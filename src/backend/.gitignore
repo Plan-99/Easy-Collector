@@ -1,2 +1,4 @@
-datasets/*.hdf5
+datasets/
 database/*.db
+
+__pycache__/

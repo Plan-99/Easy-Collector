@@ -14,5 +14,12 @@ Pillow
 pynput
 grad_cam
 curobo
-eel
-pyinstaller
+flask[async]
+flask-cors
+flask-socketio
+eventlet
+aiortc
+aiohttp
+aiohttp-cors
+hypercorn
+dynamixel_sdk

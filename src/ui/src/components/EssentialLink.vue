@@ -3,7 +3,7 @@
     clickable
     tag="a"
     target="_blank"
-    :href="props.link"
+    @click="$router.push(props.link)"
   >
     <q-item-section
       v-if="props.icon"
