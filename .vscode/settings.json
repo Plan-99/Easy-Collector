@@ -1,0 +1,14 @@
+{
+    "python.autoComplete.extraPaths": [
+        "/opt/ros/noetic/lib/python3/dist-packages",
+        "/home/gcs/haechan/vla_il",
+        "/home/gcs/haechan/vla_il",
+        "/home/gcs/haechan/vla_il"
+    ],
+    "python.analysis.extraPaths": [
+        "/opt/ros/noetic/lib/python3/dist-packages",
+        "/home/gcs/haechan/vla_il",
+        "/home/gcs/haechan/vla_il",
+        "/home/gcs/haechan/vla_il"
+    ]
+}

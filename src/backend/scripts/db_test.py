@@ -12,15 +12,26 @@ conn = get_db_connection()
 cursor = conn.cursor()
 
 
+# piper_robot = RobotModel(name='piper')
+# piper_robot.create()
+
+robot = RobotModel.find_one({ 'id': 2 })
+robot.type = 'piper'
+robot.origin = [12, 3039, 2867, 3049, 2938, 2961]
+robot.read_topic = 'piper/joint_states_single'
+robot.write_topic = 'piper/joint_states'
+robot.update()
+
+
 # sensor1 = SensorModel(name='camera1')
 # sensor1.create()
 
 # sensor2 = SensorModel(name='camera2')
 # sensor2.create()
 
-task = TaskModel.find_one({ 'id': 1 })
-task.sensor_ids = [5, 6]
-task.update()
+# task = TaskModel.find_one({ 'id': 1 })
+# task.sensor_ids = [5, 6]
+# task.update()
 
 
 

@@ -23,3 +23,15 @@ docker exec -it easy_collector_container /bin/bash
 ```
 exit
 ```
+
+### 서버 시작
+```
+cd ~/src
+python3 -m backend.api.app
+```
+
+### 인터페이스 시작
+```
+cd ~/src/ui
+npm run dev
+```

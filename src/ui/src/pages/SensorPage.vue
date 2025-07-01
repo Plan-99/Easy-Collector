@@ -3,7 +3,7 @@
         <div class="row q-col-gutter-md">
             <div class="col-6 col-sm-4 col-md-3 col-lg-2"  v-for="sensor in sensors" :key="sensor.id">
                 <q-card>
-                    <q-img :src="sensor.image" @click="watchSensor(sensor)" class="cursor-pointer">
+                    <q-img :src="sensor.image" @click="watchSensor(sensor)" class="cursor-pointer" ratio="1">
                         <div class="absolute-bottom text-h6 row q-gutter-x-sm">
                             <div>{{ sensor.name }}</div>
                             <q-space></q-space>
@@ -56,16 +56,33 @@
                 <q-btn color="grey-8" class="full-height full-width" outline size="lg" icon="add" @click="showSensorForm = true"></q-btn>
             </div>
         </div>
-        <div class="absolute-bottom bg-grey-4">
+        <div class="absolute-bottom bg-grey-4"  v-if="watchingSensor">
             <q-separator />
-            <div class="q-pa-md row q-gutter-x-md" v-if="watchingSensor">
+            <div class="q-pa-md row q-gutter-x-md">
                 <video ref="sensorVideo"
+                    class="col-4"
                     autoplay playsinline muted 
                     style="background-color: black; height: 360px;"
                 >
                 </video>
-                <div class="text-h6" v-if="!watchingSensor">There is no sensor to watch.</div>
-                <process-console :process="watchingSensor.process_id" class="col" v-else />
+                <div class="col">
+                    <div style="height: 30px" class="row">
+                        <div 
+                            class="bg-dark col text-white text-center" 
+                            v-for="sensor in sensors.filter((e) => e.status !== 'off')"
+                            :key="sensor.id"
+                            :style="sensor.id !== watchingSensor.id ? 'border: 1px solid #ffffff' : ''"
+                            :class="sensor.id !== watchingSensor.id ? 'cursor-pointer': ''"
+                            @click="watchSensor(sensor)"
+                        >{{ sensor.name }}</div>
+                    </div>
+                    <process-console 
+                        :process="sensor.process_id" 
+                        v-for="sensor in sensors.filter((e) => e.status !== 'off')"
+                        :key="sensor.id"
+                        v-show="sensor.id === watchingSensor.id"
+                    />
+                </div>
             </div>
         </div>
         <q-dialog v-model="showSensorForm">
@@ -163,14 +180,18 @@ function saveSensor() {
             'type': sensorForm.value.type
         }).then(() => {
             sensorForm.value = {};
-            listSensors()
+            listSensors().then(() => {
+                listProcesses();
+            })
         })
     }
 }
 
 function deleteSensor(sensor) {
     return api.delete(`/sensor/${sensor.id}`).then(() => {
-        listSensors()
+        listSensors().then(() => {
+            listProcesses();
+        })
     })
 }
 
@@ -182,6 +203,9 @@ function listProcesses() {
             if (process) {
                 sensor.status = 'on'; // Sensor is running
                 sensor.process = process;
+                if (!watchingSensor.value) {
+                    watchSensor(sensor)
+                }
             } else {
                 sensor.status = 'off'; // Sensor is not running
             }
@@ -193,13 +217,9 @@ function listProcesses() {
 
 function toggleSensor(sensor) {
     if (sensor.status === 'on') {
-        stopSensor(sensor).then(() => {
-            watchingSensor.value = null; // Stop watching if sensor is stopped
-        });
+        stopSensor(sensor)
     } else {
-        startSensor(sensor).then(() => {
-            watchSensor(sensor); // Start watching the sensor if it was started
-        });
+        startSensor(sensor)
     }
 }
 
@@ -240,6 +260,7 @@ onMounted(() => {
         const sensor = sensors.value.find(s => s.process_id === data.id);
         if (sensor) {
             sensor.status = 'on';
+            watchSensor(sensor)
         }
     });
 
@@ -247,6 +268,11 @@ onMounted(() => {
         const sensor = sensors.value.find(s => s.process_id === data.id);
         if (sensor) {
             sensor.status = 'off';
+            if (watchingSensor.value && watchingSensor.value.id === sensor.id && sensors.value.find((e) => e.status === 'on')) {
+                watchSensor(sensors.value.find((e) => e.status === 'on'))
+            } else {
+                watchingSensor.value = null
+            }
         }
     });
 

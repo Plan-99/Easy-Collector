@@ -353,7 +353,7 @@ def rescale_val(val, origin_rng, rescaled_rng):
     return rescaled_rng[0] + (rescaled_rng[1] - rescaled_rng[0]) * ((val - origin_rng[0]) / (origin_rng[1] - origin_rng[0]))
 
 
-def make_policy(ckpt_path, seed, policy_config, task_config, robot_config, sensor_configs_ls):
+def make_policy(ckpt_path, seed, policy_config, task_config, robot_config, sensor_configs_ls, gripper_config):
     args_override = policy_config['settings']
     if policy_config['type'] == 'ACT':
         args_override['ckpt_dir'] = ckpt_path
@@ -361,7 +361,9 @@ def make_policy(ckpt_path, seed, policy_config, task_config, robot_config, senso
         args_override['task_name'] = task_config['name']
         args_override['seed'] = seed
         args_override['num_epochs'] = policy_config['num_epochs']
-        args_override['state_dim'] = robot_config['joint_dim'] + 1
+        args_override['state_dim'] = robot_config['joint_dim']
+        if gripper_config is not None:
+            args_override['state_dim'] += 1 # gripper state dim
         args_override['num_queries'] = policy_config['settings']['chunk_size']
         
         sensor_names = [sensor['name'] for sensor in sensor_configs_ls]

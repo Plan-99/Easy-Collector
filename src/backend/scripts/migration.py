@@ -7,6 +7,7 @@ from ..database.models.task_model import TaskModel
 from ..database.models.gripper_model import GripperModel
 from ..database.models.sensor_model import SensorModel
 from ..database.models.checkpoint_model import CheckpointModel
+from ..database.models.leader_robot_preset_model import LeaderRobotPresetModel
 
 
 conn = get_db_connection()
@@ -19,6 +20,7 @@ create_task_table_query = TaskModel.generate_create_table_sql()
 create_gripper_table_query = GripperModel.generate_create_table_sql()
 create_sensor_table_query = SensorModel.generate_create_table_sql()
 create_checkpoint_table_query = CheckpointModel.generate_create_table_sql()
+create_leader_robot_preset_table_query = LeaderRobotPresetModel.generate_create_table_sql()
 
 try:
     cursor.execute(create_robot_table_query)
@@ -27,6 +29,7 @@ try:
     cursor.execute(create_gripper_table_query)
     cursor.execute(create_sensor_table_query)
     cursor.execute(create_checkpoint_table_query)
+    cursor.execute(create_leader_robot_preset_table_query)
 
 except sqlite3.Error as e:
     print(f"데이터베이스 오류: {e}")
@@ -62,6 +65,9 @@ try:
     
     default_checkpoint = CheckpointModel()
     default_checkpoint.create()
+    
+    default_leader_robot_preset = LeaderRobotPresetModel() 
+    default_leader_robot_preset.create()
     
     # sensor = SensorModel.find_one({ 'id': 1 })
     # sensor.settings['serial_number'] = 'aaaaa'

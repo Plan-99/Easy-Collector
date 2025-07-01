@@ -1,9 +1,9 @@
 <template>
     <q-page class="q-pa-md full-height">
-        <div class="row q-gutter-md">
+        <div class="row q-col-gutter-md">
             <div class="col-6 col-sm-4 col-md-3 col-lg-2" v-for="robot in robots" :key="robot.id">
                 <q-card >
-                    <q-img :src="robot.image" @click="watchRobot(robot)" class="cursor-pointer">
+                    <q-img :src="robot.image" @click="watchRobot(robot)" class="cursor-pointer" ratio="1">
                         <div class="absolute-bottom text-h6 row q-gutter-x-sm">
                             <div>{{ robot.name }}</div>
                             <q-space></q-space>
@@ -50,10 +50,46 @@
                 <q-btn color="grey-8" class="full-height full-width" outline size="lg" icon="add" @click="showRobotForm = true"></q-btn>
             </div>
         </div>
-        <div class="absolute-bottom bg-grey-4">
+        <div class="absolute-bottom bg-grey-4"  v-if="watchingRobot">
             <q-separator />
-            <div class="q-pa-md row q-gutter-x-md" v-if="watchingRobot">
-                <process-console :process="watchingRobot.process_id" class="col" />
+            <div class="q-pa-md row q-gutter-x-md">
+                <div class="col-3 column">
+                    <div class="col" 
+                        v-for="(joint, i) in watchingRobot.joint_names" :key="joint"
+                    >
+                        <div>{{ joint }}</div>
+                        <q-slider
+                            v-model="watchingRobot.joint_pos[i]"
+                            :min="watchingRobot.joint_lower_bounds[i]"
+                            :max="watchingRobot.joint_upper_bounds[i]"
+                            :step="0.01"
+                            label
+                            label-always
+                            switch-label-side
+                            color="red"
+                            :disable="!canControl"
+                            @update:model-value="(e) => moveRobot(i, e)"
+                        />
+                    </div>
+                </div>
+                <div class="col">
+                    <div style="height: 30px" class="row">
+                        <div 
+                            class="bg-dark col text-white text-center" 
+                            v-for="robot in robots.filter((e) => e.status !== 'off')"
+                            :key="robot.id"
+                            :style="robot.id !== watchingRobot.id ? 'border: 1px solid #ffffff' : ''"
+                            :class="robot.id !== watchingRobot.id ? 'cursor-pointer': ''"
+                            @click="watchRobot(robot)"
+                        >{{ robot.name }}</div>
+                    </div>
+                    <process-console 
+                        :process="robot.process_id" 
+                        v-for="robot in robots.filter((e) => e.status !== 'off')"
+                        :key="robot.id"
+                        v-show="robot.id === watchingRobot.id"
+                    />
+                </div>
             </div>
         </div>
         <q-dialog v-model="showRobotForm">
@@ -79,12 +115,6 @@
                         map-options
                         emit-value
                     />
-
-                    <q-input
-                        dense
-                        v-model="robotForm.serial_no"
-                        label="Serial Number"
-                    />
                 </q-card-section>
 
                 <q-card-actions align="center" class="text-primary">
@@ -100,10 +130,13 @@
 import { onMounted, onUnmounted, ref } from 'vue';
 
 import { useSocket } from '../composables/useSocket';
+import { useROS } from '../composables/useROS';
 import { api } from 'src/boot/axios';
 import ProcessConsole from 'src/components/ProcessConsole.vue';
 import { Notify } from 'quasar';
+
 const { socket } = useSocket();
+const { createSubscriber, createPublisher, connectROS, sendJointState } = useROS();
 
 const robots = ref([]);
 
@@ -111,7 +144,8 @@ const robotForm = ref({});
 const watchingRobot = ref(null);
 
 const robotTypeOptions = [
-    { label: 'UR5e', value: 'ur5e' }
+    { label: 'UR5e', value: 'ur5e' },
+    { label: 'PIPER', value: 'piper' },
 ]
 
 function listRobots() {                                                                                                     
@@ -120,6 +154,10 @@ function listRobots() {
         robots.value.forEach(robot => {
             robot.image = '/images/' + robot.type + '.png'; // Default image if not provided
             robot.status = 'off'; // Initialize robot state
+            robot.joint_pos = []
+            robot.joint_names.forEach((joint, i) => {
+                robot.joint_pos[i] = 0
+            })
         });
     }).catch((error) => {
         console.error('Error fetching robots:', error);
@@ -127,7 +165,7 @@ function listRobots() {
 }
 
 function saveRobot() {
-    if (!robotForm.value.name || !robotForm.value.type || !robotForm.value.serial_no) {
+    if (!robotForm.value.name || !robotForm.value.type) {
         Notify.create({
             color: 'negative',
             message: 'Please fill the form'
@@ -136,7 +174,6 @@ function saveRobot() {
     }
     if (robotForm.value.id) {
         return api.put(`/robot/${robotForm.value.id}`, {
-            'serial_no': robotForm.value.serial_no,
             'name': robotForm.value.name,
             'type': robotForm.value.type
         }).then(() => {
@@ -144,7 +181,6 @@ function saveRobot() {
         })
     } else {
         return api.post(`/robot`, {
-            'serial_no': robotForm.value.serial_no,
             'name': robotForm.value.name,
             'type': robotForm.value.type
         }).then(() => {
@@ -166,10 +202,13 @@ function listProcesses() {
         robots.value.forEach(robot => {
             const process = processes.find(p => p === robot.process_id);
             if (process) {
-                robot.status = 'on'; // Robot is running
+                robot.status = 'on'; // Sensor is running
                 robot.process = process;
+                if (!watchingRobot.value) {
+                    watchRobot(robot)
+                }
             } else {
-                robot.status = 'off'; // Robot is not running
+                robot.status = 'off'; // Sensor is not running
             }
         });
     }).catch((error) => {
@@ -190,6 +229,7 @@ function toggleRobot(robot) {
 
 function startRobot(robot) {
     robot.status = 'loading';
+    watchingRobot.value = robot
     return api.post('/robot:start', robot).catch((error) => {
         console.error('Error starting robot:', error);
         robot.status = 'off'; // Reset status on error
@@ -204,15 +244,45 @@ function stopRobot(robot) {
     });
 }
 
+let jointSub = null
+let publishJointPos = () => {}
+
+function watchRobot(robot) {
+    if (robot.status === 'off') {
+        return;
+    }
+    if (jointSub) {
+        jointSub.unsubscribe()
+    }
+    jointSub = createSubscriber(robot.read_topic, robot.read_topic_msg, (msg) => {
+        if (!canControl.value) {
+            robot.joint_pos = msg.position
+        }
+        canControl.value = true
+    })
+    publishJointPos = createPublisher(robot.write_topic, robot.write_topic_msg)
+    watchingRobot.value = robot
+}
+
+function moveRobot(joint_index, joint_pos) {
+    watchingRobot.value.joint_pos[joint_index] = joint_pos
+    sendJointState(watchingRobot.value.joint_names, watchingRobot.value.joint_pos, publishJointPos)
+}
+
+const canControl = ref(false)
+
 
 const showRobotForm = ref(false)
 
 onMounted(() => {
-
+    
+    connectROS()
+    
     socket.on('start_process', (data) => {
         const robot = robots.value.find(s => s.process_id === data.id);
         if (robot) {
             robot.status = 'on';
+            watchRobot(robot)
         }
     });
 
@@ -220,8 +290,14 @@ onMounted(() => {
         const robot = robots.value.find(s => s.process_id === data.id);
         if (robot) {
             robot.status = 'off';
+            if (watchingRobot.value && watchingRobot.value.id === robot.id && robots.value.find((e) => e.status === 'on')) {
+                watchRobot(robots.value.find((e) => e.status === 'on'))
+            } else {
+                watchingRobot.value = null
+            }
         }
     });
+
 
     listRobots().then(() => {
         listProcesses();

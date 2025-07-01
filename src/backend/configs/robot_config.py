@@ -1,3 +1,4 @@
 ROBOT_CONFIGS = {
-    'ur5e': {}
+    'ur5e': {},
+    'piper': {}
 }

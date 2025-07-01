@@ -159,13 +159,11 @@ class DBModel:
             rows = cursor.fetchall() # 
             for row in rows:
                 data_dict = data_transform_for_model(row)
-                print(data_dict)
                 model = cls(**data_dict)
                 model.set_data()
                 if to == 'dict':
                     model = model.to_dict()
                 result.append(model)
-                print(model)
             return result
 
         finally:

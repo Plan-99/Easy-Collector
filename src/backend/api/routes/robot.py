@@ -29,8 +29,6 @@ def get_robots():
     for robot in robots:
         # 프로세스 ID 초기화
         robot['process_id'] = 'robot_' + str(robot['id'])
-        # robot['process_cmd'] = f'roslaunch realsense2_camera rs_camera.launch camera:={robot['name']} serial_no:={robot['serial_no']}'
-    # 클라이언트로 센서 목록 반환
 
     return {
         'status': 'success',
@@ -40,19 +38,16 @@ def get_robots():
 @robot_bp.route('/robot:start', methods=['POST'])
 def start_robot():
     data = request.json
-    serial_no = data.get('serial_no')
     process_id = data.get('process_id')
     name = data.get('name')
     type = data.get('type')
 
     command = ''
-    if type == 'realsense_camera':
-        command = ['roslaunch', 'realsense2_camera', 'rs_camera.launch', f'camera:={name}', f'serial_no:={serial_no}']
+    if type == 'piper':
+        command = ['roslaunch', 'piper', 'start_single_piper.launch', '--screen']
 
-    if not serial_no:
-        return {'status': 'error', 'message': 'serial_no is required'}, 400
 
-    print(f"Attempting to start robot {serial_no}")
+    print(f"Attempting to start robot")
 
     process = current_app.pm.start_process(
         name=process_id,
@@ -62,11 +57,11 @@ def start_robot():
     if process:
         return {
             'status': 'success',
-            'message': f'Robot process started for serial {serial_no}',
+            'message': f'Robot process started',
             'pid': process.pid
         }, 200
     else:
-        return {'status': 'error', 'message': f'Failed to start robot for serial {serial_no}'}, 500
+        return {'status': 'error', 'message': f'Failed to start robot'}, 500
     
 
 @robot_bp.route('/robot:stop', methods=['POST'])
@@ -78,16 +73,12 @@ def stop_robot():
 
 @robot_bp.route('/robot', methods=['POST'])
 def create_robot():
-    serial_no = request.json.get('serial_no')
     name = request.json.get('name')
     type = request.json.get('type')
 
     robot = RobotModel(
         name=name,
         type=type,
-        settings={
-            'serial_number': serial_no
-        }
     )
     
     robot.create()

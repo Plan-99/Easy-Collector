@@ -22,7 +22,17 @@ from ..database.models.sensor_model import SensorModel
 from ..database.models.checkpoint_model import CheckpointModel
 
 
-def train(train_dataloader, val_dataloader, ckpt_dir, task_config, policy_config, robot_config, sensor_configs_ls, checkpoint_config=None):
+def train(
+    train_dataloader, 
+    val_dataloader, 
+    ckpt_dir, 
+    task_config, 
+    policy_config, 
+    robot_config, 
+    sensor_configs_ls, 
+    gripper_config=None, 
+    checkpoint_config=None
+    ):
     """Function to train the policy model."""
     seed = 1
     
@@ -34,7 +44,7 @@ def train(train_dataloader, val_dataloader, ckpt_dir, task_config, policy_config
     set_seed(seed) # Set seed for reproducibility
 
     # Create policy model
-    policy = make_policy(ckpt_dir, seed, policy_config, task_config, robot_config, sensor_configs_ls)
+    policy = make_policy(ckpt_dir, seed, policy_config, task_config, robot_config, sensor_configs_ls, gripper_config)
 
     # Load pre-trained model for fine-tuning
     if load_model is not None:
@@ -104,14 +114,18 @@ def main(args):
     cursor = conn.cursor()
     
     # Fetch configurations from the database
-    task_config = vars(TaskModel.find_one({'id': args['task_id']}))['args']
-    policy_config = vars(PolicyModel.find_one({'id': task_config['policy_id']}))['args']
-    if args['checkpoint_id'] is not None:
-        checkpoint_config = vars(CheckpointModel.find_one({'id': args['checkpoint_id']}))['args']
-    else:
-        checkpoint_config = None
-    robot_config = vars(RobotModel.find_one({'id': args['policy_id']}))['args']
+    task_config = vars(TaskModel.find_one({'id': args['task_id']}))
+    policy_config = vars(PolicyModel.find_one({'id': task_config['policy_id']}))
+    robot_config = vars(RobotModel.find_one({'id': args['policy_id']}))
     sensor_configs_ls = [vars(SensorModel.find_one({'id': sid}))['args'] for sid in task_config['sensor_ids']]
+    gripper_config = vars(GripperModel.find_one({'id': args['gripper_id']})) if args['gripper_id'] is not None else None
+    checkpoint_config = vars(CheckpointModel.find_one({'id': args['checkpoint_id']})) if args['checkpoint_id'] is not None else None
+    
+    # if args['checkpoint_id'] is not None:
+    #     checkpoint_config = vars(CheckpointModel.find_one({'id': args['checkpoint_id']}))['args']
+    # else:
+    #     checkpoint_config = None
+    
         
     # Get parameters from configs
     dataset_dir = task_config['dataset_dir']
@@ -135,6 +149,7 @@ if __name__ == '__main__':
     parser.add_argument('--task_id', required=True)
     parser.add_argument('--policy_id', required=True)
     parser.add_argument('--checkpoint_id', default=None, required=False)
+    parser.add_argument('--gripper_id', default=None, required=False)
     
     main(vars(parser.parse_args()))
     sys.exit(0)

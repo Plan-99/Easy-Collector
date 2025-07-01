@@ -18,6 +18,7 @@ class ProcessManager:
         try:
             for line in process_stream:
                 log_data = {'log': line.strip(), 'type': stream_type}
+                print(log_data)
                 self.socketio.emit(f"log_{process_name}", log_data, to=sid)
         finally:
             process_stream.close()

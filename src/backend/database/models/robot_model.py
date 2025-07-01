@@ -20,7 +20,7 @@ class RobotModel(DBModel):
         'image': {'default': 'default_robot_image.png'},
     }
 
-    NEW_COLS = []
+    NEW_COLS = ['joint_upper_bounds', 'joint_lower_bounds']
     
     def __init__(self, **kwargs):
         super().__init__(table_name=self.TABLE_NAME, **kwargs)
@@ -29,5 +29,16 @@ class RobotModel(DBModel):
             setattr(self, key, value)
 
     def set_data(self):
-        if self.type == 'ur5e':
-            
+        if self.type == 'piper':
+            self.joint_dim = 6
+            self.joint_names = ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6"]
+            self.read_topic = '/piper/joint_states_single'
+            self.read_topic_msg = 'sensor_msgs/JointState'
+            self.write_topic = '/piper/joint_states'
+            self.write_topic_msg = 'sensor_msgs/JointState'
+            self.move_action = None
+            self.joint_upper_bounds = [1, 1, 1, 1, 1, 1]
+            self.joint_lower_bounds = [-1, -1, -1, -1, -1, -1]
+        else:
+            self.joint_upper_bounds = [1, 1, 1, 1, 1, 1]
+            self.joint_lower_bounds = [-1, -1, -1, -1, -1, -1]

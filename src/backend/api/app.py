@@ -34,6 +34,17 @@ pcs = set()
 
 rospy.init_node("web_api_node", anonymous=True)
 
+
+pm.start_process(
+    'streaming',
+    ['python3', '-m', 'backend.api.streaming']
+)
+
+pm.start_process(
+    'rosbridge_websocket',
+    ['roslaunch', 'rosbridge_server', 'rosbridge_websocket.launch', 'port:=9090']
+)
+
 @app.route('/api/processes', methods=['GET'])
 def list_processes():
     processes = pm.list_processes()

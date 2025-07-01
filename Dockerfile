@@ -13,6 +13,7 @@ ENV TZ=Asia/Seoul
 
 # ROS 설치를 위한 준비 작업
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    apt-utils \
     curl \
     gnupg2 \
     lsb-release \
@@ -21,10 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # ROS 저장소(Repository) 추가 및 GPG 키 설정 (인증서 문제 해결)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    curl \
-    gnupg \
-    lsb-release && \
+    ca-certificates && \
     update-ca-certificates && \
     curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | gpg --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg && \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros/ubuntu $(lsb_release -sc) main" | tee /etc/apt/sources.list.d/ros-latest.list > /dev/null
@@ -49,11 +47,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     librealsense2-dbg && \
     rm -rf /var/lib/apt/lists/*
 
+RUN apt-get update && apt-get install -y --no-install-recommends ethtool can-utils iproute2
+
 # ROS Noetic (Desktop-Full) 설치
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-noetic-desktop-full \
     ros-noetic-realsense2-camera \
     ros-noetic-realsense2-description \
+    python3-rosdep ros-noetic-ruckig ros-noetic-eigen-stl-containers ros-noetic-geometric-shapes ros-noetic-pybind11-catkin \
+    ros-noetic-moveit-resources-panda-moveit-config ros-noetic-ompl ros-noetic-warehouse-ros ros-noetic-eigenpy ros-noetic-rosparam-shortcuts \
+    ros-noetic-moveit-msgs ros-noetic-srdfdom ros-noetic-rosbridge-server \
     # 파이썬3 관련 필수 도구 설치
     python3-pip \
     python3-rosdep \
@@ -61,17 +64,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-rosinstall-generator \
     python3-wstool \
     python3-tk \
+    python3-catkin-tools \
     build-essential \
     && apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*
 
-# rosdep 초기화
-# ROS 패키지의 시스템 의존성을 관리하는 도구입니다.
-RUN rosdep init && \
-    rosdep update
+# # rosdep 초기화
+# # ROS 패키지의 시스템 의존성을 관리하는 도구입니다.
+# RUN rosdep init && \
+#     rosdep update && \
+#     rosdep install --from-paths src --ignore-src -r -y
+
 
 # ROS 환경 설정
 # 컨테이너의 bash 쉘이 시작될 때마다 ROS 환경을 자동으로 source 합니다.
 RUN echo "source /opt/ros/noetic/setup.bash" >> ~/.bashrc
+RUN echo "source ~/catkin_ws/devel/setup.bash" >> ~/.bashrc
+
 
 # NodeSource 저장소 설정 (Node.js 20 설치용)
 RUN mkdir -p /etc/apt/keyrings && \
