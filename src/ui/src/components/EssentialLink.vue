@@ -1,25 +1,27 @@
 <template>
   <q-item
     clickable
-    tag="a"
-    target="_blank"
-    @click="$router.push(props.link)"
+    :to="link"
+    :active="isActive"
   >
     <q-item-section
-      v-if="props.icon"
+      v-if="icon"
       avatar
     >
-      <q-icon :name="props.icon" />
+      <q-icon :name="icon" />
     </q-item-section>
 
     <q-item-section>
-      <q-item-label>{{ props.title }}</q-item-label>
-      <q-item-label caption>{{ props.caption }}</q-item-label>
+      <q-item-label>{{ title }}</q-item-label>
+      <q-item-label caption>{{ caption }}</q-item-label>
     </q-item-section>
   </q-item>
 </template>
 
 <script setup>
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
+
 const props = defineProps({
   title: {
     type: String,
@@ -41,4 +43,19 @@ const props = defineProps({
     default: ''
   }
 })
+
+const route = useRoute()
+
+const isActive = computed(() => {
+  if (props.link === '/tasks') {
+    return route.path.startsWith('/tasks')
+  }
+  return route.path === props.link
+})
 </script>
+
+<style>
+.q-router-link--active .q-item__label {
+  color: blue;
+}
+</style>

@@ -2,7 +2,7 @@
 import { ref, readonly } from 'vue';
 import { io } from 'socket.io-client';
 
-const backendUrl = 'http://localhost:5000'; // 백엔드 URL을 환경 변수로 설정하거나 다른 방법으로 관리할 수 있습니다.
+const backendUrl = 'http://192.168.50.46:5000'; // 백엔드 URL을 환경 변수로 설정하거나 다른 방법으로 관리할 수 있습니다.
 
 // 모듈 스코프에서 소켓 인스턴스를 한 번만 생성 (싱글톤)
 const socket = io(backendUrl, {

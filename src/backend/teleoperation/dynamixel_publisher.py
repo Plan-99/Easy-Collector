@@ -19,60 +19,37 @@ import math
 
 # Import database and data models
 import os
-from ..database.db_init import get_db_connection
-from ..database.models.robot_model import RobotModel
-from ..database.models.policy_model import PolicyModel
-from ..database.models.task_model import TaskModel
-from ..database.models.gripper_model import GripperModel
-from ..database.models.sensor_model import SensorModel
-from ..database.models.checkpoint_model import CheckpointModel
-from ..database.models.leader_robot_preset_model import LeaderRobotPresetModel
+from ..database.models.robot_model import Robot as RobotModel
+from ..database.models.gripper_model import Gripper as GripperModel
+from ..database.models.leader_robot_preset_model import LeaderRobotPreset as LeaderRobotPresetModel
 
 from ..env.agent import Agent
+from ..env.dxl_controller import DxlController
 
 class Leader():
-    def __init__(self, robot_config, leader_robot_presets_config) -> None:
+    def __init__(self, robot, leader_robot_preset, gripper=None) -> None:
         # ROS 노드 초기화ur5e/ur5e_scaled_pos_joint_traj_controller/command
-        rospy.init_node('dynamixel_publisher', anonymous=False)
+        rospy.init_node('dynamixel_publisher_2', anonymous=False)
         
-        self.origin = leader_robot_presets_config['origin']  # 다이나믹셀의 원점 위치
-        self.sign_corrector = leader_robot_presets_config['sign_corrector']
-        self.max_pos = 65536
-        self.dxl_ids = leader_robot_presets_config['dxl_ids']  # 다이나믹셀 ID
-        self.target_pos = [0, 0, 0, 0, 0, 0, 0]
-        self.rad_pos = [0, 0, 0, 0, 0, 0, 0]
+        self.origin = leader_robot_preset.origin  # 다이나믹셀의 원점 위치
+        self.gripper_dxl_range = leader_robot_preset.gripper_dxl_range  # 다이나믹셀의 원점 위치
+        self.sign_corrector = leader_robot_preset.sign_corrector
+        self.dxl_ids = leader_robot_preset.dxl_ids  # 다이나믹셀 ID
         
         self.address = 132  # 다이나믹셀의 현재 위치 주소 (주소 132번은 현재 위치)
         self.rate = rospy.Rate(10)  # 10Hz로 퍼블리시
         self.p_gain = 1
-        self.pos_diff_limit = math.pi / 180 * 45
         self.is_synced = False
-        self.pub = rospy.Publisher('dynamixel_position', Float64, queue_size=10)
         # self.gripper_publisher = rospy.Publisher('gripper/cmd', GripperCmd, queue_size=1)
         
-        # self.trajectory_sub = rospy.Subscriber(robot_config['read_topic'], JointState, self.sub_js)
-        # self.trajectory_pub = rospy.Publisher(robot_config['write_topic'], JointTrajectory, queue_size=1)
-        self.agent = Agent(robot_config)
+        self.gripper_config = gripper
         
+        self.agent = Agent(robot)
         
         time.sleep(0.1)
 
+        self.dxl_controller = DxlController('/dev/ttyUSB0', self.dxl_ids)
 
-        # 다이나믹셀 포트 및 패킷 핸들러 설정
-        self.portHandler = dxl.PortHandler('/dev/ttyUSB0')  # 다이나믹셀 포트
-        self.packetHandler = dxl.PacketHandler(2.0)         # 프로토콜 2.0 사용
-        self.port_lock = threading.Lock()
-
-        # 포트 열기 및 Baud rate 설정
-        if not self.portHandler.openPort():
-            rospy.logerr("Failed to open the port")
-            return
-        if not self.portHandler.setBaudRate(57600):
-            rospy.logerr("Failed to set baudrate")
-            return
-    
-        # self.move_robot_client()
-        # self.gripper_pub()
         self.sync_leader_robot()
         self.position_pub()
         
@@ -84,237 +61,108 @@ class Leader():
             pos -= 360
         elif pos < -180:
             pos += 360
-        return pos / 360 * 2 * math.pi
+        return pos / 360 * 2 * math.pi * self.sign_corrector[dxl_id]
     
     
-    def rad_to_tick(self, rad):
-        return int((rad + math.pi / 2) * (4096 / math.pi)) + 2048
+    def rad_to_tick(self, rad, dxl_id):
+        pos_deg = rad * 180.0 / math.pi * self.sign_corrector[dxl_id]
         
-
-
-    # def move_robot_client(self):
-
-    #     try:
-    #         move_robot = rospy.ServiceProxy('mover/move_robot_planning', MoveRobot)
-
-
-    #         joint_trajectory = JointTrajectory()
-    #         joint_trajectory.joint_names = self.joint_names
-
-    #         rad_pos = [0,0,0,0,0,0]
-
-
-    #         for index, dxl_id in enumerate(self.dxl_ids[:6]):
-    #             position, comm_result, error = self.packetHandler.read2ByteTxRx(self.portHandler, dxl_id, self.address)
-
-    #             rad_pos[index] = self.get_rad_pos(position, dxl_id)
-
-    #             if index == 0:
-    #                 rad_pos[index] = -rad_pos[index]
-                
-
-    #             if comm_result != dxl.COMM_SUCCESS:
-    #                 rospy.logerr("Failed to read position: %s" % self.packetHandler.getTxRxResult(comm_result))
-    #             elif error != 0:
-    #                 rospy.logerr("Error: %s" % self.packetHandler.getRxPacketError(error))
-                
-
-    #         rospy.loginfo(f"[0] {rad_pos[0]} [1] {rad_pos[1]} [2] {rad_pos[2]} [3] {rad_pos[3]} [4] {rad_pos[4]} [5] {rad_pos[5]}")
-
-    #         request = MoveRobotRequest()
-    #         request.joint_trajectory = rad_pos[:6]
-    #         # print(joint_trajectory)
-
-    #         response = move_robot(request)
-
-    #         if response.success:
-    #             rospy.loginfo("Success: %s", response.message)
-    #             self.is_synced = True
-    #             self.position_pub()
-    #         else:
-    #             rospy.logwarn("Failed: %s", response.message)
-
-    #     except rospy.ServiceException as e:
-    #         rospy.logerr("Service call failed: %s", e)
-
-    
-    def enable_torque(self):
-        torque_enable_address = 64  # MX, X 시리즈 기준
-        for index, dxl_id in enumerate(self.dxl_ids):
-            with self.port_lock:
-                dxl_comm_result, dxl_error = self.packetHandler.write1ByteTxRx(self.portHandler, dxl_id, torque_enable_address, 1)
-            if dxl_comm_result != dxl.COMM_SUCCESS:
-                print(f"Torque Enable Comm Error: {self.packetHandler.getTxRxResult(dxl_comm_result)}")
-                return
-            elif dxl_error != 0:
-                print(f"Torque Enable Error: {self.packetHandler.getRxPacketError(dxl_error)}")
-                return
+        if pos_deg < 0:
+            pos_deg += 360
             
-    def remove_torque(self):
-        torque_enable_address = 64  # MX, X 시리즈 기준
-        for index, dxl_id in enumerate(self.dxl_ids):
-            with self.port_lock:
-                dxl_comm_result, dxl_error = self.packetHandler.write1ByteTxRx(self.portHandler, dxl_id, torque_enable_address, 0)
-            if dxl_comm_result != dxl.COMM_SUCCESS:
-                print(f"Torque Remove Comm Error: {self.packetHandler.getTxRxResult(dxl_comm_result)}")
-                return
-            elif dxl_error != 0:
-                print(f"Torque Remove Error: {self.packetHandler.getRxPacketError(dxl_error)}")
-                return
-            
-            
-    def read_dynamixel(self, dxl_id):
-        present_position_address = 132
-        with self.port_lock:
-            position, dxl_comm_result, dxl_error = self.packetHandler.read4ByteTxRx(self.portHandler, dxl_id, present_position_address)
-            
-        if dxl_comm_result != dxl.COMM_SUCCESS:
-            rospy.logerr("Failed to read position: %s" % self.packetHandler.getTxRxResult(dxl_comm_result))
-        elif dxl_error != 0:
-            rospy.logerr("Error: %s" % self.packetHandler.getRxPacketError(dxl_error))
-            
-        return position
-    
-    
-    def move_controller(self, goal_position):
-        goal_position_address = 116  # Goal Position address (X 시리즈)
-        velocity_address = 112       # Profile Velocity address
-        success = True
+        pos_steps = pos_deg / 360.0 * 4096.0
 
-        self.enable_torque()
+        position = (pos_steps + self.origin[dxl_id]) % 4096
+        
+        return int(round(position))
 
-        # 1. 속도 설정 (각 모터 동일한 속도)
-        for dxl_id in self.dxl_ids[:6]:
-            with self.port_lock:
-                dxl_comm_result, dxl_error = self.packetHandler.write4ByteTxRx(self.portHandler, dxl_id, velocity_address, 10)
-            if dxl_comm_result != dxl.COMM_SUCCESS:
-                print(f"[ID:{dxl_id}] Velocity Comm Error: {self.packetHandler.getTxRxResult(dxl_comm_result)}")
-                success = False
-            elif dxl_error != 0:
-                print(f"[ID:{dxl_id}] Velocity Error: {self.packetHandler.getRxPacketError(dxl_error)}")
-                success = False
-
-        # 2. GroupSyncWrite 객체 생성
-        groupSyncWrite = dxl.GroupSyncWrite(self.portHandler, self.packetHandler, goal_position_address, 4)
-
-        # 3. 목표 위치 패킷 구성
-        for index, dxl_id in enumerate(self.dxl_ids[:6]):
-            pos = goal_position[index]
-            param_goal_position = [
-                pos & 0xFF,
-                (pos >> 8) & 0xFF,
-                (pos >> 16) & 0xFF,
-                (pos >> 24) & 0xFF
-            ]
-            groupSyncWrite.addParam(dxl_id, bytearray(param_goal_position))
-
-        # 4. 한번에 전송
-        dxl_comm_result = groupSyncWrite.txPacket()
-        if dxl_comm_result != dxl.COMM_SUCCESS:
-            print("GroupSyncWrite failed:", self.packetHandler.getTxRxResult(dxl_comm_result))
-            return False
-
-        groupSyncWrite.clearParam()
-
-        # 5. 모든 모터가 도달할 때까지 대기
-        present_position_address = 132  # Present Position address
-        reached = [False] * len(self.dxl_ids[:6])
-
-        while not all(reached):
-            for i, dxl_id in enumerate(self.dxl_ids[:6]):
-                if reached[i]:
-                    continue
-
-                with self.port_lock:
-                    position, dxl_comm_result, dxl_error = self.packetHandler.read4ByteTxRx(self.portHandler, dxl_id, present_position_address)
-                if dxl_comm_result != dxl.COMM_SUCCESS:
-                    print(f"[ID:{dxl_id}] Read Position Error: {self.packetHandler.getTxRxResult(dxl_comm_result)}")
-                    success = False
-                    reached[i] = True  # 에러 났으니 더 이상 기다리지 않음
-                    continue
-                elif dxl_error != 0:
-                    print(f"[ID:{dxl_id}] Read Packet Error: {self.packetHandler.getRxPacketError(dxl_error)}")
-                    success = False
-                    reached[i] = True
-                    continue
-
-                print(f"[ID:{dxl_id}] GoalPos:{goal_position[i]}  PresPos:{position}")
-                if abs(goal_position[i] - position) < 40:
-                    print(f"[ID:{dxl_id}] Reached goal position.")
-                    reached[i] = True
-
-            time.sleep(0.1)
-
-        return success
-
-    
     
     def sync_leader_robot(self):
         follower_pos = self.agent.joint_states
-        follower_tick = []
         pos = []
         
-        for index, dxl_id in enumerate(self.dxl_ids[:6]):
-            follower_tick.append(self.rad_to_tick(follower_pos[dxl_id] * self.sign_corrector[dxl_id]))
-            pos.append(int((self.origin[dxl_id] + follower_tick[index]) % 4096))
-            
-        moved = self.move_controller(pos)
+        for index, dxl_id in enumerate(self.dxl_ids[:-1]):
+            pos.append(self.rad_to_tick(follower_pos[index], dxl_id))
+
+        moved = self.dxl_controller.move_controller(pos)
         
         if moved:
-            input('Will you start teleoperation? (Press Enter)')
+            print('Will you start teleoperation? Close Gripper to Start!')
+            
+            gripper_pos = self.dxl_controller.read_dynamixel(self.dxl_ids[-1])  # 그리퍼의 현재 위치를 읽어오기
+            while gripper_pos > self.gripper_dxl_range[1]:
+                gripper_pos = self.dxl_controller.read_dynamixel(self.dxl_ids[-1])  # 그리퍼의 현재 위치를 읽어오기
+
             self.is_synced = True
-            self.remove_torque()
+            self.dxl_controller.remove_torque()
         else:
             raise Exception
+        
+    def get_gripper_pos(self):
+        if self.gripper_config is None:
+            gripper_tick_pos = self.dxl_controller.read_dynamixel(self.dxl_ids[-1])
+            gripper_pos_low = self.agent.gripper_range[0]
+            gripper_pos_high = self.agent.gripper_range[-1]
+            gripper_pos = (gripper_tick_pos - self.gripper_dxl_range[1]) / (self.gripper_dxl_range[0] - self.gripper_dxl_range[1]) * (gripper_pos_high - gripper_pos_low) + gripper_pos_low
+            return gripper_pos
+        else:
+            return 0.0
 
 
     def position_pub(self):
+        target_pos = [0] * 7
         while not rospy.is_shutdown():
             if not self.is_synced:
                 continue
-            for index, dxl_id in enumerate(self.dxl_ids[:6]):
+            for index, dxl_id in enumerate(self.dxl_ids[:-1]):
                 # 다이나믹셀 값 읽어오기
-                position = self.read_dynamixel(dxl_id)
+                position = self.dxl_controller.read_dynamixel(dxl_id)
                     
-                self.rad_pos[index] = self.get_rad_pos(position, dxl_id) 
-                self.target_pos[index] = self.rad_pos[index] * self.sign_corrector[dxl_id]
+                target_pos[index] = self.get_rad_pos(position, dxl_id)
 
-
-                # # 컨트롤러와 리더의 차이가 너무 클 때
-                # if abs(self.target_pos[index] - latest_follower_pos) > self.pos_diff_limit:
-                #     publish = False
-                #     # print("Action is too big ", dxl_id)
-                #     # print(pos_error)
-                #     # print(position)
-                #     # rospy.loginfo(f"[0] {self.target_pos[0]} [1] {self.target_pos[1]} [2] {self.target_pos[2]} [3] {self.target_pos[3]} [4] {self.target_pos[4]} [5] {self.target_pos[5]}")
-                #     break
-                # else:
-                #     publish = True
                 
-            self.agent.move_step(self.target_pos)
+            # 그리퍼 매핑
+            target_pos[-1] = self.get_gripper_pos()
+                
+            self.agent.move_step(target_pos)
             self.rate.sleep()
 
             # rospy.loginfo(f"[0] {self.rad_pos[0]} [1] {self.rad_pos[1]} [2] {self.rad_pos[2]} [3] {self.rad_pos[3]} [4] {self.rad_pos[4]} [5] {self.rad_pos[5]}")
 
         
-        self.portHandler.closePort()
+        self.dxl_controller.portHandler.closePort()
         
         
 def main(args):
-    
-    leader_robot_presets_config = vars(LeaderRobotPresetModel.find_one({'id': args['leader_robot_preset_id']}))
-    robot_config = vars(RobotModel.find_one({'id': leader_robot_presets_config['robot_id']}))
-    print(robot_config)
+    from orator import DatabaseManager, Model
+
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    DB_DIR = os.path.join(BASE_DIR, 'backend/database')
+    DB_PATH = os.path.join(DB_DIR, 'main.db')
+
+    config = {
+        'mysql': {
+            'driver': 'sqlite',
+            'database': DB_PATH,
+        }
+    }
+
+    db = DatabaseManager(config)
+    Model.set_connection_resolver(db)
+
+    leader_robot_preset = LeaderRobotPresetModel.find(args['leader_robot_preset_id'])
+    robot = RobotModel.find(leader_robot_preset.robot_id)
+    gripper = GripperModel.args['gripper_id'] if 'gripper_id' in args else None
+
     try:
-        leader = Leader(robot_config, leader_robot_presets_config)
-        # leader.gripper_pub()
-        # leader.position_pub()
+        Leader(robot, leader_robot_preset , gripper)
 
     except rospy.ROSInterruptException:
         pass
 
 
 if __name__ == '__main__':
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--leader_robot_preset_id', default=None, required=True)
     

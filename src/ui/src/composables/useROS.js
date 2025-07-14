@@ -1,7 +1,7 @@
 import { ref, shallowRef, onUnmounted } from 'vue';
 import ROSLIB from 'roslib';
 
-const socketUrl = 'ws://127.0.0.1:9090'
+const socketUrl = 'ws://192.168.50.46:9090'
 
 // ROS 관련 로직을 모아둔 컴포저블 함수
 export function useROS() {

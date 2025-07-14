@@ -24,3 +24,13 @@ aiohttp-cors
 hypercorn
 dynamixel_sdk
 piper_sdk
+pyusb
+
+# diffusion policy
+dill
+hydra-core
+
+# openpi
+jax
+jax-lib
+s3fs

@@ -1,0 +1,8 @@
+<launch>
+    <arg name="device_port" default="/dev/ttyUSB0" />
+    <node name="dynamixel_node" pkg="dynamixel_ros" type="dynamixel_node.py" output="screen">
+        <env name="PYTHONUNBUFFERED" value="1" />
+        <param name="baudrate"      value="57600"/>
+        <param name="device_port"   value="$(arg device_port)"/>
+    </node>
+</launch>

@@ -6,7 +6,16 @@ const routes = [
       { path: '', component: () => import('pages/IndexPage.vue') },
       { path: 'sensors', component: () => import('src/pages/SensorPage.vue') },
       { path: 'robots', component: () => import('pages/RobotPage.vue') },
-      { path: 'tasks', component: () => import('pages/TaskPage.vue') }
+      { path: 'tasks', component: () => import('src/pages/Task/ListPage.vue') },
+      { path: 'tasks/:id', component: () => import('src/pages/Task/DetailPage.vue'),
+        children: [
+          // { path: 'overview', component: () => import('src/pages/Task/OverviewPage.vue') },
+          { path: 'data_collection', component: () => import('src/pages/Task/DataCollectionPage.vue') },
+          { path: 'train', component: () => import('src/pages/Task/TrainPage.vue') },
+          { path: 'test', component: () => import('src/pages/Task/TestPage.vue') },
+        ]
+      },
+      { path: 'datasets', component: () => import('pages/DatasetPage.vue') }
     ]
   },
 

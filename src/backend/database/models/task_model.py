@@ -1,25 +1,30 @@
-# /root/src/backend/database/models/robot_model.py
-from .model import DBModel
-import json
+from orator import Model
+from orator.orm import belongs_to
+from .robot_model import Robot
+from .sensor_model import Sensor
 
-class TaskModel(DBModel):
-    TABLE_NAME = "tasks"
-    
-    # 'COLUMNS'를 딕셔너리로 변경하여 컬럼별 속성(예: default)을 정의합니다.
-    COLUMNS = {
-        'name': {'default': 'task_1'},
-        'robot_id': {'default': 1},
-        'sensor_ids': {'default': [1, 2]},
-        'home_pose': {'default': ['0.0', '0.0', '0.0', '0.0', '0.0', '0.0', '0.0']},
-        'end_pose': {'default': ['0.0', '0.0', '0.0', '0.0', '0.0', '0.0', '0.0']},
-        'prompt':{'default': 'Pick and place the object'},
-        'episode_len': {'default': 100},
-        'dataset_dir': {'default': '/root/src/backend/datasets'},
+class Task(Model):
+
+    __fillable__ = [
+        'name',
+        'robot_id',
+        'sensor_ids',
+        'home_pose',
+        'end_pose',
+        'image',
+        'episode_len',
+        'sensor_img_size',
+    ]
+
+    __casts__ = {
+        'sensor_ids': 'json',
+        'home_pose': 'json',
+        'end_pose': 'json',
+        'sensor_img_size': 'json',
     }
     
-    def __init__(self, **kwargs):
-        # 이 부분은 변경할 필요 없습니다. 부모 클래스가 모든 것을 처리합니다.
-        super().__init__(table_name=self.TABLE_NAME, **kwargs)
-        
-        for key, value in kwargs.items():
-            setattr(self, key, value)
+    __timestamps__ = True
+
+    @belongs_to
+    def robot(self):
+        return Robot

@@ -11,8 +11,25 @@ import time
 
 from .routes.sensor import sensor_bp, SensorNamespace
 from .routes.robot import robot_bp, RobotNamespace
+from .routes.leader_robot import leader_robot_bp
+from .routes.task import task_bp
+from .routes.dataset import dataset_bp
 
 import rospy
+
+import usb.core
+import usb.util
+
+from orator import DatabaseManager, Model
+
+import os
+import argparse
+
+argparse = argparse.ArgumentParser(description='Easy Collector Web API')
+argparse.add_argument('--debug', action='store_true', help='Enable debug mode')
+args = argparse.parse_args()
+# 디버그 모드 설정
+debug = args.debug
 
 # Flask 앱과 SocketIO 객체 생성
 app = Flask(__name__)
@@ -20,14 +37,31 @@ CORS(app)
 app.config['SECRET_KEY'] = 'mysecretkey!' # 실제 운영 환경에서는 더 복잡한 키 사용
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
-pm = ProcessManager(socketio)  # 프로세스 관리 객체 생성
+pm = ProcessManager(socketio, debug=debug)  # 프로세스 관리 객체 생성
 
 app.register_blueprint(sensor_bp, url_prefix='/api')
 app.register_blueprint(robot_bp, url_prefix='/api')
+app.register_blueprint(leader_robot_bp, url_prefix='/api')
+app.register_blueprint(task_bp, url_prefix='/api')
+app.register_blueprint(dataset_bp, url_prefix='/api')
 app.pm = pm
 
 socketio.on_namespace(SensorNamespace('/sensor', pm))
-socketio.on_namespace(RobotNamespace('/sensor', pm))
+socketio.on_namespace(RobotNamespace('/robot', pm))
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DB_DIR = os.path.join(BASE_DIR, 'backend/database')
+DB_PATH = os.path.join(DB_DIR, 'main.db')
+
+config = {
+    'mysql': {
+        'driver': 'sqlite',
+        'database': DB_PATH,
+    }
+}
+
+db = DatabaseManager(config)
+Model.set_connection_resolver(db)
 
 
 pcs = set()
@@ -52,6 +86,29 @@ def list_processes():
         'status': 'success',
         'processes': processes
     }, 200
+
+@app.route('/api/devices', methods=['GET'])
+def list_devices():
+    devices = []
+    usb_devices = usb.core.find(find_all=True)
+
+    for dev in usb_devices:
+        manufacturer = usb.util.get_string(dev, dev.iManufacturer)
+        product = usb.util.get_string(dev, dev.iProduct)
+        
+        devices.append({
+            'product': product,
+            'manufacturer': manufacturer,
+            'id_vendor': hex(dev.idVendor),
+            'id_product': hex(dev.idProduct),
+        })
+        print(f"장치: {product} | 제조사: {manufacturer} | ID: {hex(dev.idVendor)}:{hex(dev.idProduct)}")
+
+    return {
+        'status': 'success',
+        'devices': devices
+    }
+
 
 # --- SocketIO 이벤트 핸들러 ---
 
@@ -87,6 +144,5 @@ def handle_offer_event(sid, data):
 if __name__ == '__main__':
     # Flask 앱을 직접 실행하는 대신, socketio.run()을 사용해야 합니다.
     # host='0.0.0.0'은 외부에서도 접속 가능하도록 설정합니다.
+    
     socketio.run(app, host='0.0.0.0', port=5000, debug=True, use_reloader=False)
-
-

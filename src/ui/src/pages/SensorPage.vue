@@ -12,29 +12,22 @@
                             <q-icon v-if="sensor.status === 'off'" name="power_settings_new" size="sm" class="cursor-pointer" @click.stop="toggleSensor(sensor)"></q-icon>
                             <q-icon v-if="sensor.status === 'loading'" color="orange-6" name="power_settings_new" size="sm" class="cursor-pointer"></q-icon>
                         </div>
-                        <div class="absolute-top-right row q-gutter-x-sm" style="background: none;">
-                            <q-btn-dropdown
-                                dropdown-icon="more_vert"
-                                flat
-                                text-color="dark"
-                                round
-                            >
-                                <q-list bordered separator>
-                                    <q-item clickable v-ripple v-close-popup @click="showSensorForm = true; sensorForm = sensor">
-                                        <q-item-section>Edit Sensor</q-item-section>
-                                        <q-item-section side>
-                                            <q-icon name="edit" size="xs" />
-                                        </q-item-section>
-                                    </q-item>
-                                    <q-item clickable v-ripple class="text-negative" @click="deleteSensor(sensor)">
-                                        <q-item-section>Delete Sensor</q-item-section>
-                                        <q-item-section side>
-                                            <q-icon color="negative" name="delete" size="xs" />
-                                        </q-item-section>
-                                    </q-item>
-                                </q-list>
-                            </q-btn-dropdown>
-                        </div>
+                        <q-menu context-menu>
+                            <q-list bordered separator>
+                                <q-item clickable v-ripple v-close-popup @click="showSensorForm = true; sensorForm = sensor">
+                                    <q-item-section>Edit Sensor</q-item-section>
+                                    <q-item-section side>
+                                        <q-icon name="edit" size="xs" />
+                                    </q-item-section>
+                                </q-item>
+                                <q-item clickable v-ripple class="text-negative" @click="deleteSensor(sensor)">
+                                    <q-item-section>Delete Sensor</q-item-section>
+                                    <q-item-section side>
+                                        <q-icon color="negative" name="delete" size="xs" />
+                                    </q-item-section>
+                                </q-item>
+                            </q-list>
+                        </q-menu>
                     </q-img>
 
 
@@ -188,6 +181,13 @@ function saveSensor() {
 }
 
 function deleteSensor(sensor) {
+    if (sensor.status === 'on') {
+        Notify.create({
+            color: 'negative',
+            message: 'Turn off the sensor first.'
+        })
+        return;
+    }
     return api.delete(`/sensor/${sensor.id}`).then(() => {
         listSensors().then(() => {
             listProcesses();

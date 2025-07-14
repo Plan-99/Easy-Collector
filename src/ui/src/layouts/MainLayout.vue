@@ -12,10 +12,8 @@
         />
 
         <q-toolbar-title>
-          Quasar App
+          Easy Collector
         </q-toolbar-title>
-
-        <div>Quasar v{{ $q.version }}</div>
       </q-toolbar>
     </q-header>
 
@@ -51,19 +49,24 @@ import EssentialLink from 'components/EssentialLink.vue'
 
 const linksList = [
   {
-    title: 'Tasks',
-    icon: 'cleaning_services',
-    link: 'tasks'
-  },
-  {
     title: 'Sensors',
     icon: 'camera',
-    link: 'sensors'
+    link: '/sensors'
   },
   {
     title: 'Robots',
     icon: 'adb',
-    link: 'robots'
+    link: '/robots'
+  },
+  {
+    title: 'Tasks',
+    icon: 'cleaning_services',
+    link: '/tasks'
+  },
+  {
+    title: 'Datasets',
+    icon: 'folder_open',
+    link: '/datasets'
   },
 ]
 

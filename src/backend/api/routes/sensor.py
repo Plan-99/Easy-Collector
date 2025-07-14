@@ -1,8 +1,7 @@
-# routes/camera.py
-
-from flask import Blueprint, request, current_app
+from flask import Blueprint, request, current_app, jsonify
 from flask_socketio import Namespace, emit
-from ...database.models.sensor_model import SensorModel
+from ...database.models.sensor_model import Sensor as SensorModel
+import json
 
 # 1. Blueprint 생성
 # 이 블루프린트는 카메라와 관련된 'HTTP' 라우트를 관리합니다.
@@ -24,13 +23,11 @@ class SensorNamespace(Namespace):
 
 @sensor_bp.route('/sensors', methods=['GET'])
 def get_sensors():
-    sensors = SensorModel.find_all(to='dict')
-
+    sensors = SensorModel.all()
+    sensors = [sensor.to_dict() for sensor in sensors]
     for sensor in sensors:
-        # 프로세스 ID 초기화
         sensor['process_id'] = 'sensor_' + str(sensor['id'])
         # sensor['process_cmd'] = f'roslaunch realsense2_camera rs_camera.launch camera:={sensor['name']} serial_no:={sensor['serial_no']}'
-    # 클라이언트로 센서 목록 반환
 
     return {
         'status': 'success',
@@ -82,7 +79,7 @@ def create_sensor():
     name = request.json.get('name')
     type = request.json.get('type')
 
-    sensor = SensorModel(
+    SensorModel.create(
         name=name,
         type=type,
         settings={
@@ -90,7 +87,6 @@ def create_sensor():
         }
     )
     
-    sensor.create()
     return {'status': 'success', 'message': 'Sensor Created'}, 200
 
 
@@ -100,19 +96,20 @@ def update_sensor(id):
     name = request.json.get('name')
     type = request.json.get('type')
 
-    sensor = SensorModel.find_one({ 'id': id })
-    sensor.settings['serial_number'] = serial_no
+    sensor = SensorModel.find(id)
+    sensor.settings = {
+        'serial_number': serial_no
+    }
     sensor.name = name
     sensor.type = type
 
-    sensor.update()
+    sensor.save()
     return {'status': 'success', 'message': 'Sensor Updated'}, 200
 
 
 @sensor_bp.route('/sensor/<id>', methods=['DELETE'])
 def delete_sensor(id):
-    sensor = SensorModel.find_one({ 'id': id })
-
+    sensor = SensorModel.find(id)
     sensor.delete()
     return {'status': 'success', 'message': 'Sensor Deleted'}, 200
 

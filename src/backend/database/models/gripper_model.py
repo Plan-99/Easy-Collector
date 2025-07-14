@@ -1,20 +1,33 @@
-# /root/src/backend/database/models/robot_model.py
-from .model import DBModel
+from orator import Model
 
-class GripperModel(DBModel):
-    TABLE_NAME = "grippers"
-    
-    COLUMNS = {
-        'name': {'default': 'gripper_1'},
-        'type': {'default': 'robotiq'},
-        'read_topic': {'default': 'gripper/cmd'},
-        'write_topic': {'default': 'gripper/cmd'},
-        'settings': {'default': '{}'},
-        'image': {'default': 'default_robot_image.png'},
+GRIPPER_CONFIGS = {
+    'robotiq': {
+        'usb_port': '/dev/ttyUSB0'
     }
-    
-    def __init__(self, **kwargs):
-        super().__init__(table_name=self.TABLE_NAME, **kwargs)
-        
-        for key, value in kwargs.items():
-            setattr(self, key, value)
+}
+
+class GripperObserver:
+    def creating(self, gripper):
+        if not getattr(gripper, 'settings', None):
+            gripper_type = gripper.type
+            if gripper_type in GRIPPER_CONFIGS:
+                gripper.settings = GRIPPER_CONFIGS[gripper_type]
+            else:
+                gripper.settings = {}
+                
+
+class Gripper(Model):
+    __fillable__ = [
+        'name',
+        'type',
+        'read_topic',
+        'write_topic',
+        'settings',
+        'image'
+    ]
+
+    __casts__ = {
+        'settings': 'json',
+    }
+
+    __timestamps__ = False

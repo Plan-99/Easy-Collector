@@ -4,29 +4,34 @@ import signal
 import atexit
 
 class ProcessManager:
-    def __init__(self, socketio):
+    def __init__(self, socketio, debug=False):
         self.processes = {}
         self.socketio = socketio
+        self.debug = debug
         atexit.register(self.stop_all_processes)
         print("ProcessManager initialized and cleanup registered.")
 
     def list_processes(self):
         return [name for name, process in self.processes.items() if process.poll() is None]
 
-    def _stream_reader(self, process_name, process_stream, stream_type, sid):
+    def _stream_reader(self, process_name, process_stream, log_emit_id, stream_type, sid):
         """스트림을 안정적으로 읽어 클라이언트로 전송합니다."""
         try:
             for line in process_stream:
                 log_data = {'log': line.strip(), 'type': stream_type}
-                print(log_data)
-                self.socketio.emit(f"log_{process_name}", log_data, to=sid)
+                self.socketio.emit(log_emit_id, log_data, to=sid)
+                if self.debug:
+                    print(f"[{process_name} {stream_type}] {line.strip()}")
         finally:
             process_stream.close()
 
-    def start_process(self, name, command, sid=None):
+    def start_process(self, name, command, log_emit_id=None, sid=None):
         if name in self.processes and self.processes[name].poll() is None:
             print(f"[ERROR] '{name} Process' is already running.")
             return None
+        
+        if log_emit_id is None:
+            log_emit_id = 'log_' + name
 
         command_full = ' '.join(command)
         try:
@@ -40,8 +45,8 @@ class ProcessManager:
             process = subprocess.Popen(final_command, **popen_args)
             self.processes[name] = process  # 딕셔너리에 먼저 추가
 
-            self.socketio.start_background_task(target=self._stream_reader, process_name=name, process_stream=process.stdout, stream_type='stdout', sid=sid)
-            self.socketio.start_background_task(target=self._stream_reader, process_name=name, process_stream=process.stderr, stream_type='stderr', sid=sid)
+            self.socketio.start_background_task(target=self._stream_reader, process_name=name, process_stream=process.stdout, log_emit_id=log_emit_id, stream_type='stdout', sid=sid)
+            self.socketio.start_background_task(target=self._stream_reader, process_name=name, process_stream=process.stderr, log_emit_id=log_emit_id, stream_type='stderr', sid=sid)
 
             def wait_for_process_end():
                 return_code = process.wait()

@@ -1,25 +1,60 @@
-# /root/src/backend/database/models/robot_model.py
-from .model import DBModel
+from orator import Model, accessor
+import json
 
-class SensorModel(DBModel):
-    TABLE_NAME = "sensors"
-    
-    COLUMNS = {
-        'name': {'default': 'sensor_1'},
-        'type': {'default': 'realsense_camera'},
-        'settings': {'default': '{}'},
-        'image': {'default': 'default_sensor_image.png'},
+SENSOR_CONFIGS = {
+    'realsense_camera': {
+        'serial_number': '00000000'
+    },
+    'custom_sensor': {
+        'process_cmd': 'rosrun my_package my_sensor_node',
+        'topic_name': 'custom_sensor_topic'
+    }
+}
+
+
+class SensorObserver:
+    def creating(self, sensor):
+        if not getattr(sensor, 'settings', None):
+            sensor_type = sensor.type
+            if sensor_type in SENSOR_CONFIGS:
+                sensor.settings = SENSOR_CONFIGS[sensor_type]
+            else:
+                sensor.settings = {}
+                
+
+class Sensor(Model):
+    __fillable__ = [
+        'name',
+        'type',
+        'settings',
+    ]
+
+    __casts__ = {
+        'settings': 'json',
     }
 
-    NEW_COLS = ['serial_no', 'topic']
-    
-    def __init__(self, **kwargs):
-        super().__init__(table_name=self.TABLE_NAME, **kwargs)
-        
-        for key, value in kwargs.items():
-            setattr(self, key, value)
+    __appends__ = ['serial_no', 'topic']
 
-    def set_data(self):
+    __timestamps__ = False
+    
+    
+    @accessor
+    def serial_no(self):
+        settings = json.loads(self.get_raw_attribute('settings'))
+        if 'serial_number' in settings:
+            return settings['serial_number']
+        
+        return None
+    
+
+    @accessor
+    def topic(self):
         if self.type == 'realsense_camera':
-            self.serial_no = self.settings['serial_number']
-            self.topic = f'/{self.name}/color/image_raw/compressed'
+            return f'/{self.name}/color/image_raw/compressed'
+        
+        return None
+    
+
+    @staticmethod
+    def boot():
+        Sensor.observe(SensorObserver())

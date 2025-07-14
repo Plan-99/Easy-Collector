@@ -2,39 +2,38 @@
     <q-page class="q-pa-md full-height">
         <div class="row q-col-gutter-md">
             <div class="col-6 col-sm-4 col-md-3 col-lg-2" v-for="robot in robots" :key="robot.id">
-                <q-card >
+                <q-card>
                     <q-img :src="robot.image" @click="watchRobot(robot)" class="cursor-pointer" ratio="1">
                         <div class="absolute-bottom text-h6 row q-gutter-x-sm">
                             <div>{{ robot.name }}</div>
                             <q-space></q-space>
-                            <q-icon v-if="robot.status === 'on' && watchingRobot === robot" color="positive" name="visibility" size="sm" class="cursor-pointer"></q-icon>
+                            <q-icon v-if="robot.status === 'on' && watchingRobot.id === robot.id" color="positive" name="visibility" size="sm" class="cursor-pointer"></q-icon>
                             <q-icon v-if="robot.status === 'on'" color="positive" name="power_settings_new" size="sm" class="cursor-pointer" @click.stop="toggleRobot(robot)"></q-icon>
                             <q-icon v-if="robot.status === 'off'" name="power_settings_new" size="sm" class="cursor-pointer" @click.stop="toggleRobot(robot)"></q-icon>
                             <q-icon v-if="robot.status === 'loading'" color="orange-6" name="power_settings_new" size="sm" class="cursor-pointer"></q-icon>
                         </div>
-                        <div class="absolute-top-right row q-gutter-x-sm" style="background: none;">
-                            <q-btn-dropdown
-                                dropdown-icon="more_vert"
-                                flat
-                                text-color="dark"
-                                round
-                            >
-                                <q-list bordered separator>
-                                    <q-item clickable v-ripple v-close-popup @click="showRobotForm = true; robotForm = robot">
-                                        <q-item-section>Edit Robot</q-item-section>
-                                        <q-item-section side>
-                                            <q-icon name="edit" size="xs" />
-                                        </q-item-section>
-                                    </q-item>
-                                    <q-item clickable v-ripple class="text-negative" @click="deleteRobot(robot)">
-                                        <q-item-section>Delete Robot</q-item-section>
-                                        <q-item-section side>
-                                            <q-icon color="negative" name="delete" size="xs" />
-                                        </q-item-section>
-                                    </q-item>
-                                </q-list>
-                            </q-btn-dropdown>
-                        </div>
+                        <q-menu context-menu>
+                            <q-list bordered separator>
+                                <q-item clickable v-ripple v-close-popup @click="showRobotForm = true; robotForm = robot">
+                                    <q-item-section>Edit Robot</q-item-section>
+                                    <q-item-section side>
+                                        <q-icon name="edit" size="xs" />
+                                    </q-item-section>
+                                </q-item>
+                                <q-item clickable v-ripple @click="openTeleSetting(robot)">
+                                    <q-item-section>Teleoperation Setting</q-item-section>
+                                    <q-item-section side>
+                                        <q-icon name="gamepad" size="xs" />
+                                    </q-item-section>
+                                </q-item>
+                                <q-item clickable v-ripple class="text-negative" @click="deleteRobot(robot)">
+                                    <q-item-section>Delete Robot</q-item-section>
+                                    <q-item-section side>
+                                        <q-icon color="negative" name="delete" size="xs" />
+                                    </q-item-section>
+                                </q-item>
+                            </q-list>
+                        </q-menu>
                     </q-img>
 
 
@@ -50,22 +49,35 @@
                 <q-btn color="grey-8" class="full-height full-width" outline size="lg" icon="add" @click="showRobotForm = true"></q-btn>
             </div>
         </div>
-        <div class="absolute-bottom bg-grey-4"  v-if="watchingRobot">
+        <div class="absolute-bottom"  v-if="watchingRobot">
+            <div class="row">
+                <q-btn @click="goOriginPos" icon="home" color="green">
+                    <q-tooltip>Click to go origin position</q-tooltip>
+                </q-btn>
+                <div v-if="watchingRobot.leader_robot_preset">
+                    <q-btn @click="() => { startLeaderTele(watchingRobot.id, 'log_' + watchingRobot.process_id) }" icon="play_arrow" color="blue" v-if="!leaderTeleStarted">
+                        <q-tooltip>Start teleoperation with leader robot</q-tooltip>
+                    </q-btn>
+                    <q-btn @click="() => { stopLeaderTele(watchingRobot.id, 'log_' + watchingRobot.process_id) }" icon="pause" color="blue" v-else>
+                        <q-tooltip>Start teleoperation with leader robot</q-tooltip>
+                    </q-btn>
+                </div>
+            </div>
             <q-separator />
-            <div class="q-pa-md row q-gutter-x-md">
+            <div class="q-pa-md row q-gutter-x-md  bg-grey-4">
                 <div class="col-3 column">
                     <div class="col" 
                         v-for="(joint, i) in watchingRobot.joint_names" :key="joint"
                     >
-                        <div>{{ joint }}</div>
+                        <div class="text-caption">{{ joint }}</div>
                         <q-slider
                             v-model="watchingRobot.joint_pos[i]"
                             :min="watchingRobot.joint_lower_bounds[i]"
                             :max="watchingRobot.joint_upper_bounds[i]"
-                            :step="0.01"
+                            :step="0.0001"
                             label
-                            label-always
                             switch-label-side
+                            thumb-size="1px"
                             color="red"
                             :disable="!canControl"
                             @update:model-value="(e) => moveRobot(i, e)"
@@ -115,28 +127,85 @@
                         map-options
                         emit-value
                     />
+
+                    <div v-if="robotForm.type === 'custom'">
+                        <q-input
+                            dense
+                            v-model="robotForm.read_topic"
+                            label="Read Topic"
+                            class="q-mb-md"
+                        />
+                        <q-input
+                            dense
+                            v-model="robotForm.read_topic_msg"
+                            label="Read Topic Message Type"
+                            class="q-mb-md"
+                        />
+                        <q-input
+                            dense
+                            v-model="robotForm.write_topic"
+                            label="Write Topic"
+                            class="q-mb-md"
+                        />
+                        <q-input
+                            dense
+                            v-model="robotForm.write_topic_msg"
+                            label="Write Topic Message Type"
+                            class="q-mb-md"
+                        />
+                        <q-input
+                            dense
+                            v-model="robotForm.joint_names"
+                            label="Joint Names"
+                            class="q-mb-md"
+                            hint="Comma separated joint names"
+                        />
+                        <q-input
+                            dense
+                            v-model="robotForm.joint_lower_bounds"
+                            label="Joint Lower Bounds"
+                            class="q-mb-md"
+                            hint="Comma separated lower bounds for each joint"
+                        />
+                        <q-input
+                            dense
+                            v-model="robotForm.joint_upper_bounds"
+                            label="Joint Upper Bounds"
+                            class="q-mb-md"
+                            hint="Comma separated upper bounds for each joint"
+                        />
+                    </div>
                 </q-card-section>
 
                 <q-card-actions align="center" class="text-primary">
-                    <q-btn flat label="Save" v-close-popup @click="saveRobot" />
+                    <q-btn flat label="Save" @click="saveRobot" />
                     <q-btn flat color="grey-7" label="Close" v-close-popup @click="robotForm = {}" />
                 </q-card-actions>
             </q-card>
         </q-dialog>
+        <tele-setting-dialog
+            v-if="showTeleSetting"
+            v-model="showTeleSetting" 
+            :robot="teleSettingRobot"
+            @hide="closeTeleSetting"
+        />
     </q-page>
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue';
+import { onMounted, onUnmounted, ref, watch } from 'vue';
 
 import { useSocket } from '../composables/useSocket';
 import { useROS } from '../composables/useROS';
+import { useLeaderTeleoperation } from '../composables/useLeaderTeleoperation';
 import { api } from 'src/boot/axios';
 import ProcessConsole from 'src/components/ProcessConsole.vue';
+import TeleSettingDialog from 'src/components/TeleSettingDialog.vue';
 import { Notify } from 'quasar';
 
 const { socket } = useSocket();
 const { createSubscriber, createPublisher, connectROS, sendJointState } = useROS();
+const { leaderTeleStarted, startLeaderTele, stopLeaderTele } = useLeaderTeleoperation();
 
 const robots = ref([]);
 
@@ -146,6 +215,7 @@ const watchingRobot = ref(null);
 const robotTypeOptions = [
     { label: 'UR5e', value: 'ur5e' },
     { label: 'PIPER', value: 'piper' },
+    { label: 'Custom Robot', value: 'custom'}
 ]
 
 function listRobots() {                                                                                                     
@@ -168,31 +238,74 @@ function saveRobot() {
     if (!robotForm.value.name || !robotForm.value.type) {
         Notify.create({
             color: 'negative',
-            message: 'Please fill the form'
+            message: 'Please fill all robot fields'
         })
         return;
     }
+    if (robotForm.value.type === 'custom' && (!robotForm.value.read_topic || !robotForm.value.read_topic_msg || !robotForm.value.write_topic || !robotForm.value.write_topic_msg)) {
+        Notify.create({
+            color: 'negative',
+            message: 'Please fill all robot fields'
+        })
+        return;
+    }
+    if (robotForm.value.type === 'custom' && (!robotForm.value.joint_names || !robotForm.value.joint_lower_bounds || !robotForm.value.joint_upper_bounds)) {
+        Notify.create({
+            color: 'negative',
+            message: 'Please fill all joint fields'
+        })
+        return;
+    }
+    if (robotForm.value.type === 'custom' && robotForm.value.joint_names.split(',').length !== robotForm.value.joint_lower_bounds.split(',').length) {
+        Notify.create({
+            color: 'negative',
+            message: 'Joint names and lower bounds must have the same number of elements'
+        })
+        return;
+    }
+    if (robotForm.value.type === 'custom' && robotForm.value.joint_names.split(',').length !== robotForm.value.joint_upper_bounds.split(',').length) {
+        Notify.create({
+            color: 'negative',
+            message: 'Joint names and upper bounds must have the same number of elements'
+        })
+        return;
+    }
+    const data = {
+        'name': robotForm.value.name,
+        'type': robotForm.value.type,
+        'read_topic': robotForm.value.read_topic || '',
+        'read_topic_msg': robotForm.value.read_topic_msg || '',
+        'write_topic': robotForm.value.write_topic || '',
+        'write_topic_msg': robotForm.value.write_topic_msg || '',
+        'joint_names': robotForm.value.joint_names ? robotForm.value.joint_names.split(',') : [],
+        'joint_lower_bounds': robotForm.value.joint_lower_bounds ? robotForm.value.joint_lower_bounds.split(',').map(Number) : [],
+        'joint_upper_bounds': robotForm.value.joint_upper_bounds ? robotForm.value.joint_upper_bounds.split(',').map(Number) : []
+    };
     if (robotForm.value.id) {
-        return api.put(`/robot/${robotForm.value.id}`, {
-            'name': robotForm.value.name,
-            'type': robotForm.value.type
-        }).then(() => {
+        return api.put(`/robot/${robotForm.value.id}`, data).then(() => {
+            showRobotForm.value = false;
             robotForm.value = {};
         })
     } else {
-        return api.post(`/robot`, {
-            'name': robotForm.value.name,
-            'type': robotForm.value.type
-        }).then(() => {
+        return api.post(`/robot`, data).then(() => {
+            showRobotForm.value = false;
             robotForm.value = {};
-            listRobots()
+            initialize()
         })
+
     }
 }
 
 function deleteRobot(robot) {
+    if (robot.status === 'on') {
+        Notify.create({
+            color: 'negative',
+            message: 'Turn off the robot first.'
+        })
+        return;
+    }
     return api.delete(`/robot/${robot.id}`).then(() => {
-        listRobots()
+        initialize()
     })
 }
 
@@ -204,6 +317,7 @@ function listProcesses() {
             if (process) {
                 robot.status = 'on'; // Sensor is running
                 robot.process = process;
+                console.log(watchingRobot.value)
                 if (!watchingRobot.value) {
                     watchRobot(robot)
                 }
@@ -258,8 +372,8 @@ function watchRobot(robot) {
         if (!canControl.value) {
             robot.joint_pos = msg.position
         }
-        canControl.value = true
     })
+    canControl.value = true
     publishJointPos = createPublisher(robot.write_topic, robot.write_topic_msg)
     watchingRobot.value = robot
 }
@@ -270,9 +384,68 @@ function moveRobot(joint_index, joint_pos) {
 }
 
 const canControl = ref(false)
-
-
 const showRobotForm = ref(false)
+
+const showTeleSetting = ref(false)
+const teleSettingRobot = ref(null)
+
+function openTeleSetting(robot) {
+    if (robot.status === 'off') {
+        Notify.create({
+            color: 'negative',
+            message: 'Turn on the robot first.'
+        })
+        return;
+    }
+    showTeleSetting.value = true;
+    teleSettingRobot.value = robot;
+    canControl.value = false; // Reset control state
+}
+
+function closeTeleSetting(leaderSettingForm) {
+    if (leaderSettingForm) {
+        robots.value.find((e) => e.id === teleSettingRobot.value.id).leader_robot_preset = leaderSettingForm;
+    }
+    showTeleSetting.value = false;
+    teleSettingRobot.value = null;
+    canControl.value = true; // Reset control state
+}
+
+function goOriginPos() {
+    const robot = watchingRobot.value;
+    canControl.value = false; // Reset control state
+    api.post(`/robot/${robot.id}/:move_to`, {
+        goal_pos: [0, 0, 0, 0, 0, 0] // Default to zero if not set
+    }).then(() => {
+        Notify.create({
+            color: 'positive',
+            message: 'Robot moved to origin position'
+        })
+    }).catch((error) => {
+        console.error('Error moving robot to origin:', error);
+        Notify.create({
+            color: 'negative',
+            message: 'Failed to move robot to origin'
+        })
+    }).finally(() => {
+        setTimeout(() => {
+            canControl.value = true; // Reset control state
+        }, 2000);
+    });
+}
+
+watch(watchingRobot, (newVal, oldVal) => {
+    if (oldVal) {
+        stopLeaderTele(oldVal.id); // Stop leader teleoperation when switching robots
+    }
+});
+
+
+function initialize() {
+    listRobots().then(() => {
+        listProcesses();
+    })
+}
 
 onMounted(() => {
     
@@ -283,6 +456,9 @@ onMounted(() => {
         if (robot) {
             robot.status = 'on';
             watchRobot(robot)
+        }
+        if (data.id === 'leader_teleoperation') {
+            leaderTeleStarted.value = true;
         }
     });
 
@@ -296,16 +472,22 @@ onMounted(() => {
                 watchingRobot.value = null
             }
         }
+        if (data.id === 'leader_teleoperation') {
+            leaderTeleStarted.value = false;
+        }
     });
 
 
-    listRobots().then(() => {
-        listProcesses();
-    })
+    initialize()
 })
 
 onUnmounted(() => {
     socket.off('start_process');
+    socket.off('stop_process');
+
+    if (jointSub) {
+        jointSub.unsubscribe();
+    }
 });
 
 </script>
