@@ -25,6 +25,7 @@ hypercorn
 dynamixel_sdk
 piper_sdk
 pyusb
+orator
 
 # diffusion policy
 dill
