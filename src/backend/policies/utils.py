@@ -18,11 +18,11 @@ e = IPython.embed
 
 
 class EpisodicDataset(torch.utils.data.Dataset):
-    def __init__(self, episode_ids, dataset_dir, camera_names, norm_stats, task_space=False, vel_control=False):
+    def __init__(self, episode_ids, dataset_dir, sensor_ids, norm_stats, task_space=False, vel_control=False):
         super(EpisodicDataset).__init__()
         self.episode_ids = episode_ids
         self.dataset_dir = dataset_dir
-        self.camera_names = camera_names
+        self.sensor_ids = sensor_ids
         self.norm_stats = norm_stats
         self.task_space = task_space
         self.vel_control = vel_control
@@ -46,7 +46,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
                 else:
                     original_action_shape = root['/xaction'].shape
             else:
-                original_action_shape = root['/action'].shape
+                original_action_shape = root['qaction']['robot_1'].shape
             episode_len = original_action_shape[0]
             if sample_full_episode:
                 start_ts = 0
@@ -55,17 +55,16 @@ class EpisodicDataset(torch.utils.data.Dataset):
             # get observation at start_ts only
             if self.task_space:
                 if self.vel_control:
-                    # qpos = root['/observations/xvel'][start_ts]
                     qpos = np.array([0] * 8)
                 else:
                     qpos = root['/observations/xpos'][start_ts]
             else:
-                qpos = root['/observations/qpos'][start_ts]
+                qpos = get_concatenated_pos(root['/observations/qpos'], target_id=start_ts)
+                # qpos = root['/observations/qpos'][start_ts]
 
-            qvel = root['/observations/qvel'][start_ts]
             image_dict = dict()
-            for cam_name in self.camera_names:
-                image_dict[cam_name] = root[f'/observations/images/{cam_name}'][start_ts]
+            for sensor_id in self.sensor_ids:
+                image_dict[f"sensor_{sensor_id}"] = root[f'/observations/images/sensor_{sensor_id}'][start_ts]
             # get all actions after and including start_ts
             if is_sim:
                 if self.task_space:
@@ -83,7 +82,8 @@ class EpisodicDataset(torch.utils.data.Dataset):
                     else:
                         action = root['/xaction'][max(0, start_ts - 1):]
                 else:
-                    action = root['/action'][max(0, start_ts - 1):]
+                    action = get_concatenated_pos(root['qaction'], target_id=None, target_ids=max(0, start_ts - 1))
+
                 # action = root['/xaction'][max(0, start_ts - 1):] if self.task_space else root['/action'][max(0, start_ts - 1):]
                 # hack, to make timesteps more aligned
                 action_len = episode_len - max(0, start_ts - 1) # hack, to make timesteps more aligned
@@ -96,8 +96,8 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
         # new axis for different cameras
         all_cam_images = []
-        for cam_name in self.camera_names:
-            all_cam_images.append(image_dict[cam_name])
+        for sensor_id in self.sensor_ids:
+            all_cam_images.append(image_dict[f"sensor_{sensor_id}"])
         all_cam_images = np.stack(all_cam_images, axis=0)
 
         # construct observations
@@ -111,7 +111,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
         # normalize image and change dtype to float
         image_data = image_data / 255.0
-        action_data = (action_data - self.norm_stats["action_mean"]) / self.norm_stats["action_std"]
+        action_data = (action_data - self.norm_stats["qaction_mean"]) / self.norm_stats["qaction_std"]
         qpos_data = (qpos_data - self.norm_stats["qpos_mean"]) / self.norm_stats["qpos_std"]
 
         return image_data, qpos_data, action_data, is_pad
@@ -133,8 +133,9 @@ def get_norm_stats(dataset_dir, num_episodes, task_space, vel_control):
                     qpos = root['/observations/xpos'][()]
                     action = root['/xaction'][()]
             else:
-                qpos = root['/observations/qpos'][()]
-                action = root['/action'][()]
+                qpos = get_concatenated_pos(root['/observations/qpos'])
+                action = get_concatenated_pos(root['qaction'])
+                
         all_qpos_data.append(torch.from_numpy(qpos))
         all_action_data.append(torch.from_numpy(action))
     all_qpos_data = torch.stack(all_qpos_data)
@@ -150,16 +151,34 @@ def get_norm_stats(dataset_dir, num_episodes, task_space, vel_control):
     qpos_std = all_qpos_data.std(dim=[0, 1], keepdim=True)
     qpos_std = torch.clip(qpos_std, 1e-2, np.inf) # clipping
 
-    stats = {"action_mean": action_mean.numpy().squeeze(), "action_std": action_std.numpy().squeeze(),
+    stats = {"qaction_mean": action_mean.numpy().squeeze(), "qaction_std": action_std.numpy().squeeze(),
              "qpos_mean": qpos_mean.numpy().squeeze(), "qpos_std": qpos_std.numpy().squeeze(),
              "example_qpos": qpos}
     
-    print(stats)
+    # print(stats)
 
     return stats
 
 
-def load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val, task_space=False, vel_control=False):
+def get_concatenated_pos(pos_path, target_id=None, target_ids=None):
+    pos_list = []
+    for key in pos_path.keys():
+        if target_id is None and target_ids is None:
+            pos_list.append(pos_path[key][()])
+            if len(pos_list) > 0:
+                pos = np.concatenate(pos_list, axis=0)
+        elif target_ids is None:
+            pos_list.append(pos_path[key][target_id])
+            if len(pos_list) > 0:
+                pos = np.concatenate(pos_list, axis=0)
+        else:
+            pos_list.append(pos_path[key][target_ids:])
+            if len(pos_list) > 0:
+                pos = np.concatenate(pos_list, axis=0)
+    return pos
+
+
+def load_data(dataset_dir, num_episodes, sensor_ids, batch_size_train, batch_size_val, task_space=False, vel_control=False):
     print(f'\nData from: {dataset_dir}\n')
     # obtain train test split
     train_ratio = 0.8
@@ -171,8 +190,8 @@ def load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_s
     norm_stats = get_norm_stats(dataset_dir, num_episodes, task_space, vel_control)
 
     # construct dataset and dataloader
-    train_dataset = EpisodicDataset(train_indices, dataset_dir, camera_names, norm_stats, task_space, vel_control)
-    val_dataset = EpisodicDataset(val_indices, dataset_dir, camera_names, norm_stats, task_space, vel_control)
+    train_dataset = EpisodicDataset(train_indices, dataset_dir, sensor_ids, norm_stats, task_space, vel_control)
+    val_dataset = EpisodicDataset(val_indices, dataset_dir, sensor_ids, norm_stats, task_space, vel_control)
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train, shuffle=True, pin_memory=True, num_workers=1, prefetch_factor=1)
     val_dataloader = DataLoader(val_dataset, batch_size=batch_size_val, shuffle=True, pin_memory=True, num_workers=1, prefetch_factor=1)
 
@@ -353,26 +372,23 @@ def rescale_val(val, origin_rng, rescaled_rng):
     return rescaled_rng[0] + (rescaled_rng[1] - rescaled_rng[0]) * ((val - origin_rng[0]) / (origin_rng[1] - origin_rng[0]))
 
 
-def make_policy(ckpt_path, seed, policy_config, task_config, robot_config, sensor_configs_ls, gripper_config):
-    args_override = policy_config['settings']
-    if policy_config['type'] == 'ACT':
+def make_policy(ckpt_path, seed, policy_obj, task, robot, sensors, gripper):
+    args_override = policy_obj.settings
+    if policy_obj.type == 'ACT':
         args_override['ckpt_dir'] = ckpt_path
-        args_override['policy_class'] = policy_config['type']
-        args_override['task_name'] = task_config['name']
+        args_override['policy_class'] = policy_obj.type
+        args_override['task_name'] = task.name
         args_override['seed'] = seed
-        args_override['num_epochs'] = policy_config['num_epochs']
-        args_override['state_dim'] = robot_config['joint_dim']
-        if gripper_config is not None:
+        args_override['state_dim'] = robot.joint_dim
+        if gripper is not None:
             args_override['state_dim'] += 1 # gripper state dim
-        args_override['num_queries'] = policy_config['settings']['chunk_size']
+        args_override['num_queries'] = int(policy_obj.settings['chunk_size'])
+        args_override['hidden_dim'] = int(policy_obj.settings['hidden_dim'])
+        args_override['dim_feedforward'] = int(policy_obj.settings['dim_feedforward'])
         
-        sensor_names = [sensor['name'] for sensor in sensor_configs_ls]
+        sensor_names = [sensor.name for sensor in sensors]
         args_override['camera_names'] = sensor_names
-        # args_override['camera_names'] = task_config['sen_names']
         
-        # args_override = SimpleNamespace(**args_override)  # Convert dict to SimpleNamespace for easier attribute access
-        
-        # print(args_override['state_dim'])
         policy = ACTPolicy(args_override)
     else:
         raise NotImplementedError
@@ -391,35 +407,35 @@ def forward_pass(data, policy):
     image_data, qpos_data, action_data, is_pad = image_data.cuda(), qpos_data.cuda(), action_data.cuda(), is_pad.cuda()
     return policy(qpos_data, image_data, action_data, is_pad) # TODO remove None
 
-def get_image(ts, camera_names, camera_config, memories, yolo_config=None):
-    curr_images = []
-    raw_images = []
+# def get_image(ts, sensor_ids, camera_config, memories, yolo_config=None):
+#     curr_images = []
+#     raw_images = []
 
-    for index, cam_name in enumerate(camera_names):
-        image = ts.observation['images'][cam_name]
+#     for index, cam_name in enumerate(camera_names):
+#         image = ts.observation['images'][cam_name]
 
-        # if cam_name in camera_config:
-        #     image, memories[index] = fetch_image_with_config(image, camera_config[cam_name], memories[index], yolo_config)
-
-
-        raw_images.append(image)
-        curr_image = rearrange(image, 'h w c -> c h w')
-        curr_images.append(curr_image)
-
-    if len(raw_images):           
-        # 이미지 크기 맞추기 (최대 크기로 맞추거나 다른 방식으로 조정)
-        max_height = 480
-        max_width = 640
-        resized_images = [cv2.resize(img, (max_width, max_height)) for img in raw_images]
-
-        # 이미지를 가로로 나열
-        combined_image = cv2.hconcat(resized_images)
-
-    else:
-        print("No images to display.")
+#         # if cam_name in camera_config:
+#         #     image, memories[index] = fetch_image_with_config(image, camera_config[cam_name], memories[index], yolo_config)
 
 
-    curr_image = np.stack(curr_images, axis=0)
-    curr_image = torch.from_numpy(curr_image / 255.0).float().cuda().unsqueeze(0)
+#         raw_images.append(image)
+#         curr_image = rearrange(image, 'h w c -> c h w')
+#         curr_images.append(curr_image)
 
-    return curr_image, memories
+#     if len(raw_images):           
+#         # 이미지 크기 맞추기 (최대 크기로 맞추거나 다른 방식으로 조정)
+#         max_height = 480
+#         max_width = 640
+#         resized_images = [cv2.resize(img, (max_width, max_height)) for img in raw_images]
+
+#         # 이미지를 가로로 나열
+#         combined_image = cv2.hconcat(resized_images)
+
+#     else:
+#         print("No images to display.")
+
+
+#     curr_image = np.stack(curr_images, axis=0)
+#     curr_image = torch.from_numpy(curr_image / 255.0).float().cuda().unsqueeze(0)
+
+#     return curr_image, memories

@@ -1,7 +1,7 @@
-from orator import Model
+from orator import Model, SoftDeletes
 
 
-class LeaderRobotPreset(Model):
+class LeaderRobotPreset(Model, SoftDeletes):
     __fillable__ = [
         'name',
         'robot_id',

@@ -1,9 +1,9 @@
-from orator import Model
+from orator import Model, SoftDeletes
 from orator.orm import belongs_to
 from .task_model import Task
 from .policy_model import Policy
 
-class Checkpoint(Model):
+class Checkpoint(Model, SoftDeletes):
 
     __fillable__ = [
         'name',
@@ -11,12 +11,7 @@ class Checkpoint(Model):
         'file_name',
         'task_id',
         'policy_id',
-        'settings'
     ]
-
-    __casts__ = {
-        'settings': 'json'
-    }
     
     __timestamps__ = True
 

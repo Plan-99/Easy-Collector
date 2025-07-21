@@ -10,7 +10,7 @@ export function useWebRTC() {
     const connectionState = ref('new');
     const error = ref(null);
 
-    const connect = async (sensor, onTrack) => {
+    const connect = async (topic, config, onTrack) => {
         const pc = new RTCPeerConnection({
             iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
         });
@@ -27,25 +27,17 @@ export function useWebRTC() {
 
         const response = await fetch(`${streaming_server}/offer`, {
             method: "POST",
-            body: JSON.stringify({ sdp: offer.sdp, type: offer.type, sensor }),
+            body: JSON.stringify({ sdp: offer.sdp, type: offer.type, topic, config }),
             headers: { "Content-Type": "application/json" },
         });
 
         const answer = await response.json();
         await pc.setRemoteDescription(new RTCSessionDescription(answer));
 
-        // console.log('aaaaa')
-
-        // socket.emit('offer', {
-        //     sdp: offer.sdp, type: offer.type, sensor: sensor
-        // })
-
-        // socket.on('answer', async (data) => {
-        //     await pc.setRemoteDescription(new RTCSessionDescription(data));
-        // });
-
-
-        return pc;
+        return {
+            pc,
+            stream_id: answer.stream_id,
+        };
     };
 
     const disconnect = () => {
@@ -59,9 +51,18 @@ export function useWebRTC() {
         // socket.off('answer')
     };
 
+    const addConfig = async (streamId, config) => {
+        await fetch(`${streaming_server}/add_config`, {
+            method: "POST",
+            body: JSON.stringify({ stream_id: streamId, config }),
+            headers: { "Content-Type": "application/json" },
+        });
+    };
+
+
     onUnmounted(() => {
         disconnect();
     });
 
-    return { streams, connectionState, error, connect, disconnect };
+    return { streams, connectionState, error, connect, disconnect, addConfig };
 }

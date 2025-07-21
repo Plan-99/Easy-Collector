@@ -6,7 +6,7 @@ class CreateGrippersTable(Migration):
     def up(self):
         with self.schema.create('grippers') as table:
             table.increments('id')
-            table.string('name').unique()
+            table.string('name')
             table.string('type')
             table.string('read_topic').nullable()
             table.string('write_topic').nullable()

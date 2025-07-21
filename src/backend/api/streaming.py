@@ -11,17 +11,20 @@ import sys
 import os
 import traceback
 from av import VideoFrame
+import uuid
 
 
 # --- 전역 변수 ---
 pcs = set()
+
+stream_config = {}
 
 # --- ROSImageStreamTrack 클래스 (변경 없음) ---
 class ROSImageStreamTrack(VideoStreamTrack):
     """
     ROS CompressedImage 토픽을 구독하여 비디오 프레임을 제공하는 클래스.
     """
-    def __init__(self, initial_topic: str, pub_term: int=1):
+    def __init__(self, initial_topic: str, pub_term: int=1, stream_id: str = None):
         super().__init__()
         self.topic = initial_topic
         self.subscriber = None
@@ -30,6 +33,7 @@ class ROSImageStreamTrack(VideoStreamTrack):
         self.pub_term = pub_term
         self.cnt = 0
         self.frame = None
+        self.stream_id = stream_id
 
     def start_subscriber(self):
         if self.subscriber:
@@ -40,9 +44,6 @@ class ROSImageStreamTrack(VideoStreamTrack):
         rospy.loginfo(f"Subscribed to ROS topic: {self.topic}")
 
     def ros_callback(self, msg: CompressedImage):
-        # self.cnt += 1
-        # if self.cnt % self.pub_term != 0:
-        #     return 
         try:
             np_arr = np.frombuffer(msg.data, np.uint8)
             cv_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
@@ -50,12 +51,13 @@ class ROSImageStreamTrack(VideoStreamTrack):
             if cv_image is None:
                 rospy.logwarn(f"Failed to decode image from topic {self.topic}")
                 return
+            
+            if 'resize' in stream_config[self.stream_id] and stream_config[self.stream_id]['resize'] and len(stream_config[self.stream_id]['resize']) == 2:
+                cv_image = cv2.resize(cv_image, (stream_config[self.stream_id]['resize'][0], stream_config[self.stream_id]['resize'][1]))
+
 
             self.frame = VideoFrame.from_ndarray(cv_image, format="bgr24")
-            
-            # if self.frame_queue.full():
-            #     self.frame_queue.get_nowait()
-            # self.frame_queue.put_nowait(frame)
+
         except Exception as e:
             rospy.logerr(f"Error in ros_callback for topic {self.topic}: {e}\n{traceback.format_exc()}")
 
@@ -76,8 +78,8 @@ class ROSImageStreamTrack(VideoStreamTrack):
 
 async def offer(request):
     params = await request.json()
-    sensor = params.get('sensor')
-    
+    topic = params.get('topic')
+    config = params.get('config', {})
     # STUN 서버 추가
 
     ice_servers = [RTCIceServer(urls="stun:stun.l.google.com:19302")]
@@ -99,7 +101,9 @@ async def offer(request):
 
     try:
         # 🔹 두 개의 비디오 트랙 추가
-        video_track = ROSImageStreamTrack(initial_topic=sensor['topic'])
+        stream_id = str(uuid.uuid4())
+        stream_config[stream_id] = config
+        video_track = ROSImageStreamTrack(initial_topic=topic, stream_id=stream_id)
 
         pc.addTrack(video_track)
 
@@ -121,7 +125,18 @@ async def offer(request):
         print("Error setting local description:", e, traceback.format_exc())
         return web.json_response({"error": "Failed to set local description"}, status=500)
 
-    return web.json_response({"sdp": pc.localDescription.sdp, "type": pc.localDescription.type})
+    return web.json_response({"sdp": pc.localDescription.sdp, "type": pc.localDescription.type, 'stream_id': stream_id}, status=200)
+
+
+async def add_config(request):
+    params = await request.json()
+    stream_id = params.get('stream_id')
+    config = params.get('config', {})
+
+    if 'resize' in config:
+        stream_config[stream_id]['resize'] = config['resize']
+
+    return web.json_response({"status": "success", "message": "aaa"}, status=200)
 
 
 async def cleanup():
@@ -143,8 +158,11 @@ if __name__ == "__main__":
             allow_headers="*"
         )
     })
-    route = app.router.add_post("/offer", offer)
-    cors.add(route)
+    offer_route = app.router.add_post("/offer", offer)
+    add_config_route = app.router.add_post("/add_config", add_config)
+    cors.add(offer_route)
+    cors.add(add_config_route)
+
 
     loop = asyncio.get_event_loop()
     loop.create_task(cleanup())

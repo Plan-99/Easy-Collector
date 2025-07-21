@@ -4,21 +4,29 @@ from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 import rospy
 import threading
 from collections import deque
-from ..database.models.robot_model import Robot as RobotModel
 import time
+
+import roslib.message
 
 class Agent():
     def __init__(self, robot, gripper=None):
-        
+        self.id = robot['id']
+        self.leader_robot_preset = robot.get('leader_robot_preset', None)    
         self.js_mutex = threading.Lock()
         self.joint_states = None
-        self.robot_type = robot.type
+        self.joint_actions = None
+        self.robot_type = robot['type']
+        self.joint_len = len(robot['joint_names'])
         
         if gripper is None:
-            self.gripper_range = robot.gripper_range
+            self.gripper_range = robot['gripper_range']
+
+        read_topic_cls = roslib.message.get_message_class(robot['read_topic_msg'])
+        write_topic_cls = roslib.message.get_message_class(robot['write_topic_msg'])
         
-        rospy.Subscriber(robot.read_topic, JointState, self.joint_state_cb)
-        self.move_robot_pub = rospy.Publisher(robot.write_topic, JointState, queue_size=10)
+        rospy.Subscriber(robot['read_topic'], read_topic_cls, self.joint_state_cb)
+        rospy.Subscriber(robot['write_topic'], write_topic_cls, self.joint_action_cb)
+        self.move_robot_pub = rospy.Publisher(robot['write_topic'], JointState, queue_size=10)
         time.sleep(0.1)  # Wait for subscriber to be ready
             
         
@@ -37,12 +45,18 @@ class Agent():
             self.joint_states = msg.position
 
 
+    def joint_action_cb(self, msg):
+        with self.js_mutex:
+            self.joint_actions = msg.position
+
+
     def move_to(self, target_pos, step_size=0.1):
         if self.robot_type == 'ur5e':
             pass
             # self.move_to_ur5(target_pos)
         if self.robot_type == 'piper':
             self.move_step(target_pos)
+            time.sleep(3)
         else:
             while True:
                 with self.js_mutex:

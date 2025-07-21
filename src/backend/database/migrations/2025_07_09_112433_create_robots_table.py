@@ -5,7 +5,7 @@ class CreateRobotsTable(Migration):
     def up(self):
         with self.schema.create('robots') as table:
             table.increments('id')
-            table.string('name').unique()
+            table.string('name')
             table.string('type')
             table.json('settings').nullable()
             table.timestamps()

@@ -6,49 +6,51 @@ import numpy as np
 from tqdm import tqdm
 from copy import deepcopy
 import argparse
+import json
+import shutil
+import pickle
 
 # Import policies and utilities
-from ..policies.policies import ACTPolicy
 from ..policies.utils import make_policy, make_optimizer, forward_pass, detach_dict, compute_dict_mean, set_seed, load_data
 
 # Import database and data models
-import os
-from ..database.db_init import get_db_connection
-from ..database.models.robot_model import RobotModel
-from ..database.models.policy_model import PolicyModel
-from ..database.models.task_model import TaskModel
-from ..database.models.gripper_model import GripperModel
-from ..database.models.sensor_model import SensorModel
-from ..database.models.checkpoint_model import CheckpointModel
+from orator import DatabaseManager
+from orator.orm import Model
+from ..database.models.robot_model import Robot
+from ..database.models.policy_model import Policy
+from ..database.models.task_model import Task
+from ..database.models.gripper_model import Gripper
+from ..database.models.sensor_model import Sensor
+from ..database.models.checkpoint_model import Checkpoint
 
 
 def train(
     train_dataloader, 
     val_dataloader, 
-    ckpt_dir, 
-    task_config, 
-    policy_config, 
-    robot_config, 
-    sensor_configs_ls, 
-    gripper_config=None, 
-    checkpoint_config=None
+    ckpt_dir,
+    num_epochs,
+    stats,
+    task,
+    policy_obj,
+    robot,
+    sensors,
+    gripper=None,
+    load_model=None
     ):
     """Function to train the policy model."""
     seed = 1
     
-    # Set training parameters
-    num_epochs = policy_config['num_epochs']
-    policy_class = policy_config['type']
-    load_model = checkpoint_config['path'] if checkpoint_config else None
+    policy_class = policy_obj.type
+    load_model_path = f"/root/src/backend/checkpoints/{load_model.id}" if load_model else None
 
     set_seed(seed) # Set seed for reproducibility
 
     # Create policy model
-    policy = make_policy(ckpt_dir, seed, policy_config, task_config, robot_config, sensor_configs_ls, gripper_config)
+    policy = make_policy(ckpt_dir, seed, policy_obj, task, robot, sensors, gripper)
 
     # Load pre-trained model for fine-tuning
-    if load_model is not None:
-        model_path = os.path.join(load_model, 'policy_best.ckpt')
+    if load_model_path is not None:
+        model_path = os.path.join(load_model_path, 'policy_best.ckpt')
         loading_status = policy.load_state_dict(torch.load(model_path))
         print(loading_status)
         
@@ -96,12 +98,25 @@ def train(
             
         epoch_summary = compute_dict_mean(train_history[(batch_idx+1)*epoch:(batch_idx+1)*(epoch+1)])
         print(f'Train loss: {epoch_summary["loss"]:.5f}')
+        
+        # save dataset stats
+    if not os.path.isdir(ckpt_dir):
+        os.makedirs(ckpt_dir)
+        print("Folder created:", ckpt_dir)
+    stats_path = os.path.join(ckpt_dir, f'dataset_stats.pkl')
+    with open(stats_path, 'wb') as f:
+        pickle.dump(stats, f)
 
     # Save the best checkpoint after training is finished
     best_epoch, min_val_loss, best_state_dict = best_ckpt_info
+
     ckpt_path = os.path.join(ckpt_dir, f'policy_epoch_{best_epoch}_seed_{seed}.ckpt')
     torch.save(best_state_dict, ckpt_path)
+    ckpt_path = os.path.join(ckpt_dir, f'policy_best.ckpt')
+    torch.save(best_state_dict, ckpt_path)
+    
     print(f'Training finished:\nSeed {seed}, val loss {min_val_loss:.6f} at epoch {best_epoch}')
+    
 
     return best_ckpt_info
 
@@ -109,37 +124,74 @@ def train(
 def main(args):
     """Main execution function to load configs and start training."""
     
-    # Connect to the database
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    # Setup database connection using Orator
+    db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'database', 'main.db'))
+    config = {
+        'sqlite': {
+            'driver': 'sqlite',
+            'database': db_path,
+        }
+    }
+    db = DatabaseManager(config)
+    Model.set_connection_resolver(db)
     
-    # Fetch configurations from the database
-    task_config = vars(TaskModel.find_one({'id': args['task_id']}))
-    policy_config = vars(PolicyModel.find_one({'id': task_config['policy_id']}))
-    robot_config = vars(RobotModel.find_one({'id': args['policy_id']}))
-    sensor_configs_ls = [vars(SensorModel.find_one({'id': sid}))['args'] for sid in task_config['sensor_ids']]
-    gripper_config = vars(GripperModel.find_one({'id': args['gripper_id']})) if args['gripper_id'] is not None else None
-    checkpoint_config = vars(CheckpointModel.find_one({'id': args['checkpoint_id']})) if args['checkpoint_id'] is not None else None
+    # Create a temporary directory to store dataset files
+    temp_dir = "/root/src/backend/datasets/tmp"
+    if os.path.exists(temp_dir):
+        shutil.rmtree(temp_dir)
+    os.makedirs(temp_dir)
     
-    # if args['checkpoint_id'] is not None:
-    #     checkpoint_config = vars(CheckpointModel.find_one({'id': args['checkpoint_id']}))['args']
-    # else:
-    #     checkpoint_config = None
-    
-        
-    # Get parameters from configs
-    dataset_dir = task_config['dataset_dir']
-    sensor_names = [sensor['name'] for sensor in sensor_configs_ls]
-    batch_size = policy_config['batch_size']
-    
-    ckpt_dir = "root/src/backend/policies/act/checkpoints/pick_can1"
-    
-    # Load data
-    num_episodes = 3
-    train_dataloader, val_dataloader, stats, _ = load_data(f"{dataset_dir}/tmp", num_episodes, sensor_names, batch_size, batch_size)
+    try:
+        # Copy dataset files to the temporary directory
+        dataset_ids = json.loads(args.dataset_ids)
+        episode_counter = 0
+        for ds_id in dataset_ids:
+            dataset_path = f"/root/src/backend/datasets/{ds_id}"
+            
+            episode_files = [f for f in os.listdir(dataset_path) if f.startswith('episode_') and os.path.isfile(os.path.join(dataset_path, f))]
 
-    # Start the training process
-    best_ckpt_info = train(train_dataloader, val_dataloader, ckpt_dir, task_config, policy_config, robot_config, sensor_configs_ls)
+            for ep_file in episode_files:
+                src_ep_path = os.path.join(dataset_path, ep_file)
+                dest_ep_path = os.path.join(temp_dir, f'episode_{episode_counter}.hdf5')
+                shutil.copy(src_ep_path, dest_ep_path)
+                episode_counter += 1
+                print("Copied episode file:", ep_file, "to", dest_ep_path)
+
+        # Fetch configurations from the database
+        task = Task.find(args.task_id)
+        policy = Policy.find(args.policy_id)
+        robot = Robot.find(task.robot_ids[0]) # Assuming first robot
+        sensors = [Sensor.find(sid) for sid in task.sensor_ids]
+        # gripper = Gripper.find(robot.gripper_id) if robot.gripper_id else None
+        load_model = Checkpoint.find(args.load_model_id) if args.load_model_id else None
+        
+        # Get parameters from configs
+        sensor_ids = [sensor.id for sensor in sensors]
+        
+        num_epochs = int(args.num_epochs)
+        batch_size = int(args.batch_size)
+        
+        # Load data from the temporary directory
+        print(episode_counter)
+        train_dataloader, val_dataloader, stats, _ = load_data(temp_dir, episode_counter, sensor_ids, batch_size, batch_size)
+        
+        ckpt_dir = f"/root/src/backend/checkpoints/{args.checkpoint_id}"
+        # Start the training process
+        best_ckpt_info = train(
+            train_dataloader,
+            val_dataloader,
+            ckpt_dir,
+            num_epochs,
+            stats,
+            task,
+            policy,
+            robot,
+            sensors,
+            load_model)
+        
+    finally:
+        # Clean up the temporary directory
+        shutil.rmtree(temp_dir)
     
     
 # Script entry point
@@ -148,8 +200,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--task_id', required=True)
     parser.add_argument('--policy_id', required=True)
-    parser.add_argument('--checkpoint_id', default=None, required=False)
-    parser.add_argument('--gripper_id', default=None, required=False)
+    parser.add_argument('--load_model_id', default=None, required=False)
+    parser.add_argument('--checkpoint_id', required=True)
+    parser.add_argument('--dataset_ids', required=True)
+    parser.add_argument('--num_epochs', required=True)
+    parser.add_argument('--batch_size', required=True)
     
-    main(vars(parser.parse_args()))
+    main(parser.parse_args())
     sys.exit(0)

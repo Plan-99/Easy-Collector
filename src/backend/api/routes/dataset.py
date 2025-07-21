@@ -1,6 +1,8 @@
-from flask import Blueprint, request
+from flask import Blueprint, request, current_app
 from ...database.models.dataset_model import Dataset as DatasetModel
 import os
+from ..process.read_hdf5 import read_hdf5
+from ..process.record_episode import record_episode
 
 dataset_bp = Blueprint('dataset_bp', __name__)
 
@@ -8,19 +10,25 @@ DATASET_DIR = '/root/src/backend/datasets'
 
 @dataset_bp.route('/datasets', methods=['GET'])
 def get_datasets():
-    datasets = DatasetModel.all()
+    params = request.args
+    print(params)
+    task_id = params.get('task_id')
+    datasets = DatasetModel.where('task_id', task_id).get() if task_id else DatasetModel.all()
     datasets = [dataset.to_dict() for dataset in datasets]
     return {
         'status': 'success', 'datasets': datasets}, 200
 
 
-@dataset_bp.route('/datasets/<folder_name>', methods=['GET'])
+@dataset_bp.route('/datasets/<id>', methods=['GET'])
 def get_dataset_files(id):
     folder_path = os.path.join(DATASET_DIR, id)
     if not os.path.exists(folder_path) or not os.path.isdir(folder_path):
         return {'status': 'error', 'message': 'Folder not found'}, 404
 
-    files = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f))]
+    files = [{ 'name': f } for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f))]
+    files = sorted(
+        files, key=lambda x: os.path.getmtime(os.path.join(folder_path, x['name'])), reverse=False
+    )
     return {'status': 'success', 'files': files}, 200
 
 
@@ -61,6 +69,15 @@ def delete_dataset(id):
 
     dataset.delete()
     return {'status': 'success', 'message': 'Dataset Deleted'}, 200
+
+@dataset_bp.route('/dataset/<id>/<file_name>', methods=['DELETE'])
+def delete_dataset_file(id, file_name):
+    dataset_path = os.path.join(DATASET_DIR, id, file_name)
+    if not os.path.exists(dataset_path) or not os.path.isfile(dataset_path):
+        return {'status': 'error', 'message': 'File not found'}, 404
+
+    os.remove(dataset_path)
+    return {'status': 'success', 'message': 'File Deleted'}, 200
     
     
 # def get_dataset(folder_name):
@@ -70,3 +87,45 @@ def delete_dataset(id):
 
 #     files = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f))]
 #     return jsonify({'status': 'success', 'files': files})
+
+@dataset_bp.route('/dataset/<id>/<file_name>/:start_read_hdf5', methods=['POST'])
+def start_read_hdf5(id, file_name):
+    current_app.pm.start_function(
+        func=read_hdf5,
+        name=f"read_hdf5_{id}_{file_name}",
+        hdf5_path=os.path.join(DATASET_DIR, id, file_name),
+        socketio_instance=current_app.pm.socketio
+    ),
+    return {'status': 'success', 'message': 'HDF5 reading process started'}, 200
+
+@dataset_bp.route('/dataset/<id>/<file_name>/:stop_read_hdf5', methods=['POST'])
+def stop_read_hdf5(id, file_name):
+    current_app.pm.stop_function(
+        name=f"read_hdf5_{id}_{file_name}",
+    ),
+    return {'status': 'success', 'message': 'HDF5 reading process stopped'}, 200
+    
+
+
+@dataset_bp.route('/dataset/<id>/:start_collection', methods=['POST'])
+def start_collection(id):
+    data = request.json
+    current_app.pm.start_function(
+        func=record_episode,
+        dataset_id=id,
+        robots=data.get('robots'),
+        sensors=data.get('sensors'),
+        task=data.get('task'),
+        tele_type=data.get('tele_type', 'leader'),
+        socketio_instance=current_app.pm.socketio,
+        name=f"record_episode_dataset{id}",
+    )
+
+    return {'status': 'success', 'message': 'Data collection started'}, 200
+
+@dataset_bp.route('/dataset/<id>/:stop_collection', methods=['POST'])
+def stop_collection(id):
+    current_app.pm.stop_function(
+        name=f"record_episode_dataset{id}",
+    )
+    return {'status': 'success', 'message': 'Data collection stopped'}, 200

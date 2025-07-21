@@ -1,0 +1,77 @@
+from flask import Blueprint, request
+from ...database.models.checkpoint_model import Checkpoint as CheckpointModel
+import os
+import shutil
+
+checkpoint_bp = Blueprint('checkpoint_bp', __name__)
+
+CHECKPOINT_DIR = '/root/src/backend/checkpoints'
+
+@checkpoint_bp.route('/checkpoints', methods=['GET'])
+def get_checkpoints():
+    checkpoints = CheckpointModel.with_('policy', 'task').get()
+    checkpoints = [checkpoint.to_dict() for checkpoint in checkpoints]
+    return {
+        'status': 'success', 'checkpoints': checkpoints}, 200
+
+
+@checkpoint_bp.route('/checkpoints/<folder_name>', methods=['GET'])
+def get_checkpoint_files(id):
+    folder_path = os.path.join(CHECKPOINT_DIR, id)
+    if not os.path.exists(folder_path) or not os.path.isdir(folder_path):
+        return {'status': 'error', 'message': 'Folder not found'}, 404
+
+    files = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f))]
+    return {'status': 'success', 'files': files}, 200
+
+
+@checkpoint_bp.route('/checkpoint', methods=['POST'])
+def create_checkpoint():
+    data = request.json
+    new_checkpoint = CheckpointModel.create(
+        name=data.get('name'),
+        task_id=data.get('task_id'),
+        policy_id=data.get('policy_id'),
+    )
+    return {'status': 'success', 'message': 'Checkpoint Created', 'id': new_checkpoint.id}, 200
+
+
+@checkpoint_bp.route('/checkpoint/<id>/:check_create_successed', methods=['GET'])
+def check_create_successed(id):
+    checkpoint = CheckpointModel.find(id)
+    if not checkpoint:
+        return {'status': 'error', 'message': 'Checkpoint not found'}, 404
+
+    folder_path = os.path.join(CHECKPOINT_DIR, str(checkpoint.id))
+    if os.path.exists(folder_path) and os.path.isdir(folder_path):
+        return {'check_create_successed': True, 'message': 'Checkpoint created successfully'}, 200
+    else:
+        return {'check_create_successed': False, 'message': 'Checkpoint creation failed'}, 200
+
+
+@checkpoint_bp.route('/checkpoint/<id>', methods=['PUT'])
+def update_checkpoint(id):
+    data = request.json
+    checkpoint = CheckpointModel.find(id)
+    if not checkpoint:
+        return {'status': 'error', 'message': 'Checkpoint not found'}, 404
+
+    checkpoint.name = data.get('name', checkpoint.name)
+    checkpoint.settings = data.get('settings', checkpoint.settings)
+    checkpoint.save()
+    
+    return {'status': 'success', 'message': 'Checkpoint Updated'}, 200
+
+
+@checkpoint_bp.route('/checkpoint/<id>', methods=['DELETE'])
+def delete_checkpoint(id):
+    checkpoint = CheckpointModel.find(id)
+    if not checkpoint:
+        return {'status': 'error', 'message': 'Checkpoint not found'}, 404
+
+    folder_path = os.path.join(CHECKPOINT_DIR, str(checkpoint.id))
+    if os.path.exists(folder_path) and os.path.isdir(folder_path):
+        shutil.rmtree(folder_path)
+
+    checkpoint.delete()
+    return {'status': 'success', 'message': 'Checkpoint Deleted'}, 200

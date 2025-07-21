@@ -7,29 +7,38 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, onUnmounted, watch } from 'vue';
 import { defineProps } from 'vue';
 import { useSocket } from '../composables/useSocket';
 
 const { socket } = useSocket();
-
-onMounted(() => {
-    socket.on(`log_${props.process}`, (data) => {
-        logs.value.push({ type: data.type, message: data.log });
-    });
-});
-onUnmounted(() => {
-    socket.off(`log_${props.process}`);
-});
-
-
 const logs = ref([]);
-
 
 const props = defineProps({
     process: {
         type: String,
         default: ''
     }
-})
+});
+
+const logHandler = (data) => {
+    logs.value.push({ type: data.type, message: data.log });
+};
+
+watch(() => props.process, (newProcess, oldProcess) => {
+    logs.value = []; // 새로운 프로세스를 위해 로그를 비웁니다.
+    if (oldProcess) {
+        socket.off(`log_${oldProcess}`, logHandler);
+    }
+    if (newProcess) {
+        socket.on(`log_${newProcess}`, logHandler);
+    }
+}, { immediate: true });
+
+onUnmounted(() => {
+    if (props.process) {
+        socket.off(`log_${props.process}`, logHandler);
+    }
+});
+
 </script>

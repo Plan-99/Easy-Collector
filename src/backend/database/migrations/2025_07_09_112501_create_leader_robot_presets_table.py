@@ -5,7 +5,7 @@ class CreateLeaderRobotPresetsTable(Migration):
     def up(self):
         with self.schema.create('leader_robot_presets') as table:
             table.increments('id')
-            table.string('name').unique()
+            table.string('name')
             table.integer('robot_id').unsigned().unique()
             table.integer('gripper_id').unsigned().nullable()
             table.json('origin').default(json.dumps([0.0] * 7))

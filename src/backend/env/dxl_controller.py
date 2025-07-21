@@ -119,8 +119,8 @@ class DxlController:
 
                 position = self.read_dynamixel(dxl_id)
 
-                # print(f"[ID:{dxl_id}] GoalPos:{goal_position[i]}  PresPos:{position}")
-                if abs(goal_position[i] - position) < 20:
+                print(f"[ID:{dxl_id}] GoalPos:{goal_position[i]}  PresPos:{position}")
+                if abs(goal_position[i] - position) < 40 or abs(goal_position[i] - position + 4096) < 40 or abs(goal_position[i] - position - 4096) < 40:
                     print(f"[ID:{dxl_id}] Reached goal position.")
                     reached[i] = True
 

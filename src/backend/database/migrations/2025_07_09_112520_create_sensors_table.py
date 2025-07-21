@@ -6,7 +6,7 @@ class CreateSensorsTable(Migration):
     def up(self):
         with self.schema.create('sensors') as table:
             table.increments('id')
-            table.string('name').unique()
+            table.string('name')
             table.string('type')
             table.json('settings').default(json.dumps({}))
             table.timestamps()

@@ -2,9 +2,9 @@
     <q-page class="q-pa-md full-height">
         <div class="row q-col-gutter-md">
             <div class="col-6 col-sm-4 col-md-3 col-lg-2" v-for="task in tasks" :key="task.id">
-                <q-card class="cursor-pointer full-height">
+                <q-card class="cursor-pointer full-height"  @click="$router.push(`/tasks/${task.id}/data_collection`)">
                     <div class="cursor-pointer relative-position" style="height: 180px; display: flex; align-items: center; justify-content: center;">
-                        <div style="font-size: 80px;" @click="$router.push(`/tasks/${task.id}/data_collection`)">
+                        <div style="font-size: 80px;">
                             {{ task.image || '🤖' }}
                         </div>
                         <div class="absolute-bottom text-h6 q-pa-sm" style="background-color: rgba(0,0,0,0.5); color: white; width: 100%;">
@@ -30,20 +30,13 @@
                             </q-list>
                         </q-menu>
                     </div>
-
-                    <q-card-section>
-                    <div class="text-grey-6 text-caption">Robot</div>
-                    <div class="row">
-                        <div>{{ task.robot.name }}</div>
-                    </div>
-                    </q-card-section>
                 </q-card>
             </div>
             <div class="col-6 col-sm-4 col-md-3 col-lg-2">
                 <q-btn color="grey-8" class="full-height full-width" outline size="lg" icon="add" @click="openNewTaskDialog"></q-btn>
             </div>
         </div>
-        <q-dialog v-model="showTaskForm">
+        <q-dialog v-model="showTaskForm" persistent>
             <q-card style="min-width: 500px">
                 <q-card-section class="q-pt-none">
                     <q-card-section>
@@ -57,7 +50,7 @@
                         </q-btn>
                     </div>
                     <q-input dense v-model="taskForm.name" label="Task Name" autofocus class="q-mb-md" />
-                    <q-select dense v-model="taskForm.robot_id" :options="robots" label="Robot" class="q-mb-md" map-options emit-value option-label="name" option-value="id" />
+                    <q-select dense v-model="taskForm.robot_ids" :options="robots" label="Robot" class="q-mb-md" multiple map-options emit-value option-label="name" option-value="id" />
                     <q-select dense v-model="taskForm.sensor_ids" :options="sensors" label="Sensors" class="q-mb-md" multiple map-options emit-value option-label="name" option-value="id" />
                     <!-- <div v-if="taskForm.robot_id">
                         <div class="q-mb-md">
@@ -104,10 +97,10 @@ function onSelectEmoji(emoji) {
 
 const defaultTaskForm = {
     name: '',
-    robot_id: null,
+    robot_ids: [],
     sensor_ids: [],
-    home_pose: [],
-    end_pose: [],
+    home_pose: {},
+    end_pose: {},
     episode_len: 100,
     image: '🤖',
 };
@@ -138,16 +131,19 @@ function listSensors() {
 }
 
 function saveTask() {
-    if (!taskForm.value.name || !taskForm.value.robot_id || !taskForm.value.sensor_ids.length) {
+    taskForm.value.robot_ids.forEach((robotId) => {
+        const robot = robots.value.find(r => r.id === robotId);
+        const jointNames = robot ? robot.joint_names : [];
+        taskForm.value.home_pose[robot.id] = Array(jointNames.length).fill(0);
+        taskForm.value.end_pose[robot.id] = Array(jointNames.length).fill(0);
+    });
+    if (!taskForm.value.name || !taskForm.value.robot_ids.length || !taskForm.value.sensor_ids.length) {
         Notify.create({
             color: 'negative',
             message: 'Please fill the form'
         });
         return;
     }
-
-    taskForm.value.home_pose = taskForm.value.home_pose.length ? taskForm.value.home_pose : Array(robots.value.find(e => e.id === taskForm.value.robot_id).joint_names.length).fill(0);
-    taskForm.value.end_pose = taskForm.value.end_pose.lenght ? taskForm.value.end_pose : Array(robots.value.find(e => e.id === taskForm.value.robot_id).joint_names.length).fill(0);
 
     if (taskForm.value.id) {
         return api.put(`/task/${taskForm.value.id}`, taskForm.value).then(() => {

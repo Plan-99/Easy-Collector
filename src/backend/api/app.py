@@ -14,6 +14,8 @@ from .routes.robot import robot_bp, RobotNamespace
 from .routes.leader_robot import leader_robot_bp
 from .routes.task import task_bp
 from .routes.dataset import dataset_bp
+from .routes.policy import policy_bp
+from .routes.checkpoint import checkpoint_bp
 
 import rospy
 
@@ -44,10 +46,13 @@ app.register_blueprint(robot_bp, url_prefix='/api')
 app.register_blueprint(leader_robot_bp, url_prefix='/api')
 app.register_blueprint(task_bp, url_prefix='/api')
 app.register_blueprint(dataset_bp, url_prefix='/api')
+app.register_blueprint(policy_bp, url_prefix='/api')
+app.register_blueprint(checkpoint_bp, url_prefix='/api')
 app.pm = pm
 
 socketio.on_namespace(SensorNamespace('/sensor', pm))
 socketio.on_namespace(RobotNamespace('/robot', pm))
+
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DB_DIR = os.path.join(BASE_DIR, 'backend/database')
@@ -108,6 +113,17 @@ def list_devices():
         'status': 'success',
         'devices': devices
     }
+
+@app.route('/api/topics', methods=['GET'])
+def list_topics():
+    topics = rospy.get_published_topics()
+    topic_list = [{'name': topic[0], 'type': topic[1]} for topic in topics]
+    
+    return {
+        'status': 'success',
+        'topics': topic_list
+    }, 200
+
 
 
 # --- SocketIO 이벤트 핸들러 ---

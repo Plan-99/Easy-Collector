@@ -42,7 +42,7 @@ def get_robots():
 def start_robot():
     data = request.json
     process_id = data.get('process_id')
-    name = data.get('name')
+    id = data.get('id')
     type = data.get('type')
 
     command = ''
@@ -54,7 +54,7 @@ def start_robot():
             log_emit_id = 'log_' +  process_id
         )
         time.sleep(1)
-        command = ['roslaunch', 'piper', 'start_single_piper.launch', f'group_ns:={name}']
+        command = ['roslaunch', 'piper', 'start_single_piper.launch', f'group_ns:=ec_robot_{id}']
 
 
     print(f"Attempting to start robot")
@@ -78,6 +78,7 @@ def start_robot():
 def stop_robot():
     process_id = request.json.get('process_id')
     current_app.pm.stop_process(process_id)
+    current_app.pm.stop_process('leader_teleoperation')
     return {'status': 'success', 'message': 'Robot process stopped'}, 200
 
 
@@ -150,7 +151,7 @@ def move_robot(id):
     if not goal_pos:
         return {'status': 'error', 'message': 'Action is required'}, 400
     
-    agent = Agent(robot)
+    agent = Agent(robot.to_dict())
 
     agent.move_to(goal_pos, step_size)
     return {'status': 'success', 'message': 'Robot moved'}, 200

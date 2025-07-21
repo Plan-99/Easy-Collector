@@ -6,9 +6,9 @@ class CreateTasksTable(Migration):
     def up(self):
         with self.schema.create('tasks') as table:
             table.increments('id')
-            table.string('name').unique()
-            table.integer('robot_id').unsigned()
-            table.json('sensor_ids').default(json.dumps([1, 2]))
+            table.string('name')
+            table.json('robot_ids').default(json.dumps([]))
+            table.json('sensor_ids').default(json.dumps([]))
             table.json('home_pose').default(json.dumps(['0.0'] * 7))
             table.json('end_pose').default(json.dumps(['0.0'] * 7))
             table.string('image').nullable()

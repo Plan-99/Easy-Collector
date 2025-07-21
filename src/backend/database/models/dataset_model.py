@@ -1,9 +1,10 @@
-from orator import Model
+from orator import Model, SoftDeletes
 from orator.orm import belongs_to
 from .task_model import Task
 from orator.orm import accessor
+import os
 
-class Dataset(Model):
+class Dataset(Model, SoftDeletes):
 
     __fillable__ = [
         'name',
@@ -11,7 +12,7 @@ class Dataset(Model):
     ]
     
     __appends__ = [
-        'robot_id',
+        'robot_ids',
         'sensor_ids',
         'sensor_img_size',
         'episode_len',
@@ -23,13 +24,14 @@ class Dataset(Model):
     
     __timestamps__ = True
 
+
     @belongs_to
     def task(self):
         return Task
     
     @accessor
-    def robot_id(self):
-        return self.task.robot_id if self.task else None
+    def robot_ids(self):
+        return self.task.robot_ids if self.task else None
     
     @accessor
     def sensor_ids(self):
@@ -42,3 +44,4 @@ class Dataset(Model):
     @accessor
     def episode_len(self):
         return self.task.episode_len if self.task else None
+    

@@ -1,13 +1,13 @@
-from orator import Model
+from orator import Model, SoftDeletes
 from orator.orm import belongs_to
 from .robot_model import Robot
 from .sensor_model import Sensor
 
-class Task(Model):
+class Task(Model, SoftDeletes):
 
     __fillable__ = [
         'name',
-        'robot_id',
+        'robot_ids',
         'sensor_ids',
         'home_pose',
         'end_pose',
@@ -18,13 +18,10 @@ class Task(Model):
 
     __casts__ = {
         'sensor_ids': 'json',
+        'robot_ids': 'json',
         'home_pose': 'json',
         'end_pose': 'json',
         'sensor_img_size': 'json',
     }
     
     __timestamps__ = True
-
-    @belongs_to
-    def robot(self):
-        return Robot

@@ -1,4 +1,4 @@
-from orator import Model, accessor
+from orator import Model, accessor, SoftDeletes
 from orator.orm import has_one
 import json
 from .leader_robot_preset_model import LeaderRobotPreset
@@ -20,7 +20,7 @@ class RobotObserver:
                 robot.settings = {}
 
 
-class Robot(Model):
+class Robot(Model, SoftDeletes):
     __fillable__ = [
         'name',
         'type',
@@ -45,8 +45,6 @@ class Robot(Model):
         'move_action',
         'yml_path',
     ]
-
-    __timestamps__ = False
 
     @has_one
     def leader_robot_preset(self):
@@ -73,7 +71,7 @@ class Robot(Model):
     def read_topic(self):
         type = self.get_raw_attribute('type')
         if type == 'piper':
-            return f'/{self.name}/joint_states_single'
+            return f'/ec_robot_{self.id}/joint_states_single'
 
         return self.settings['read_topic']
     
@@ -89,7 +87,7 @@ class Robot(Model):
     def write_topic(self):
         type = self.get_raw_attribute('type')
         if type == 'piper':
-            return f'/{self.name}/joint_states'
+            return f'/ec_robot_{self.id}/joint_states'
 
         return self.settings['write_topic']
     
@@ -121,7 +119,7 @@ class Robot(Model):
     def joint_upper_bounds(self):
         type = self.get_raw_attribute('type')
         if type == 'piper':
-            return [2.618, 2.618, 0, 1.745, 1.22, 2.094, 0.034]
+            return [2.618, 2.618, 0, 1.745, 1.22, 2.094, 0.0726]
 
         return self.settings['joint_upper_bounds']
     
@@ -137,7 +135,7 @@ class Robot(Model):
     def gripper_range(self):
         type = self.get_raw_attribute('type')
         if type == 'piper':
-            return [0, 0.034]
+            return [0, 0.0726]
 
         return []
     

@@ -6,6 +6,7 @@ import atexit
 class ProcessManager:
     def __init__(self, socketio, debug=False):
         self.processes = {}
+        self.tasks = {}
         self.socketio = socketio
         self.debug = debug
         atexit.register(self.stop_all_processes)
@@ -81,6 +82,41 @@ class ProcessManager:
             except Exception:
                 process.kill()
             print(f"'{name}' Process terminated.")
+
+    def start_function(self, name, func, *args, **kwargs):
+        if name in self.tasks and self.tasks[name]['stop'] is False:
+            print(f"[ERROR] '{name}' Function is already running.", self.tasks)
+            return
+
+        # 1. 작업을 제어할 '중지 플래그'를 생성합니다.
+        task_control = {'stop': False}
+        self.tasks[name] = task_control
+        
+        # 2. **kwargs에 제어 플래그를 추가하여 target 함수로 전달합니다.
+        kwargs['task_control'] = task_control
+        try:
+            # 3. start_background_task의 반환값은 저장할 필요가 없습니다.
+            self.socketio.start_background_task(target=func, *args, **kwargs)
+            print(f"'{name}' Function started.")
+        except Exception as e:
+            print(f"[ERROR]: {e}")
+            # 실패 시 딕셔너리에서 제거
+            if name in self.tasks:
+                del self.tasks[name]
+        
+        
+    def stop_function(self, name):
+        if name not in self.tasks:
+            print(f"'{name}' Function is not running.")
+            return
+
+        # 4. 실제 스레드를 종료하는 대신, '중지 플래그'를 True로 바꿉니다.
+        task_control = self.tasks.get(name)
+        if task_control:
+            print(f"'{name}' Function stopping.")
+            task_control['stop'] = True
+
+        
         
     def stop_all_processes(self):
         print("--- stop_all_processes called ---")

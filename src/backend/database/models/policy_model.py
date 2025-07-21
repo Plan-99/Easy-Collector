@@ -1,4 +1,4 @@
-from orator import Model
+from orator import Model, SoftDeletes
 from orator.orm import belongs_to
 
 
@@ -32,7 +32,7 @@ class PolicyObserver:
                 policy.settings = {}
                 
 
-class Policy(Model):
+class Policy(Model, SoftDeletes):
 
     __fillable__ = [
         'name',
@@ -40,7 +40,6 @@ class Policy(Model):
         'batch_size',
         'num_epochs',
         'settings',
-        'is_deleted'
     ]
 
     __casts__ = {

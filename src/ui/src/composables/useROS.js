@@ -1,4 +1,4 @@
-import { ref, shallowRef, onUnmounted } from 'vue';
+import { ref, shallowRef } from 'vue';
 import ROSLIB from 'roslib';
 
 const socketUrl = 'ws://192.168.50.46:9090'
@@ -107,11 +107,6 @@ export function useROS() {
     // 준비된 퍼블리시 함수를 호출하여 메시지 발행
     publishFunc(jointStateMessage);
   }
-
-  // 컴포넌트가 언마운트될 때 자동으로 ROS 연결 해제
-  onUnmounted(() => {
-    disconnectROS();
-  });
 
   // 외부에서 사용할 상태와 함수들을 반환
   return {

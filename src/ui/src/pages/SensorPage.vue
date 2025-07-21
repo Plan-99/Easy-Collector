@@ -7,7 +7,7 @@
                         <div class="absolute-bottom text-h6 row q-gutter-x-sm">
                             <div>{{ sensor.name }}</div>
                             <q-space></q-space>
-                            <q-icon v-if="sensor.status === 'on' && watchingSensor === sensor" color="positive" name="visibility" size="sm" class="cursor-pointer"></q-icon>
+                            <q-icon v-if="sensor.status === 'on' && watchingSensor && watchingSensor.id === sensor.id" color="positive" name="visibility" size="sm" class="cursor-pointer"></q-icon>
                             <q-icon v-if="sensor.status === 'on'" color="positive" name="power_settings_new" size="sm" class="cursor-pointer" @click.stop="toggleSensor(sensor)"></q-icon>
                             <q-icon v-if="sensor.status === 'off'" name="power_settings_new" size="sm" class="cursor-pointer" @click.stop="toggleSensor(sensor)"></q-icon>
                             <q-icon v-if="sensor.status === 'loading'" color="orange-6" name="power_settings_new" size="sm" class="cursor-pointer"></q-icon>
@@ -49,35 +49,33 @@
                 <q-btn color="grey-8" class="full-height full-width" outline size="lg" icon="add" @click="showSensorForm = true"></q-btn>
             </div>
         </div>
-        <div class="absolute-bottom bg-grey-4"  v-if="watchingSensor">
-            <q-separator />
-            <div class="q-pa-md row q-gutter-x-md">
-                <video ref="sensorVideo"
-                    class="col-4"
-                    autoplay playsinline muted 
-                    style="background-color: black; height: 360px;"
-                >
-                </video>
-                <div class="col">
-                    <div style="height: 30px" class="row">
-                        <div 
-                            class="bg-dark col text-white text-center" 
+        <bottom-terminal
+            :tabs="sensors.filter((e) => e.status !== 'off')"
+            tab-label="name"
+            tab-value="id"
+            v-model="watchingSensor"
+            v-if="sensors.filter((e) => e.status !== 'off').length > 0 && watchingSensor"
+            @update:model-value="watchSensor($event)"
+        >
+            <template v-for="sensor in sensors.filter((e) => e.status !== 'off')" :key="sensor.id" v-slot:[sensor.id]>
+                <div class="q-pa-md row q-gutter-x-md" v-if="watchingSensor && watchingSensor.id === sensor.id">
+                    <web-rtc-video
+                        :process-id="`sensor_${sensor.id}`"
+                        :topic="sensor.topic"
+                        ref="sensorVideo"
+                        style="height: 330px;"
+                    ></web-rtc-video>
+                    <div class="col">
+                        <process-console 
+                            :process="sensor.process_id" 
                             v-for="sensor in sensors.filter((e) => e.status !== 'off')"
                             :key="sensor.id"
-                            :style="sensor.id !== watchingSensor.id ? 'border: 1px solid #ffffff' : ''"
-                            :class="sensor.id !== watchingSensor.id ? 'cursor-pointer': ''"
-                            @click="watchSensor(sensor)"
-                        >{{ sensor.name }}</div>
+                            v-show="sensor.id === watchingSensor.id"
+                        />
                     </div>
-                    <process-console 
-                        :process="sensor.process_id" 
-                        v-for="sensor in sensors.filter((e) => e.status !== 'off')"
-                        :key="sensor.id"
-                        v-show="sensor.id === watchingSensor.id"
-                    />
                 </div>
-            </div>
-        </div>
+            </template>
+        </bottom-terminal>
         <q-dialog v-model="showSensorForm">
             <q-card style="min-width: 350px">
                 <q-card-section class="q-pt-none">
@@ -119,15 +117,16 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue';
+import { onMounted, ref } from 'vue';
 
 import { useSocket } from '../composables/useSocket';
-import { useWebRTC } from '../composables/useWebRTC';
 import { api } from 'src/boot/axios';
 import ProcessConsole from 'src/components/ProcessConsole.vue';
 import { Notify } from 'quasar';
+import BottomTerminal from 'src/components/BottomTerminal.vue';
+import WebRtcVideo from 'src/components/WebRtcVideo.vue';
+
 const { socket } = useSocket();
-const { connect } = useWebRTC(socket);
 
 const sensors = ref([]);
 
@@ -190,7 +189,7 @@ function deleteSensor(sensor) {
     }
     return api.delete(`/sensor/${sensor.id}`).then(() => {
         listSensors().then(() => {
-            listProcesses();
+            listProcesses()
         })
     })
 }
@@ -241,15 +240,11 @@ function stopSensor(sensor) {
 
 const sensorVideo = ref({});
 function watchSensor(sensor) {
+    console.log(sensorVideo.value)
     if (sensor.status === 'off') {
         return;
     }
     watchingSensor.value = sensor; // Start watching the selected sensor
-    connect(sensor, (event) => {
-        const newStream = new MediaStream();
-        newStream.addTrack(event.track); // 현재 track 추가
-        sensorVideo.value.srcObject = newStream;
-    });
 }
 
 const showSensorForm = ref(false)
@@ -281,8 +276,5 @@ onMounted(() => {
     })
 })
 
-onUnmounted(() => {
-    socket.off('start_process');
-});
 
 </script>

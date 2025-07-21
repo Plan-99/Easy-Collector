@@ -1,4 +1,4 @@
-from orator import Model, accessor
+from orator import Model, accessor, SoftDeletes
 import json
 
 SENSOR_CONFIGS = {
@@ -22,7 +22,7 @@ class SensorObserver:
                 sensor.settings = {}
                 
 
-class Sensor(Model):
+class Sensor(Model, SoftDeletes):
     __fillable__ = [
         'name',
         'type',
@@ -35,8 +35,6 @@ class Sensor(Model):
 
     __appends__ = ['serial_no', 'topic']
 
-    __timestamps__ = False
-    
     
     @accessor
     def serial_no(self):
@@ -50,7 +48,7 @@ class Sensor(Model):
     @accessor
     def topic(self):
         if self.type == 'realsense_camera':
-            return f'/{self.name}/color/image_raw/compressed'
+            return f'/ec_sensor_{self.id}/color/image_raw/compressed'
         
         return None
     

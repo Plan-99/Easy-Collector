@@ -1,4 +1,4 @@
-from orator import Model
+from orator import Model, SoftDeletes
 
 GRIPPER_CONFIGS = {
     'robotiq': {
@@ -16,7 +16,7 @@ class GripperObserver:
                 gripper.settings = {}
                 
 
-class Gripper(Model):
+class Gripper(Model, SoftDeletes):
     __fillable__ = [
         'name',
         'type',

@@ -7,7 +7,7 @@
                         <div class="absolute-bottom text-h6 row q-gutter-x-sm">
                             <div>{{ robot.name }}</div>
                             <q-space></q-space>
-                            <q-icon v-if="robot.status === 'on' && watchingRobot.id === robot.id" color="positive" name="visibility" size="sm" class="cursor-pointer"></q-icon>
+                            <q-icon v-if="robot.status === 'on' && watchingRobot && watchingRobot.id === robot.id" color="positive" name="visibility" size="sm" class="cursor-pointer"></q-icon>
                             <q-icon v-if="robot.status === 'on'" color="positive" name="power_settings_new" size="sm" class="cursor-pointer" @click.stop="toggleRobot(robot)"></q-icon>
                             <q-icon v-if="robot.status === 'off'" name="power_settings_new" size="sm" class="cursor-pointer" @click.stop="toggleRobot(robot)"></q-icon>
                             <q-icon v-if="robot.status === 'loading'" color="orange-6" name="power_settings_new" size="sm" class="cursor-pointer"></q-icon>
@@ -49,61 +49,73 @@
                 <q-btn color="grey-8" class="full-height full-width" outline size="lg" icon="add" @click="showRobotForm = true"></q-btn>
             </div>
         </div>
-        <div class="absolute-bottom"  v-if="watchingRobot">
-            <div class="row">
-                <q-btn @click="goOriginPos" icon="home" color="green">
-                    <q-tooltip>Click to go origin position</q-tooltip>
-                </q-btn>
-                <div v-if="watchingRobot.leader_robot_preset">
-                    <q-btn @click="() => { startLeaderTele(watchingRobot.id, 'log_' + watchingRobot.process_id) }" icon="play_arrow" color="blue" v-if="!leaderTeleStarted">
-                        <q-tooltip>Start teleoperation with leader robot</q-tooltip>
-                    </q-btn>
-                    <q-btn @click="() => { stopLeaderTele(watchingRobot.id, 'log_' + watchingRobot.process_id) }" icon="pause" color="blue" v-else>
-                        <q-tooltip>Start teleoperation with leader robot</q-tooltip>
-                    </q-btn>
-                </div>
-            </div>
-            <q-separator />
-            <div class="q-pa-md row q-gutter-x-md  bg-grey-4">
-                <div class="col-3 column">
-                    <div class="col" 
-                        v-for="(joint, i) in watchingRobot.joint_names" :key="joint"
-                    >
-                        <div class="text-caption">{{ joint }}</div>
-                        <q-slider
-                            v-model="watchingRobot.joint_pos[i]"
-                            :min="watchingRobot.joint_lower_bounds[i]"
-                            :max="watchingRobot.joint_upper_bounds[i]"
-                            :step="0.0001"
-                            label
-                            switch-label-side
-                            thumb-size="1px"
-                            color="red"
-                            :disable="!canControl"
-                            @update:model-value="(e) => moveRobot(i, e)"
-                        />
+
+        <bottom-terminal
+            :tabs="robots.filter((e) => e.status !== 'off')"
+            tab-label="name"
+            tab-value="id"
+            v-model="watchingRobot"
+            v-if="robots.filter((e) => e.status !== 'off').length > 0 && watchingRobot"
+            @update:model-value="watchRobot($event)"
+        >
+            <template v-for="robot in robots.filter((e) => e.status !== 'off')" :key="robot.id" v-slot:[robot.id]>
+                <div class="row q-pa-md row q-gutter-x-md ">
+                    <div class="col-3 column">
+                        <div class="col" 
+                            v-for="(joint, i) in watchingRobot.joint_names" :key="joint"
+                        >
+                            <div class="text-caption">{{ joint }}</div>
+                            <q-slider
+                                v-model="watchingRobot.joint_pos[i]"
+                                :min="watchingRobot.joint_lower_bounds[i]"
+                                :max="watchingRobot.joint_upper_bounds[i]"
+                                :step="0.0001"
+                                label
+                                switch-label-side
+                                thumb-size="1px"
+                                color="red"
+                                :disable="!canControl"
+                                @update:model-value="(e) => moveRobot(i, e)"
+                            />
+                        </div>
                     </div>
-                </div>
-                <div class="col">
-                    <div style="height: 30px" class="row">
-                        <div 
-                            class="bg-dark col text-white text-center" 
+                    <div class="col-8">
+                        <div style="height: 30px" class="row">
+                            <div 
+                                class="bg-dark col text-white text-center" 
+                                v-for="robot in robots.filter((e) => e.status !== 'off')"
+                                :key="robot.id"
+                                :style="robot.id !== watchingRobot.id ? 'border: 1px solid #ffffff' : ''"
+                                :class="robot.id !== watchingRobot.id ? 'cursor-pointer': ''"
+                                @click="watchRobot(robot)"
+                            >{{ robot.name }}</div>
+                        </div>
+                        <process-console 
+                            :process="robot.process_id" 
                             v-for="robot in robots.filter((e) => e.status !== 'off')"
                             :key="robot.id"
-                            :style="robot.id !== watchingRobot.id ? 'border: 1px solid #ffffff' : ''"
-                            :class="robot.id !== watchingRobot.id ? 'cursor-pointer': ''"
-                            @click="watchRobot(robot)"
-                        >{{ robot.name }}</div>
+                            v-show="robot.id === watchingRobot.id"
+                        />
                     </div>
-                    <process-console 
-                        :process="robot.process_id" 
-                        v-for="robot in robots.filter((e) => e.status !== 'off')"
-                        :key="robot.id"
-                        v-show="robot.id === watchingRobot.id"
-                    />
+                    <div class="col">
+                        <div class="q-gutter-sm">
+                            <q-btn @click="goOriginPos" icon="home" color="green">
+                                <q-tooltip class="text-body2">Click to go origin position</q-tooltip>
+                            </q-btn>
+                            <div v-if="watchingRobot.leader_robot_preset">
+                                <q-btn @click="() => { startLeaderTele(watchingRobot.id, 'log_' + watchingRobot.process_id) }" icon="play_arrow" color="blue" v-if="!leaderTeleStarted">
+                                    <q-tooltip class="text-body2">Start teleoperation with leader robot</q-tooltip>
+                                </q-btn>
+                                <q-btn @click="() => { stopLeaderTele(watchingRobot.id, 'log_' + watchingRobot.process_id) }" icon="pause" color="blue" v-else>
+                                    <q-tooltip class="text-body2">Start teleoperation with leader robot</q-tooltip>
+                                </q-btn>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-            </div>
-        </div>
+                
+            </template>
+        </bottom-terminal>
         <q-dialog v-model="showRobotForm">
             <q-card style="min-width: 350px">
                 <q-card-section class="q-pt-none">
@@ -202,6 +214,8 @@ import { api } from 'src/boot/axios';
 import ProcessConsole from 'src/components/ProcessConsole.vue';
 import TeleSettingDialog from 'src/components/TeleSettingDialog.vue';
 import { Notify } from 'quasar';
+import BottomTerminal from 'src/components/BottomTerminal.vue';
+import { useRobot } from '../composables/useRobot';
 
 const { socket } = useSocket();
 const { createSubscriber, createPublisher, connectROS, sendJointState } = useROS();
@@ -223,7 +237,10 @@ function listRobots() {
         robots.value = response.data.robots || [];
         robots.value.forEach(robot => {
             robot.image = '/images/' + robot.type + '.png'; // Default image if not provided
-            robot.status = 'off'; // Initialize robot state
+            robot.loading = false;
+            robot.handler = useRobot(robot, () => {
+                watchRobot(robot);
+            });
             robot.joint_pos = []
             robot.joint_names.forEach((joint, i) => {
                 robot.joint_pos[i] = 0
@@ -277,9 +294,9 @@ function saveRobot() {
         'read_topic_msg': robotForm.value.read_topic_msg || '',
         'write_topic': robotForm.value.write_topic || '',
         'write_topic_msg': robotForm.value.write_topic_msg || '',
-        'joint_names': robotForm.value.joint_names ? robotForm.value.joint_names.split(',') : [],
-        'joint_lower_bounds': robotForm.value.joint_lower_bounds ? robotForm.value.joint_lower_bounds.split(',').map(Number) : [],
-        'joint_upper_bounds': robotForm.value.joint_upper_bounds ? robotForm.value.joint_upper_bounds.split(',').map(Number) : []
+        'joint_names': typeof(robotForm.value.joint_names) === String ? robotForm.value.joint_names.split(',') : robotForm.value.joint_names,
+        'joint_lower_bounds': typeof(robotForm.value.joint_lower_bounds) === String ? robotForm.value.joint_lower_bounds.split(',').map(Number) : robotForm.value.joint_lower_bounds,
+        'joint_upper_bounds': typeof(robotForm.value.joint_upper_bounds) === String ? robotForm.value.joint_upper_bounds.split(',').map(Number) : robotForm.value.joint_upper_bounds,
     };
     if (robotForm.value.id) {
         return api.put(`/robot/${robotForm.value.id}`, data).then(() => {
@@ -292,7 +309,6 @@ function saveRobot() {
             robotForm.value = {};
             initialize()
         })
-
     }
 }
 
@@ -309,62 +325,20 @@ function deleteRobot(robot) {
     })
 }
 
-function listProcesses() {
-    return api.get('/processes').then((response) => {
-        const processes = response.data.processes || [];
-        robots.value.forEach(robot => {
-            const process = processes.find(p => p === robot.process_id);
-            if (process) {
-                robot.status = 'on'; // Sensor is running
-                robot.process = process;
-                console.log(watchingRobot.value)
-                if (!watchingRobot.value) {
-                    watchRobot(robot)
-                }
-            } else {
-                robot.status = 'off'; // Sensor is not running
-            }
-        });
-    }).catch((error) => {
-        console.error('Error fetching processes:', error);
-    });
-}
-
 function toggleRobot(robot) {
     if (robot.status === 'on') {
-        stopRobot(robot).then(() => {
+        robot.handler.stopRobot().then(() => {
             watchingRobot.value = null; // Stop watching if robot is stopped
         });
     } else {
-        startRobot(robot).then(() => {
-        });
+        robot.handler.startRobot()
     }
-}
-
-function startRobot(robot) {
-    robot.status = 'loading';
-    watchingRobot.value = robot
-    return api.post('/robot:start', robot).catch((error) => {
-        console.error('Error starting robot:', error);
-        robot.status = 'off'; // Reset status on error
-    });
-}
-
-function stopRobot(robot) {
-    robot.status = 'loading';
-    return api.post('/robot:stop', robot).catch((error) => {
-        console.error('Error stopping robot:', error);
-        robot.status = 'on'; // Reset status on error
-    });
 }
 
 let jointSub = null
 let publishJointPos = () => {}
 
 function watchRobot(robot) {
-    if (robot.status === 'off') {
-        return;
-    }
     if (jointSub) {
         jointSub.unsubscribe()
     }
@@ -442,9 +416,7 @@ watch(watchingRobot, (newVal, oldVal) => {
 
 
 function initialize() {
-    listRobots().then(() => {
-        listProcesses();
-    })
+    listRobots()
 }
 
 onMounted(() => {
@@ -454,8 +426,9 @@ onMounted(() => {
     socket.on('start_process', (data) => {
         const robot = robots.value.find(s => s.process_id === data.id);
         if (robot) {
-            robot.status = 'on';
+            // robot.status = 'on';
             watchRobot(robot)
+            robot.loading = false
         }
         if (data.id === 'leader_teleoperation') {
             leaderTeleStarted.value = true;
@@ -465,12 +438,13 @@ onMounted(() => {
     socket.on('stop_process', (data) => {
         const robot = robots.value.find(s => s.process_id === data.id);
         if (robot) {
-            robot.status = 'off';
+            // robot.status = 'off';
             if (watchingRobot.value && watchingRobot.value.id === robot.id && robots.value.find((e) => e.status === 'on')) {
                 watchRobot(robots.value.find((e) => e.status === 'on'))
             } else {
                 watchingRobot.value = null
             }
+            robot.loading = false
         }
         if (data.id === 'leader_teleoperation') {
             leaderTeleStarted.value = false;
@@ -482,9 +456,6 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-    socket.off('start_process');
-    socket.off('stop_process');
-
     if (jointSub) {
         jointSub.unsubscribe();
     }
