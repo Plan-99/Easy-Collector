@@ -35,8 +35,6 @@ def start_training():
     num_epochs = data.get('num_epochs', 100)
     batch_size = data.get('batch_size', 32)
     
-    print(data)
-
     if not task_id or not policy_id:
         return {'status': 'error', 'message': 'task_id and policy_id are required'}, 400
 

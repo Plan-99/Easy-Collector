@@ -5,7 +5,7 @@
         v-for="tab in tabs"
         :key="tab[tabValue]"
         @click="model = tab"
-        class="q-pa-sm col-1 text-center cursor-pointer"
+        class="q-pa-sm col-1 text-center cursor-pointer ellipsis"
         :class="{ 'text-white': model === tab, 'text-grey-8': model !== tab, 'bg-grey-6': model === tab, 'bg-grey-4': model !== tab }"
       >
         {{ tab[tabLabel] }}

@@ -11,7 +11,12 @@ class Checkpoint(Model, SoftDeletes):
         'file_name',
         'task_id',
         'policy_id',
+        'dataset_info',
     ]
+    
+    __casts__ = {
+        'dataset_info': 'json',
+    }
     
     __timestamps__ = True
 

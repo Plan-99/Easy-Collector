@@ -331,7 +331,9 @@ function toggleRobot(robot) {
             watchingRobot.value = null; // Stop watching if robot is stopped
         });
     } else {
-        robot.handler.startRobot()
+        robot.handler.startRobot().then(() => {
+            watchRobot(robot); // Start watching the robot after it is started
+        })
     }
 }
 
@@ -424,28 +426,12 @@ onMounted(() => {
     connectROS()
     
     socket.on('start_process', (data) => {
-        const robot = robots.value.find(s => s.process_id === data.id);
-        if (robot) {
-            // robot.status = 'on';
-            watchRobot(robot)
-            robot.loading = false
-        }
         if (data.id === 'leader_teleoperation') {
             leaderTeleStarted.value = true;
         }
     });
 
     socket.on('stop_process', (data) => {
-        const robot = robots.value.find(s => s.process_id === data.id);
-        if (robot) {
-            // robot.status = 'off';
-            if (watchingRobot.value && watchingRobot.value.id === robot.id && robots.value.find((e) => e.status === 'on')) {
-                watchRobot(robots.value.find((e) => e.status === 'on'))
-            } else {
-                watchingRobot.value = null
-            }
-            robot.loading = false
-        }
         if (data.id === 'leader_teleoperation') {
             leaderTeleStarted.value = false;
         }

@@ -27,11 +27,11 @@ piper_sdk
 pyusb
 orator
 
-# diffusion policy
-dill
-hydra-core
+# # diffusion policy
+# dill
+# hydra-core
 
-# openpi
-jax
-jax-lib
-s3fs
+# # openpi
+# jax
+# jax-lib
+# s3fs

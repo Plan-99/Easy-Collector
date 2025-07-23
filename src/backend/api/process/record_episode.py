@@ -103,7 +103,7 @@ def record_episode(dataset_id, robots, sensors, task, socketio_instance, task_co
                 data_dict[f'/qaction/robot_{agent.id}'].append(ts.observation['robot_states'][agent.id]['qaction'])
             
             for sensor in sensors:
-                image = ts.observation['images'][sensor['id']]
+                image = ts.observation['images']['sensor_' + str(sensor['id'])]
 
                 if image is not None:
                     image = fetch_image_with_config(image, {

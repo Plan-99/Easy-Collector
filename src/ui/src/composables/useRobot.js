@@ -23,7 +23,7 @@ export function useRobot(robot, robotOnCallback=() => {}) {
       checkRobotTopic()
     }).catch((error) => {
       console.error('Error starting robot:', error);
-      robot.loading = false;
+      robot.status = 'off';
     });
   }
 
@@ -33,7 +33,7 @@ export function useRobot(robot, robotOnCallback=() => {}) {
       robot.status = 'off';
     }).catch((error) => {
       console.error('Error stopping robot:', error);
-      robot.loading = false;
+      robot.status = 'on';
     });
   }
 

@@ -375,9 +375,9 @@
                                 <q-radio dark v-model="teleoperationMethod" val="keyboard" label="Keyboard" disable/>
                             </div>
                             <div v-if="dataCollecting" class="q-mb-md">
-                                <q-linear-progress size="25px" :value="collectingProgress" color="accent">
+                                <q-linear-progress size="25px" instant-feedback :value="collectingProgress" color="accent">
                                     <div class="absolute-full flex flex-center">
-                                        <q-badge color="white" text-color="accent" :label="`${Number(collectingProgress * 100)}%`" />
+                                        <q-badge color="white" text-color="accent" :label="`${Number(collectingProgress * 100).toFixed(0)}%`" />
                                     </div>
                                 </q-linear-progress>
                             </div>
@@ -674,6 +674,7 @@ function stopDataCollection() {
             color: 'positive',
             message: 'Data collection stopped'
         });
+        collectingProgress.value = 0;
     }).catch((error) => {
         console.error('Error stopping data collection:', error);
         Notify.create({

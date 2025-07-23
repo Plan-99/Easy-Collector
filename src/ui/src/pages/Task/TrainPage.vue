@@ -611,6 +611,7 @@ async function startTraining() {
             name: newCheckpointName.value,
             task_id: taskVal.value.id,
             policy_id: policyVal.id,
+            dataset_info: selectedDatasets.value.map(d => ({ id: d.id, episode_num: d.episode_num })),
         };
 
         console.log('New Checkpoint Value:', newCheckpointValue);

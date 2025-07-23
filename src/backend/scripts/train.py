@@ -40,7 +40,7 @@ def train(
     """Function to train the policy model."""
     seed = 1
     
-    policy_class = policy_obj.type
+    policy_class = policy_obj['type']
     load_model_path = f"/root/src/backend/checkpoints/{load_model.id}" if load_model else None
 
     set_seed(seed) # Set seed for reproducibility
@@ -158,21 +158,20 @@ def main(args):
                 print("Copied episode file:", ep_file, "to", dest_ep_path)
 
         # Fetch configurations from the database
-        task = Task.find(args.task_id)
-        policy = Policy.find(args.policy_id)
-        robot = Robot.find(task.robot_ids[0]) # Assuming first robot
-        sensors = [Sensor.find(sid) for sid in task.sensor_ids]
+        task = Task.find(args.task_id).to_dict()
+        policy = Policy.find(args.policy_id).to_dict()
+        robot = Robot.find(task['robot_ids'][0]).to_dict() # Assuming first robot
+        sensors = [Sensor.find(sid).to_dict() for sid in task['sensor_ids']]
         # gripper = Gripper.find(robot.gripper_id) if robot.gripper_id else None
-        load_model = Checkpoint.find(args.load_model_id) if args.load_model_id else None
+        load_model = Checkpoint.find(args.load_model_id).to_dict() if args.load_model_id else None
         
         # Get parameters from configs
-        sensor_ids = [sensor.id for sensor in sensors]
+        sensor_ids = [sensor['id'] for sensor in sensors]
         
         num_epochs = int(args.num_epochs)
         batch_size = int(args.batch_size)
         
         # Load data from the temporary directory
-        print(episode_counter)
         train_dataloader, val_dataloader, stats, _ = load_data(temp_dir, episode_counter, sensor_ids, batch_size, batch_size)
         
         ckpt_dir = f"/root/src/backend/checkpoints/{args.checkpoint_id}"

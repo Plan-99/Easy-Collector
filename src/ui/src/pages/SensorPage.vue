@@ -119,14 +119,13 @@
 <script setup>
 import { onMounted, ref } from 'vue';
 
-import { useSocket } from '../composables/useSocket';
 import { api } from 'src/boot/axios';
 import ProcessConsole from 'src/components/ProcessConsole.vue';
 import { Notify } from 'quasar';
 import BottomTerminal from 'src/components/BottomTerminal.vue';
 import WebRtcVideo from 'src/components/WebRtcVideo.vue';
+import { useSensor } from '../composables/useSensor'; 
 
-const { socket } = useSocket();
 
 const sensors = ref([]);
 
@@ -142,7 +141,9 @@ function listSensors() {
         sensors.value = response.data.sensors || [];
         sensors.value.forEach(sensor => {
             sensor.image = '/images/' + sensor.type + '.png'; // Default image if not provided
-            sensor.status = 'off'; // Initialize sensor state
+            sensor.handler = useSensor(sensor, () => {
+                watchSensor(sensor);
+            });
         });
     }).catch((error) => {
         console.error('Error fetching sensors:', error);
@@ -172,9 +173,7 @@ function saveSensor() {
             'type': sensorForm.value.type
         }).then(() => {
             sensorForm.value = {};
-            listSensors().then(() => {
-                listProcesses();
-            })
+            listSensors()
         })
     }
 }
@@ -188,59 +187,25 @@ function deleteSensor(sensor) {
         return;
     }
     return api.delete(`/sensor/${sensor.id}`).then(() => {
-        listSensors().then(() => {
-            listProcesses()
-        })
+        listSensors()
     })
-}
-
-function listProcesses() {
-    return api.get('/processes').then((response) => {
-        const processes = response.data.processes || [];
-        sensors.value.forEach(sensor => {
-            const process = processes.find(p => p === sensor.process_id);
-            if (process) {
-                sensor.status = 'on'; // Sensor is running
-                sensor.process = process;
-                if (!watchingSensor.value) {
-                    watchSensor(sensor)
-                }
-            } else {
-                sensor.status = 'off'; // Sensor is not running
-            }
-        });
-    }).catch((error) => {
-        console.error('Error fetching processes:', error);
-    });
 }
 
 function toggleSensor(sensor) {
     if (sensor.status === 'on') {
-        stopSensor(sensor)
+        sensor.handler.stopSensor().then(() => {
+            watchingSensor.value = null; // Stop watching if sensor is stopped
+        })
     } else {
-        startSensor(sensor)
+        sensor.handler.startSensor().then(() => {
+            watchSensor(sensor); // Start watching the sensor after it is started
+        })
     }
 }
 
-function startSensor(sensor) {
-    sensor.status = 'loading';
-    return api.post('/sensor:start', sensor).catch((error) => {
-        console.error('Error starting sensor:', error);
-        sensor.status = 'off'; // Reset status on error
-    });
-}
-
-function stopSensor(sensor) {
-    sensor.status = 'loading';
-    return api.post('/sensor:stop', sensor).catch((error) => {
-        console.error('Error stopping sensor:', error);
-        sensor.status = 'on'; // Reset status on error
-    });
-}
 
 const sensorVideo = ref({});
 function watchSensor(sensor) {
-    console.log(sensorVideo.value)
     if (sensor.status === 'off') {
         return;
     }
@@ -250,30 +215,7 @@ function watchSensor(sensor) {
 const showSensorForm = ref(false)
 
 onMounted(() => {
-
-    socket.on('start_process', (data) => {
-        const sensor = sensors.value.find(s => s.process_id === data.id);
-        if (sensor) {
-            sensor.status = 'on';
-            watchSensor(sensor)
-        }
-    });
-
-    socket.on('stop_process', (data) => {
-        const sensor = sensors.value.find(s => s.process_id === data.id);
-        if (sensor) {
-            sensor.status = 'off';
-            if (watchingSensor.value && watchingSensor.value.id === sensor.id && sensors.value.find((e) => e.status === 'on')) {
-                watchSensor(sensors.value.find((e) => e.status === 'on'))
-            } else {
-                watchingSensor.value = null
-            }
-        }
-    });
-
-    listSensors().then(() => {
-        listProcesses();
-    })
+    listSensors()
 })
 
 

@@ -373,20 +373,20 @@ def rescale_val(val, origin_rng, rescaled_rng):
 
 
 def make_policy(ckpt_path, seed, policy_obj, task, robot, sensors, gripper):
-    args_override = policy_obj.settings
-    if policy_obj.type == 'ACT':
+    args_override = policy_obj['settings']
+    if policy_obj['type'] == 'ACT':
         args_override['ckpt_dir'] = ckpt_path
-        args_override['policy_class'] = policy_obj.type
-        args_override['task_name'] = task.name
+        args_override['policy_class'] = policy_obj['type']
+        args_override['task_name'] = task['name']
         args_override['seed'] = seed
-        args_override['state_dim'] = robot.joint_dim
+        args_override['state_dim'] = robot['joint_dim']
         if gripper is not None:
             args_override['state_dim'] += 1 # gripper state dim
-        args_override['num_queries'] = int(policy_obj.settings['chunk_size'])
-        args_override['hidden_dim'] = int(policy_obj.settings['hidden_dim'])
-        args_override['dim_feedforward'] = int(policy_obj.settings['dim_feedforward'])
+        args_override['num_queries'] = int(policy_obj['settings']['chunk_size'])
+        args_override['hidden_dim'] = int(policy_obj['settings']['hidden_dim'])
+        args_override['dim_feedforward'] = int(policy_obj['settings']['dim_feedforward'])
         
-        sensor_names = [sensor.name for sensor in sensors]
+        sensor_names = [sensor['name'] for sensor in sensors]
         args_override['camera_names'] = sensor_names
         
         policy = ACTPolicy(args_override)

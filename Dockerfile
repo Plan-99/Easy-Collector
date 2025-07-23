@@ -94,47 +94,47 @@ RUN apt-get update && apt-get install nodejs -y
 # RUN mkdir src
 # RUN /bin/bash -c "source /opt/ros/noetic/setup.bash; catkin_init_workspace"
 
-# pyenv 빌드에 필요한 의존성 패키지 설치
-RUN apt-get update && apt-get install -y \
-    libosmesa6-dev \
-    libgl1-mesa-glx \ 
-    libglfw3 \
-    patchelf \
-    librealsense2-dev \
-    libspnav-dev \
-    spacenavd \
-    make \
-    build-essential \
-    libssl-dev \
-    zlib1g-dev \
-    libbz2-dev \
-    libreadline-dev \
-    libsqlite3-dev \
-    wget \
-    curl \
-    llvm \
-    libncurses5-dev \
-    libncursesw5-dev \
-    xz-utils \
-    tk-dev \
-    libffi-dev \
-    liblzma-dev \
-    python3-openssl \
-    git
-RUN useradd -ms /bin/bash appuser
-USER appuser
-WORKDIR /home/appuser
+# # pyenv 빌드에 필요한 의존성 패키지 설치
+# RUN apt-get update && apt-get install -y \
+#     libosmesa6-dev \
+#     libgl1-mesa-glx \ 
+#     libglfw3 \
+#     patchelf \
+#     librealsense2-dev \
+#     libspnav-dev \
+#     spacenavd \
+#     make \
+#     build-essential \
+#     libssl-dev \
+#     zlib1g-dev \
+#     libbz2-dev \
+#     libreadline-dev \
+#     libsqlite3-dev \
+#     wget \
+#     curl \
+#     llvm \
+#     libncurses5-dev \
+#     libncursesw5-dev \
+#     xz-utils \
+#     tk-dev \
+#     libffi-dev \
+#     liblzma-dev \
+#     python3-openssl \
+#     git
+# RUN useradd -ms /bin/bash appuser
+# USER appuser
+# WORKDIR /home/appuser
 
-# pyenv 설치 스크립트 실행
-RUN curl https://pyenv.run | bash
-# ENV 명령어로 pyenv 경로와 PATH를 영구적으로 설정
-ENV PYENV_ROOT="/home/appuser/.pyenv"
-ENV PATH="$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH"
+# # pyenv 설치 스크립트 실행
+# RUN curl https://pyenv.run | bash
+# # ENV 명령어로 pyenv 경로와 PATH를 영구적으로 설정
+# ENV PYENV_ROOT="/home/appuser/.pyenv"
+# ENV PATH="$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH"
 
-# 5. pyenv를 사용하여 원하는 Python 버전 설치
-# -s 옵션은 에러 로그를 생략하여 깔끔하게 보여줌
-RUN pyenv install 3.9.18 && \
-    pyenv global 3.9.18
+# # 5. pyenv를 사용하여 원하는 Python 버전 설치
+# # -s 옵션은 에러 로그를 생략하여 깔끔하게 보여줌
+# RUN pyenv install 3.9.18 && \
+#     pyenv global 3.9.18
 
 
 COPY requirements.txt .

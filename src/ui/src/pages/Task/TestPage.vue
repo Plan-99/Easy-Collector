@@ -1,269 +1,373 @@
 <template>
-    <q-page class="q-pa-md">
-        <q-stepper v-model="step" ref="stepper" color="primary" animated header-nav="false">
-            <q-step
-                :name="1"
-                title="Setup Test Environment"
-                icon="settings"
-                :done="step > 1"
-            >
-                <div class="text-h6 q-mb-md">Configuration</div>
-
-                <!-- Checkpoint Selection -->
-                <q-select
-                    outlined
-                    v-model="selectedCheckpoint"
-                    :options="checkpointOptions"
-                    label="Select Checkpoint"
-                    class="q-mb-md"
-                    emit-value
-                    map-options
-                />
-
-                <!-- Sensor Management -->
-                <q-card class="q-mb-md">
-                    <q-card-section>
-                        <div class="text-h6">Sensors</div>
-                    </q-card-section>
-                    <q-separator />
-                    <q-list bordered>
-                        <q-item v-for="sensor in sensors" :key="sensor.id">
-                            <q-item-section avatar>
-                                <q-icon name="sensors" />
-                            </q-item-section>
-                            <q-item-section>
-                                <q-item-label>{{ sensor.name }}</q-item-label>
-                                <q-item-label caption>{{ sensor.type }}</q-item-label>
-                            </q-item-section>
-                            <q-item-section side>
-                                <q-badge :color="sensor.is_running ? 'green' : 'red'" :label="sensor.is_running ? 'Online' : 'Offline'" />
-                            </q-item-section>
-                            <q-item-section side>
-                                <q-btn
-                                    size="sm"
-                                    :color="sensor.is_running ? 'negative' : 'positive'"
-                                    :label="sensor.is_running ? 'Stop' : 'Start'"
-                                    @click="toggleSensor(sensor)"
-                                />
-                            </q-item-section>
-                        </q-item>
-                    </q-list>
-                    <div v-if="cameraSensors.length" class="row q-col-gutter-md q-pa-md">
-                        <div v-for="camera in cameraSensors" :key="camera.id" class="col-12 col-md-6">
-                            <q-video v-if="camera.is_running" :src="camera.streaming_url" />
-                        </div>
-                    </div>
-                </q-card>
-
-                <!-- Robot Management -->
-                <q-card>
-                    <q-card-section>
-                        <div class="text-h6">Robots</div>
-                    </q-card-section>
-                    <q-separator />
-                    <q-list bordered>
-                        <q-item v-for="robot in robots" :key="robot.id">
-                            <q-item-section avatar>
-                                <q-icon name="precision_manufacturing" />
-                            </q-item-section>
-                            <q-item-section>
-                                <q-item-label>{{ robot.name }}</q-item-label>
-                            </q-item-section>
-                            <q-item-section side>
-                                <q-badge :color="robot.is_running ? 'green' : 'red'" :label="robot.is_running ? 'Online' : 'Offline'" />
-                            </q-item-section>
-                             <q-item-section side>
-                                <q-btn
-                                    size="sm"
-                                    :color="robot.is_running ? 'negative' : 'positive'"
-                                    :label="robot.is_running ? 'Stop' : 'Start'"
-                                    @click="toggleRobot(robot)"
-                                />
-                            </q-item-section>
-                        </q-item>
-                    </q-list>
-                </q-card>
-
-            </q-step>
-
-            <q-step
-                :name="2"
-                title="Run Test"
-                icon="play_circle_filled"
-            >
-                <div class="text-h6">Live Sensor Feeds</div>
-                 <div class="row q-col-gutter-md">
-                    <div v-for="camera in cameraSensors" :key="camera.id" class="col-12 col-md-6">
-                        <q-card>
-                            <q-card-section class="q-pa-none">
-                                 <q-video v-if="camera.is_running" :src="camera.streaming_url" />
-                                 <div v-else class="text-center q-pa-xl text-grey">
-                                     <q-icon name="videocam_off" size="lg" />
-                                     <div>{{ camera.name }} is offline</div>
-                                 </div>
-                            </q-card-section>
-                        </q-card>
+    <div class="q-pa-md full-height">
+        <div class="row q-col-gutter-md">
+            <div class="col-6 col-sm-4 col-md-3 col-lg-2" v-for="checkpoint in checkpoints" :key="checkpoint.id" style="min-height: 150px;">
+                <div class="cursor-pointer text-center"  @click="() => { watchCheckpoint(checkpoint) }" :style="{ border: watchingCheckpoint && watchingCheckpoint.id === checkpoint.id ? '1px solid #1976d2' : '' }">
+                    <q-icon name="folder" size="100px" color="amber">
+                        <q-menu context-menu>
+                            <q-list bordered separator>
+                                <q-item clickable v-ripple v-close-popup @click="showCheckpointForm = true; checkpointForm = { ...checkpoint }">
+                                    <q-item-section>Edit Checkpoint</q-item-section>
+                                    <q-item-section side>
+                                        <q-icon name="edit" size="xs" />
+                                    </q-item-section>
+                                </q-item>
+                                <q-item clickable v-ripple v-close-popup class="text-negative" @click="deleteCheckpoint(checkpoint)">
+                                    <q-item-section>Delete Checkpoint</q-item-section>
+                                    <q-item-section side>
+                                        <q-icon color="negative" name="delete" size="xs" />
+                                    </q-item-section>
+                                </q-item>
+                            </q-list>
+                        </q-menu>
+                    </q-icon>
+                    <div class="text-h6 text-center">
+                        <div>{{ checkpoint.name }}</div>
                     </div>
                 </div>
-            </q-step>
+            </div>
+        </div>
 
-            <template v-slot:navigation>
-                <q-stepper-navigation class="text-center">
-                    <q-btn v-if="step > 1" flat color="primary" @click="stepper.previous()" label="Back" class="q-mr-sm" />
-                    <q-btn @click="navigateStep" color="primary" :label="step === 1 ? 'Start Test' : 'Finish'" />
-                </q-stepper-navigation>
+        <bottom-terminal
+            :tabs="checkpoints.filter(e => e.onTerminal)"
+            v-model="watchingCheckpoint"
+            tab-label="name"
+            tab-value="id"
+            v-if="checkpoints.filter(e => e.onTerminal).length > 0 && watchingCheckpoint"
+            @update:model-value="watchCheckpoint($event)"
+            @close-tab="closeCheckpointTab"
+        >
+            <template v-for="checkpoint in checkpoints.filter(e => e.onTerminal)" :key="checkpoint.id" v-slot:[checkpoint.id]>
+                <div class="q-pa-md">
+                    <q-btn color="primary" @click="showTestDialog = true" class="full-width q-mb-sm">Start Test</q-btn>
+                    <div class="row">
+                        <div v-if="activePolicy" class="col-6">
+                            <div class="rounded-borders" style="border: 1px solid rgba(0,0,0,0.12);">
+                                <div class="row q-pa-sm bg-grey-2 text-weight-bold">
+                                    <div class="col-6">Setting</div>
+                                    <div class="col-6">Value</div>
+                                </div>
+                                <div v-for="(value, key) in { model: activePolicy.type, ...activePolicy.settings, created_at: activePolicy.created_at }" :key="key">
+                                    <q-separator />
+                                    <div class="row q-pa-sm">
+                                        <div class="col-6" style="word-wrap: break-word;">{{ key }}</div>
+                                        <div class="col-6" style="word-wrap: break-word;">{{ value }}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div v-else class="text-center text-grey-6 q-pa-md">
+                            Loading policy settings...
+                        </div>
+                    </div>
+                </div>
             </template>
-        </q-stepper>
-    </q-page>
+        </bottom-terminal>
+
+        <q-dialog v-model="showCheckpointForm">
+            <q-card style="min-width: 350px;">
+                <q-card-section>
+                    <div class="text-h6">Edit Checkpoint</div>
+                </q-card-section>
+
+                <q-card-section class="q-pt-none">
+                    <q-input dense v-model="checkpointForm.name" label="Checkpoint Name" autofocus @keyup.enter="editCheckpoint" />
+                </q-card-section>
+
+                <q-card-actions align="right" class="text-primary">
+                    <q-btn flat label="Cancel" v-close-popup />
+                    <q-btn flat label="Save" @click="editCheckpoint" v-close-popup />
+                </q-card-actions>
+            </q-card>
+        </q-dialog>
+
+        <q-dialog
+            maximized
+            v-model="showTestDialog"
+            @before-hide="onHideTestDialog"
+        >
+            <div class="bg-dark column text-white">
+                <div class="absolute-top-right" @click="showTestDialog = false">
+                    <q-icon name="close" class="cursor-pointer q-pa-lg" size="lg" style="z-index: 1000;" v-close-popup></q-icon>
+                </div>
+                <div class="row col">
+                    <div
+                        v-for="sensor in sensors.filter(e => task.sensor_ids.includes(e.id))"
+                        :key="sensor.id"
+                        class="full-width full-height col"
+                    >
+                        <web-rtc-video
+                            :process-id="`sensor_${sensor.id}`"
+                            style="width: 400px;"
+                            :topic="sensor.topic"
+                            class="full-width full-height"
+                            v-if="sensor.handler.status() === 'on'"
+                            :resize="[task.sensor_img_size[0], task.sensor_img_size[1]]"
+                        ></web-rtc-video>
+                        <div
+                            class="full-width full-height text-center q-pa-md bg-grey-8 flex flex-center"
+                            style="border-right: 1px solid #ffffff;"
+                            v-else
+                        >
+                            <q-btn round flat icon="play_arrow" size="xl" @click="sensor.handler.startSensor(sensor)"></q-btn>
+                        </div>
+                    </div>
+                </div>
+                <div class="row col bg-grey-9">
+                    <div class="col-2 q-pa-md">
+                        <div v-for="robot in robots.filter(e => task.robot_ids.includes(e.id))" :key="robot.id" class="q-mb-md">
+                            <q-btn color="grey-7 full-width" icon="power_settings_new" v-if="robot.handler.status() === 'off'" @click="robot.handler.startRobot()">
+                                {{ robot.name }}
+                                <q-tooltip class="bg-primary text-body2">Start robot first to set home pose and end pose</q-tooltip>
+                            </q-btn>
+                            <q-btn color="orange full-width" icon="power_settings_new" v-if="robot.handler.status() === 'loading'">
+                                {{ robot.name }}
+                            </q-btn>
+                            <q-btn color="green full-width" icon="power_settings_new" v-if="robot.handler.status() === 'on'" @click="robot.handler.stopRobot()">
+                                {{ robot.name }}
+                            </q-btn>
+                        </div>
+                    </div>
+                    <div class="col-10 q-pa-md">
+                        <div v-if="
+                            robots.filter(e => task.robot_ids.includes(e.id)).find((e) => e.handler.status() === 'off' || e.handler.status() === 'loading') 
+                            || sensors.filter(e => task.sensor_ids.includes(e.id)).find((e) => e.handler.status() === 'off' || e.handler.status() === 'loading')"
+                            class="flex flex-center full-height"
+                            style="border: 1px solid #ffffff;"
+                        >
+                            Start all robots and sensors to start test
+                        </div>
+                        <div v-else class="text-center">
+                            <div v-if="!testing">
+                                <q-btn class="full-width bg-white" outline color="primary" @click="startTest">Start Test</q-btn>
+                            </div>
+                            <div v-else>
+                                <div class="q-mb-md">
+                                    <q-linear-progress size="25px" instant-feedback :value="testingProgress" color="accent">
+                                        <div class="absolute-full flex flex-center">
+                                            <q-badge color="white" text-color="accent" :label="`${Number(testingProgress * 100).toFixed(0)}%`" />
+                                        </div>
+                                    </q-linear-progress>
+                                </div>
+                                <q-btn 
+                                    class="full-width bg-white" 
+                                    outline 
+                                    color="orange-8" 
+                                    @click="stopTest" 
+                                >Stop</q-btn>
+                            </div>
+                            <process-console
+                                process="checkpoint_test"
+                                class="full-width q-mt-md"
+                                style="border: 1px solid #ffffff;"                                
+                            >
+                            </process-console> 
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </q-dialog>
+    </div>
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue';
-import { useQuasar, Notify } from 'quasar';
+import { onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { api } from 'src/boot/axios';
+import BottomTerminal from 'src/components/BottomTerminal.vue';
+import { useRobot } from 'src/composables/useRobot.js';
+import { useSensor } from 'src/composables/useSensor.js';
+import WebRtcVideo from 'src/components/WebRtcVideo.vue';
+import ProcessConsole from 'src/components/ProcessConsole.vue';
+import { Notify } from 'quasar';
+import { useSocket } from 'src/composables/useSocket.js';
 
-const $q = useQuasar();
 const route = useRoute();
-const stepper = ref(null);
-const step = ref(1);
-const taskId = route.params.id;
+const { socket } = useSocket();
+
+const taskId = Number(route.params.id);
 
 const checkpoints = ref([]);
-const selectedCheckpoint = ref(null);
-const sensors = ref([]);
-const robots = ref([]);
+const policies = ref([]);
+const watchingCheckpoint = ref(null);
+const activePolicy = ref(null);
+
+const showCheckpointForm = ref(false);
+const checkpointForm = ref({
+    id: null,
+    name: '',
+});
+
+const showTestDialog = ref(false);
+const testing = ref(false);
+
 const task = ref(null);
+const robots = ref([]);
+const sensors = ref([]);
 
-const checkpointOptions = computed(() =>
-    checkpoints.value.map(c => ({ label: c.name, value: c.id }))
-);
+const testingProgress = ref(0);
 
-const cameraSensors = computed(() =>
-    sensors.value.filter(s => s.type === 'camera' && s.is_running)
-);
-
-async function fetchTaskDetails() {
-    try {
-        const response = await api.get(`/tasks/${taskId}`);
-        task.value = response.data.task;
-        await fetchSensors(task.value.sensor_ids);
-        await fetchRobots(task.value.robot_ids);
-    } catch (error) {
-        Notify.create({ color: 'negative', message: error + ': Failed to fetch task details.' });
-    }
+function listCheckpoints() {
+    return api.get('/checkpoints').then((response) => {
+        checkpoints.value = response.data.checkpoints.filter(c => c.task_id === taskId);
+    })
 }
 
-async function fetchCheckpoints() {
-    try {
-        const response = await api.get('/checkpoints');
-        checkpoints.value = response.data.checkpoints.filter(c => c.task_id == taskId);
-    } catch (error) {
-        Notify.create({ color: 'negative', message: error + ': Failed to load checkpoints.' });
-    }
-}
-
-async function fetchSensors(sensorIds) {
-    try {
-        const response = await api.get('/sensors');
-        sensors.value = response.data.sensors
-            .filter(s => sensorIds.includes(s.id))
-            .map(s => ({ ...s, is_running: false, streaming_url: `http://localhost:8000/stream/${s.id}` })); // Placeholder URL
-    } catch (error) {
-        Notify.create({ color: 'negative', message: error + ': Failed to load sensors.' });
-    }
-}
-
-async function fetchRobots(robotIds) {
-    try {
-        const response = await api.get('/robots');
-        robots.value = response.data.robots
-            .filter(r => robotIds.includes(r.id))
-            .map(r => ({ ...r, is_running: false }));
-    } catch (error) {
-        Notify.create({ color: 'negative', message: error + ': Failed to load robots.' });
-    }
-}
-
-async function toggleSensor(sensor) {
-    const action = sensor.is_running ? 'stop' : 'start';
-    try {
-        // await api.post(`/sensor/${sensor.id}/${action}`);
-        sensor.is_running = !sensor.is_running;
-        Notify.create({ color: 'positive', message: `Sensor ${sensor.name} ${action}ed.` });
-    } catch (error) {
-        Notify.create({ color: 'negative', message: error + `: Failed to ${action} sensor.` });
-    }
-}
-
-async function toggleRobot(robot) {
-    const action = robot.is_running ? 'stop' : 'start';
-    try {
-        // await api.post(`/robot/${robot.id}/${action}`);
-        robot.is_running = !robot.is_running;
-        Notify.create({ color: 'positive', message: `Robot ${robot.name} ${action}ed.` });
-    } catch (error) {
-        Notify.create({ color: 'negative', message: error + `: Failed to ${action} robot.` });
-    }
-}
-
-async function startTest() {
-    try {
-        await api.post('/task:start_test', {
-            task_id: taskId,
-            checkpoint_id: selectedCheckpoint.value,
+function editCheckpoint() {
+    api.put(`/checkpoint/${checkpointForm.value.id}`, {
+        name: checkpointForm.value.name
+    }).then(() => {
+        Notify.create({
+            color: 'positive',
+            message: 'Checkpoint updated successfully'
         });
-        Notify.create({ color: 'positive', message: 'Test started successfully.' });
-    } catch (error) {
-        Notify.create({ color: 'negative', message: error + 'Failed to start test.' });
-    }
+        listCheckpoints();
+    }).catch((error) => {
+        console.error('Error updating checkpoint:', error);
+        Notify.create({
+            color: 'negative',
+            message: 'Failed to update checkpoint'
+        });
+    });
 }
 
-async function stopTest() {
-    try {
-        await api.post('/task:stop_test', { task_id: taskId });
-        Notify.create({ color: 'info', message: 'Test stopped.' });
-    } catch (error) {
-        Notify.create({ color: 'negative', message: error + ': Failed to stop test.' });
-    }
+function deleteCheckpoint(checkpoint) {
+    api.delete(`/checkpoint/${checkpoint.id}`).then(() => {
+        Notify.create({
+            color: 'positive',
+            message: 'Checkpoint deleted successfully'
+        });
+        listCheckpoints();
+    }).catch((error) => {
+        console.error('Error deleting checkpoint:', error);
+        Notify.create({
+            color: 'negative',
+            message: 'Failed to delete checkpoint'
+        });
+    });
 }
 
-function navigateStep() {
-    if (step.value === 1) {
-        if (!selectedCheckpoint.value) {
-            Notify.create({ color: 'warning', message: 'Please select a checkpoint.' });
-            return;
-        }
-        const all_running = sensors.value.every(s => s.is_running) && robots.value.every(r => r.is_running);
-        if (!all_running) {
-             $q.dialog({
-                title: 'Confirm',
-                message: 'Not all sensors and robots are running. Continue anyway?',
-                cancel: true,
-                persistent: true
-            }).onOk(() => {
-                startTest();
-                stepper.value.next();
-            })
-        } else {
-            startTest();
-            stepper.value.next();
-        }
+function listPolicies() {
+    return api.get('/policies').then((response) => {
+        policies.value = response.data.policies;
+    });
+}
+
+function getTask() {
+    return api.get(`/tasks/${taskId}`).then((response) => {
+        task.value = response.data.task;
+    }).catch((error) => {
+        console.error('Error fetching task:', error);
+    });
+}
+
+function listRobots() {
+    return api.get('/robots').then((response) => {
+        robots.value = response.data.robots || [];
+        robots.value.forEach(robot => {
+            robot.handler = useRobot(robot);
+        });
+    }).catch((error) => {
+        console.error('Error fetching robots:', error);
+    });
+}
+
+function listSensors() {
+    return api.get('/sensors').then((response) => {
+        sensors.value = response.data.sensors || [];
+        sensors.value.forEach(sensor => {
+            sensor.handler = useSensor(sensor);
+        });
+    }).catch((error) => {
+        console.error('Error fetching sensors:', error);
+    });
+}
+
+function watchCheckpoint(checkpoint) {
+    if (!checkpoint) {
+        watchingCheckpoint.value = null;
+        return;
+    }
+    
+    if (watchingCheckpoint.value && watchingCheckpoint.value.id === checkpoint.id) {
+        return;
+    }
+
+    watchingCheckpoint.value = checkpoint;
+    checkpoint.onTerminal = true;
+
+    if (checkpoint.policy_id) {
+        activePolicy.value = policies.value.find(p => p.id === checkpoint.policy_id) || null;
     } else {
+        activePolicy.value = null;
+    }
+}
+
+function closeCheckpointTab(checkpoint) {
+    const c = checkpoints.value.find(c => c.id === checkpoint.id);
+    if (c) {
+        c.onTerminal = false;
+    }
+    if (watchingCheckpoint.value && watchingCheckpoint.value.id === checkpoint.id) {
+        watchingCheckpoint.value = null;
+    }
+}
+
+function startTest() {
+    api.post(`/checkpoint/${watchingCheckpoint.value.id}/:start_test`, {
+        task: task.value,
+        policy: activePolicy.value,
+        robots: robots.value.filter(e => task.value.robot_ids.includes(e.id)),
+        sensors: sensors.value.filter(e => task.value.sensor_ids.includes(e.id)),
+    }).then(() => {
+        testing.value = true;
+        Notify.create({
+            color: 'positive',
+            message: 'Test started'
+        });
+    }).catch((error) => {
+        console.error('Error starting test:', error);
+        Notify.create({
+            color: 'negative',
+            message: 'Error starting test'
+        });
+    });
+}
+
+function stopTest() {
+    api.post(`/checkpoint/${watchingCheckpoint.value.id}/:stop_test`).then(() => {
+        testing.value = false;
+        Notify.create({
+            color: 'positive',
+            message: 'Test stopped'
+        });
+        testingProgress.value = 0;
+    }).catch((error) => {
+        console.error('Error stopping test:', error);
+        Notify.create({
+            color: 'negative',
+            message: 'Error stopping test'
+        });
+    });
+}
+
+function onHideTestDialog() {
+    if (testing.value) {
         stopTest();
-        $q.router.push('/tasks');
     }
 }
 
 onMounted(() => {
-    fetchTaskDetails();
-    fetchCheckpoints();
+    listCheckpoints();
+    listPolicies();
+    getTask();
+    listRobots();
+    listSensors();
+
+    socket.on('checkpoint_test_progress', (data) => {
+        testingProgress.value = data.progress;
+        console.log('Checkpoint test progress:', testingProgress.value);
+    });
+
 });
-
 </script>
-
-<style scoped>
-.q-stepper {
-    background-color: #f5f5f5;
-}
-</style>

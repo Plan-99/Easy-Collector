@@ -39,7 +39,9 @@ def create_dataset():
         name=data.get('name'),
         task_id=data.get('task_id'),
     )
-    os.mkdir(os.path.join(DATASET_DIR, str(new_dataset.id)))
+    dataset_path = os.path.join(DATASET_DIR, str(new_dataset.id))
+    os.makedirs(dataset_path, exist_ok=True)
+
     return {'status': 'success', 'message': 'Dataset Created'}, 200
 
 

@@ -50,7 +50,12 @@ class Env:
     def get_images(self):
         image_dict = dict()
         for sensor in self.sensors:
-            image_dict[sensor['id']] = getattr(self, f"sensor_{sensor['id']}")
+            image = getattr(self, f"sensor_{sensor['id']}")
+            while image is None:
+                rospy.loginfo(f"Waiting for image from sensor_{sensor['id']}")
+                time.sleep(0.1)
+                image = getattr(self, f"sensor_{sensor['id']}")
+            image_dict[f"sensor_{sensor['id']}"] = image
         return image_dict
     
 

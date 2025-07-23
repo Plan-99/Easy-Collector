@@ -1,7 +1,10 @@
-from flask import Blueprint, request
+from flask import Blueprint, request, current_app
 from ...database.models.checkpoint_model import Checkpoint as CheckpointModel
 import os
 import shutil
+
+from ..process.checkpoint_test import checkpoint_test
+
 
 checkpoint_bp = Blueprint('checkpoint_bp', __name__)
 
@@ -28,10 +31,12 @@ def get_checkpoint_files(id):
 @checkpoint_bp.route('/checkpoint', methods=['POST'])
 def create_checkpoint():
     data = request.json
+    print(data)
     new_checkpoint = CheckpointModel.create(
         name=data.get('name'),
         task_id=data.get('task_id'),
         policy_id=data.get('policy_id'),
+        dataset_info=data.get('dataset_info', []),
     )
     return {'status': 'success', 'message': 'Checkpoint Created', 'id': new_checkpoint.id}, 200
 
@@ -47,6 +52,32 @@ def check_create_successed(id):
         return {'check_create_successed': True, 'message': 'Checkpoint created successfully'}, 200
     else:
         return {'check_create_successed': False, 'message': 'Checkpoint creation failed'}, 200
+    
+    
+@checkpoint_bp.route('/checkpoint/<id>/:start_test', methods=['POST'])
+def start_test(id):
+    data = request.json
+    current_app.pm.start_function(
+        func=checkpoint_test,
+        checkpoint_id=id,
+        task=data.get('task'),
+        policy_obj=data.get('policy'),
+        robots=data.get('robots'),
+        sensors=data.get('sensors'),
+        socketio_instance=current_app.pm.socketio,
+        name=f"checkpoint_test_{id}",
+    )
+    
+    return {'status': 'success', 'message': 'Checkpoint test started'}, 200
+
+@checkpoint_bp.route('/checkpoint/<id>/:stop_test', methods=['POST'])
+def stop_test(id):
+    current_app.pm.stop_function(
+        name=f"checkpoint_test_{id}",
+    )
+    
+    return {'status': 'success', 'message': 'Checkpoint test stopped'}, 200
+
 
 
 @checkpoint_bp.route('/checkpoint/<id>', methods=['PUT'])
@@ -57,7 +88,6 @@ def update_checkpoint(id):
         return {'status': 'error', 'message': 'Checkpoint not found'}, 404
 
     checkpoint.name = data.get('name', checkpoint.name)
-    checkpoint.settings = data.get('settings', checkpoint.settings)
     checkpoint.save()
     
     return {'status': 'success', 'message': 'Checkpoint Updated'}, 200
