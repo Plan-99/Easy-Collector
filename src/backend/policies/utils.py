@@ -345,7 +345,7 @@ def rescale_val(val, origin_rng, rescaled_rng):
     return rescaled_rng[0] + (rescaled_rng[1] - rescaled_rng[0]) * ((val - origin_rng[0]) / (origin_rng[1] - origin_rng[0]))
 
 
-def make_policy(ckpt_path, seed, learning_rate, lr_backbone, policy_obj, task, robot, sensors, gripper):
+def make_policy(ckpt_path, seed, learning_rate, lr_backbone, policy_obj, task, robot, sensors, gripper=None):
     args_override = policy_obj['settings']
     if policy_obj['type'] == 'ACT':
         args_override['ckpt_dir'] = ckpt_path

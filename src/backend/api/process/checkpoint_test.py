@@ -28,7 +28,7 @@ def checkpoint_test(
         ckpt_dir = os.path.join("/root/src/backend/checkpoints", str(checkpoint_id))
         ckpt_name = "policy_best.ckpt"
         ckpt_path = os.path.join(ckpt_dir, ckpt_name)
-        policy = make_policy(ckpt_dir, seed, policy_obj, task, robots[0], sensors, gripper)
+        policy = make_policy(ckpt_dir, seed, 0, 0, policy_obj, task, robots[0], sensors, gripper)
         
         temporal_agg = True
         
