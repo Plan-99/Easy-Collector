@@ -2,7 +2,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 import torchvision.transforms as transforms
 
-from .act.detr.main import build_ACT_model_and_optimizer, build_CNNMLP_model_and_optimizer
+from .act.main import build_ACT_model_and_optimizer, build_CNNMLP_model_and_optimizer
 
 from pytorch_grad_cam import EigenCAM
 from pytorch_grad_cam.utils.image import show_cam_on_image, preprocess_image
