@@ -32,7 +32,6 @@ export const useProcessStore = defineStore('process', () => {
 
   // Initialize and set up socket listeners
   function initialize() {
-    fetchProcesses();
 
     socket.on('start_process', (data) => {
       if (data && data.id) {
@@ -45,6 +44,8 @@ export const useProcessStore = defineStore('process', () => {
         removeProcess(data.id);
       }
     });
+
+    return fetchProcesses();
   }
 
   // Getter to check if a process is running

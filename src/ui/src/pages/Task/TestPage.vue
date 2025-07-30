@@ -3,7 +3,7 @@
         <div class="row q-col-gutter-md">
             <div class="col-6 col-sm-4 col-md-3 col-lg-2" v-for="checkpoint in checkpoints" :key="checkpoint.id" style="min-height: 150px;">
                 <div class="cursor-pointer text-center"  @click="() => { watchCheckpoint(checkpoint) }" :style="{ border: watchingCheckpoint && watchingCheckpoint.id === checkpoint.id ? '1px solid #1976d2' : '' }">
-                    <q-icon name="folder" size="100px" color="amber">
+                    <q-icon name="folder" size="100px" color="grey">
                         <q-menu context-menu>
                             <q-list bordered separator>
                                 <q-item clickable v-ripple v-close-popup @click="showCheckpointForm = true; checkpointForm = { ...checkpoint }">
@@ -40,14 +40,14 @@
             <template v-for="checkpoint in checkpoints.filter(e => e.onTerminal)" :key="checkpoint.id" v-slot:[checkpoint.id]>
                 <div class="q-pa-md">
                     <q-btn color="primary" @click="showTestDialog = true" class="full-width q-mb-sm">Start Test</q-btn>
-                    <div class="row">
-                        <div v-if="activePolicy" class="col-6">
+                    <div class="row q-col-gutter-sm" v-if="watchingCheckpoint" >
+                        <div class="col-6">
                             <div class="rounded-borders" style="border: 1px solid rgba(0,0,0,0.12);">
                                 <div class="row q-pa-sm bg-grey-2 text-weight-bold">
                                     <div class="col-6">Setting</div>
                                     <div class="col-6">Value</div>
                                 </div>
-                                <div v-for="(value, key) in { model: activePolicy.type, ...activePolicy.settings, created_at: activePolicy.created_at }" :key="key">
+                                <div v-for="(value, key) in { model: watchingCheckpoint.policy.type, ...watchingCheckpoint.policy.settings }" :key="key">
                                     <q-separator />
                                     <div class="row q-pa-sm">
                                         <div class="col-6" style="word-wrap: break-word;">{{ key }}</div>
@@ -56,9 +56,24 @@
                                 </div>
                             </div>
                         </div>
-                        <div v-else class="text-center text-grey-6 q-pa-md">
-                            Loading policy settings...
+                        <div class="col-6 q-pa-md text-h6">
+                            <div class="text-bold">Epochs: {{ watchingCheckpoint.num_epochs }}</div>
+                            <div class="text-bold">Batch Size: {{ watchingCheckpoint.batch_size }}</div>
+                            <div class="text-bold">Datasets: </div>
+                            <div class="q-ml-lg">
+                                <div v-for="(info, id) in watchingCheckpoint.dataset_info" :key="id">
+                                    <div class="text-grey-8 text-body1">
+                                        <span class="text-black">{{ info.name }}</span> (Number of Episodes: {{ info.episode_num }})
+                                    </div>
+                                </div>
+                            </div>
+                            <div v-if="watchingCheckpoint.load_model">
+                                <div class="text-bold">Finetuned from: {{ watchingCheckpoint.load_model.name }}</div>
+                            </div>
                         </div>
+                    </div>
+                    <div v-else class="text-center text-grey-6 q-pa-md">
+                        Loading policy settings...
                     </div>
                 </div>
             </template>
@@ -101,8 +116,9 @@
                             style="width: 400px;"
                             :topic="sensor.topic"
                             class="full-width full-height"
-                            v-if="sensor.handler.status() === 'on'"
+                            v-if="sensor.handler.status() !== 'off'"
                             :resize="[task.sensor_img_size[0], task.sensor_img_size[1]]"
+                            :loading="sensor.status !== 'on'"
                         ></web-rtc-video>
                         <div
                             class="full-width full-height text-center q-pa-md bg-grey-8 flex flex-center"
@@ -208,8 +224,12 @@ const sensors = ref([]);
 const testingProgress = ref(0);
 
 function listCheckpoints() {
-    return api.get('/checkpoints').then((response) => {
-        checkpoints.value = response.data.checkpoints.filter(c => c.task_id === taskId);
+    return api.get('/checkpoints', {
+        params: {
+            where: `task_id,=,${taskId}|is_training,=,0`
+        }
+    }).then((response) => {
+        checkpoints.value = response.data.checkpoints
     })
 }
 
@@ -286,10 +306,6 @@ function listSensors() {
 function watchCheckpoint(checkpoint) {
     if (!checkpoint) {
         watchingCheckpoint.value = null;
-        return;
-    }
-    
-    if (watchingCheckpoint.value && watchingCheckpoint.value.id === checkpoint.id) {
         return;
     }
 

@@ -12,6 +12,13 @@
                                     <q-icon name="edit" size="xs" />
                                 </q-item-section>
                             </q-item>
+                            <q-item clickable v-ripple v-close-popup 
+                                @click="openAugmentationForm(dataset)">
+                                <q-item-section>Augment Dataset</q-item-section>
+                                <q-item-section side>
+                                    <q-icon name="edit" size="xs" />
+                                </q-item-section>
+                            </q-item>
                             <q-item clickable v-ripple class="text-negative" @click="deleteDataset(dataset)">
                                 <q-item-section>Delete Dataset</q-item-section>
                                 <q-item-section side>
@@ -22,6 +29,7 @@
                     </q-menu>
                     <div class="text-h6 text-center">
                         <div>{{ dataset.name }}</div>
+                        <div class="text-grey-8 text-body2">{{ dataset.episode_num }}</div> 
                     </div>
                 </div>
             </div>
@@ -177,11 +185,12 @@
                     </div>
                     <div class="q-mt-md">
                         <web-rtc-video
-                            v-if="sensor.handler.status() === 'on'"
+                            v-if="sensor.handler.status() !== 'off'"
                             :process-id="`sensor_${sensor.id}`"
                             style="width: 400px;"
                             :topic="sensor.topic"
                             :resize="[task.sensor_img_size[0], task.sensor_img_size[1]]"
+                            :loading="sensor.status !== 'on'"
                         ></web-rtc-video>
                     </div>
                 </div>
@@ -198,6 +207,7 @@
             tab-value="id"
             v-if="datasets.filter(e => e.onTerminal).length > 0 && watchingDataset"
             @update:model-value="watchDataset($event)"
+            @close="datasets.forEach(e => e.onTerminal = false)"
         >
             <template v-for="dataset in datasets.filter(e => e.onTerminal)" :key="dataset.id" v-slot:[dataset.id]>
                 <div class="row q-pa-xs">
@@ -209,7 +219,7 @@
                                     clickable v-ripple
                                     v-for="(file, index) in watchingFileList" 
                                     :key="index" 
-                                    @click="watchFile(file)"
+                                    @click="() => { watchFile(file, watchingFile) }"
                                     :class="{ 'bg-grey-8': watchingFile && watchingFile.name === file.name, 'text-white': watchingFile && watchingFile.name === file.name }"
                                 >
                                     <q-item-section>{{ file.name }}</q-item-section>
@@ -226,19 +236,11 @@
                         </q-scroll-area>
                     </div>
                     
-                    <div v-if="watchingFile && watchingFile.content" class="col q-pl-md">
-                        <div class="text-h6">Joint Action</div>
-                        <div v-for="(state, name) in watchingFile.content.robot_states" :key="name">
-                            <div>
-                                current: {{ state.qpos.map((e) => e.toFixed(4)) }}
-                            </div>
-                            <div>
-                                actions: {{ state.qaction.map((e) => e.toFixed(4)) }}
-                            </div>
-                        </div>
-                        <div class="row q-pt-md">
-                            <img :src="image" alt="" v-for="(image, name) in watchingFile.content.images" :key="name" class="col" style="max-height: 300px; width: 100%; object-fit: contain;">
-                        </div>
+                    <div v-if="watchingFile && !showAugmentationForm" class="col q-pl-md">
+                        <hdf5-viewer
+                            :path="`${watchingDataset.id}/${watchingFile.name}`"
+                            style="height: 380px;"
+                        ></hdf5-viewer>
                     </div>
                 </div>
                 
@@ -320,8 +322,9 @@
                             style="width: 400px;"
                             :topic="sensor.topic"
                             class="full-width full-height"
-                            v-if="sensor.handler.status() === 'on'"
+                            v-if="sensor.handler.status() !== 'off'"
                             :resize="[task.sensor_img_size[0], task.sensor_img_size[1]]"
+                            :loading="sensor.status !== 'on'"
                         ></web-rtc-video>
                         <div
                             class="full-width full-height text-center q-pa-md bg-grey-8 flex flex-center"
@@ -408,11 +411,16 @@
                 </div>
             </div>
         </q-dialog>
-      </div>
+        <data-augmentation-dialog
+            v-model="showAugmentationForm"
+            :dataset="augmentingDataset"
+            :task-id="taskId"
+        />
+    </div>
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref, watch } from 'vue';
+import { onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { api } from 'src/boot/axios';
 import { Notify } from 'quasar';
@@ -423,6 +431,8 @@ import { useSensor } from 'src/composables/useSensor.js';
 import WebRtcVideo from 'src/components/WebRtcVideo.vue';
 import { useSocket } from 'src/composables/useSocket.js';
 import ProcessConsole from 'src/components/ProcessConsole.vue';
+import Hdf5Viewer from 'src/components/Hdf5Viewer.vue';
+import DataAugmentationDialog from 'src/components/DataAugmentationDialog.vue';
 
 const route = useRoute();
 const { socket } = useSocket();
@@ -448,6 +458,11 @@ function listDatasets() {
     }).catch((error) => {
         console.error('Error fetching datasets:', error);
     });
+}
+
+function getDatasetByID(dataset_id) {
+    console.log(datasets.value)
+    return datasets.value.find(e => e.id === dataset_id);
 }
 
 function saveDataset() {
@@ -610,6 +625,8 @@ function watchDataset(dataset) {
     watchingFileList.value = [];
     watchingFile.value = null;
     watchingDataset.value = dataset;
+    if (!dataset) return;
+
     dataset.onTerminal = true;
     api.get(`/datasets/${dataset.id}`).then((response) => {
         watchingFileList.value = response.data.files || [];
@@ -619,26 +636,9 @@ function watchDataset(dataset) {
 }
 
 const watchingFile = ref(null);
-function watchFile(file) {
-    watchingFile.value = file;
+function watchFile(newFile) {
+    watchingFile.value = newFile;
 }
-
-watch(() => watchingFile.value, (newFile, oldFile) => {
-    if (newFile) {
-        api.post(`/dataset/${watchingDataset.value.id}/${newFile.name}/:start_read_hdf5`).then(() => {
-            // Successfully started reading HDF5 file
-        }).catch((error) => {
-            console.error('Error starting to read HDF5 file:', error);
-        });
-    }
-    if (oldFile) {
-        api.post(`/dataset/${watchingDataset.value.id}/${oldFile.name}/:stop_read_hdf5`).then(() => {
-            // Successfully stopped reading HDF5 file
-        }).catch((error) => {
-            console.error('Error stopping to read HDF5 file:', error);
-        });
-    }
-});
 
 const showDataCollectionDialog = ref(false);
 const teleoperationMethod = ref('leader');
@@ -695,43 +695,45 @@ function deleteFile(file) {
     })
 }
 
+const showAugmentationForm = ref(false);
+const augmentingDataset = ref(null);
+function openAugmentationForm(dataset) {
+    if (!dataset.episode_num) {
+        Notify.create({
+            color: 'negative',
+            message: 'Dataset must have at least one episode to augment.'
+        });
+        return;
+    }
+    augmentingDataset.value = dataset;
+    showAugmentationForm.value = true;
+}
+
 onMounted(() => {
     listDatasets();
     getTask();
     listRobots();
     listSensors();
 
-    socket.on('show_episode_step', (data) => {
-        const hdf5_path = data.hdf5_path.split('/');
-        const file_name = hdf5_path.pop();
-        const dataset_id = Number(hdf5_path.pop());
-        if (!watchingDataset.value || watchingDataset.value.id !== dataset_id || !watchingFile.value || watchingFile.value.name !== file_name) {
-            api.post(`/dataset/${dataset_id}/${file_name}/:stop_read_hdf5`).then(() => {
-                // Successfully started reading HDF5 file
-            }).catch((error) => {
-                console.error('Error stoping to read HDF5 file:', error);
-            });
-            return;
-        }
-
-        watchingFile.value.content = data
-    });
+    socket.on('augmentation_complete', (data) => {
+        Notify.create({
+            color: 'positive',
+            message: 'Augmentation complete'
+        });
+        listDatasets().then(() => {
+            showAugmentationForm.value = false;
+            const new_dataset = getDatasetByID(data.dataset_id);
+            if (new_dataset) {
+                watchDataset(new_dataset);
+            } else {
+                console.error(`Could not find the newly augmented dataset with id: ${data.dataset_id}`);
+            }
+        });
+    })
 
     socket.on('record_episode_progress', (data) => {
         collectingProgress.value = data.progress;
     });
 })
-
-onUnmounted(() => {
-    socket.off('show_episode_step');
-
-    if (watchingFile.value) {
-        api.post(`/dataset/${watchingDataset.value.id}/${watchingFile.value.name}/:stop_read_hdf5`).then(() => {
-            // Successfully stopped reading HDF5 file
-        }).catch((error) => {
-            console.error('Error stopping to read HDF5 file:', error);
-        });
-    }
-});
 
 </script>

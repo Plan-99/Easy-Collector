@@ -29,6 +29,8 @@ def train(
     val_dataloader, 
     ckpt_dir,
     num_epochs,
+    learning_rate,
+    lr_backbone,
     stats,
     task,
     policy_obj,
@@ -38,17 +40,17 @@ def train(
     load_model=None
     ):
     """Function to train the policy model."""
-    seed = 1
+    seed = 100
     
     policy_class = policy_obj['type']
-    load_model_path = f"/root/src/backend/checkpoints/{load_model.id}" if load_model else None
+    load_model_path = f"/root/src/backend/checkpoints/{load_model['id']}" if load_model else None
 
     set_seed(seed) # Set seed for reproducibility
 
     # Create policy model
-    policy = make_policy(ckpt_dir, seed, policy_obj, task, robot, sensors, gripper)
 
-    # Load pre-trained model for fine-tuning
+    policy = make_policy(ckpt_dir, seed, learning_rate, lr_backbone, policy_obj, task, robot, sensors, gripper)
+
     if load_model_path is not None:
         model_path = os.path.join(load_model_path, 'policy_best.ckpt')
         loading_status = policy.load_state_dict(torch.load(model_path))
@@ -64,7 +66,7 @@ def train(
 
     # Main training loop
     for epoch in tqdm(range(num_epochs)):
-        print(f'\nEpoch {epoch}')
+        print(f'\nEpoch {epoch} / {num_epochs}')
         
         # --- Validation Step ---
         with torch.inference_mode():
@@ -85,15 +87,14 @@ def train(
 
         # --- Training Step ---
         policy.train() # Set model to training mode
-        optimizer.zero_grad()
         for batch_idx, data in enumerate(train_dataloader):
+            optimizer.zero_grad()
             forward_dict = forward_pass(data, policy)
-            
             # Backpropagation
             loss = forward_dict['loss']
             loss.backward()
             optimizer.step()
-            optimizer.zero_grad()
+            
             train_history.append(detach_dict(forward_dict))
             
         epoch_summary = compute_dict_mean(train_history[(batch_idx+1)*epoch:(batch_idx+1)*(epoch+1)])
@@ -164,16 +165,18 @@ def main(args):
         sensors = [Sensor.find(sid).to_dict() for sid in task['sensor_ids']]
         # gripper = Gripper.find(robot.gripper_id) if robot.gripper_id else None
         load_model = Checkpoint.find(args.load_model_id).to_dict() if args.load_model_id else None
-        
-        # Get parameters from configs
         sensor_ids = [sensor['id'] for sensor in sensors]
         
         num_epochs = int(args.num_epochs)
         batch_size = int(args.batch_size)
         
+        learning_rate = float(args.learning_rate)
+        lr_backbone = float(args.lr_backbone)
+        
+        
         # Load data from the temporary directory
         train_dataloader, val_dataloader, stats, _ = load_data(temp_dir, episode_counter, sensor_ids, batch_size, batch_size)
-        
+
         ckpt_dir = f"/root/src/backend/checkpoints/{args.checkpoint_id}"
         # Start the training process
         best_ckpt_info = train(
@@ -181,12 +184,22 @@ def main(args):
             val_dataloader,
             ckpt_dir,
             num_epochs,
+            learning_rate,
+            lr_backbone,
             stats,
             task,
             policy,
             robot,
             sensors,
-            load_model)
+            gripper=None,
+            load_model=load_model)
+        
+        Checkpoint.find(args.checkpoint_id).update({
+            'is_training': False
+        })
+        
+    except Exception as e:
+        Checkpoint.find(args.checkpoint_id).delete()
         
     finally:
         # Clean up the temporary directory
@@ -204,6 +217,8 @@ if __name__ == '__main__':
     parser.add_argument('--dataset_ids', required=True)
     parser.add_argument('--num_epochs', required=True)
     parser.add_argument('--batch_size', required=True)
-    
+    parser.add_argument('--learning_rate', default=1e-5, required=False)
+    parser.add_argument('--lr_backbone', default=1e-6, required=False)
+
     main(parser.parse_args())
     sys.exit(0)

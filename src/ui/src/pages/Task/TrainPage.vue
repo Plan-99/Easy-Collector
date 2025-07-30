@@ -1,5 +1,5 @@
 <template>
-    <q-page class="q-pa-md">
+    <div class="q-pa-md">
         <q-stepper v-model="step" ref="stepper" color="primary" animated>
             <q-step
                 :name="1"
@@ -121,10 +121,14 @@
                         <div class="text-h6">{{ formTitle }}</div>
                     </q-card-section>
                     <q-card-section>
-                        <q-form class="q-gutter-md">
-                            <q-input dense outlined v-model="policyForm.name" label="Policy Name" :readonly="isNameReadonly" />
-                            <q-select dense outlined v-model="policyForm.type" :options="policyTypes" label="Policy Type" :readonly="isTypeReadonly" @update:model-value="handlePolicyTypeChange" />
-                            <div v-for="(config, key) in policyForm.settings" :key="key">
+                        <q-form class="q-col-gutter-md row">
+                            <div class="col-4">
+                                <q-input dense outlined v-model="policyForm.name" label="Policy Name" :readonly="isNameReadonly" />
+                            </div>
+                            <div class="col-4">
+                                <q-select dense outlined v-model="policyForm.type" :options="policyTypes" label="Policy Type" :readonly="isTypeReadonly" @update:model-value="handlePolicyTypeChange" />
+                            </div>
+                            <div v-for="(config, key) in policyForm.settings" :key="key" class="col-4">
                                 <q-select
                                     v-if="config.type === 'select'"
                                     dense
@@ -138,14 +142,24 @@
                                     map-options
                                 />
                                 <q-input
-                                    v-else
+                                    dense
+                                    outlined
+                                    v-model.number="config.value"
+                                    :label="config.label"
+                                    :readonly="isSettingsReadonly"
+                                    :disable="isSettingsReadonly"
+                                    v-else-if="config.type === 'number'"
+                                    type="number"
+                                />
+                                <q-input
                                     dense
                                     outlined
                                     v-model="config.value"
                                     :label="config.label"
-                                    :type="config.type || 'text'"
                                     :readonly="isSettingsReadonly"
                                     :disable="isSettingsReadonly"
+                                    v-else
+                                    type="text"
                                 />
                             </div>
                         </q-form>
@@ -164,21 +178,35 @@
             >
                 <div class="q-gutter-y-md">
                     <div class="row q-col-gutter-md">
-                        <q-input dense outlined v-model="newCheckpointName" class="col-12" label="Checkpoint Name" />
+                        <q-input dense outlined v-model="newCheckpointName" class="col-12" label="Checkpoint Name" :disable="isTraining" />
 
-                        <q-input dense outlined v-model.number="numEpochsForm" class="col" label="Num Epochs" type="number" />
-                        <q-input dense outlined v-model.number="batchSizeForm" class="col" label="Batch Size" />
+                        <q-input dense outlined v-model.number="trainingForm.numEpochs" class="col" label="Num Epochs" type="number" :disable="isTraining" />
+                        <q-input dense outlined v-model.number="trainingForm.batchSize" class="col" label="Batch Size" :disable="isTraining" />
+                        <q-input dense outlined v-model="trainingForm.learning_rate" class="col" label="Learning Rate" type="number" :disable="isTraining" />
+                        <q-input dense outlined v-model="trainingForm.lr_backbone" class="col" label="Backbone Learning Rate" type="number" :disab />
                     </div>
                     <div class="text-center">
-                        <q-btn v-if="!trainingProcessId" color="primary" label="Start Training" @click="startTraining" :loading="isLoadingApi" :disable="isTraining" />
+                        <q-btn v-if="!isTraining" color="primary" label="Start Training" @click="startTraining" :loading="isLoadingApi" :disable="isTraining" />
                         <q-btn v-else color="negative" label="Stop Training" @click="stopTraining" />
 
                     </div>
 
+                    <q-linear-progress
+                        v-if="isTraining"
+                        instant-feedback
+                        :value="trainingProgress"
+                        size="20px"
+                        color="primary"
+                    >
+                        <div class="absolute-full flex flex-center">
+                            <q-badge color="white" text-color="primary" :label="`${Number(trainingProgress * 100).toFixed(2)}%`" />
+                        </div>
+                    </q-linear-progress>
+
 
                     <process-console
                         v-if="step === 3"
-                        :process="trainingProcessId"
+                        process="train_task"
                     />
                 </div>
                 
@@ -186,7 +214,7 @@
 
             <template v-slot:navigation>
                 <q-stepper-navigation class="text-center">
-                    <q-btn v-if="step > 1" flat color="primary" @click="$refs.stepper.previous()" label="Back" class="q-mr-sm" />
+                    <q-btn v-if="step > 1 && !isTraining" flat color="primary" @click="$refs.stepper.previous()" label="Back" class="q-mr-sm" />
                     <q-btn @click="nextStep" color="primary" :label="'Continue'" v-show="step !== 3" />
                 </q-stepper-navigation>
             </template>
@@ -206,7 +234,7 @@
                 </q-card-actions>
             </q-card>
         </q-dialog>
-    </q-page>
+    </div>
 </template>
 
 <script setup>
@@ -216,7 +244,9 @@ import { useRoute } from 'vue-router';
 import { api } from 'src/boot/axios';
 import ProcessConsole from 'src/components/ProcessConsole.vue';
 import { useSocket } from 'src/composables/useSocket';
+import { useProcessStore } from 'src/stores/processStore';
 
+const processStore = useProcessStore();
 
 const $q = useQuasar();
 const route = useRoute();
@@ -234,8 +264,14 @@ const policies = ref([]);
 const selectedCheckpoint = ref(null);
 const selectedPolicy = ref(null);
 const policyForm = ref({});
-const numEpochsForm = ref(1000);
-const batchSizeForm = ref(32);
+const trainingForm = ref({
+    numEpochs: 1000,
+    batchSize: 20,
+    learning_rate: 1e-5,
+    lr_backbone: 1e-6
+});
+// const numEpochsForm = ref(1000);
+// const batchSizeForm = ref(32);
 const showSaveAsDialog = ref(false);
 const newPolicyName = ref('');
 const newCheckpointName = ref('');
@@ -244,21 +280,15 @@ const taskVal = ref({});
 
 // Step 3: Training
 const isLoadingApi = ref(false); // For API call loading state
-const isTraining = ref(false);
-const trainingProcessId = ref(null); // Holds the running process ID
 const { socket } = useSocket();
-
-const currentCheckpointId = ref(null);
 
 const POLICY_CONFIGS = {
     'ACT': {
         'chunk_size': { 'label': 'Chunk Size', 'value': 32, 'type': 'number' },
         'kl_weight': { 'label': 'KL Weight', 'value': 10.0, 'type': 'number' },
-        'lr': { 'label': 'Learning Rate', 'value': 1e-5, 'type': 'number' },
         'hidden_dim': { 'label': 'Hidden Dimension', 'value': 256, 'type': 'number' },
         'dim_feedforward': { 'label': 'Feedforward Dimension', 'value': 2048, 'type': 'number' },
         'backbone': { 'label': 'Backbone', 'value': 'resnet18', 'type': 'select', 'options': ['resnet18'] },
-        'lr_backbone': { 'label': 'Backbone Learning Rate', 'value': 1e-6, 'type': 'number' },
         'enc_layers': { 'label': 'Encoder Layers', 'value': 4, 'type': 'number' },
         'dec_layers': { 'label': 'Decoder Layers', 'value': 6, 'type': 'number' },
         'nheads': { 'label': 'Number of Heads', 'value': 8, 'type': 'number' },
@@ -292,6 +322,7 @@ const isNameReadonly = computed(() => !!selectedCheckpoint.value || (selectedPol
 const isTypeReadonly = computed(() => !!selectedCheckpoint.value || (selectedPolicy.value && selectedPolicy.value !== 'new'));
 const isSettingsReadonly = computed(() => !!selectedCheckpoint.value);
 const showFormButtons = computed(() => selectedPolicy.value && !selectedCheckpoint.value);
+const isTraining = computed(() => processStore.isRunning('train_task'));
 
 function validatePolicyForm() {
     const form = policyForm.value;
@@ -351,7 +382,7 @@ watch(selectedCheckpoint, (newVal) => {
 });
 
 watch(() => policyForm.value.name, (newVal) => {
-    newCheckpointName.value = `${taskVal.value.name}_${newVal}_${selectedCheckpoint.value ? 'finetuned' : ''}_${new Date().toISOString()}`;
+    newCheckpointName.value = `${newVal}_${selectedCheckpoint.value ? 'finetuned' : ''}_${new Date().toISOString()}`;
 });
 
 watch(selectedPolicy, (newVal) => {
@@ -410,7 +441,7 @@ function deselectDataset(dataset) {
 
 // --- Methods for Step 2 ---
 function listCheckpoints() {
-    api.get('/checkpoints').then(response => {
+    return api.get('/checkpoints').then(response => {
         checkpoints.value = response.data.checkpoints.map(c => {
             const policy = policies.value.find(p => p.id === c.policy_id);
             return {...c, policy: policy};
@@ -603,37 +634,26 @@ function resetCheckpointForm() {
 }
 
 async function startTraining() {
+    console.log(selectedCheckpoint.value)
     isLoadingApi.value = true;
     try {
-        const policyVal = policies.value.find(p => p.id === selectedPolicy.value);
-
-        const newCheckpointValue = {
-            name: newCheckpointName.value,
-            task_id: taskVal.value.id,
-            policy_id: policyVal.id,
-            dataset_info: selectedDatasets.value.map(d => ({ id: d.id, episode_num: d.episode_num })),
-        };
-
-        console.log('New Checkpoint Value:', newCheckpointValue);
-
-        const ckpt_response = await api.post('/checkpoint', newCheckpointValue);
-        currentCheckpointId.value = ckpt_response.data.id;
-
-        
-        await api.post('/task:start_training', {
+        api.post('/task:start_training', {
             task_id: taskId,
             policy_id: selectedPolicy.value,
             load_model_id: selectedCheckpoint.value,
-            dataset_ids: selectedDatasets.value.map(d => d.id),
-            checkpoint_id: currentCheckpointId.value,
-            num_epochs: numEpochsForm.value,
-            batch_size: batchSizeForm.value,
+            num_epochs: trainingForm.value.numEpochs,
+            batch_size: trainingForm.value.batchSize,
+            learning_rate: trainingForm.value.learning_rate,
+            lr_backbone: trainingForm.value.lr_backbone,
+            dataset_info: Object.fromEntries(selectedDatasets.value.map(d => [d.id, { episode_num: d.episode_num }])),
+            name: newCheckpointName.value,
+        }).then(() => {
+            getTrainingCheckpoint()
         });
+
 
         // The UI state will now be updated by the 'start_process' socket event.
         // We can anticipate the training state to be true.
-        isTraining.value = true;
-
     } catch (error) {
         Notify.create({ color: 'negative', message: `${error}: Failed to start training: ` });
     } finally {
@@ -643,47 +663,63 @@ async function startTraining() {
 }
 
 async function stopTraining() {
-    if (!trainingProcessId.value) return;
+    if (!isTraining.value) return;
     try {
-        await api.post('/task:stop_training', { task_id: taskId });
+        await api.post('/task:stop_training');
     } catch (error) {
         Notify.create({ color: 'negative', message: `${error}: Failed to stop training.` });
-    } finally {
-        isTraining.value = false;
     }
 }
 
+const trainingCheckpoint = ref(null);
+function getTrainingCheckpoint() {
+    return api.get(`/checkpoints`, {
+        params: {
+            where: `task_id,=,${taskId}|is_training,=,1`
+        }
+    }).then(response => {
+        trainingCheckpoint.value = response.data.checkpoints.at(-1) || null;
+        newCheckpointName.value = trainingCheckpoint.value.name || '';
+        trainingForm.value.numEpochs = trainingCheckpoint.value.num_epochs || 1000;
+        trainingForm.value.batchSize = trainingCheckpoint.value.batch_size || 32;
+        trainingForm.value.learning_rate = trainingCheckpoint.value.learning_rate || 1e-5;
+        trainingForm.value.lr_backbone = trainingCheckpoint.value.lr_backbone || 1e-6;
+    })
+}
+
+const trainingProgress = ref(0);
 onMounted(async () => {
     listDatasets();
     await listPolicies(); // Wait for policies to load first
-    listCheckpoints(); // Then load checkpoints which may depend on policies
-
-    const constructedProcessId = `train_task_${taskId}`;
+    listCheckpoints()
     const taskResponse = await api.get(`/tasks/${taskId}`);
     taskVal.value = taskResponse.data.task;
 
-    socket.on('start_process', async (data) => {
-        if (data.id === constructedProcessId) {
-            trainingProcessId.value = data.id;
-            isTraining.value = true;
-        }
-    });
+    if (isTraining.value) {
+        step.value = 3;
+        getTrainingCheckpoint()
+    }
 
     socket.on('stop_process', (data) => {
-        if (data.id === constructedProcessId) {
-            trainingProcessId.value = null;
-            isTraining.value = false;
-            api.get(`/checkpoint/${currentCheckpointId.value}/:check_create_successed`).then(response => {
+        if (data.id === 'train_task') {
+
+            api.get(`/checkpoint/${trainingCheckpoint.value.id}/:check_create_successed`).then(response => {
                 if (response.data.check_create_successed) {
                     Notify.create({ color: 'positive', message: 'Training completed successfully.' });
                 } else {
                     console.log(response.data);
                     Notify.create({ color: 'negative', message: 'Training failed.' });
-                    api.delete(`/checkpoint/${currentCheckpointId.value}`)
                 }
             }).catch(error => {
                 Notify.create({ color: 'negative', message: `Error stopping training: ${error}` });
             });
+        }
+    });
+
+    socket.on('log_train_task', (data) => {
+        if (data.log.includes('Epoch ')) {
+            const epochMatch = data.log.replace('Epoch ', '');
+            trainingProgress.value = eval(epochMatch);
         }
     });
 });

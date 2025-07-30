@@ -1,8 +1,6 @@
 import { api } from 'boot/axios';
-// import { useProcessStore } from '../stores/processStore';
 
 export function useSensor(sensor, sensorOnCallback=() => {}) {
-  // const processStore = useProcessStore();
 
   let sensorTopicChecker = null;
 
@@ -54,23 +52,13 @@ export function useSensor(sensor, sensorOnCallback=() => {}) {
       if (steps >= maxSteps) {
         clearInterval(sensorTopicChecker);
         sensor.status = 'off';
+        if (sensor.status === 'on') {
+          stopSensor();
+        }
       }
     }, 1000);
   }
 
-  // function subsSensor(sensor) {
-  //   if (!processStore.isRunning(sensor.process_id)) {
-  //     return;
-  //   }
-  //   watchingSensor.value = sensor;
-  //   connect(sensor, (event) => {
-  //     const newStream = new MediaStream();
-  //     newStream.addTrack(event.track);
-  //     if (sensorVideo.value) {
-  //       sensorVideo.value.srcObject = newStream;
-  //     }
-  //   });
-  // }
   return {
     startSensor,
     stopSensor,

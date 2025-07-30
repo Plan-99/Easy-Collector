@@ -10,6 +10,16 @@
       >
         {{ tab[tabLabel] }}
       </div>
+      <q-space class="col"></q-space>
+      <div class="col-1 text-right">
+        <q-btn
+          color="grey-8"
+          class="q-pa-sm col-1"
+          icon="close"
+          style="z-index: 1000"
+          @click="model = null; $emit('close')"
+        ></q-btn>
+      </div>
     </div>
     <q-separator />
     <div class="bg-grey-4" style="min-height: 350px;">

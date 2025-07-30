@@ -40,53 +40,28 @@ class EpisodicDataset(torch.utils.data.Dataset):
         with h5py.File(dataset_path, 'r') as root:
             # is_sim = root.attrs['sim']
             is_sim = None
-            if self.task_space:
-                if self.vel_control:
-                    original_action_shape = root['/xvel_action'].shape
-                else:
-                    original_action_shape = root['/xaction'].shape
-            else:
-                original_action_shape = root['qaction']['robot_1'].shape
-            episode_len = original_action_shape[0]
+
+            episode_len = 0
+
+            action_dim = 0
+            for key in root['qaction'].keys():
+                episode_len = root['qaction'][key].shape[0]
+                action_dim += root['qaction'][key].shape[1]
+
+            original_action_shape = (episode_len, action_dim)
+                
             if sample_full_episode:
                 start_ts = 0
             else:
                 start_ts = np.random.choice(episode_len)
-            # get observation at start_ts only
-            if self.task_space:
-                if self.vel_control:
-                    qpos = np.array([0] * 8)
-                else:
-                    qpos = root['/observations/xpos'][start_ts]
-            else:
-                qpos = get_concatenated_pos(root['/observations/qpos'], target_id=start_ts)
-                # qpos = root['/observations/qpos'][start_ts]
+
+            qpos = get_concatenated_pos(root['/observations/qpos'], target_id=start_ts)
 
             image_dict = dict()
             for sensor_id in self.sensor_ids:
                 image_dict[f"sensor_{sensor_id}"] = root[f'/observations/images/sensor_{sensor_id}'][start_ts]
-            # get all actions after and including start_ts
-            if is_sim:
-                if self.task_space:
-                    if self.vel_control:
-                        qpos = root['/observations/xvel'][start_ts]
-                    else:
-                        qpos = root['/observations/xpos'][start_ts]
-                else:
-                    qpos = root['/observations/qpos'][start_ts]
-                action_len = episode_len - start_ts
-            else:
-                if self.task_space:
-                    if self.vel_control:
-                        action = root['/xvel_action'][max(0, start_ts - 1):]
-                    else:
-                        action = root['/xaction'][max(0, start_ts - 1):]
-                else:
-                    action = get_concatenated_pos(root['qaction'], target_id=None, target_ids=max(0, start_ts - 1))
-
-                # action = root['/xaction'][max(0, start_ts - 1):] if self.task_space else root['/action'][max(0, start_ts - 1):]
-                # hack, to make timesteps more aligned
-                action_len = episode_len - max(0, start_ts - 1) # hack, to make timesteps more aligned
+                action = get_concatenated_pos(root['qaction'], target_id=None, target_ids=max(0, start_ts))
+                action_len = episode_len - max(0, start_ts) # hack, to make timesteps more aligned
 
         self.is_sim = is_sim
         padded_action = np.zeros(original_action_shape, dtype=np.float32)
@@ -111,7 +86,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
         # normalize image and change dtype to float
         image_data = image_data / 255.0
-        action_data = (action_data - self.norm_stats["qaction_mean"]) / self.norm_stats["qaction_std"]
+        action_data = (action_data - self.norm_stats["qpos_mean"]) / self.norm_stats["qpos_std"]
         qpos_data = (qpos_data - self.norm_stats["qpos_mean"]) / self.norm_stats["qpos_std"]
 
         return image_data, qpos_data, action_data, is_pad
@@ -153,10 +128,8 @@ def get_norm_stats(dataset_dir, num_episodes, task_space, vel_control):
 
     stats = {"qaction_mean": action_mean.numpy().squeeze(), "qaction_std": action_std.numpy().squeeze(),
              "qpos_mean": qpos_mean.numpy().squeeze(), "qpos_std": qpos_std.numpy().squeeze(),
-             "example_qpos": qpos}
+             "example_qpos": qpos, 'example_action': action }
     
-    # print(stats)
-
     return stats
 
 
@@ -372,7 +345,7 @@ def rescale_val(val, origin_rng, rescaled_rng):
     return rescaled_rng[0] + (rescaled_rng[1] - rescaled_rng[0]) * ((val - origin_rng[0]) / (origin_rng[1] - origin_rng[0]))
 
 
-def make_policy(ckpt_path, seed, policy_obj, task, robot, sensors, gripper):
+def make_policy(ckpt_path, seed, learning_rate, lr_backbone, policy_obj, task, robot, sensors, gripper):
     args_override = policy_obj['settings']
     if policy_obj['type'] == 'ACT':
         args_override['ckpt_dir'] = ckpt_path
@@ -383,8 +356,11 @@ def make_policy(ckpt_path, seed, policy_obj, task, robot, sensors, gripper):
         if gripper is not None:
             args_override['state_dim'] += 1 # gripper state dim
         args_override['num_queries'] = int(policy_obj['settings']['chunk_size'])
-        args_override['hidden_dim'] = int(policy_obj['settings']['hidden_dim'])
-        args_override['dim_feedforward'] = int(policy_obj['settings']['dim_feedforward'])
+        
+        args_override['learning_rate'] = learning_rate
+        args_override['lr_backbone'] = lr_backbone
+        # args_override[''] = int(policy_obj['settings']['lr_backbone'])
+        
         
         sensor_names = [sensor['name'] for sensor in sensors]
         args_override['camera_names'] = sensor_names

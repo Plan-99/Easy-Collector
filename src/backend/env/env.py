@@ -39,7 +39,7 @@ class Env:
 
 
     def record_step(self):
-        time.sleep(0.1)
+        # time.sleep(0.1)
         return dm_env.TimeStep(
             step_type=dm_env.StepType.MID,
             reward=self.get_reward(),

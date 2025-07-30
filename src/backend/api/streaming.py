@@ -12,6 +12,7 @@ import os
 import traceback
 from av import VideoFrame
 import uuid
+import h5py
 
 
 # --- 전역 변수 ---
@@ -31,7 +32,6 @@ class ROSImageStreamTrack(VideoStreamTrack):
         # self.frame_queue = asyncio.Queue(maxsize=2)
         self.start_subscriber()
         self.pub_term = pub_term
-        self.cnt = 0
         self.frame = None
         self.stream_id = stream_id
 
@@ -74,6 +74,35 @@ class ROSImageStreamTrack(VideoStreamTrack):
             self.subscriber.unregister()
             rospy.loginfo(f"Unsubscribed from ROS topic: {self.topic}")
         super().stop()
+
+
+# class Hdf5StreamTrack(VideoStreamTrack):
+#     """
+#     HDF5 파일에서 비디오 프레임을 읽어오는 클래스.
+#     """
+#     def __init__(self, hdf5_file_path):
+#         super().__init__()
+#         self.hdf5_file_path = hdf5_file_path
+#         self.current_frame_index = 0
+#         self.frames = self.load_frames()
+
+#     def load_frames(self):
+#         with h5py.File(self.hdf5_file_path, 'r') as f:
+#             frames = f['frames'][:]
+#         return frames
+
+#     async def recv(self):
+#         if self.current_frame_index >= len(self.frames):
+#             raise StopAsyncIteration
+        
+#         frame_data = self.frames[self.current_frame_index]
+#         self.current_frame_index += 1
+        
+#         frame = VideoFrame.from_ndarray(frame_data, format="bgr24")
+#         pts, time_base = await self.next_timestamp()
+#         frame.pts = pts
+#         frame.time_base = time_base
+#         return frame
 
 
 async def offer(request):

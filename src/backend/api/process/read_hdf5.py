@@ -6,15 +6,20 @@ import argparse
 import os
 import cv2
 import base64 # 이미지 인코딩을 위해 추가
+from .augment_dataset import adjust_lightness, draw_rectangles, add_salt_and_pepper_noise, add_gaussian_noise, generate_rect_params
+from PIL import Image
 
+config = {}
 
-def read_hdf5(hdf5_path, socketio_instance, task_control):
+def read_hdf5(hdf5_path, socketio_instance, sid, task_control):
+    global config
+    config = {}
     while True:
         image_data = {}
         qpos_data = {}
         qaction_data = {}
-
         with h5py.File(hdf5_path, 'r') as f:
+            rect_params = []
             # actions = f[f"action"][:]
             # xactions = f[f"xaction"][:]
             # xvel_actions = f[f"xvel_action"][:]
@@ -41,6 +46,20 @@ def read_hdf5(hdf5_path, socketio_instance, task_control):
                 encoded_images = {}
                 for cam_name in sensor_names:
                     img_array = image_data[cam_name][i]
+
+                    img = Image.fromarray(img_array)
+                    if 'lightness' in config:
+                        img = adjust_lightness(img, config['lightness'])
+                    if 'rectangles' in config:
+                        if len(rect_params) != config['rectangles'].get('count', 0):
+                            rect_params = generate_rect_params(config['rectangles'], img.width, img.height)
+                        img = draw_rectangles(img, rect_params)
+                    if 'saltAndPepper' in config:
+                        img = add_salt_and_pepper_noise(img, config['saltAndPepper'].get('amount', 0))
+                    if 'gaussian' in config:
+                        img = add_gaussian_noise(img, config['gaussian'].get('mean', 0), config['gaussian'].get('sigma', 0))    
+                    
+                    img_array = np.array(img)
                     
                     # 이미지를 JPEG 형식으로 메모리 버퍼에 인코딩
                     success, buffer = cv2.imencode('.jpg', img_array)
@@ -64,7 +83,7 @@ def read_hdf5(hdf5_path, socketio_instance, task_control):
                         'qaction': qaction_array.tolist(),
                     }
 
-                time.sleep(0.1)
+                time.sleep(0.2)
                 socketio_instance.emit('show_episode_step', {
                     'hdf5_path': hdf5_path,
                     'images': encoded_images,
@@ -73,4 +92,10 @@ def read_hdf5(hdf5_path, socketio_instance, task_control):
                     # 'xvel_action': xvel_actions[i].tolist(),
                     # 'xpos': xpos_data[i].tolist(),
                     # 'xvel': xvel_data[i].tolist()
-                })
+                }, to=sid)
+
+
+def add_config(config_data):
+    global config
+    config.update(config_data)
+    

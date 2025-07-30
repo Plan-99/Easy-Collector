@@ -1,7 +1,7 @@
 <template>
   <div class="relative-position">
     <video ref="videoElement" autoplay playsinline muted style="height: 100%; width: 100%;"></video>
-    <q-inner-loading :showing="!isPublished">
+    <q-inner-loading :showing="props.loading">
       <q-spinner-gears size="50px" color="primary" />
       <div class="q-mt-md">Waiting for topic to be published...</div>
     </q-inner-loading>
@@ -9,16 +9,11 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref, watch } from 'vue';
+import { ref, watch } from 'vue';
 import { useWebRTC } from '../composables/useWebRTC';
 import { useSocket } from '../composables/useSocket';
-import { api } from 'src/boot/axios';
 
 const props = defineProps({
-  processId: {
-    type: String,
-    required: true,
-  },
   topic: {
     type: String,
     required: true,
@@ -26,6 +21,10 @@ const props = defineProps({
   resize: {
     type: Array,
     default: () => []
+  },
+  loading: {
+    type: Boolean,
+    default: false,
   },
 });
 
@@ -49,34 +48,23 @@ const setupWebRTC = () => {
   })
 };
 
-const isPublished = ref(false);
-let interval = null;
 
-onMounted(() => {
-  interval = setInterval(() => {
-    api.get(`/topics`)
-      .then((res) => {
-        isPublished.value = Boolean(res.data.topics.find(topic => topic.name === props.topic));
-        if (isPublished.value) {
-          setupWebRTC();
-          clearInterval(interval);
-        }
-      })
-      .catch(error => {
-        console.error('Error setting up WebRTC:', error);
-      });
-  }, 1000); // Delay to ensure the video element is ready
-});
+watch(() => props.loading, (newVal) => {
+  if (!newVal) {
+    console.log(newVal, 'Loading finished, setting up WebRTC');
+    setupWebRTC();
+  }
+}, { immediate: true });
 
-onUnmounted(() => {
-  clearInterval(interval);
-});
 
-watch(() => props.resize, (newResize) => {
+watch(() => props.resize, (newResize, oldResize) => {
+  if (newResize[0] === oldResize[0] && newResize[1] === oldResize[1]) {
+    return;
+  }
   addConfig(stream_id, {
     resize: newResize.length ? newResize : null,
   });
-}, { deep: true });
+});
 
 
 </script>

@@ -1,7 +1,9 @@
 from orator import Model, SoftDeletes
-from orator.orm import belongs_to
+from orator.orm import belongs_to, accessor
 from .task_model import Task
 from .policy_model import Policy
+from .dataset_model import Dataset
+import json
 
 class Checkpoint(Model, SoftDeletes):
 
@@ -12,10 +14,15 @@ class Checkpoint(Model, SoftDeletes):
         'task_id',
         'policy_id',
         'dataset_info',
+        'is_training',
+        'num_epochs',
+        'batch_size',
+        'load_model_id',
     ]
     
     __casts__ = {
         'dataset_info': 'json',
+        'is_training': 'boolean',
     }
     
     __timestamps__ = True
@@ -27,3 +34,18 @@ class Checkpoint(Model, SoftDeletes):
     @belongs_to
     def policy(self):
         return Policy
+    
+    @belongs_to
+    def load_model(self):
+        return Checkpoint
+    
+    @accessor
+    def dataset_info(self):
+        dataset_info = self.get_raw_attribute('dataset_info')
+        if isinstance(dataset_info, str):
+            dataset_info = json.loads(dataset_info)
+
+        for key, value in dataset_info.items():
+            dataset_info[key]['name'] = Dataset.find(key).name if Dataset.find(key) else 'Unknown'
+
+        return dataset_info

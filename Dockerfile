@@ -68,6 +68,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*
 
+# tmux 설치
+Run apt-get update & apt-get install tmux \
+    nano \
+
 # # rosdep 초기화
 # # ROS 패키지의 시스템 의존성을 관리하는 도구입니다.
 # RUN rosdep init && \
@@ -88,6 +92,13 @@ RUN mkdir -p /etc/apt/keyrings && \
 
 # Node.js 설치 (npm도 함께 설치됨)
 RUN apt-get update && apt-get install nodejs -y
+
+# GUI 관련
+RUN apt-get update && apt-get install -y \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libxext6 \
+    libx11-6
 
 # # (선택) Catkin 작업 공간(Workspace) 생성
 # WORKDIR /root/catkin_ws

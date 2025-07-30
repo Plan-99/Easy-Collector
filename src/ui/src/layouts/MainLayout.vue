@@ -63,11 +63,11 @@ const linksList = [
     icon: 'cleaning_services',
     link: '/tasks'
   },
-  {
-    title: 'Datasets',
-    icon: 'folder_open',
-    link: '/datasets'
-  },
+  // {
+  //   title: 'Datasets',
+  //   icon: 'folder_open',
+  //   link: '/datasets'
+  // },
 ]
 
 const leftDrawerOpen = ref(false)

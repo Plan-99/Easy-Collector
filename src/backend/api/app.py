@@ -124,6 +124,24 @@ def list_topics():
         'topics': topic_list
     }, 200
 
+@app.route('/api/stop_process', methods=['POST'])
+def stop_process():
+    data = request.json
+    if pm.processes.get(data['name']) is None:
+        return {
+            'status': 'error',
+            'message': f"Process '{data['name']}' not found."
+        }, 404
+    
+    if pm.processes[data['name']] == 'function':
+        pm.stop_function(data['name'])
+    else:
+        pm.stop_process(data['name'])
+
+    return {
+        'status': 'success',
+        'message': f"Process '{data['name']}' stopped."
+    }, 200
 
 
 # --- SocketIO 이벤트 핸들러 ---

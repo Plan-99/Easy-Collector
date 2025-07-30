@@ -13,7 +13,7 @@ class ProcessManager:
         print("ProcessManager initialized and cleanup registered.")
 
     def list_processes(self):
-        return [name for name, process in self.processes.items() if process.poll() is None]
+        return [name for name, process in self.processes.items()]
 
     def _stream_reader(self, process_name, process_stream, log_emit_id, stream_type, sid):
         """스트림을 안정적으로 읽어 클라이언트로 전송합니다."""
@@ -69,6 +69,7 @@ class ProcessManager:
 
     def stop_process(self, name):
         if name not in self.processes:
+            print(f"'{name}' Process is not running.")
             return
         process = self.processes.pop(name)
         if process.poll() is None:
@@ -91,6 +92,7 @@ class ProcessManager:
         # 1. 작업을 제어할 '중지 플래그'를 생성합니다.
         task_control = {'stop': False}
         self.tasks[name] = task_control
+        self.processes[name] = 'function'  # 프로세스 딕셔너리에 추가
         
         # 2. **kwargs에 제어 플래그를 추가하여 target 함수로 전달합니다.
         kwargs['task_control'] = task_control
@@ -109,9 +111,13 @@ class ProcessManager:
         if name not in self.tasks:
             print(f"'{name}' Function is not running.")
             return
+        
+        if name in self.processes:
+            del self.processes[name]  # 프로세스 딕셔너리에 추가
 
         # 4. 실제 스레드를 종료하는 대신, '중지 플래그'를 True로 바꿉니다.
         task_control = self.tasks.get(name)
+        self.socketio.emit(f"stop_process", {'id': name})
         if task_control:
             print(f"'{name}' Function stopping.")
             task_control['stop'] = True

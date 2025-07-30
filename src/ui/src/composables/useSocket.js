@@ -1,6 +1,7 @@
 // src/composables/useSocket.js
 import { ref, readonly } from 'vue';
 import { io } from 'socket.io-client';
+import { LocalStorage } from 'quasar';
 
 const backendUrl = 'http://192.168.50.46:5000'; // 백엔드 URL을 환경 변수로 설정하거나 다른 방법으로 관리할 수 있습니다.
 
@@ -18,6 +19,7 @@ const imageData = ref(null);
 // 연결 이벤트 처리
 socket.on('connect', () => {
   console.log('Connected to server, Socket ID:', socket.id);
+  LocalStorage.set('socketId', socket.id); // 소켓 ID를 로컬 스토리지에 저장
   isConnected.value = true;
 });
 

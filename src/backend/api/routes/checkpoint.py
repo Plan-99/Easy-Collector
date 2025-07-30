@@ -12,7 +12,14 @@ CHECKPOINT_DIR = '/root/src/backend/checkpoints'
 
 @checkpoint_bp.route('/checkpoints', methods=['GET'])
 def get_checkpoints():
-    checkpoints = CheckpointModel.with_('policy', 'task').get()
+    query = request.args.get('where', None)
+    query = query.split('|') if query else []
+    checkpointsQuery = CheckpointModel.with_('policy', 'task', 'load_model')
+    for q in query:
+        qarr = q.split(',')
+        checkpointsQuery = checkpointsQuery.where(qarr[0], qarr[1], qarr[2])
+
+    checkpoints = checkpointsQuery.get()    
     checkpoints = [checkpoint.to_dict() for checkpoint in checkpoints]
     return {
         'status': 'success', 'checkpoints': checkpoints}, 200
@@ -31,12 +38,13 @@ def get_checkpoint_files(id):
 @checkpoint_bp.route('/checkpoint', methods=['POST'])
 def create_checkpoint():
     data = request.json
-    print(data)
     new_checkpoint = CheckpointModel.create(
         name=data.get('name'),
         task_id=data.get('task_id'),
         policy_id=data.get('policy_id'),
         dataset_info=data.get('dataset_info', []),
+        num_epochs=data.get('num_epochs'),
+        batch_size=data.get('batch_size'),
     )
     return {'status': 'success', 'message': 'Checkpoint Created', 'id': new_checkpoint.id}, 200
 
@@ -45,7 +53,7 @@ def create_checkpoint():
 def check_create_successed(id):
     checkpoint = CheckpointModel.find(id)
     if not checkpoint:
-        return {'status': 'error', 'message': 'Checkpoint not found'}, 404
+        return {'check_create_successed': False, 'message': 'Checkpoint creation failed'}, 200
 
     folder_path = os.path.join(CHECKPOINT_DIR, str(checkpoint.id))
     if os.path.exists(folder_path) and os.path.isdir(folder_path):
@@ -75,7 +83,6 @@ def stop_test(id):
     current_app.pm.stop_function(
         name=f"checkpoint_test_{id}",
     )
-    
     return {'status': 'success', 'message': 'Checkpoint test stopped'}, 200
 
 
@@ -105,3 +112,4 @@ def delete_checkpoint(id):
 
     checkpoint.delete()
     return {'status': 'success', 'message': 'Checkpoint Deleted'}, 200
+

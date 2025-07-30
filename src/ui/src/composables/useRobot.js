@@ -86,7 +86,7 @@ export function useRobot(robot, robotOnCallback=() => {}) {
     });
   }
 
-  function checkRobotTopic(maxSteps = 10) {
+  function checkRobotTopic(maxSteps = 20) {
     if (robotTopicChecker) {
       clearInterval(robotTopicChecker);
     }
@@ -107,6 +107,9 @@ export function useRobot(robot, robotOnCallback=() => {}) {
       steps++;
       if (steps >= maxSteps) {
         clearInterval(robotTopicChecker);
+        if (robot.status === 'on') {
+          stopRobot();
+        }
         robot.status = 'off';
       }
     }, 1000);

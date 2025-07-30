@@ -3,6 +3,9 @@ import torch
 import pickle
 import numpy as np
 import time
+import cv2
+from einops import rearrange
+from ...utils.image_parser import fetch_image_with_config
 
 from ...policies.utils import make_policy
 from ...env.env import Env
@@ -20,7 +23,7 @@ def checkpoint_test(
     
     while True:
     
-        seed = 1
+        seed = 100
         
         ckpt_dir = os.path.join("/root/src/backend/checkpoints", str(checkpoint_id))
         ckpt_name = "policy_best.ckpt"
@@ -52,9 +55,11 @@ def checkpoint_test(
             
             if temporal_agg:
                 query_frequency = 1
+            else:
+                query_frequency = policy_obj['settings']['chunk_size']
             num_queries = policy_obj['settings']['chunk_size']
             
-            max_timesteps = task['episode_len']
+            max_timesteps = task['episode_len'] * 10
             
             env = Env(robots, sensors)
             
@@ -79,16 +84,19 @@ def checkpoint_test(
                 'log': 'Robot moved to homepose',
                 'type': 'stdout '
             })
-            
         
-            
+        target_qpos = np.zeros(state_dim)
+        robot_input_raw = np.zeros(state_dim)
             
         for t in range(max_timesteps):
 
             start = time.time()
             ### process previous timestep to get qpos and image_list
-            timesteps.append(ts)
+            
+            
+            ts = env.record_step()
             obs = ts.observation
+            timesteps.append(ts)
                 
                 
             # 로봇 상태 전처리
@@ -97,6 +105,8 @@ def checkpoint_test(
                 curr_qpos_ls.append(robot_state['qpos'])
             concatenated_pos = np.concatenate(curr_qpos_ls, axis=0)
             robot_input_raw = concatenated_pos
+            # robot_input_raw = target_qpos.copy()
+            
             robot_input = pre_process(robot_input_raw)
             robot_input = torch.from_numpy(robot_input).float().cuda().unsqueeze(0)
             
@@ -104,10 +114,26 @@ def checkpoint_test(
             # 이미지 전처리
             curr_image_ls = []
             for image in obs['images'].values():
-                curr_image_ls.append(image)
+                curr_image = fetch_image_with_config(image, {
+                    'resize': task['sensor_img_size'],
+                })
+                curr_image = rearrange(curr_image, 'h w c -> c h w')
+                curr_image_ls.append(curr_image)
             curr_image = np.stack(curr_image_ls, axis=0)
-            curr_image = torch.from_numpy(curr_image / 255.0).float().cuda().unsqueeze(0).permute(0, 1, 4, 2, 3)
-            time.sleep(0.5)  # Simulate processing time
+            
+            print(curr_image.shape)
+            # if len(curr_image_ls) > 1:
+            #     # To display multiple camera images, we concatenate them horizontally.
+            #     display_image = cv2.hconcat(curr_image_ls)
+            #     print(display_image)
+            #     # OpenCV's imshow expects images in BGR format. If the colors look
+            #     # incorrect, the source image might be in RGB. In that case,
+            #     # uncomment the following line to convert it.
+            #     # display_image = cv2.cvtColor(display_image, cv2.COLOR_RGB2BGR)
+            #     cv2.imshow("Checkpoint Test Cameras", display_image)
+ 
+            # curr_image = np.zeros_like(curr_image) # For testing purposes, use zero images
+            curr_image = torch.from_numpy(curr_image / 255.0).float().cuda().unsqueeze(0)
             
             with torch.inference_mode():
                 ### query policy
@@ -136,6 +162,8 @@ def checkpoint_test(
             start_action_id = 0
             for agent in env.agents:
                 target_qpos = action[start_action_id:start_action_id + agent.joint_len]
+                print(f"To:{target_qpos} / Now:{robot_input_raw}")
+                start_action_id += agent.joint_len
                 agent.move_step(target_qpos)
                 
                 
@@ -143,11 +171,45 @@ def checkpoint_test(
                 'progress': (t+1) / max_timesteps,
                 'type': 'stdout '
             })
+
+            time.sleep(0.1)  # Simulate processing time
+
+            # cv2.waitKey(1)  # Display the image
             
-            socketio_instance.emit('log_checkpoint_test', {
-                'log': raw_action.tolist(),
-                'type': 'stdout '
-            })
+            # socketio_instance.emit('log_checkpoint_test', {
+            #     'log': f'{robot_input_raw.tolist()}',
+            #     'type': 'stdout '
+            # })
+            
+            # socketio_instance.emit('log_checkpoint_test', {
+            #     'log': f'{image[0, :5, 0]}',
+            #     'type': 'stdout '
+            # })
+            
+                        
+            # socketio_instance.emit('log_checkpoint_test', {
+            #     'log': f'{curr_image[0, 0, 0, 0, :5]}',
+            #     'type': 'stdout '
+            # })
+            
+            # socketio_instance.emit('log_checkpoint_test', {
+            #     'log': f'{robot_input.tolist()}',
+            #     'type': 'stdout '
+            # })
+            
+            # socketio_instance.emit('log_checkpoint_test', {
+            #     'log': f"표준편차: {stats['qaction_std'].tolist()}",
+            #     'type': 'stdout '
+            # })
+            # socketio_instance.emit('log_checkpoint_test', {
+            #     'log': f"평균: {stats['qaction_mean'].tolist()}",
+            #     'type': 'stdout '
+            # })
+            
+            # socketio_instance.emit('log_checkpoint_test', {
+            #     'log': f"Now: {raw_action.tolist()}",
+            #     'type': 'stdout '
+            # })
             
             if task_control['stop']:
                 socketio_instance.emit('log_checkpoint_test', {
@@ -158,7 +220,8 @@ def checkpoint_test(
             
                 
         time.sleep(3)  # Simulate processing time
-                
+        
+        cv2.destroyAllWindows()
     socketio_instance.emit('log_checkpoint_test', {
         'log': f'Stopping Checkpoint Test',
         'type': 'stdout '

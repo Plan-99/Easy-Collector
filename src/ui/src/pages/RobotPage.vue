@@ -26,12 +26,12 @@
                                         <q-icon name="gamepad" size="xs" />
                                     </q-item-section>
                                 </q-item>
-                                <q-item clickable v-ripple class="text-negative" @click="deleteRobot(robot)">
+                                <!-- <q-item clickable v-ripple class="text-negative" @click="deleteRobot(robot)">
                                     <q-item-section>Delete Robot</q-item-section>
                                     <q-item-section side>
                                         <q-icon color="negative" name="delete" size="xs" />
                                     </q-item-section>
-                                </q-item>
+                                </q-item> -->
                             </q-list>
                         </q-menu>
                     </q-img>
@@ -80,21 +80,9 @@
                         </div>
                     </div>
                     <div class="col-8">
-                        <div style="height: 30px" class="row">
-                            <div 
-                                class="bg-dark col text-white text-center" 
-                                v-for="robot in robots.filter((e) => e.status !== 'off')"
-                                :key="robot.id"
-                                :style="robot.id !== watchingRobot.id ? 'border: 1px solid #ffffff' : ''"
-                                :class="robot.id !== watchingRobot.id ? 'cursor-pointer': ''"
-                                @click="watchRobot(robot)"
-                            >{{ robot.name }}</div>
-                        </div>
                         <process-console 
                             :process="robot.process_id" 
-                            v-for="robot in robots.filter((e) => e.status !== 'off')"
                             :key="robot.id"
-                            v-show="robot.id === watchingRobot.id"
                         />
                     </div>
                     <div class="col">
@@ -312,18 +300,18 @@ function saveRobot() {
     }
 }
 
-function deleteRobot(robot) {
-    if (robot.status === 'on') {
-        Notify.create({
-            color: 'negative',
-            message: 'Turn off the robot first.'
-        })
-        return;
-    }
-    return api.delete(`/robot/${robot.id}`).then(() => {
-        initialize()
-    })
-}
+// function deleteRobot(robot) {
+//     if (robot.status === 'on') {
+//         Notify.create({
+//             color: 'negative',
+//             message: 'Turn off the robot first.'
+//         })
+//         return;
+//     }
+//     return api.delete(`/robot/${robot.id}`).then(() => {
+//         initialize()
+//     })
+// }
 
 function toggleRobot(robot) {
     if (robot.status === 'on') {

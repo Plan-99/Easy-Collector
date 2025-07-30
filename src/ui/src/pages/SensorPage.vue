@@ -20,12 +20,12 @@
                                         <q-icon name="edit" size="xs" />
                                     </q-item-section>
                                 </q-item>
-                                <q-item clickable v-ripple class="text-negative" @click="deleteSensor(sensor)">
+                                <!-- <q-item clickable v-ripple class="text-negative" @click="deleteSensor(sensor)">
                                     <q-item-section>Delete Sensor</q-item-section>
                                     <q-item-section side>
                                         <q-icon color="negative" name="delete" size="xs" />
                                     </q-item-section>
-                                </q-item>
+                                </q-item> -->
                             </q-list>
                         </q-menu>
                     </q-img>
@@ -58,19 +58,18 @@
             @update:model-value="watchSensor($event)"
         >
             <template v-for="sensor in sensors.filter((e) => e.status !== 'off')" :key="sensor.id" v-slot:[sensor.id]>
-                <div class="q-pa-md row q-gutter-x-md" v-if="watchingSensor && watchingSensor.id === sensor.id">
+                <div class="q-pa-md row q-gutter-x-md">
                     <web-rtc-video
                         :process-id="`sensor_${sensor.id}`"
                         :topic="sensor.topic"
                         ref="sensorVideo"
                         style="height: 330px;"
+                        :loading="sensor.status !== 'on'"
                     ></web-rtc-video>
                     <div class="col">
                         <process-console 
                             :process="sensor.process_id" 
-                            v-for="sensor in sensors.filter((e) => e.status !== 'off')"
                             :key="sensor.id"
-                            v-show="sensor.id === watchingSensor.id"
                         />
                     </div>
                 </div>
@@ -178,18 +177,18 @@ function saveSensor() {
     }
 }
 
-function deleteSensor(sensor) {
-    if (sensor.status === 'on') {
-        Notify.create({
-            color: 'negative',
-            message: 'Turn off the sensor first.'
-        })
-        return;
-    }
-    return api.delete(`/sensor/${sensor.id}`).then(() => {
-        listSensors()
-    })
-}
+// function deleteSensor(sensor) {
+//     if (sensor.status === 'on') {
+//         Notify.create({
+//             color: 'negative',
+//             message: 'Turn off the sensor first.'
+//         })
+//         return;
+//     }
+//     return api.delete(`/sensor/${sensor.id}`).then(() => {
+//         listSensors()
+//     })
+// }
 
 function toggleSensor(sensor) {
     if (sensor.status === 'on') {
