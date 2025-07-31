@@ -60,6 +60,8 @@ def start_leader_teleoperation():
 
     preset = LeaderRobotPresetModel.where('robot_id', robot_id).first()
 
+    current_app.pm.stop_process(name='start_leader_robot')
+
     if not preset:
         return {'status': 'error', 'message': 'Leader robot preset not found'}, 404
 

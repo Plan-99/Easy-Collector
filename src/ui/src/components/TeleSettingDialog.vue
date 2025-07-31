@@ -267,8 +267,8 @@ onMounted(() => {
                 gripperDxlId = Math.max(...msg.ids);
                 gripperDxlIdIndex = msg.ids.indexOf(gripperDxlId);
                 if (leaderSettingStep.value === 1) {
-                    leaderSettingForm.value.dxl_ids = msg.ids;
-                    leaderSettingForm.value.origin = msg.values;
+                    leaderSettingForm.value.dxl_ids = [...msg.ids];
+                    leaderSettingForm.value.origin = [...msg.values];
                 }
                 if (!gripperDxlRangeSaved.value[0]) {
                     leaderSettingForm.value.gripper_dxl_range[0] = msg.values[gripperDxlIdIndex];

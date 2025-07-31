@@ -12,7 +12,10 @@ const processStore = useProcessStore();
 function cleanup() {
   processStore.processIds.forEach((processId) => {
     if (processId.includes('read_hdf5')) {
-        api.post('/stop_process', { name: processId })
+      api.post('/stop_process', { name: processId })
+    }
+    if (processId.includes('leader_teleoperation')) {
+      api.post('/stop_process', { name: processId })
     }
   });
 }

@@ -68,9 +68,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*
 
-# tmux 설치
-Run apt-get update & apt-get install tmux \
-    nano \
+# # tmux 설치
+# Run apt-get update & apt-get install tmux \
+#     nano \
 
 # # rosdep 초기화
 # # ROS 패키지의 시스템 의존성을 관리하는 도구입니다.

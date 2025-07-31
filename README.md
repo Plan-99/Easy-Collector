@@ -24,14 +24,45 @@ docker exec -it easy_collector_container /bin/bash
 exit
 ```
 
+
 ### 서버 시작
 ```
 cd ~/src
 python3 -m backend.api.app
 ```
 
+
 ### 인터페이스 시작
 ```
 cd ~/src/ui
 npm run dev
 ```
+
+
+## For User
+### 터미널1을 켜고 (roscore)
+```
+bash ./run.sh
+```
+```
+roscore
+```
+
+### 터미널2를 켜고 (backend)
+```
+docker exec -it easy_collector_container /bin/bash
+```
+```
+cd ~/src
+python3 -m backend.api.app
+```
+
+### 터미널3을 켜고 (ui)
+```
+docker exec -it easy_collector_container /bin/bash
+```
+cd ~/src/ui
+npm run dev
+```
+
+

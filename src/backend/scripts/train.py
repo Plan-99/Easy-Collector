@@ -50,7 +50,6 @@ def train(
     # Create policy model
 
     policy = make_policy(ckpt_dir, seed, learning_rate, lr_backbone, policy_obj, task, robot, sensors, gripper)
-
     if load_model_path is not None:
         model_path = os.path.join(load_model_path, 'policy_best.ckpt')
         loading_status = policy.load_state_dict(torch.load(model_path))
@@ -200,6 +199,7 @@ def main(args):
         
     except Exception as e:
         Checkpoint.find(args.checkpoint_id).delete()
+        raise e
         
     finally:
         # Clean up the temporary directory
