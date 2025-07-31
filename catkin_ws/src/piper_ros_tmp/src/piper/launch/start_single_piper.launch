@@ -1,0 +1,19 @@
+<launch>
+  <arg name="can_port" default="can0" />
+  <arg name="auto_enable" default="true" />
+  <arg name="gripper_val_mutiple" default="1" />
+  <arg name="group_ns" default="piper" /> 
+  <!-- <include file="$(find piper_description)/launch/display_xacro.launch"/> -->
+  <!-- 启动机械臂节点 -->
+  <group ns="$(arg group_ns)">
+    <node name="piper_ctrl_single_node" pkg="piper" type="piper_ctrl_single_node.py" output="screen">
+      <env name="PYTHONUNBUFFERED" value="1" />
+      <param name="can_port" value="$(arg can_port)" />
+      <param name="auto_enable" value="$(arg auto_enable)" />
+      <param name="gripper_val_mutiple" value="$(arg gripper_val_mutiple)" />
+      <!-- <param name="rviz_ctrl_flag" value="true" /> -->
+      <param name="girpper_exist" value="true" />
+      <remap from="joint_ctrl_single" to="joint_states" />
+    </node>
+  </group>
+</launch>

@@ -1,3 +1,0 @@
-[submodule "catkin_ws/src/piper_ros"]
-    path = catkin_ws/src/piper_ros
-    url = https://github.com/agilexrobotics/piper_ros.git
