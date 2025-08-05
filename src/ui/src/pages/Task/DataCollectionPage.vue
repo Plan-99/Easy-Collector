@@ -415,6 +415,7 @@
             v-model="showAugmentationForm"
             :dataset="augmentingDataset"
             :task-id="taskId"
+            @hide="watchingFile = null;"
         />
     </div>
 </template>

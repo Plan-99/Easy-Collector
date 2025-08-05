@@ -44,7 +44,6 @@ function stopReadingHdf5(path) {
 }
 
 watch(() => props.path, (newVal, oldVal) => {
-    console.log('Model changed:', newVal, oldVal);
     if (newVal) {
         startReadingHdf5(newVal);
     }

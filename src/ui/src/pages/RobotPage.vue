@@ -396,7 +396,9 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-    watchingRobot.value.handler.unSubscribeRobot();
+    if (watchingRobot.value) {
+        watchingRobot.value.handler.unSubscribeRobot();
+    }
 });
 
 </script>
