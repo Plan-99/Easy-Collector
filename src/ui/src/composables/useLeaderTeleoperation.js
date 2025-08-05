@@ -7,12 +7,25 @@ export function useLeaderTeleoperation() {
   const $q = useQuasar();
   const leaderTeleStarted = ref(false);
 
-  function startLeaderTele(robotId, logEmitId = null) {
-    const payload = { robot_id: robotId };
-    if (logEmitId) {
-      payload.log_emit_id = logEmitId;
-    }
-    api.post('/leader_robot:tele_start', payload)
+  function startLeaderTele(robot, preset, logEmitId = null) {
+    // if (logEmitId) {
+    //   payload.log_emit_id = logEmitId;
+    // }
+    console.log('Starting leader teleoperation for robot:', robot, 'with preset:', preset, 'and logEmitId:', logEmitId);
+    api.post('/leader_robot:tele_start', {
+      robot: robot,
+      preset: preset,
+      log_emit_id: logEmitId
+    })
+      .then(() => {
+        leaderTeleStarted.value = true;
+        $q.notify({
+          color: 'positive',
+          position: 'top',
+          message: 'Leader teleoperation started successfully',
+          icon: 'check_circle'
+        });
+    })
       .catch((error) => {
         console.error('Error starting leader teleoperation:', error);
         $q.notify({
@@ -24,12 +37,8 @@ export function useLeaderTeleoperation() {
       });
   }
 
-  function stopLeaderTele(robotId, logEmitId = null) {
-    const payload = { robot_id: robotId };
-    if (logEmitId) {
-      payload.log_emit_id = logEmitId;
-    }
-    api.post('/leader_robot:tele_stop', payload)
+  function stopLeaderTele() {
+    api.post('/leader_robot:tele_stop')
       .catch((error) => {
         console.error('Error stopping leader teleoperation:', error);
         $q.notify({

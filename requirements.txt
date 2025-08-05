@@ -26,6 +26,7 @@ dynamixel_sdk
 piper_sdk
 pyusb
 orator
+python-can
 
 # # diffusion policy
 # dill

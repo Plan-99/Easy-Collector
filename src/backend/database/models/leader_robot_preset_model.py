@@ -9,7 +9,8 @@ class LeaderRobotPreset(Model, SoftDeletes):
         'origin',
         'gripper_dxl_range',
         'dxl_ids',
-        'sign_corrector'
+        'sign_corrector',
+        'port_name'
     ]
 
     __casts__ = {

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
-import eventlet
-eventlet.monkey_patch()  # eventlet를 사용하기 위해 필요한 패치
+# import eventlet
+# eventlet.monkey_patch()  # eventlet를 사용하기 위해 필요한 패치
+# from eventlet import tpool
 
 from flask import Flask, request
 from flask_socketio import SocketIO, emit
@@ -17,7 +18,8 @@ from .routes.dataset import dataset_bp
 from .routes.policy import policy_bp
 from .routes.checkpoint import checkpoint_bp
 
-import rospy
+import rclpy
+from rclpy.node import Node
 
 import usb.core
 import usb.util
@@ -26,6 +28,8 @@ from orator import DatabaseManager, Model
 
 import os
 import argparse
+
+import threading
 
 argparse = argparse.ArgumentParser(description='Easy Collector Web API')
 argparse.add_argument('--debug', action='store_true', help='Enable debug mode')
@@ -37,9 +41,12 @@ debug = args.debug
 app = Flask(__name__)
 CORS(app)
 app.config['SECRET_KEY'] = 'mysecretkey!' # 실제 운영 환경에서는 더 복잡한 키 사용
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 pm = ProcessManager(socketio, debug=debug)  # 프로세스 관리 객체 생성
+
+rclpy.init(args=None)
+node = Node("web_api_node")
 
 app.register_blueprint(sensor_bp, url_prefix='/api')
 app.register_blueprint(robot_bp, url_prefix='/api')
@@ -48,7 +55,6 @@ app.register_blueprint(task_bp, url_prefix='/api')
 app.register_blueprint(dataset_bp, url_prefix='/api')
 app.register_blueprint(policy_bp, url_prefix='/api')
 app.register_blueprint(checkpoint_bp, url_prefix='/api')
-app.pm = pm
 
 socketio.on_namespace(SensorNamespace('/sensor', pm))
 socketio.on_namespace(RobotNamespace('/robot', pm))
@@ -71,9 +77,6 @@ Model.set_connection_resolver(db)
 
 pcs = set()
 
-rospy.init_node("web_api_node", anonymous=True)
-
-
 pm.start_process(
     'streaming',
     ['python3', '-m', 'backend.api.streaming']
@@ -81,7 +84,7 @@ pm.start_process(
 
 pm.start_process(
     'rosbridge_websocket',
-    ['roslaunch', 'rosbridge_server', 'rosbridge_websocket.launch', 'port:=9090']
+    ['ros2', 'launch', 'rosbridge_server', 'rosbridge_websocket_launch.xml', 'port:=9090']
 )
 
 @app.route('/api/processes', methods=['GET'])
@@ -116,8 +119,8 @@ def list_devices():
 
 @app.route('/api/topics', methods=['GET'])
 def list_topics():
-    topics = rospy.get_published_topics()
-    topic_list = [{'name': topic[0], 'type': topic[1]} for topic in topics]
+    topics = node.get_topic_names_and_types()
+    topic_list = [{'name': topic[0], 'type': topic[1][0]} for topic in topics]
     
     return {
         'status': 'success',
@@ -158,7 +161,6 @@ def handle_disconnect():
     print('Client disconnected')
 
 
-# @app.route('/api/offer', methods=['POST'])
 @socketio.on('offer')
 def handle_offer_event(sid, data):
     # data = request.json
@@ -167,16 +169,30 @@ def handle_offer_event(sid, data):
     # return await sm.offer(data)
 
 
-# @socketio.on('ice_candidate')
-# async def handle_ice_event(data):
-#     """클라이언트의 ice_candidate를 처리 (올바른 방식)"""
-#     if data:
-#         await sm.handle_ice_candidate(request.sid, data)
-
-
-# 서버 실행
-if __name__ == '__main__':
-    # Flask 앱을 직접 실행하는 대신, socketio.run()을 사용해야 합니다.
-    # host='0.0.0.0'은 외부에서도 접속 가능하도록 설정합니다.
+def main():
+    app.node = node  # Flask 앱에 ROS 노드 할당
+    app.pm = pm  # Flask 앱에 프로세스 관리 객체 할당
     
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True, use_reloader=False)
+    try:
+        # 3. 메인 스레드에서 웹 서버 실행
+        print("Starting Flask-SocketIO server...")
+        # rclpy.spin을 별도의 스레드에서 실행
+        executor_thread = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
+        executor_thread.start()
+        # 이 함수는 서버가 종료(예: Ctrl+C)될 때까지 여기서 멈춥니다.
+        socketio.run(app, host='0.0.0.0', port=5000, debug=True, use_reloader=False)
+
+    finally:
+        import subprocess
+        print("\nServer is shutting down. Executing kill script...")
+        result = subprocess.run(
+            ['/bin/bash', '/root/src/kill.sh'], 
+            check=True,
+            capture_output=True, # 스크립트의 출력을 캡처합니다.
+            text=True            # 출력을 텍스트(문자열)로 다룹니다.
+        )
+        print("kill.sh script executed successfully.")
+        print(f"Script output:\n{result.stdout}")
+
+if __name__ == '__main__':
+    main()

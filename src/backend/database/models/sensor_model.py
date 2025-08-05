@@ -48,7 +48,7 @@ class Sensor(Model, SoftDeletes):
     @accessor
     def topic(self):
         if self.type == 'realsense_camera':
-            return f'/ec_sensor_{self.id}/color/image_raw/compressed'
+            return f'/ec_sensor_{self.id}/camera/color/image_raw/compressed'
         
         return None
     

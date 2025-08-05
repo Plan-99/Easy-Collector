@@ -1,6 +1,7 @@
 # #!/usr/bin/env python
 
-import rospy
+import rclpy
+from rclpy.node import Node
 import math
 from std_msgs.msg import Float64
 import dynamixel_sdk as dxl  # 다이나믹셀 SDK 사용
@@ -26,10 +27,11 @@ from ..database.models.leader_robot_preset_model import LeaderRobotPreset as Lea
 from ..env.agent import Agent
 from ..env.dxl_controller import DxlController
 
-class Leader():
+class Leader(Node):
     def __init__(self, robot, leader_robot_preset, gripper=None) -> None:
         # ROS 노드 초기화ur5e/ur5e_scaled_pos_joint_traj_controller/command
-        rospy.init_node('dynamixel_publisher_2', anonymous=False)
+        super().__init__('dynamixel_publisher_2')
+        
         
         self.origin = leader_robot_preset.origin  # 다이나믹셀의 원점 위치
         self.gripper_dxl_range = leader_robot_preset.gripper_dxl_range  # 다이나믹셀의 원점 위치
@@ -37,10 +39,9 @@ class Leader():
         self.dxl_ids = leader_robot_preset.dxl_ids  # 다이나믹셀 ID
         
         self.address = 132  # 다이나믹셀의 현재 위치 주소 (주소 132번은 현재 위치)
-        self.rate = rospy.Rate(10)  # 10Hz로 퍼블리시
+        self.rate = self.create_rate(10)  # 10Hz로 퍼블리시
         self.p_gain = 1
         self.is_synced = False
-        # self.gripper_publisher = rospy.Publisher('gripper/cmd', GripperCmd, queue_size=1)
         
         self.gripper_config = gripper
         
@@ -111,7 +112,7 @@ class Leader():
 
     def position_pub(self):
         target_pos = [0] * 7
-        while not rospy.is_shutdown():
+        while rclpy.ok():
             if not self.is_synced:
                 continue
             for index, dxl_id in enumerate(self.dxl_ids[:-1]):
@@ -126,8 +127,6 @@ class Leader():
                 
             self.agent.move_step(target_pos)
             self.rate.sleep()
-
-            # rospy.loginfo(f"[0] {self.rad_pos[0]} [1] {self.rad_pos[1]} [2] {self.rad_pos[2]} [3] {self.rad_pos[3]} [4] {self.rad_pos[4]} [5] {self.rad_pos[5]}")
 
         
         self.dxl_controller.portHandler.closePort()
@@ -155,10 +154,15 @@ def main(args):
     gripper = GripperModel.args['gripper_id'] if 'gripper_id' in args else None
 
     try:
-        Leader(robot, leader_robot_preset , gripper)
+        rclpy.init(args=None)
+        leader = Leader(robot, leader_robot_preset , gripper)
+        rclpy.spin(leader)
 
-    except rospy.ROSInterruptException:
+    except KeyboardInterrupt:
         pass
+    finally:
+        leader.destroy_node()
+        rclpy.shutdown()
 
 
 if __name__ == '__main__':

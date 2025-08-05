@@ -5,8 +5,6 @@ import torch
 from torch.nn import functional as F
 import numpy as np
 
-import matplotlib.pyplot as plt
-
 class FusionModel(nn.Module):
     def __init__(self, ratio=0.6):
         super(FusionModel, self).__init__()

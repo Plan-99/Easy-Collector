@@ -63,7 +63,7 @@ class Robot(Model, SoftDeletes):
     def joint_names(self):
         type = self.get_raw_attribute('type')
         if type == 'piper':
-            return ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7"]
+            return ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"]
 
         return self.settings['joint_names']
     

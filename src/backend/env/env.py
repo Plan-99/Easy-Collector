@@ -2,20 +2,21 @@ import collections
 import dm_env
 import time
 from ..env.agent import Agent
-import rospy
+import rclpy
+from rclpy.node import Node
 from sensor_msgs.msg import Image, CompressedImage
 from ..utils.image_parser import ros_image_to_numpy
 
 class Env:
-    def __init__(self, robots, sensors):
+    def __init__(self, node, robots, sensors):
         self.sensors = sensors
         self.agents = []
-        for robot in robots:
-            self.agents.append(Agent(robot))
+        self.node = node
+        self.agents = [Agent(node, robot) for robot in robots]
 
         for sensor in sensors:
             setattr(self, f'sensor_{sensor["id"]}', None)
-            rospy.Subscriber(sensor['topic'], CompressedImage, self.image_raw_cb, callback_args=sensor['id'])
+            node.create_subscription(CompressedImage, sensor['topic'], lambda msg, sid=sensor['id']: self.image_raw_cb(msg, sid), 10)
 
     def image_raw_cb(self, data, sensor_id):
         image = ros_image_to_numpy(data)
@@ -52,7 +53,6 @@ class Env:
         for sensor in self.sensors:
             image = getattr(self, f"sensor_{sensor['id']}")
             while image is None:
-                rospy.loginfo(f"Waiting for image from sensor_{sensor['id']}")
                 time.sleep(0.1)
                 image = getattr(self, f"sensor_{sensor['id']}")
             image_dict[f"sensor_{sensor['id']}"] = image

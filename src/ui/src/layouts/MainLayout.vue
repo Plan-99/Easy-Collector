@@ -12,7 +12,7 @@
         />
 
         <q-toolbar-title>
-          Easy Collector
+          Vertical Labs
         </q-toolbar-title>
       </q-toolbar>
     </q-header>

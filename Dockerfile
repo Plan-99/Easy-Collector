@@ -1,89 +1,72 @@
 # ===================================================================
-# ROS Noetic (Desktop-Full) on Ubuntu 20.04 Dockerfile
+# ROS 2 Humble (Desktop-Full) on Ubuntu 22.04 Dockerfile
 # ===================================================================
 
 # 베이스 이미지 설정
-# ROS Noetic은 Ubuntu 20.04 (Focal)을 공식 지원합니다.
-FROM ubuntu:20.04
+FROM ubuntu:22.04
 
 # 빌드 중 대화형 프롬프트 방지 및 환경 변수 설정
-# apt-get 설치 시 timezone 이나 키보드 레이아웃 등을 묻는 것을 방지합니다.
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Asia/Seoul
 
-# ROS 설치를 위한 준비 작업
+# ROS 설치를 위한 준비 작업 및 필수 패키지 설치
 RUN apt-get update && apt-get install -y --no-install-recommends \
     apt-utils \
     curl \
-    gnupg2 \
+    gnupg \
     lsb-release \
-    # ROS 설치 후 정리할 때 필요한 패키지
-    && apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*
-
-# ROS 저장소(Repository) 추가 및 GPG 키 설정 (인증서 문제 해결)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates && \
-    update-ca-certificates && \
-    curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | gpg --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg && \
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros/ubuntu $(lsb_release -sc) main" | tee /etc/apt/sources.list.d/ros-latest.list > /dev/null
-
-# Intel RealSense SDK 설치에 필요한 패키지 추가
-RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
     software-properties-common \
-    apt-transport-https && \
-    rm -rf /var/lib/apt/lists/*
+    apt-transport-https \
+    && rm -rf /var/lib/apt/lists/*
 
-# Intel RealSense 저장소 및 GPG 키 등록
-RUN apt-key adv --keyserver keyserver.ubuntu.com --recv-key F6E65AC044F831AC80A06380C8B3A55A6F3EFCDE || \
-    apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-key F6E65AC044F831AC80A06380C8B3A55A6F3EFCDE && \
-    add-apt-repository "deb https://librealsense.intel.com/Debian/apt-repo $(lsb_release -cs) main" -u
+# ROS 2 저장소(Repository) 추가 및 GPG 키 설정
+RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | gpg --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(lsb_release -sc) main" | tee /etc/apt/sources.list.d/ros2-latest.list > /dev/null
+
+# Intel RealSense 저장소 및 GPG 키 등록 (수정된 방식)
+# 기존 키 파일 URL이 더 이상 유효하지 않으므로, 키 서버에서 ID로 직접 키를 받아옵니다.
+RUN curl -sSL "http://keyserver.ubuntu.com/pks/lookup?op=get&search=0xF6E65AC044F831AC80A06380C8B3A55A6F3EFCDE" | gpg --dearmor -o /usr/share/keyrings/intel-librealsense.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/intel-librealsense.gpg] https://librealsense.intel.com/Debian/apt-repo $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/librealsense.list > /dev/null
 
 # librealsense2-sdk 와 개발용 헤더 파일 설치
-# -dev 패키지는 realsense-ros 패키지를 빌드할 때 필요합니다.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    librealsense2-dkms \
     librealsense2-utils \
     librealsense2-dev \
-    librealsense2-dbg && \
-    rm -rf /var/lib/apt/lists/*
+    librealsense2-dbg \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN apt-get update && apt-get install -y --no-install-recommends ethtool can-utils iproute2
+# 네트워크 관련 도구 설치
+RUN apt-get update && apt-get install -y --no-install-recommends ethtool can-utils iproute2 && rm -rf /var/lib/apt/lists/*
 
-# ROS Noetic (Desktop-Full) 설치
+# ROS 2 Humble (Desktop-Full) 및 관련 패키지 설치
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ros-noetic-desktop-full \
-    ros-noetic-realsense2-camera \
-    ros-noetic-realsense2-description \
-    python3-rosdep ros-noetic-ruckig ros-noetic-eigen-stl-containers ros-noetic-geometric-shapes ros-noetic-pybind11-catkin \
-    ros-noetic-moveit-resources-panda-moveit-config ros-noetic-ompl ros-noetic-warehouse-ros ros-noetic-eigenpy ros-noetic-rosparam-shortcuts \
-    ros-noetic-moveit-msgs ros-noetic-srdfdom ros-noetic-rosbridge-server \
-    # 파이썬3 관련 필수 도구 설치
+    ros-humble-desktop-full \
+    ros-humble-realsense2-camera \
+    ros-humble-realsense2-description \
+    ros-humble-ruckig \
+    ros-humble-eigen-stl-containers \
+    ros-humble-geometric-shapes \
+    ros-humble-pybind11-vendor \
+    ros-humble-moveit-resources-panda-moveit-config \
+    ros-humble-ompl \
+    ros-humble-warehouse-ros \
+    ros-humble-eigenpy \
+    ros-humble-moveit-msgs \
+    ros-humble-srdfdom \
+    ros-humble-rosbridge-server \
+    ros-humble-ros2-control \
+    ros-humble-ros2-controllers \
+    ros-humble-controller-manager \
     python3-pip \
     python3-rosdep \
-    python3-rosinstall \
-    python3-rosinstall-generator \
-    python3-wstool \
-    python3-tk \
-    python3-catkin-tools \
+    python3-colcon-common-extensions \
     build-essential \
     && apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*
 
-# # tmux 설치
-# Run apt-get update & apt-get install tmux \
-#     nano \
-
-# # rosdep 초기화
-# # ROS 패키지의 시스템 의존성을 관리하는 도구입니다.
-# RUN rosdep init && \
-#     rosdep update && \
-#     rosdep install --from-paths src --ignore-src -r -y
-
-
-# ROS 환경 설정
-# 컨테이너의 bash 쉘이 시작될 때마다 ROS 환경을 자동으로 source 합니다.
-RUN echo "source /opt/ros/noetic/setup.bash" >> ~/.bashrc
-RUN echo "source ~/catkin_ws/devel/setup.bash" >> ~/.bashrc
-
+# ROS 2 환경 설정
+RUN echo "source /opt/ros/humble/setup.bash" >> /etc/bash.bashrc
+RUN echo "source /root/ros2_ws/install/setup.bash" >> /etc/bash.bashrc
 
 # NodeSource 저장소 설정 (Node.js 20 설치용)
 RUN mkdir -p /etc/apt/keyrings && \
@@ -91,66 +74,19 @@ RUN mkdir -p /etc/apt/keyrings && \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list
 
 # Node.js 설치 (npm도 함께 설치됨)
-RUN apt-get update && apt-get install nodejs -y
+RUN apt-get update && apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*
 
-# GUI 관련
-RUN apt-get update && apt-get install -y \
+# GUI 관련 라이브러리
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1-mesa-glx \
     libglib2.0-0 \
     libxext6 \
-    libx11-6
+    libx11-6 \
+    && rm -rf /var/lib/apt/lists/*
 
-# # (선택) Catkin 작업 공간(Workspace) 생성
-# WORKDIR /root/catkin_ws
-# RUN mkdir src
-# RUN /bin/bash -c "source /opt/ros/noetic/setup.bash; catkin_init_workspace"
-
-# # pyenv 빌드에 필요한 의존성 패키지 설치
-# RUN apt-get update && apt-get install -y \
-#     libosmesa6-dev \
-#     libgl1-mesa-glx \ 
-#     libglfw3 \
-#     patchelf \
-#     librealsense2-dev \
-#     libspnav-dev \
-#     spacenavd \
-#     make \
-#     build-essential \
-#     libssl-dev \
-#     zlib1g-dev \
-#     libbz2-dev \
-#     libreadline-dev \
-#     libsqlite3-dev \
-#     wget \
-#     curl \
-#     llvm \
-#     libncurses5-dev \
-#     libncursesw5-dev \
-#     xz-utils \
-#     tk-dev \
-#     libffi-dev \
-#     liblzma-dev \
-#     python3-openssl \
-#     git
-# RUN useradd -ms /bin/bash appuser
-# USER appuser
-# WORKDIR /home/appuser
-
-# # pyenv 설치 스크립트 실행
-# RUN curl https://pyenv.run | bash
-# # ENV 명령어로 pyenv 경로와 PATH를 영구적으로 설정
-# ENV PYENV_ROOT="/home/appuser/.pyenv"
-# ENV PATH="$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH"
-
-# # 5. pyenv를 사용하여 원하는 Python 버전 설치
-# # -s 옵션은 에러 로그를 생략하여 깔끔하게 보여줌
-# RUN pyenv install 3.9.18 && \
-#     pyenv global 3.9.18
-
-
+# pip 패키지 설치
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # 컨테이너 시작 시 실행할 기본 명령어 설정
-# 컨테이너가 실행되면 bash 쉘을 시작합니다.
 CMD ["/bin/bash"]

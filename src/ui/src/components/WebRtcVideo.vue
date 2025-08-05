@@ -9,7 +9,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue';
+import { ref, watch, onMounted } from 'vue';
 import { useWebRTC } from '../composables/useWebRTC';
 import { useSocket } from '../composables/useSocket';
 
@@ -64,6 +64,12 @@ watch(() => props.resize, (newResize, oldResize) => {
   addConfig(stream_id, {
     resize: newResize.length ? newResize : null,
   });
+});
+
+onMounted(() => {
+  if (props.loading) {
+    console.log('Component mounted, waiting for loading to finish');
+  }
 });
 
 

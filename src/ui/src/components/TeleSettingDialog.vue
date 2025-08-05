@@ -27,7 +27,7 @@
                                     <q-select
                                         label="Serial Port"
                                         :options="['/dev/ttyUSB0', '/dev/ttyUSB1']"
-                                        v-model="leaderPort"
+                                        v-model="leaderSettingForm.port_name"
                                         dense
                                         outlined
                                     ></q-select>
@@ -135,7 +135,7 @@
                                         <q-btn
                                             color="primary"
                                             label="Start Teleoperation"
-                                            @click="startLeaderTele(robot.id, 'log_start_leader_robot')"
+                                            @click="startLeaderTele(robot, leaderSettingForm, 'log_start_leader_robot')"
                                             class="full-width q-mt-md"
                                             outline
                                             v-if="!leaderTeleStarted"
@@ -143,7 +143,7 @@
                                         <q-btn
                                             color="orange-8"
                                             label="Stop Teleoperation"
-                                            @click="stopLeaderTele(robot.id, 'log_start_leader_robot')"
+                                            @click="stopLeaderTele()"
                                             class="full-width q-mt-md"
                                             outline
                                             v-else
@@ -207,19 +207,19 @@ const { leaderTeleStarted, startLeaderTele, stopLeaderTele } = useLeaderTeleoper
 
 const teleSettingTab = ref('leader');
 const leaderSettingStep = ref(1);
-const leaderPort = ref('/dev/ttyUSB0');
 const leaderRobotStarted = ref(false);
 // const robotId = ref(props.robot.id);
 const leaderSettingForm = ref(props.robot.leader_robot_preset || {
     gripper_dxl_range: [0, 0],
     sign_corrector: [1, 1, 1, 1, 1, 1, 1],
+    port_name: '/dev/ttyUSB0',
 });
 const gripperDxlRangeSaved = ref([false, false]);
 
 
 function startLeaderRobot() {
     api.post('/leader_robot:start', {
-        serial_port: leaderPort.value
+        serial_port: leaderSettingForm.value.port_name
     })
 }
 
@@ -264,6 +264,7 @@ onMounted(() => {
             let gripperDxlId;
             let gripperDxlIdIndex;
             createSubscriber('/dynamixel/data', 'dynamixel_ros/DynamixelData', (msg) => {
+                console.log('Dynamixel Data:', msg);
                 gripperDxlId = Math.max(...msg.ids);
                 gripperDxlIdIndex = msg.ids.indexOf(gripperDxlId);
                 if (leaderSettingStep.value === 1) {
@@ -271,7 +272,7 @@ onMounted(() => {
                     leaderSettingForm.value.origin = [...msg.values];
                 }
                 if (!gripperDxlRangeSaved.value[0]) {
-                    leaderSettingForm.value.gripper_dxl_range[0] = msg.values[gripperDxlIdIndex];
+                    leaderSettingForm.value.gripper_dxl_range[0] = Number(msg.values[gripperDxlIdIndex]);
                 } else if (!gripperDxlRangeSaved.value[1]) {
                     leaderSettingForm.value.gripper_dxl_range[1] = msg.values[gripperDxlIdIndex];
                 }
@@ -294,7 +295,7 @@ onMounted(() => {
 
 onUnmounted(() => {
     stopLeaderRobot();
-    stopLeaderTele(props.robot.id);
+    stopLeaderTele();
     socket.off('leader_robot_started');
     socket.off('leader_robot_stopped');
 });

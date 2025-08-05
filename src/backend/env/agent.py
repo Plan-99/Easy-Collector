@@ -1,15 +1,14 @@
 from sensor_msgs.msg import JointState
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
-import rospy
+import rclpy
+from rclpy.node import Node
 import threading
 from collections import deque
 import time
 
-import roslib.message
-
-class Agent():
-    def __init__(self, robot, gripper=None):
+class Agent:
+    def __init__(self, node: Node, robot, gripper=None):
         self.id = robot['id']
         self.leader_robot_preset = robot.get('leader_robot_preset', None)    
         self.js_mutex = threading.Lock()
@@ -17,26 +16,28 @@ class Agent():
         self.joint_actions = None
         self.robot_type = robot['type']
         self.joint_len = len(robot['joint_names'])
+        self.joint_names = robot['joint_names']
         
         if gripper is None:
             self.gripper_range = robot['gripper_range']
 
-        read_topic_cls = roslib.message.get_message_class(robot['read_topic_msg'])
-        write_topic_cls = roslib.message.get_message_class(robot['write_topic_msg'])
-        
-        rospy.Subscriber(robot['read_topic'], read_topic_cls, self.joint_state_cb)
-        rospy.Subscriber(robot['write_topic'], write_topic_cls, self.joint_action_cb)
-        self.move_robot_pub = rospy.Publisher(robot['write_topic'], JointState, queue_size=10)
+        node.create_subscription(JointState, robot['read_topic'], self.joint_state_cb, 10)
+        node.create_subscription(JointState, robot['write_topic'], self.joint_action_cb, 10)
+        self.move_robot_pub = node.create_publisher(JointState, robot['write_topic'], 10)
         time.sleep(0.1)  # Wait for subscriber to be ready
             
         
     def move_step(self, action):
+        action = [float(a) for a in action]
         if self.robot_type == 'ur5e':
             pass
             # self.move_step_ur5(action)
         else:
             js = JointState()
+            js.name = self.joint_names
             js.position = action
+            js.velocity = [0.0] * self.joint_len
+            js.velocity[-1] = 100
             self.move_robot_pub.publish(js)
             
         

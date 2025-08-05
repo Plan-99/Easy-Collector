@@ -4,8 +4,8 @@ import torchvision.transforms as transforms
 
 from .act.main import build_ACT_model_and_optimizer, build_CNNMLP_model_and_optimizer
 
-from pytorch_grad_cam import EigenCAM
-from pytorch_grad_cam.utils.image import show_cam_on_image, preprocess_image
+# from pytorch_grad_cam import EigenCAM
+# from pytorch_grad_cam.utils.image import show_cam_on_image, preprocess_image
 import torch
 import cv2
 import numpy as np
@@ -48,30 +48,30 @@ class ACTPolicy(nn.Module):
     def configure_optimizers(self):
         return self.optimizer
     
-    def show_grad_cam_heatmap(self, image_tensor, cam_len):
-        backbone_model = self.model.backbones[0][0].body
-        target_layer = backbone_model.layer4[-1]
-        wrapped_model = WrapperModel(backbone_model)
+    # def show_grad_cam_heatmap(self, image_tensor, cam_len):
+    #     backbone_model = self.model.backbones[0][0].body
+    #     target_layer = backbone_model.layer4[-1]
+    #     wrapped_model = WrapperModel(backbone_model)
 
-        visualizations = []
-        for cam_id in range(cam_len):
-            image = image_tensor[:, cam_id]
-            norm_image = self.normalize(image)
+    #     visualizations = []
+    #     for cam_id in range(cam_len):
+    #         image = image_tensor[:, cam_id]
+    #         norm_image = self.normalize(image)
             
 
-            cam = EigenCAM(model=wrapped_model, target_layers=[target_layer])
-            # heatmaps.append(cam(image)[0])
-            heatmap = cam(image)[0]
-            image = image.cpu()[0].numpy().transpose(1, 2, 0)
-            visualizations.append(show_cam_on_image(image, heatmap, use_rgb=True))
+    #         cam = EigenCAM(model=wrapped_model, target_layers=[target_layer])
+    #         # heatmaps.append(cam(image)[0])
+    #         heatmap = cam(image)[0]
+    #         image = image.cpu()[0].numpy().transpose(1, 2, 0)
+    #         visualizations.append(show_cam_on_image(image, heatmap, use_rgb=True))
 
-        view = np.concatenate(visualizations, axis=1)
-        # 5️⃣ cv2를 사용한 시각화
-        visualization_bgr = cv2.cvtColor(view, cv2.COLOR_RGB2BGR)  # OpenCV는 BGR 형식을 사용하므로 변환 필요
-        resized = cv2.resize(visualization_bgr, (640*3, 480))
+    #     view = np.concatenate(visualizations, axis=1)
+    #     # 5️⃣ cv2를 사용한 시각화
+    #     visualization_bgr = cv2.cvtColor(view, cv2.COLOR_RGB2BGR)  # OpenCV는 BGR 형식을 사용하므로 변환 필요
+    #     resized = cv2.resize(visualization_bgr, (640*3, 480))
         
-        cv2.imshow("eigencam_result", resized)
-        cv2.waitKey(1)
+    #     cv2.imshow("eigencam_result", resized)
+    #     cv2.waitKey(1)
         
 class WrapperModel(nn.Module):
     def __init__(self, base_model):

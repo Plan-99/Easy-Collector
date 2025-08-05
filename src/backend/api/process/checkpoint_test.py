@@ -11,6 +11,7 @@ from ...policies.utils import make_policy
 from ...env.env import Env
 
 def checkpoint_test(
+    node,
     checkpoint_id,
     task,
     policy_obj,
@@ -61,7 +62,7 @@ def checkpoint_test(
             
             max_timesteps = task['episode_len'] * 10
             
-            env = Env(robots, sensors)
+            env = Env(node, robots, sensors)
             
             ts = env.reset()
             timesteps = [ts]

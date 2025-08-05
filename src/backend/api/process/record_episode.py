@@ -17,8 +17,8 @@ def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
             return i
     raise Exception(f"Error getting auto index, or more than {max_idx} episodes")
 
-def record_episode(dataset_id, robots, sensors, task, socketio_instance, task_control, tele_type='leader'):
-    env = Env(robots=robots, sensors=sensors)
+def record_episode(node, dataset_id, robots, sensors, task, socketio_instance, task_control, tele_type='leader'):
+    env = Env(node, robots=robots, sensors=sensors)
     dataset_dir = f"{DATASET_DIR}/{dataset_id}"
 
     while not task_control['stop']:
@@ -47,7 +47,7 @@ def record_episode(dataset_id, robots, sensors, task, socketio_instance, task_co
         for agent in env.agents:
             agent.move_to(home_pose[str(agent.id)])
             if tele_type == 'leader':
-                leader = Leader(agent, socketio_instance, log_emit_id='record_episode')
+                leader = Leader(agent, socketio_instance, agent.leader_robot_preset, log_emit_id='record_episode', port=agent.leader_robot_preset['port_name'])
                 leader.sync_leader_robot()
                 socketio_instance.start_background_task(
                     target=leader.position_pub,

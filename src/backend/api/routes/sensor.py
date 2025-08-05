@@ -44,7 +44,8 @@ def start_sensor():
 
     command = ''
     if type == 'realsense_camera':
-        command = ['roslaunch', 'realsense2_camera', 'rs_camera.launch', f'camera:=ec_sensor_{id}', f'serial_no:={serial_no}']
+        # command = ['roslaunch', 'realsense2_camera', 'rs_camera.launch', f'camera:=ec_sensor_{id}', f'serial_no:={serial_no}']
+        command = ['ros2', 'launch', 'realsense2_camera', 'rs_launch.py', f'camera_namespace:=ec_sensor_{id}', f'serial_no:="{serial_no}"']
 
     if not serial_no:
         return {'status': 'error', 'message': 'serial_no is required'}, 400

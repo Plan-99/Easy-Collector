@@ -116,7 +116,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue';
+import { onMounted, ref} from 'vue';
 
 import { api } from 'src/boot/axios';
 import ProcessConsole from 'src/components/ProcessConsole.vue';

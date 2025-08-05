@@ -61,17 +61,15 @@ export function useRobot(robot, robotOnCallback=() => {}) {
     }
   }
 
+
   function moveRobot(joint_index, joint_pos) {
-    if (!robot) return;
     robot.joint_pos[joint_index] = joint_pos;
     sendJointState(robot.joint_names, robot.joint_pos, publishJointPos);
   }
 
   function goOriginPos() {
-    if (!robot) return;
-    const robot = robot;
     api.post(`/robot/${robot.id}/:move_to`, {
-      goal_pos: [0, 0, 0, 0, 0, 0]
+      goal_pos: [0, 0, 0, 0, 0, 0, 0]
     }).then(() => {
       Notify.create({
         color: 'positive',

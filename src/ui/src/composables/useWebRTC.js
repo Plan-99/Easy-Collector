@@ -32,6 +32,7 @@ export function useWebRTC() {
         });
 
         const answer = await response.json();
+
         await pc.setRemoteDescription(new RTCSessionDescription(answer));
 
         return {

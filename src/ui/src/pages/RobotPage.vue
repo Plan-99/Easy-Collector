@@ -75,7 +75,7 @@
                                 thumb-size="1px"
                                 color="red"
                                 :disable="!canControl"
-                                @update:model-value="(e) => moveRobot(i, e)"
+                                @update:model-value="(e) => watchingRobot.handler.moveRobot(i, e)"
                             />
                         </div>
                     </div>
@@ -87,14 +87,14 @@
                     </div>
                     <div class="col">
                         <div class="q-gutter-sm">
-                            <q-btn @click="goOriginPos" icon="home" color="green">
+                            <q-btn @click="watchingRobot.handler.goOriginPos" icon="home" color="green">
                                 <q-tooltip class="text-body2">Click to go origin position</q-tooltip>
                             </q-btn>
                             <div v-if="watchingRobot.leader_robot_preset">
-                                <q-btn @click="() => { startLeaderTele(watchingRobot.id, 'log_' + watchingRobot.process_id) }" icon="play_arrow" color="blue" v-if="!leaderTeleStarted">
+                                <q-btn @click="() => { startLeaderTele(watchingRobot, watchingRobot.leader_robot_preset, 'log_' + watchingRobot.process_id) }" icon="play_arrow" color="blue" v-if="!leaderTeleStarted">
                                     <q-tooltip class="text-body2">Start teleoperation with leader robot</q-tooltip>
                                 </q-btn>
-                                <q-btn @click="() => { stopLeaderTele(watchingRobot.id, 'log_' + watchingRobot.process_id) }" icon="pause" color="blue" v-else>
+                                <q-btn @click="() => { stopLeaderTele() }" icon="pause" color="blue" v-else>
                                     <q-tooltip class="text-body2">Start teleoperation with leader robot</q-tooltip>
                                 </q-btn>
                             </div>
@@ -206,7 +206,7 @@ import BottomTerminal from 'src/components/BottomTerminal.vue';
 import { useRobot } from '../composables/useRobot';
 
 const { socket } = useSocket();
-const { createSubscriber, createPublisher, connectROS, sendJointState } = useROS();
+const { connectROS } = useROS();
 const { leaderTeleStarted, startLeaderTele, stopLeaderTele } = useLeaderTeleoperation();
 
 const robots = ref([]);
@@ -325,26 +325,15 @@ function toggleRobot(robot) {
     }
 }
 
-let jointSub = null
-let publishJointPos = () => {}
-
 function watchRobot(robot) {
-    if (jointSub) {
-        jointSub.unsubscribe()
-    }
-    jointSub = createSubscriber(robot.read_topic, robot.read_topic_msg, (msg) => {
+    robot.handler.subscribeRobot((msg) => {
         if (!canControl.value) {
             robot.joint_pos = msg.position
         }
     })
+    robot.handler.publishRobot()
     canControl.value = true
-    publishJointPos = createPublisher(robot.write_topic, robot.write_topic_msg)
     watchingRobot.value = robot
-}
-
-function moveRobot(joint_index, joint_pos) {
-    watchingRobot.value.joint_pos[joint_index] = joint_pos
-    sendJointState(watchingRobot.value.joint_names, watchingRobot.value.joint_pos, publishJointPos)
 }
 
 const canControl = ref(false)
@@ -375,32 +364,9 @@ function closeTeleSetting(leaderSettingForm) {
     canControl.value = true; // Reset control state
 }
 
-function goOriginPos() {
-    const robot = watchingRobot.value;
-    canControl.value = false; // Reset control state
-    api.post(`/robot/${robot.id}/:move_to`, {
-        goal_pos: [0, 0, 0, 0, 0, 0] // Default to zero if not set
-    }).then(() => {
-        Notify.create({
-            color: 'positive',
-            message: 'Robot moved to origin position'
-        })
-    }).catch((error) => {
-        console.error('Error moving robot to origin:', error);
-        Notify.create({
-            color: 'negative',
-            message: 'Failed to move robot to origin'
-        })
-    }).finally(() => {
-        setTimeout(() => {
-            canControl.value = true; // Reset control state
-        }, 2000);
-    });
-}
-
 watch(watchingRobot, (newVal, oldVal) => {
     if (oldVal) {
-        stopLeaderTele(oldVal.id); // Stop leader teleoperation when switching robots
+        stopLeaderTele(); // Stop leader teleoperation when switching robots
     }
 });
 
@@ -430,9 +396,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-    if (jointSub) {
-        jointSub.unsubscribe();
-    }
+    watchingRobot.value.handler.unSubscribeRobot();
 });
 
 </script>

@@ -47,14 +47,14 @@ def start_robot():
 
     command = ''
     if type == 'piper':
-        script_path = os.path.expanduser('~/catkin_ws/src/piper_ros/can_activate.sh')
+        script_path = os.path.expanduser('~/ros2_ws/src/piper_ros/can_activate.sh')
         current_app.pm.start_process(
             name='can_config',
             command=['bash', script_path , 'can0', '1000000'],
             log_emit_id = 'log_' +  process_id
         )
         time.sleep(1)
-        command = ['roslaunch', 'piper', 'start_single_piper.launch', f'group_ns:=ec_robot_{id}']
+        command = ['ros2', 'launch', 'piper', 'start_single_piper.launch.py', f'namespace:=ec_robot_{id}']
 
 
     print(f"Attempting to start robot")
@@ -151,7 +151,7 @@ def move_robot(id):
     if not goal_pos:
         return {'status': 'error', 'message': 'Action is required'}, 400
     
-    agent = Agent(robot.to_dict())
+    agent = Agent(current_app.node, robot.to_dict())
 
     agent.move_to(goal_pos, step_size)
     return {'status': 'success', 'message': 'Robot moved'}, 200

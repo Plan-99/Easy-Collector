@@ -133,6 +133,7 @@ def start_collection(id):
     data = request.json
     current_app.pm.start_function(
         func=record_episode,
+        node=current_app.node,
         dataset_id=id,
         robots=data.get('robots'),
         sensors=data.get('sensors'),

@@ -78,9 +78,10 @@ def eval_bc(checkpoint_config, task_config, policy_config, robot_config, sensor_
     # if real_robot:
     # from aloha_scripts.robot_utils import move_grippers # requires aloha
     from env import AlohaEnv
-    import rospy
+    import rclpy
 
-    rospy.init_node("imitate_episode_node", anonymous=False)
+    rclpy.init(args=None)
+    node = rclpy.create_node("imitate_episode_node")
     env = AlohaEnv(camera_names, robot_name='yaskawa')
     env_max_reward = 0
 

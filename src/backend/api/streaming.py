@@ -1,68 +1,65 @@
+# -*- coding: utf-8 -*-
 import asyncio
 import cv2
 import numpy as np
-import rospy
+import rclpy
+from rclpy.node import Node
 from sensor_msgs.msg import CompressedImage
 from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack, RTCConfiguration, RTCIceServer
-from aiortc.contrib.media import MediaBlackhole
 from aiohttp import web
 import aiohttp_cors
-import sys
-import os
 import traceback
 from av import VideoFrame
 import uuid
-import h5py
-
+import threading #  threading 모듈 추가
 
 # --- 전역 변수 ---
 pcs = set()
-
 stream_config = {}
 
-# --- ROSImageStreamTrack 클래스 (변경 없음) ---
+# --- 1. ROSImageStreamTrack 클래스 수정 ---
+# Node를 상속하지 않고, 생성자에서 node 객체를 전달받습니다.
 class ROSImageStreamTrack(VideoStreamTrack):
     """
-    ROS CompressedImage 토픽을 구독하여 비디오 프레임을 제공하는 클래스.
+    공유된 ROS 노드를 사용하여 CompressedImage 토픽을 구독하는 클래스.
     """
-    def __init__(self, initial_topic: str, pub_term: int=1, stream_id: str = None):
+    def __init__(self, node: Node, initial_topic: str, stream_id: str = None):
         super().__init__()
+        self.node = node # 전달받은 노드 객체 저장
         self.topic = initial_topic
         self.subscriber = None
-        # self.frame_queue = asyncio.Queue(maxsize=2)
-        self.start_subscriber()
-        self.pub_term = pub_term
         self.frame = None
         self.stream_id = stream_id
+        self.start_subscriber()
 
     def start_subscriber(self):
         if self.subscriber:
-            self.subscriber.unregister()
-        self.subscriber = rospy.Subscriber(
-            self.topic, CompressedImage, self.ros_callback, queue_size=1
+            self.node.destroy_subscription(self.subscriber)
+        self.subscriber = self.node.create_subscription(
+            CompressedImage, self.topic, self.ros_callback, 1
         )
-        rospy.loginfo(f"Subscribed to ROS topic: {self.topic}")
+        self.node.get_logger().info(f"Stream {self.stream_id}: Subscribed to ROS topic: {self.topic}")
 
     def ros_callback(self, msg: CompressedImage):
         try:
             np_arr = np.frombuffer(msg.data, np.uint8)
             cv_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
             
-            if cv_image is None:
-                rospy.logwarn(f"Failed to decode image from topic {self.topic}")
-                return
-            
-            if 'resize' in stream_config[self.stream_id] and stream_config[self.stream_id]['resize'] and len(stream_config[self.stream_id]['resize']) == 2:
-                cv_image = cv2.resize(cv_image, (stream_config[self.stream_id]['resize'][0], stream_config[self.stream_id]['resize'][1]))
+            if cv_image is None: return
 
-
+            config = stream_config.get(self.stream_id, {})
+            if 'resize' in config and config['resize'] and len(config['resize']) == 2:
+                cv_image = cv2.resize(cv_image, tuple(config['resize']))
+                
             self.frame = VideoFrame.from_ndarray(cv_image, format="bgr24")
-
         except Exception as e:
-            rospy.logerr(f"Error in ros_callback for topic {self.topic}: {e}\n{traceback.format_exc()}")
+            self.node.get_logger().error(f"Error in ros_callback: {e}\n{traceback.format_exc()}")
 
     async def recv(self):
-        # frame = await self.frame_queue.get()
+        # 최신 프레임이 있을 때까지 잠시 대기 (비동기)
+        while self.frame is None:
+            await asyncio.sleep(0.01)
+            
         frame = self.frame
         pts, time_base = await self.next_timestamp()
         frame.pts = pts
@@ -71,129 +68,94 @@ class ROSImageStreamTrack(VideoStreamTrack):
 
     def stop(self):
         if self.subscriber:
-            self.subscriber.unregister()
-            rospy.loginfo(f"Unsubscribed from ROS topic: {self.topic}")
+            self.node.destroy_subscription(self.subscriber)
+            self.node.get_logger().info(f"Stream {self.stream_id}: Unsubscribed from ROS topic: {self.topic}")
         super().stop()
 
 
-# class Hdf5StreamTrack(VideoStreamTrack):
-#     """
-#     HDF5 파일에서 비디오 프레임을 읽어오는 클래스.
-#     """
-#     def __init__(self, hdf5_file_path):
-#         super().__init__()
-#         self.hdf5_file_path = hdf5_file_path
-#         self.current_frame_index = 0
-#         self.frames = self.load_frames()
-
-#     def load_frames(self):
-#         with h5py.File(self.hdf5_file_path, 'r') as f:
-#             frames = f['frames'][:]
-#         return frames
-
-#     async def recv(self):
-#         if self.current_frame_index >= len(self.frames):
-#             raise StopAsyncIteration
-        
-#         frame_data = self.frames[self.current_frame_index]
-#         self.current_frame_index += 1
-        
-#         frame = VideoFrame.from_ndarray(frame_data, format="bgr24")
-#         pts, time_base = await self.next_timestamp()
-#         frame.pts = pts
-#         frame.time_base = time_base
-#         return frame
-
-
 async def offer(request):
+    # aiohttp 앱 객체에서 ROS 노드를 가져옵니다.
+    node = request.app['ros_node']
+    
     params = await request.json()
     topic = params.get('topic')
     config = params.get('config', {})
-    # STUN 서버 추가
-
     ice_servers = [RTCIceServer(urls="stun:stun.l.google.com:19302")]
-    rtc_config = RTCConfiguration(iceServers=ice_servers)
-    pc = RTCPeerConnection(rtc_config)
-
+    pc = RTCPeerConnection(RTCConfiguration(iceServers=ice_servers))
     pcs.add(pc)
 
-    @pc.on("icecandidate")
-    async def on_icecandidate(candidate):
-        print("New ICE Candidate:", candidate)
+    @pc.on("connectionstatechange")
+    async def on_connectionstatechange():
+        print(f"Connection state is {pc.connectionState}")
+        if pc.connectionState == "failed" or pc.connectionState == "closed":
+            await pc.close()
+            pcs.discard(pc)
 
     try:
         await pc.setRemoteDescription(RTCSessionDescription(sdp=params["sdp"], type=params["type"]))
-        print("Remote description set successfully")
-    except Exception as e:
-        print("Error setting remote description:", e, traceback.format_exc())
-        return web.json_response({"error": "Failed to set remote description"}, status=500)
-
-    try:
-        # 🔹 두 개의 비디오 트랙 추가
+        
         stream_id = str(uuid.uuid4())
         stream_config[stream_id] = config
-        video_track = ROSImageStreamTrack(initial_topic=topic, stream_id=stream_id)
-
+        
+        # 2. ROSImageStreamTrack 생성 시 공유 노드 객체 전달
+        video_track = ROSImageStreamTrack(node=node, initial_topic=topic, stream_id=stream_id)
         pc.addTrack(video_track)
 
         answer = await pc.createAnswer()
-    except Exception as e:
-        print("Error creating answer:", e, traceback.format_exc())
-        return web.json_response({"error": "Failed to create answer"}, status=500)
-
-    await asyncio.sleep(1)  # 🔹 ICE Candidate가 모일 때까지 기다림
-
-    try:
-
         await pc.setLocalDescription(answer)
-        if pc.localDescription is None:
-            print("Error: `pc.localDescription` is None!")
-            return web.json_response({"error": "Local Description is None"}, status=500)
-        print("Local description set successfully")
+
+        return web.json_response({"sdp": pc.localDescription.sdp, "type": pc.localDescription.type, 'stream_id': stream_id})
     except Exception as e:
-        print("Error setting local description:", e, traceback.format_exc())
-        return web.json_response({"error": "Failed to set local description"}, status=500)
-
-    return web.json_response({"sdp": pc.localDescription.sdp, "type": pc.localDescription.type, 'stream_id': stream_id}, status=200)
-
+        print(f"Error in offer: {e}\n{traceback.format_exc()}")
+        return web.json_response({"error": str(e)}, status=500)
 
 async def add_config(request):
     params = await request.json()
     stream_id = params.get('stream_id')
     config = params.get('config', {})
-
-    if 'resize' in config:
+    if stream_id in stream_config and 'resize' in config:
         stream_config[stream_id]['resize'] = config['resize']
+    return web.json_response({"status": "success"})
 
-    return web.json_response({"status": "success", "message": "aaa"}, status=200)
 
+# 3. ROS 노드를 관리하는 함수들
+def ros_main(args=None):
+    rclpy.init(args=args)
+    ros_node = Node("webrtc_ros_bridge_node")
+    
+    # asyncio 루프에 노드를 전달하기 위한 future
+    future = asyncio.Future()
+    app = create_aiohttp_app(ros_node, future)
 
-async def cleanup():
-    while True:
-        await asyncio.sleep(10)
-        for pc in pcs:
-            if pc.connectionState == "closed":
-                pcs.discard(pc)
+    # ROS 노드 스핀을 위한 별도 스레드 실행
+    ros_thread = threading.Thread(target=rclpy.spin, args=(ros_node,), daemon=True)
+    ros_thread.start()
+    
+    # aiohttp 앱 실행
+    web.run_app(app, port=5002)
+    
+    # 앱 종료 시 정리
+    ros_node.destroy_node()
+    rclpy.shutdown()
+    ros_thread.join()
 
-if __name__ == "__main__":
-    rospy.init_node("webrtc_ros_stream")
-
+# aiohttp 앱을 생성하는 헬퍼 함수
+def create_aiohttp_app(ros_node, future):
     app = web.Application()
-
+    app['ros_node'] = ros_node # 앱 객체에 ROS 노드 저장
+    
     cors = aiohttp_cors.setup(app, defaults={
         "*": aiohttp_cors.ResourceOptions(
-            allow_credentials=True,
-            expose_headers="*",
-            allow_headers="*"
+            allow_credentials=True, expose_headers="*", allow_headers="*"
         )
     })
+    
     offer_route = app.router.add_post("/offer", offer)
     add_config_route = app.router.add_post("/add_config", add_config)
     cors.add(offer_route)
     cors.add(add_config_route)
+    
+    return app
 
-
-    loop = asyncio.get_event_loop()
-    loop.create_task(cleanup())
-
-    web.run_app(app, port=5002)
+if __name__ == "__main__":
+    ros_main()

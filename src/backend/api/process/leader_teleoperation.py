@@ -1,6 +1,7 @@
 # #!/usr/bin/env python
 
-import rospy
+import rclpy
+from rclpy.node import Node
 import math
 # import numpy as np
 import time
@@ -9,21 +10,18 @@ import math
 from ...env.dxl_controller import DxlController
 
 class Leader():
-    def __init__(self, agent, socketio_instance, log_emit_id='leader_teleoperation', port='/dev/ttyUSB0', gripper=None) -> None:
+    def __init__(self, agent, socketio_instance, leader_robot_preset, log_emit_id='leader_teleoperation', port='/dev/ttyUSB0', gripper=None) -> None:
         # ROS 노드 초기화ur5e/ur5e_scaled_pos_joint_traj_controller/command
         self.socketio_instance = socketio_instance
         self.log_emit_id = log_emit_id
-        leader_robot_preset = agent.leader_robot_preset
         self.origin = leader_robot_preset['origin']  # 다이나믹셀의 원점 위치
         self.gripper_dxl_range = leader_robot_preset['gripper_dxl_range']  # 다이나믹셀의 원점 위치
         self.sign_corrector = leader_robot_preset['sign_corrector']
         self.dxl_ids = leader_robot_preset['dxl_ids']  # 다이나믹셀 ID
         
         self.address = 132  # 다이나믹셀의 현재 위치 주소 (주소 132번은 현재 위치)
-        self.rate = rospy.Rate(10)  # 10Hz로 퍼블리시
         self.p_gain = 1
         self.is_synced = False
-        # self.gripper_publisher = rospy.Publisher('gripper/cmd', GripperCmd, queue_size=1)
         
         self.gripper_config = gripper
         
@@ -56,20 +54,21 @@ class Leader():
     
     def sync_leader_robot(self):
         follower_pos = self.agent.joint_states
+
         pos = []
         
         for index, dxl_id in enumerate(self.dxl_ids[:-1]):
             pos.append(self.rad_to_tick(follower_pos[index], dxl_id))
 
-        self.socketio_instance.emit('log_' + self.log_emit_id, {
+        self.socketio_instance.emit(self.log_emit_id, {
             'log': f'Syncing Leader Robot',
-            'type': 'stdout '
+            'type': 'stdout'
         })
 
         moved = self.dxl_controller.move_controller(pos)
         
         if moved:
-            self.socketio_instance.emit('log_' + self.log_emit_id, {
+            self.socketio_instance.emit(self.log_emit_id, {
                 'log': 'Will you start teleoperation? Close Gripper to Start!',
                 'type': 'stdout '
             })
@@ -107,8 +106,5 @@ class Leader():
             target_pos[-1] = self.get_gripper_pos()
                 
             self.agent.move_step(target_pos)
-            self.rate.sleep()
-
-            # rospy.loginfo(f"[0] {self.rad_pos[0]} [1] {self.rad_pos[1]} [2] {self.rad_pos[2]} [3] {self.rad_pos[3]} [4] {self.rad_pos[4]} [5] {self.rad_pos[5]}")
         
         self.dxl_controller.portHandler.closePort()
