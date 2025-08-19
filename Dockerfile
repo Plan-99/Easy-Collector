@@ -89,4 +89,5 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 컨테이너 시작 시 실행할 기본 명령어 설정
-CMD ["/bin/bash"]
+WORKDIR /root/src/ui
+CMD ["npm", "run", "dev"]

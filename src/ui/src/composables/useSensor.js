@@ -49,12 +49,10 @@ export function useSensor(sensor, sensorOnCallback=() => {}) {
         console.error('Error setting up WebRTC:', error);
       });
       steps++;
-      if (steps >= maxSteps) {
+      if (steps > maxSteps) {
         clearInterval(sensorTopicChecker);
         sensor.status = 'off';
-        if (sensor.status === 'on') {
-          stopSensor();
-        }
+        stopSensor();
       }
     }, 1000);
   }

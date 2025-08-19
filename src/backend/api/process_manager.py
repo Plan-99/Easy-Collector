@@ -96,13 +96,32 @@ class ProcessManager:
         
         # 2. **kwargs에 제어 플래그를 추가하여 target 함수로 전달합니다.
         kwargs['task_control'] = task_control
+
+        def task_wrapper(*wrapper_args, **wrapper_kwargs):
+            """
+            실제 작업을 감싸고, 작업 완료 후 정리 작업을 수행합니다.
+            *args, **kwargs를 직접 받아 명시적으로 전달합니다.
+            """
+            print(f"Wrapper for '{name}' started.")
+            try:
+                # 2. 실제 작업 함수(func)를 실행합니다.
+                func(*wrapper_args, **wrapper_kwargs)
+            except Exception as e:
+                print(f"[ERROR] An error occurred in task '{name}': {e}")
+            finally:
+                # 3. 작업이 어떻게 끝나든(성공, 실패, 중단) 항상 상태를 정리합니다.
+                print(f"Task '{name}' finished. Cleaning up.")
+                if name in self.tasks:
+                    del self.tasks[name]
+                # 클라이언트에게도 작업이 최종적으로 끝났음을 알릴 수 있습니다.
+                self.socketio.emit('stop_process', {'id': name})
+
         try:
-            # 3. start_background_task의 반환값은 저장할 필요가 없습니다.
-            self.socketio.start_background_task(target=func, *args, **kwargs)
-            print(f"'{name}' Function started.")
+            # 4. 래퍼 함수에 *args와 **kwargs를 올바르게 전달합니다.
+            self.socketio.start_background_task(target=task_wrapper, *args, **kwargs)
+            print(f"Task '{name}' has been started in the background.")
         except Exception as e:
-            print(f"[ERROR]: {e}")
-            # 실패 시 딕셔너리에서 제거
+            print(f"[ERROR] Failed to start task '{name}': {e}")
             if name in self.tasks:
                 del self.tasks[name]
         

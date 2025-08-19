@@ -74,16 +74,6 @@ def start_leader_teleoperation():
         func=leader.position_pub,
     )
 
-
-    # if not preset:
-    #     return {'status': 'error', 'message': 'Leader robot preset not found'}, 404
-
-    # current_app.pm.start_process(
-    #     name='leader_teleoperation',
-    #     command=['python3', '-u', '-m', 'backend.teleoperation.dynamixel_publisher', f'--leader_robot_preset_id={preset.id}'],
-    #     log_emit_id=log_emit_id,
-    # )
-
     return {'status': 'success', 'message': 'Leader teleoperation started'}, 200
 
 

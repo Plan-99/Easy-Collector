@@ -7,7 +7,6 @@
       </q-breadcrumbs>
       <q-tabs
         v-model="tab"
-        dense
         class="text-grey-7 bg-blue-2 col-9"
         active-color="primary"
         indicator-color="primary"

@@ -15,6 +15,11 @@ const routes = [
           { path: 'test', component: () => import('src/pages/Task/TestPage.vue') },
         ]
       },
+      { path: 'vla', component: () => import('src/pages/VLA/MainPage.vue'),
+        children: [
+          { path: 'execute', component: () => import('src/pages/VLA/ExecutePage.vue') },
+        ],
+      },
       { path: 'datasets', component: () => import('pages/DatasetPage.vue') }
     ]
   },

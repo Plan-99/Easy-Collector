@@ -11,7 +11,7 @@ import shutil
 import pickle
 
 # Import policies and utilities
-from ..policies.utils import make_policy, make_optimizer, forward_pass, detach_dict, compute_dict_mean, set_seed, load_data
+from ..policies.utils import make_policy, make_optimizer, forward_pass, detach_dict, compute_dict_mean, set_seed, load_data, convert_lists_to_tuples
 
 # Import database and data models
 from orator import DatabaseManager
@@ -23,40 +23,71 @@ from ..database.models.gripper_model import Gripper
 from ..database.models.sensor_model import Sensor
 from ..database.models.checkpoint_model import Checkpoint
 
+from ..lerobot.policies.act.configuration_act import ACTConfig
+from ..lerobot.policies.act.modeling_act import ACTPolicy
+from ..lerobot.policies.diffusion.configuration_diffusion import DiffusionConfig
+from ..lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
+from ..lerobot.datasets.utils import dataset_to_policy_features
+from ..lerobot.configs.types import FeatureType
+from safetensors.torch import load_file
+
 
 def train(
-    train_dataloader, 
-    val_dataloader, 
-    ckpt_dir,
-    num_epochs,
-    learning_rate,
-    lr_backbone,
+    train_dataloader,
+    val_dataloader,
+    input_features,
+    output_features,
     stats,
-    task,
     policy_obj,
-    robot,
-    sensors,
-    gripper=None,
-    load_model=None
+    checkpoint_obj,
+    load_model=None,
     ):
     """Function to train the policy model."""
     seed = 100
     
-    policy_class = policy_obj['type']
+    policy_settings = convert_lists_to_tuples(policy_obj['settings'])
+    train_settings = convert_lists_to_tuples(checkpoint_obj['train_settings'])
     load_model_path = f"/root/src/backend/checkpoints/{load_model['id']}" if load_model else None
 
     set_seed(seed) # Set seed for reproducibility
 
-    # Create policy model
+    num_epochs = train_settings['num_epochs']
+    del train_settings['num_epochs'] # Remove num_epochs from train_settings
+    del train_settings['batch_size'] # Remove batch_size from train_settings
+    del train_settings['num_workers'] # Remove num_workers from train_settings
 
-    policy = make_policy(ckpt_dir, seed, learning_rate, lr_backbone, policy_obj, task, robot, sensors, gripper)
+    
+    if policy_obj['type'] == 'ACT':
+        # Create policy model
+        cfg = ACTConfig(
+            input_features=input_features,
+            output_features=output_features,
+            **policy_settings,
+            **train_settings,
+        )
+        policy = ACTPolicy(cfg, dataset_stats=stats)
+    elif policy_obj['type'] == 'Diffusion':
+        
+        cfg = DiffusionConfig(
+            input_features=input_features,
+            output_features=output_features,
+            **policy_settings,
+            **train_settings,
+        )
+        policy = DiffusionPolicy(cfg, dataset_stats=stats)
+    
+
+    policy.train()
+    policy.cuda()
+
     if load_model_path is not None:
-        model_path = os.path.join(load_model_path, 'policy_best.ckpt')
-        loading_status = policy.load_state_dict(torch.load(model_path))
-        print(loading_status)
+        model_path = os.path.join(load_model_path, 'model.safetensors')
+        state_dict = load_file(model_path, device='cuda')
+        policy.load_state_dict(state_dict)
         
     policy.cuda() # Move model to GPU
-    optimizer = make_optimizer(policy_class, policy) # Create optimizer
+
+    optimizer = torch.optim.Adam(policy.parameters(), lr=cfg.optimizer_lr)
 
     train_history = []
     validation_history = []
@@ -64,59 +95,60 @@ def train(
     best_ckpt_info = None
 
     # Main training loop
-    for epoch in tqdm(range(num_epochs)):
-        print(f'\nEpoch {epoch} / {num_epochs}')
+    for epoch in range(num_epochs):
         
         # --- Validation Step ---
         with torch.inference_mode():
             policy.eval() # Set model to evaluation mode
-            epoch_dicts = []
+            
+            val_loss_sum = 0
             for batch_idx, data in enumerate(val_dataloader):
-                forward_dict = forward_pass(data, policy)
-                epoch_dicts.append(forward_dict)
-            epoch_summary = compute_dict_mean(epoch_dicts)
-            validation_history.append(epoch_summary)
+                loss, _ = forward_pass(data, policy)
+                val_loss_sum += loss.item()
 
-            # Save the best model checkpoint based on validation loss
-            epoch_val_loss = epoch_summary['loss']
+            epoch_val_loss = val_loss_sum / (batch_idx + 1)
+            validation_history.append(epoch_val_loss)
+
             if epoch_val_loss < min_val_loss:
                 min_val_loss = epoch_val_loss
-                best_ckpt_info = (epoch, min_val_loss, deepcopy(policy.state_dict()))
-        print(f'Val loss:   {epoch_val_loss:.5f}')
+                best_ckpt_info = (epoch, min_val_loss, deepcopy(policy))
 
         # --- Training Step ---
         policy.train() # Set model to training mode
         for batch_idx, data in enumerate(train_dataloader):
             optimizer.zero_grad()
-            forward_dict = forward_pass(data, policy)
+            loss, _ = forward_pass(data, policy)
             # Backpropagation
-            loss = forward_dict['loss']
             loss.backward()
             optimizer.step()
             
-            train_history.append(detach_dict(forward_dict))
+            train_history.append({'loss': loss.item()})
             
         epoch_summary = compute_dict_mean(train_history[(batch_idx+1)*epoch:(batch_idx+1)*(epoch+1)])
-        print(f'Train loss: {epoch_summary["loss"]:.5f}')
+        train_log = {
+            'epoch': epoch,
+            'total_epoch': num_epochs,
+            'val_loss': epoch_val_loss,
+            'train_loss': epoch_summary["loss"]
+        }
+        print(f"[TRAIN_LOG] {json.dumps(train_log)}")
+
         
-        # save dataset stats
-    if not os.path.isdir(ckpt_dir):
-        os.makedirs(ckpt_dir)
-        print("Folder created:", ckpt_dir)
+    # save dataset stats
+    ckpt_dir = f"/root/src/backend/checkpoints/{checkpoint_obj['id']}"
+
+    # Save the best checkpoint after training is finished
+    best_epoch, min_val_loss, best_policy = best_ckpt_info
+
+    # ckpt_path = os.path.join(ckpt_dir, f'policy_best.ckpt')
+    best_policy.save_pretrained(ckpt_dir)
     stats_path = os.path.join(ckpt_dir, f'dataset_stats.pkl')
     with open(stats_path, 'wb') as f:
         pickle.dump(stats, f)
 
-    # Save the best checkpoint after training is finished
-    best_epoch, min_val_loss, best_state_dict = best_ckpt_info
-
-    ckpt_path = os.path.join(ckpt_dir, f'policy_epoch_{best_epoch}_seed_{seed}.ckpt')
-    torch.save(best_state_dict, ckpt_path)
-    ckpt_path = os.path.join(ckpt_dir, f'policy_best.ckpt')
-    torch.save(best_state_dict, ckpt_path)
+    # torch.save(best_state_dict, ckpt_path)
     
     print(f'Training finished:\nSeed {seed}, val loss {min_val_loss:.6f} at epoch {best_epoch}')
-    
 
     return best_ckpt_info
 
@@ -160,41 +192,37 @@ def main(args):
         # Fetch configurations from the database
         task = Task.find(args.task_id).to_dict()
         policy = Policy.find(args.policy_id).to_dict()
-        robot = Robot.find(task['robot_ids'][0]).to_dict() # Assuming first robot
-        sensors = [Sensor.find(sid).to_dict() for sid in task['sensor_ids']]
-        # gripper = Gripper.find(robot.gripper_id) if robot.gripper_id else None
+        checkpoint = Checkpoint.find(args.checkpoint_id).to_dict()
         load_model = Checkpoint.find(args.load_model_id).to_dict() if args.load_model_id else None
-        sensor_ids = [sensor['id'] for sensor in sensors]
-        
-        num_epochs = int(args.num_epochs)
-        batch_size = int(args.batch_size)
-        
-        learning_rate = float(args.learning_rate)
-        lr_backbone = float(args.lr_backbone)
-        
+
+        batch_size = checkpoint['train_settings']['batch_size']
+        sensor_ids = task['sensor_ids']
+        if policy['type'] in ['ACT']:
+            chunk_size = policy['settings']['chunk_size']
+        elif policy['type'] in ['Diffusion']:
+            chunk_size = policy['settings']['horizon']
+        num_workers = checkpoint['train_settings']['num_workers']
+        n_obs_steps = policy['settings']['n_obs_steps']  # Default to 1 if not specified
         
         # Load data from the temporary directory
-        train_dataloader, val_dataloader, stats, _ = load_data(temp_dir, episode_counter, sensor_ids, batch_size, batch_size)
+        train_dataloader, val_dataloader, stats, input_features, output_features = load_data(temp_dir, episode_counter, sensor_ids, batch_size, batch_size, chunk_size, num_workers, n_obs_steps)
 
-        ckpt_dir = f"/root/src/backend/checkpoints/{args.checkpoint_id}"
         # Start the training process
-        best_ckpt_info = train(
+        best_epoch, min_val_loss, best_state_dict = train(
             train_dataloader,
             val_dataloader,
-            ckpt_dir,
-            num_epochs,
-            learning_rate,
-            lr_backbone,
+            input_features,
+            output_features,
             stats,
-            task,
             policy,
-            robot,
-            sensors,
-            gripper=None,
-            load_model=load_model)
+            checkpoint,
+            load_model=load_model,
+        )
         
         Checkpoint.find(args.checkpoint_id).update({
-            'is_training': False
+            'is_training': False,
+            'best_epoch': best_epoch,
+            'loss': min_val_loss,
         })
         
     except Exception as e:
@@ -215,10 +243,13 @@ if __name__ == '__main__':
     parser.add_argument('--load_model_id', default=None, required=False)
     parser.add_argument('--checkpoint_id', required=True)
     parser.add_argument('--dataset_ids', required=True)
-    parser.add_argument('--num_epochs', required=True)
-    parser.add_argument('--batch_size', required=True)
-    parser.add_argument('--learning_rate', default=1e-5, required=False)
-    parser.add_argument('--lr_backbone', default=1e-6, required=False)
+    
+    # # Add arguments for training parameters
+    # # This is a bit of a hack to get all the training parameters from the command line
+    # # A better way would be to pass a config file
+    # for key, value in ACTConfig.model_fields.items():
+    #     if key not in ['input_features', 'output_features']:
+    #         parser.add_argument(f'--{key}', type=type(value.default), default=value.default)
 
     main(parser.parse_args())
     sys.exit(0)

@@ -41,24 +41,41 @@
                 <div class="q-pa-md">
                     <q-btn color="primary" @click="showTestDialog = true" class="full-width q-mb-sm">Start Test</q-btn>
                     <div class="row q-col-gutter-sm" v-if="watchingCheckpoint" >
-                        <div class="col-6">
+                        <div class="col-4">
                             <div class="rounded-borders" style="border: 1px solid rgba(0,0,0,0.12);">
                                 <div class="row q-pa-sm bg-grey-2 text-weight-bold">
-                                    <div class="col-6">Setting</div>
+                                    <div class="col-6">Policy Parameters</div>
                                     <div class="col-6">Value</div>
                                 </div>
-                                <div v-for="(value, key) in { model: watchingCheckpoint.policy.type, ...watchingCheckpoint.policy.settings }" :key="key">
-                                    <q-separator />
-                                    <div class="row q-pa-sm">
-                                        <div class="col-6" style="word-wrap: break-word;">{{ key }}</div>
-                                        <div class="col-6" style="word-wrap: break-word;">{{ value }}</div>
+                                <q-scroll-area style="height: 400px;">
+                                    <div v-for="(value, key) in { model: watchingCheckpoint.policy.type, ...watchingCheckpoint.policy.settings }" :key="key">
+                                        <q-separator />
+                                        <div class="row q-pa-sm">
+                                            <div class="col-6" style="word-wrap: break-word;">{{ key }}</div>
+                                            <div class="col-6" style="word-wrap: break-word;">{{ value }}</div>
+                                        </div>
                                     </div>
-                                </div>
+                                </q-scroll-area>
                             </div>
                         </div>
-                        <div class="col-6 q-pa-md text-h6">
-                            <div class="text-bold">Epochs: {{ watchingCheckpoint.num_epochs }}</div>
-                            <div class="text-bold">Batch Size: {{ watchingCheckpoint.batch_size }}</div>
+                        <div class="col-4">
+                            <div class="rounded-borders" style="border: 1px solid rgba(0,0,0,0.12);">
+                                <div class="row q-pa-sm bg-grey-2 text-weight-bold">
+                                    <div class="col-6">Train Parameters</div>
+                                    <div class="col-6">Value</div>
+                                </div>
+                                <q-scroll-area style="height: 400px;">
+                                    <div v-for="(value, key) in { finetuned_from: watchingCheckpoint.load_model?.name, ...watchingCheckpoint.train_settings }" :key="key">
+                                        <q-separator />
+                                        <div class="row q-pa-sm">
+                                            <div class="col-6" style="word-wrap: break-word;">{{ key }}</div>
+                                            <div class="col-6" style="word-wrap: break-word;">{{ value }}</div>
+                                        </div>
+                                    </div>
+                                </q-scroll-area>
+                            </div>
+                        </div>
+                        <div class="col-4 q-pa-md text-h6">
                             <div class="text-bold">Datasets: </div>
                             <div class="q-ml-lg">
                                 <div v-for="(info, id) in watchingCheckpoint.dataset_info" :key="id">
@@ -67,9 +84,8 @@
                                     </div>
                                 </div>
                             </div>
-                            <div v-if="watchingCheckpoint.load_model">
-                                <div class="text-bold">Finetuned from: {{ watchingCheckpoint.load_model.name }}</div>
-                            </div>
+                            <div class="text-bold">Loss: <span class="text-body1">{{ watchingCheckpoint.loss?.toFixed(5) }}</span></div>
+                            <div class="text-bold">Best Epoch: <span class="text-body1">{{ watchingCheckpoint.best_epoch }}</span></div>
                         </div>
                     </div>
                     <div v-else class="text-center text-grey-6 q-pa-md">
@@ -142,6 +158,9 @@
                             <q-btn color="green full-width" icon="power_settings_new" v-if="robot.handler.status() === 'on'" @click="robot.handler.stopRobot()">
                                 {{ robot.name }}
                             </q-btn>
+                        </div>
+                        <div>
+                            <q-input dense outlined label="Timesteps per episode" class="bg-white" v-model="timesteps"></q-input>
                         </div>
                     </div>
                     <div class="col-10 q-pa-md">
@@ -276,6 +295,7 @@ function listPolicies() {
 function getTask() {
     return api.get(`/tasks/${taskId}`).then((response) => {
         task.value = response.data.task;
+        timesteps.value = task.value.episode_len;
     }).catch((error) => {
         console.error('Error fetching task:', error);
     });
@@ -329,8 +349,10 @@ function closeCheckpointTab(checkpoint) {
     }
 }
 
+const timesteps = ref(100)
 function startTest() {
     api.post(`/checkpoint/${watchingCheckpoint.value.id}/:start_test`, {
+        timesteps: timesteps.value,
         task: task.value,
         policy: activePolicy.value,
         robots: robots.value.filter(e => task.value.robot_ids.includes(e.id)),
@@ -383,6 +405,17 @@ onMounted(() => {
     socket.on('checkpoint_test_progress', (data) => {
         testingProgress.value = data.progress;
         console.log('Checkpoint test progress:', testingProgress.value);
+    });
+
+    socket.on('stop_process', (data) => {
+        if (data.id === 'checkpoint_test') {
+            testing.value = false;
+            testingProgress.value = 0;
+            Notify.create({
+                color: 'positive',
+                message: 'Test stopped'
+            });
+        }
     });
 
 });

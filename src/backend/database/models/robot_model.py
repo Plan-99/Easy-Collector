@@ -56,6 +56,8 @@ class Robot(Model, SoftDeletes):
         type = self.get_raw_attribute('type')
         if type == 'piper':
             return 7
+        if type == 'ur5e':
+            return 6
 
         return self.settings['joint_names'].__len__()
     
@@ -64,6 +66,8 @@ class Robot(Model, SoftDeletes):
         type = self.get_raw_attribute('type')
         if type == 'piper':
             return ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"]
+        if type == 'ur5e':
+            return ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
 
         return self.settings['joint_names']
     
@@ -72,6 +76,8 @@ class Robot(Model, SoftDeletes):
         type = self.get_raw_attribute('type')
         if type == 'piper':
             return f'/ec_robot_{self.id}/joint_states_single'
+        if type == 'ur5e':
+            return f'/ec_robot_{self.id}/joint_states'
 
         return self.settings['read_topic']
     
@@ -79,6 +85,8 @@ class Robot(Model, SoftDeletes):
     def read_topic_msg(self):
         type = self.get_raw_attribute('type')
         if type == 'piper':
+            return 'sensor_msgs/JointState'
+        if type == 'ur5e':
             return 'sensor_msgs/JointState'
         
         return self.settings['read_topic_msg']
@@ -88,6 +96,8 @@ class Robot(Model, SoftDeletes):
         type = self.get_raw_attribute('type')
         if type == 'piper':
             return f'/ec_robot_{self.id}/joint_states'
+        if type == 'ur5e':
+            return f'/ec_robot_{self.id}/joint_states'
 
         return self.settings['write_topic']
     
@@ -95,6 +105,8 @@ class Robot(Model, SoftDeletes):
     def write_topic_msg(self):
         type = self.get_raw_attribute('type')
         if type == 'piper':
+            return 'sensor_msgs/JointState'
+        if type == 'ur5e':
             return 'sensor_msgs/JointState'
         
         return self.settings['write_topic_msg']
@@ -104,6 +116,8 @@ class Robot(Model, SoftDeletes):
         type = self.get_raw_attribute('type')
         if type == 'piper':
             return ''
+        if type == 'ur5e':
+            return 'move_to_joint_position'
 
         return ''
     
@@ -112,6 +126,8 @@ class Robot(Model, SoftDeletes):
         type = self.get_raw_attribute('type')
         if type == 'piper':
             return 'piper.yml'
+        if type == 'ur5e':
+            return 'ur5e.yml'
 
         return ''
     
@@ -120,6 +136,8 @@ class Robot(Model, SoftDeletes):
         type = self.get_raw_attribute('type')
         if type == 'piper':
             return [2.618, 2.618, 0, 1.745, 1.22, 2.094, 0.0726]
+        if type == 'ur5e': 
+            return [2.618, 2.618, 2.618, 1.745, 1.22, 2.094, 0]
 
         return self.settings['joint_upper_bounds']
     
@@ -128,6 +146,8 @@ class Robot(Model, SoftDeletes):
         type = self.get_raw_attribute('type')
         if type == 'piper':
             return [-2.618, 0, -2.618, -1.745, -1.22, -2.094, 0]
+        if type == 'ur5e':
+            return [-2.618, -2.618, -2.618, -1.745, -1.22, -2.094, 0]
 
         return self.settings['joint_lower_bounds']
     
@@ -136,6 +156,8 @@ class Robot(Model, SoftDeletes):
         type = self.get_raw_attribute('type')
         if type == 'piper':
             return [0, 0.0726]
+        if type == 'ur5e':
+            return [0, 0.08]
 
         return []
     

@@ -83,7 +83,7 @@ def read_hdf5(hdf5_path, socketio_instance, sid, task_control):
                         'qaction': qaction_array.tolist(),
                     }
 
-                time.sleep(0.2)
+                time.sleep(0.1)
                 socketio_instance.emit('show_episode_step', {
                     'hdf5_path': hdf5_path,
                     'images': encoded_images,

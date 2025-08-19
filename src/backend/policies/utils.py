@@ -12,21 +12,22 @@ import json
 import readline
 from sensor_msgs.msg import CompressedImage
 from types import SimpleNamespace
+from ..lerobot.configs.types import PolicyFeature, FeatureType
 
 
 e = IPython.embed
 
 
 class EpisodicDataset(torch.utils.data.Dataset):
-    def __init__(self, episode_ids, dataset_dir, sensor_ids, norm_stats, task_space=False, vel_control=False):
+    def __init__(self, episode_ids, dataset_dir, sensor_ids, norm_stats, chunk_size, n_obs_steps=1):
         super(EpisodicDataset).__init__()
         self.episode_ids = episode_ids
         self.dataset_dir = dataset_dir
         self.sensor_ids = sensor_ids
         self.norm_stats = norm_stats
-        self.task_space = task_space
-        self.vel_control = vel_control
-        self.is_sim = None
+        self.chunk_size = chunk_size
+        self.n_obs_steps = n_obs_steps
+        self.info = None
         self.__getitem__(0) # initialize self.is_sim
 
     def __len__(self):
@@ -39,119 +40,177 @@ class EpisodicDataset(torch.utils.data.Dataset):
         dataset_path = os.path.join(self.dataset_dir, f'episode_{episode_id}.hdf5')
         with h5py.File(dataset_path, 'r') as root:
             # is_sim = root.attrs['sim']
-            is_sim = None
-
-            episode_len = 0
 
             action_dim = 0
             for key in root['qaction'].keys():
                 episode_len = root['qaction'][key].shape[0]
                 action_dim += root['qaction'][key].shape[1]
 
-            original_action_shape = (episode_len, action_dim)
+            original_action_shape = (self.chunk_size, action_dim)
                 
             if sample_full_episode:
                 start_ts = 0
             else:
-                start_ts = np.random.choice(episode_len)
+                start_ts = np.random.choice(np.arange(self.n_obs_steps - 1, episode_len - self.chunk_size))
+            end_ts = start_ts + self.chunk_size
 
-            qpos = get_concatenated_pos(root['/observations/qpos'], target_id=start_ts)
+            obs_step_start = start_ts - self.n_obs_steps + 1
+            qpos = []
+            for i in range(self.n_obs_steps):
+                qpos.append(get_concatenated_pos(root['/observations/qpos'], target_id=obs_step_start + i))
 
             image_dict = dict()
             for sensor_id in self.sensor_ids:
-                image_dict[f"sensor_{sensor_id}"] = root[f'/observations/images/sensor_{sensor_id}'][start_ts]
-                action = get_concatenated_pos(root['qaction'], target_id=None, target_ids=max(0, start_ts))
-                action_len = episode_len - max(0, start_ts) # hack, to make timesteps more aligned
+                image_dict[f"sensor_{sensor_id}"] = []
+                for i in range(self.n_obs_steps):
+                    image_dict[f"sensor_{sensor_id}"].append(root[f'/observations/images/sensor_{sensor_id}'][obs_step_start + i])
 
-        self.is_sim = is_sim
+
+            action = get_concatenated_pos(root['qaction'], target_id=None, target_range=[start_ts, min(episode_len, end_ts)])
+            
+            action_len = min(self.chunk_size, episode_len - start_ts) # hack, to make timesteps more aligned
+
         padded_action = np.zeros(original_action_shape, dtype=np.float32)
+
         padded_action[:action_len] = action
-        is_pad = np.zeros(episode_len)
+        is_pad = np.zeros(self.chunk_size)
         is_pad[action_len:] = 1
 
-        # new axis for different cameras
-        all_cam_images = []
+        # # new axis for different cameras
+        # all_cam_images = []
+        # for sensor_id in self.sensor_ids:
+        #     all_cam_images.append(image_dict[f"sensor_{sensor_id}"])
+        # all_cam_images = np.stack(all_cam_images, axis=0)
+
+        # # construct observations
+        # image_data = torch.from_numpy(all_cam_images)
+        # qpos_data = torch.from_numpy(qpos).float()
+        # action_data = torch.from_numpy(padded_action).float()
+        # is_pad = torch.from_numpy(is_pad).bool()
+
+        # # channel last
+        # image_data = torch.einsum('k h w c -> k c h w', image_data)
+
+        # # normalize image and change dtype to float
+        # image_data = image_data / 255.0
+        # action_data = (action_data - self.norm_stats["qpos_mean"]) / self.norm_stats["qpos_std"]
+        # qpos_data = (qpos_data - self.norm_stats["qpos_mean"]) / self.norm_stats["qpos_std"]
+
+        # return image_data, qpos_data, action_data, is_pad
+
+
+        item = dict()
         for sensor_id in self.sensor_ids:
-            all_cam_images.append(image_dict[f"sensor_{sensor_id}"])
-        all_cam_images = np.stack(all_cam_images, axis=0)
+            image = torch.from_numpy(np.array(image_dict[f"sensor_{sensor_id}"]))
+            image = torch.einsum('n h w c -> n c h w', image)  # channel last to channel first
+            image = image / 255.0  # normalize image
+            item[f"observation.images.sensor_{sensor_id}"] = image
+        item["observation.state"] = torch.from_numpy(np.array(qpos)).float()
+        item["action"] = torch.from_numpy(padded_action).float()
+        item["action_is_pad"] = torch.from_numpy(is_pad).bool()
+        item['next.done'] = torch.from_numpy(np.zeros(1, dtype=np.bool_)).bool()  # dummy done tensor
 
-        # construct observations
-        image_data = torch.from_numpy(all_cam_images)
-        qpos_data = torch.from_numpy(qpos).float()
-        action_data = torch.from_numpy(padded_action).float()
-        is_pad = torch.from_numpy(is_pad).bool()
+        if self.info is None:
+            self.info = dict()
+            for key, val in item.items():
+                if key.startswith("observation.images"):
+                    self.info[key] = PolicyFeature(FeatureType.VISUAL, shape=val[0].shape)
+                if key == "observation.state":
+                    self.info[key] = PolicyFeature(FeatureType.STATE, shape=val[0].shape)
+                if key == "action":
+                    self.info[key] = PolicyFeature(FeatureType.ACTION, shape=val[0].shape)
 
-        # channel last
-        image_data = torch.einsum('k h w c -> k c h w', image_data)
-
-        # normalize image and change dtype to float
-        image_data = image_data / 255.0
-        action_data = (action_data - self.norm_stats["qpos_mean"]) / self.norm_stats["qpos_std"]
-        qpos_data = (qpos_data - self.norm_stats["qpos_mean"]) / self.norm_stats["qpos_std"]
-
-        return image_data, qpos_data, action_data, is_pad
+        return item
 
 
-def get_norm_stats(dataset_dir, num_episodes, task_space, vel_control):
+
+
+def get_norm_stats(dataset_dir, num_episodes):
     all_qpos_data = []
     all_action_data = []
     # episode 길이 관련 코드 수정
+    observation_image_keys = []
+    cnt = 0
     for episode_idx in range(num_episodes):
         dataset_path = os.path.join(dataset_dir, f'episode_{episode_idx}.hdf5')
         with h5py.File(dataset_path, 'r') as root:
-            if task_space:
-                if vel_control:
-                    # qpos = root['/observations/xvel'][()]
-                    qpos = np.zeros_like(root['/observations/xvel'][()])
-                    action = root['/xvel_action'][()]
-                else:
-                    qpos = root['/observations/xpos'][()]
-                    action = root['/xaction'][()]
-            else:
-                qpos = get_concatenated_pos(root['/observations/qpos'])
-                action = get_concatenated_pos(root['qaction'])
-                
+            qpos = get_concatenated_pos(root['/observations/qpos'])
+            action = get_concatenated_pos(root['qaction'])
+            observation_image_keys = list(root['/observations/images'].keys())
+        
+        cnt += qpos.shape[0]
         all_qpos_data.append(torch.from_numpy(qpos))
         all_action_data.append(torch.from_numpy(action))
     all_qpos_data = torch.stack(all_qpos_data)
     all_action_data = torch.stack(all_action_data)
 
     # normalize action data
+    action_min = all_action_data.view(-1, 7).min(dim=0)[0]
+    action_max = all_action_data.view(-1, 7).max(dim=0)[0]
     action_mean = all_action_data.mean(dim=[0, 1], keepdim=True)
     action_std = all_action_data.std(dim=[0, 1], keepdim=True)
     action_std = torch.clip(action_std, 1e-2, np.inf) # clipping
 
     # normalize qpos data
+    qpos_min = all_qpos_data.view(-1, 7).min(dim=0)[0]
+    qpos_max = all_qpos_data.view(-1, 7).max(dim=0)[0]
     qpos_mean = all_qpos_data.mean(dim=[0, 1], keepdim=True)
     qpos_std = all_qpos_data.std(dim=[0, 1], keepdim=True)
     qpos_std = torch.clip(qpos_std, 1e-2, np.inf) # clipping
 
-    stats = {"qaction_mean": action_mean.numpy().squeeze(), "qaction_std": action_std.numpy().squeeze(),
-             "qpos_mean": qpos_mean.numpy().squeeze(), "qpos_std": qpos_std.numpy().squeeze(),
-             "example_qpos": qpos, 'example_action': action }
+    stats = {
+        "action": {
+            "min": action_min.numpy(),
+            "max": action_max.numpy(),
+            "mean": action_mean.numpy().squeeze(),
+            "std": action_std.numpy().squeeze(),
+            "count": np.array([cnt]),
+        },
+        "observation.state": {
+            "min": qpos_min.numpy(),
+            "max": qpos_max.numpy(),
+            "mean": qpos_mean.numpy().squeeze(),
+            "std": qpos_std.numpy().squeeze(),
+            "count": np.array([cnt]),
+        },
+    }
+
+    for key in observation_image_keys:
+        stats[f"observation.images.{key}"] = {
+            "min": np.array([[[0.0]], [[0.0]], [[0.0]]]),  # Assuming images are normalized between 0 and 1
+            "max": np.array([[[1.0]], [[1.0]], [[1.0]]]),  # Assuming images are normalized between 0 and 1
+            "mean": np.array([[[0.5]], [[0.5]], [[0.5]]]),  # Assuming images are normalized between 0 and 1
+            "std": np.array([[[0.25]], [[0.25]], [[0.25]]]),  # Assuming images are normalized between 0 and 1
+            "count": np.array([cnt]),
+        }
+    
+
+    # stats = {"qaction_mean": action_mean.numpy().squeeze(), "qaction_std": action_std.numpy().squeeze(),
+    #          "qpos_mean": qpos_mean.numpy().squeeze(), "qpos_std": qpos_std.numpy().squeeze(),
+    #          "example_qpos": qpos, 'example_action': action }
     
     return stats
 
 
-def get_concatenated_pos(pos_path, target_id=None, target_ids=None):
+def get_concatenated_pos(pos_path, target_id=None, target_range=None):
     pos_list = []
     for key in pos_path.keys():
-        if target_id is None and target_ids is None:
+        if target_id is None and target_range is None:
             pos_list.append(pos_path[key][()])
             if len(pos_list) > 0:
                 pos = np.concatenate(pos_list, axis=0)
-        elif target_ids is None:
+        elif target_range is None:
             pos_list.append(pos_path[key][target_id])
             if len(pos_list) > 0:
                 pos = np.concatenate(pos_list, axis=0)
         else:
-            pos_list.append(pos_path[key][target_ids:])
+            pos_list.append(pos_path[key][target_range[0]:target_range[1]])
             if len(pos_list) > 0:
                 pos = np.concatenate(pos_list, axis=0)
     return pos
 
 
-def load_data(dataset_dir, num_episodes, sensor_ids, batch_size_train, batch_size_val, task_space=False, vel_control=False):
+def load_data(dataset_dir, num_episodes, sensor_ids, batch_size_train, batch_size_val, chunk_size, num_workers=1, n_obs_steps=1):
     print(f'\nData from: {dataset_dir}\n')
     # obtain train test split
     train_ratio = 0.8
@@ -160,15 +219,18 @@ def load_data(dataset_dir, num_episodes, sensor_ids, batch_size_train, batch_siz
     val_indices = shuffled_indices[int(train_ratio * num_episodes):]
 
     # obtain normalization stats for qpos and action
-    norm_stats = get_norm_stats(dataset_dir, num_episodes, task_space, vel_control)
+    norm_stats = get_norm_stats(dataset_dir, num_episodes)
 
     # construct dataset and dataloader
-    train_dataset = EpisodicDataset(train_indices, dataset_dir, sensor_ids, norm_stats, task_space, vel_control)
-    val_dataset = EpisodicDataset(val_indices, dataset_dir, sensor_ids, norm_stats, task_space, vel_control)
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train, shuffle=True, pin_memory=True, num_workers=1, prefetch_factor=1)
-    val_dataloader = DataLoader(val_dataset, batch_size=batch_size_val, shuffle=True, pin_memory=True, num_workers=1, prefetch_factor=1)
+    train_dataset = EpisodicDataset(train_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, n_obs_steps=n_obs_steps)
+    val_dataset = EpisodicDataset(val_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, n_obs_steps=n_obs_steps)
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train, shuffle=True, pin_memory=True, num_workers=num_workers, prefetch_factor=1)
+    val_dataloader = DataLoader(val_dataset, batch_size=batch_size_val, shuffle=True, pin_memory=True, num_workers=num_workers, prefetch_factor=1)
 
-    return train_dataloader, val_dataloader, norm_stats, train_dataset.is_sim
+    input_features = {k: v for k, v in train_dataset.info.items() if k.startswith("observation")}
+    output_features = {k: v for k, v in train_dataset.info.items() if k.startswith("action")}
+
+    return train_dataloader, val_dataloader, norm_stats, input_features, output_features
 
 
 
@@ -378,10 +440,12 @@ def make_optimizer(policy_class, policy):
         raise NotImplementedError
     return optimizer
 
-def forward_pass(data, policy):
-    image_data, qpos_data, action_data, is_pad = data
-    image_data, qpos_data, action_data, is_pad = image_data.cuda(), qpos_data.cuda(), action_data.cuda(), is_pad.cuda()
-    return policy(qpos_data, image_data, action_data, is_pad) # TODO remove None
+def forward_pass(batch, policy):
+    data = {k: (v.cuda() if isinstance(v, torch.Tensor) else v) for k, v in batch.items()}
+    return policy.forward(data)
+    # image_data, qpos_data, action_data, is_pad = data
+    # image_data, qpos_data, action_data, is_pad = image_data.cuda(), qpos_data.cuda(), action_data.cuda(), is_pad.cuda()
+    # return policy(qpos_data, image_data, action_data, is_pad) # TODO remove None
 
 # def get_image(ts, sensor_ids, camera_config, memories, yolo_config=None):
 #     curr_images = []
@@ -415,3 +479,18 @@ def forward_pass(data, policy):
 #     curr_image = torch.from_numpy(curr_image / 255.0).float().cuda().unsqueeze(0)
 
 #     return curr_image, memories
+
+
+def convert_lists_to_tuples(obj):
+    """
+    딕셔너리나 리스트 내부의 모든 리스트를 재귀적으로 튜플로 변환합니다.
+    """
+    # 입력된 객체가 딕셔너리일 경우
+    if isinstance(obj, dict):
+        return {key: convert_lists_to_tuples(value) for key, value in obj.items()}
+    # 입력된 객체가 리스트일 경우
+    elif isinstance(obj, list):
+        return tuple(convert_lists_to_tuples(item) for item in obj)
+    # 딕셔너리나 리스트가 아니면 그대로 반환
+    else:
+        return obj

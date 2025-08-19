@@ -17,6 +17,7 @@ from .routes.task import task_bp
 from .routes.dataset import dataset_bp
 from .routes.policy import policy_bp
 from .routes.checkpoint import checkpoint_bp
+from .routes.vla import vla_bp
 
 import rclpy
 from rclpy.node import Node
@@ -55,6 +56,7 @@ app.register_blueprint(task_bp, url_prefix='/api')
 app.register_blueprint(dataset_bp, url_prefix='/api')
 app.register_blueprint(policy_bp, url_prefix='/api')
 app.register_blueprint(checkpoint_bp, url_prefix='/api')
+app.register_blueprint(vla_bp, url_prefix='/api')
 
 socketio.on_namespace(SensorNamespace('/sensor', pm))
 socketio.on_namespace(RobotNamespace('/robot', pm))

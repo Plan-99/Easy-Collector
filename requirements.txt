@@ -12,7 +12,6 @@ dm-env
 h5py
 Pillow
 pynput
-grad_cam
 curobo
 flask[async]
 flask-cors
@@ -27,6 +26,14 @@ piper_sdk
 pyusb
 orator
 python-can
+datasets
+jsonlines
+draccus
+safetensors
+termcolor
+gymnasium
+diffusers
+transformers
 
 # # diffusion policy
 # dill

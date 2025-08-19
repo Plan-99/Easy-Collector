@@ -38,12 +38,12 @@
                 <q-btn color="grey-8" class="full-height full-width" outline size="lg" icon="add" @click="showDatasetForm = true"></q-btn>
             </div>
         </div>
-        <right-drawer v-model="showRightDrawer">
+        <right-drawer v-model="showRightDrawer" v-if="!datasets.length">
             <div class="row">
                 <div class="col text-center q-py-sm cursor-pointer" :class="{ 'bg-grey-4': settingTab !== 'robot', 'text-dark': settingTab !== 'robot' }" @click="settingTab = 'robot'">Robot</div>
                 <div class="col text-center q-py-sm cursor-pointer" :class="{ 'bg-grey-4': settingTab !== 'sensor', 'text-dark': settingTab !== 'sensor' }" @click="settingTab = 'sensor'">Sensor</div>
             </div>
-            <div v-if="settingTab === 'robot'" class="q-pa-lg">
+            <q-scroll-area v-if="settingTab === 'robot'" class="q-pa-lg" style="height: 800px; width: 600px">
                 <q-select
                     v-model="task.robot_ids"
                     label="Robot"
@@ -110,11 +110,8 @@
                         ></q-input>
                     </div>
                 </div>
-                <div class="absolute-bottom" style="left: 80px; right: 30px; bottom: 20px;">
-                    <q-btn color="primary  full-width" @click="saveTask">Save Setting</q-btn>
-                </div>
-            </div>
-            <div v-else class="q-pa-lg">
+            </q-scroll-area>
+            <q-scroll-area v-else class="q-pa-lg" style="height: 800px; width: 600px">
                 <q-select
                     v-model="task.sensor_ids"
                     label="Sensor"
@@ -183,7 +180,7 @@
                             </q-btn>
                         </div>
                     </div>
-                    <div class="q-mt-md">
+                    <div class="q-mt-md flex flex-center">
                         <web-rtc-video
                             v-if="sensor.handler.status() !== 'off'"
                             :process-id="`sensor_${sensor.id}`"
@@ -194,9 +191,9 @@
                         ></web-rtc-video>
                     </div>
                 </div>
-                <div class="absolute-bottom" style="left: 80px; right: 30px; bottom: 20px;">
-                    <q-btn color="primary full-width" @click="saveTask">Save Setting</q-btn>
-                </div>
+            </q-scroll-area>
+            <div class="absolute-bottom" style="left: 80px; right: 30px; bottom: 20px;">
+                <q-btn color="primary full-width" @click="saveTask">Save Setting</q-btn>
             </div>
         </right-drawer>
 
@@ -456,6 +453,9 @@ function listDatasets() {
         datasets.value.forEach(dataset => {
             dataset.onTerminal = false;
         });
+        if (datasets.value.length === 0) {
+            showRightDrawer.value = true;
+        }
     }).catch((error) => {
         console.error('Error fetching datasets:', error);
     });

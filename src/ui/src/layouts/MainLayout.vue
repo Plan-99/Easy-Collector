@@ -63,6 +63,11 @@ const linksList = [
     icon: 'cleaning_services',
     link: '/tasks'
   },
+  {
+    title: 'VLA',
+    icon: 'psychology',
+    link: '/vla/execute'
+  }
   // {
   //   title: 'Datasets',
   //   icon: 'folder_open',

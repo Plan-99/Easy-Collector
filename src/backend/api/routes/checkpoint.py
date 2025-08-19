@@ -73,8 +73,9 @@ def start_test(id):
         policy_obj=data.get('policy'),
         robots=data.get('robots'),
         sensors=data.get('sensors'),
+        max_timesteps=data.get('timesteps', 100),
         socketio_instance=current_app.pm.socketio,
-        name=f"checkpoint_test_{id}",
+        name=f"checkpoint_test",
     )
     
     return {'status': 'success', 'message': 'Checkpoint test started'}, 200
@@ -82,7 +83,7 @@ def start_test(id):
 @checkpoint_bp.route('/checkpoint/<id>/:stop_test', methods=['POST'])
 def stop_test(id):
     current_app.pm.stop_function(
-        name=f"checkpoint_test_{id}",
+        name=f"checkpoint_test",
     )
     return {'status': 'success', 'message': 'Checkpoint test stopped'}, 200
 

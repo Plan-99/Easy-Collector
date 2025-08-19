@@ -15,14 +15,16 @@ class Checkpoint(Model, SoftDeletes):
         'policy_id',
         'dataset_info',
         'is_training',
-        'num_epochs',
-        'batch_size',
+        'train_settings',
         'load_model_id',
+        'loss',
+        'best_epoch',
     ]
     
     __casts__ = {
         'dataset_info': 'json',
         'is_training': 'boolean',
+        'train_settings': 'json',
     }
     
     __timestamps__ = True

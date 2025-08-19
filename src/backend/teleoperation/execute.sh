@@ -1,1 +1,0 @@
-python3 -m backend.teleoperation.dynamixel_publisher --leader_robot_preset_id 1 --robot_id 2
