@@ -454,6 +454,7 @@ class PI0Policy(PreTrainedPolicy):
         """
         images = []
         img_masks = []
+    
 
         present_img_keys = [key for key in self.config.image_features if key in batch]
         missing_img_keys = [key for key in self.config.image_features if key not in batch]

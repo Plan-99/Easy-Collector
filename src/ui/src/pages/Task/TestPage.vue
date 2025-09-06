@@ -84,8 +84,6 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="text-bold">Loss: <span class="text-body1">{{ watchingCheckpoint.loss?.toFixed(5) }}</span></div>
-                            <div class="text-bold">Best Epoch: <span class="text-body1">{{ watchingCheckpoint.best_epoch }}</span></div>
                         </div>
                     </div>
                     <div v-else class="text-center text-grey-6 q-pa-md">
@@ -245,7 +243,7 @@ const testingProgress = ref(0);
 function listCheckpoints() {
     return api.get('/checkpoints', {
         params: {
-            where: `task_id,=,${taskId}|is_training,=,0`
+            where: `task_id,=,${taskId}|status,=,finished`
         }
     }).then((response) => {
         checkpoints.value = response.data.checkpoints

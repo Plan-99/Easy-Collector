@@ -27,6 +27,8 @@ from ..lerobot.policies.act.configuration_act import ACTConfig
 from ..lerobot.policies.act.modeling_act import ACTPolicy
 from ..lerobot.policies.diffusion.configuration_diffusion import DiffusionConfig
 from ..lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
+from ..lerobot.policies.vlasen.configuration_vlasen import VLAsEnConfig
+from ..lerobot.policies.vlasen.modeling_vlasen import VLAsEnPolicy
 from ..lerobot.datasets.utils import dataset_to_policy_features
 from ..lerobot.configs.types import FeatureType
 from safetensors.torch import load_file
@@ -75,6 +77,15 @@ def train(
             **train_settings,
         )
         policy = DiffusionPolicy(cfg, dataset_stats=stats)
+    elif policy_obj['type'] == 'VLAsEn':
+        
+        cfg = VLAsEnConfig(
+            input_features=input_features,
+            output_features=output_features,
+            **policy_settings,
+            **train_settings,
+        )
+        policy = VLAsEnPolicy(cfg, dataset_stats=stats)
     
 
     policy.train()
@@ -174,8 +185,18 @@ def main(args):
     os.makedirs(temp_dir)
     
     try:
-        # Copy dataset files to the temporary directory
-        dataset_ids = json.loads(args.dataset_ids)
+        # Fetch configurations from the database
+        # task = Task.find(args.task_id).to_dict()
+        # policy = Policy.find(args.policy_id).to_dict()
+        checkpoint = Checkpoint.find(args.checkpoint_id)
+        checkpoint.update({'status': 'training'})
+        task = Task.find(checkpoint.task_id).to_dict()
+        policy = Policy.find(checkpoint.policy_id).to_dict()
+        load_model = Checkpoint.find(checkpoint.load_model_id).to_dict() if checkpoint.load_model_id else None
+        # load_model = Checkpoint.find(args.load_model_id).to_dict() if args.load_model_id else None
+
+                # Copy dataset files to the temporary directory
+        dataset_ids = checkpoint.dataset_info.keys()
         episode_counter = 0
         for ds_id in dataset_ids:
             dataset_path = f"/root/src/backend/datasets/{ds_id}"
@@ -189,23 +210,20 @@ def main(args):
                 episode_counter += 1
                 print("Copied episode file:", ep_file, "to", dest_ep_path)
 
-        # Fetch configurations from the database
-        task = Task.find(args.task_id).to_dict()
-        policy = Policy.find(args.policy_id).to_dict()
-        checkpoint = Checkpoint.find(args.checkpoint_id).to_dict()
-        load_model = Checkpoint.find(args.load_model_id).to_dict() if args.load_model_id else None
+        checkpoint = checkpoint.to_dict()
 
         batch_size = checkpoint['train_settings']['batch_size']
         sensor_ids = task['sensor_ids']
-        if policy['type'] in ['ACT']:
+        if policy['type'] in ['ACT', 'VLAsEn']:
             chunk_size = policy['settings']['chunk_size']
         elif policy['type'] in ['Diffusion']:
             chunk_size = policy['settings']['horizon']
         num_workers = checkpoint['train_settings']['num_workers']
         n_obs_steps = policy['settings']['n_obs_steps']  # Default to 1 if not specified
+        vision_backbone = policy['settings']['vision_backbone']
         
         # Load data from the temporary directory
-        train_dataloader, val_dataloader, stats, input_features, output_features = load_data(temp_dir, episode_counter, sensor_ids, batch_size, batch_size, chunk_size, num_workers, n_obs_steps)
+        train_dataloader, val_dataloader, stats, input_features, output_features = load_data(temp_dir, episode_counter, sensor_ids, batch_size, batch_size, chunk_size, vision_backbone, num_workers, n_obs_steps)
 
         # Start the training process
         best_epoch, min_val_loss, best_state_dict = train(
@@ -220,7 +238,7 @@ def main(args):
         )
         
         Checkpoint.find(args.checkpoint_id).update({
-            'is_training': False,
+            'status': 'finished',
             'best_epoch': best_epoch,
             'loss': min_val_loss,
         })
@@ -238,11 +256,11 @@ def main(args):
 if __name__ == '__main__':
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('--task_id', required=True)
-    parser.add_argument('--policy_id', required=True)
-    parser.add_argument('--load_model_id', default=None, required=False)
+    # parser.add_argument('--task_id', required=True)
+    # parser.add_argument('--policy_id', required=True)
+    # parser.add_argument('--load_model_id', default=None, required=False)
     parser.add_argument('--checkpoint_id', required=True)
-    parser.add_argument('--dataset_ids', required=True)
+    # parser.add_argument('--dataset_ids', required=True)
     
     # # Add arguments for training parameters
     # # This is a bit of a hack to get all the training parameters from the command line

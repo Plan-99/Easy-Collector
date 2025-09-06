@@ -3,15 +3,9 @@
         <div class="row q-col-gutter-md">
             <div class="col-6 col-sm-4 col-md-3 col-lg-2" v-for="task in tasks" :key="task.id">
                 <q-card class="cursor-pointer full-height"  @click="$router.push(`/tasks/${task.id}/data_collection`)">
-                    <div class="cursor-pointer relative-position" style="height: 180px; display: flex; align-items: center; justify-content: center;">
+                    <q-card-section class="cursor-pointer relative-position" style="height: 180px; display: flex; align-items: center; justify-content: center;">
                         <div style="font-size: 80px;">
                             {{ task.image || '🤖' }}
-                        </div>
-                        <div class="absolute-bottom text-h6 q-pa-sm" style="background-color: rgba(0,0,0,0.5); color: white; width: 100%;">
-                            <div>{{ task.name }}</div>
-                            <q-space></q-space>
-                            <q-icon v-if="task.status === 'running'" color="positive" name="play_arrow" size="sm"></q-icon>
-                            <q-icon v-if="task.status === 'stopped'" name="stop" size="sm"></q-icon>
                         </div>
                         <q-menu context-menu>
                             <q-list bordered separator>
@@ -29,11 +23,25 @@
                                 </q-item>
                             </q-list>
                         </q-menu>
-                    </div>
+                    </q-card-section>
+                    <q-card-section class="text-h6 q-pa-sm" style="background-color: rgba(0,0,0,0.5); color: white; width: 100%;">
+                        <div>{{ task.name }}</div>
+                        <q-space></q-space>
+                        <q-icon v-if="task.status === 'running'" color="positive" name="play_arrow" size="sm"></q-icon>
+                        <q-icon v-if="task.status === 'stopped'" name="stop" size="sm"></q-icon>
+                    </q-card-section>
                 </q-card>
             </div>
-            <div class="col-6 col-sm-4 col-md-3 col-lg-2">
-                <q-btn color="grey-8" class="full-height full-width" outline size="lg" icon="add" @click="openNewTaskDialog"></q-btn>
+            <div class="col" v-if="!tasks.length">
+                <q-card class="full-height" flat bordered>
+                    <q-card-section class="text-center">
+                        <div class="text-h6">No Tasks Found</div>
+                        <div class="text-subtitle2">Click the button below to add a new task.</div>
+                    </q-card-section>
+                </q-card>
+            </div>
+            <div class="col-6 col-sm-4 col-md-3 col-lg-2" style="min-height: 220px;">
+                <q-btn color="primary" class="full-height full-width" outline size="lg" icon="add" @click="openNewTaskDialog"></q-btn>
             </div>
         </div>
         <q-dialog v-model="showTaskForm" persistent>

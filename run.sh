@@ -11,4 +11,5 @@ docker run -it --rm \
     --env "XAUTHORITY=$HOME/.Xauthority" \
     --net=host \
     --gpus all \
-    --name easy_collector_container easy-collector:latest
+    --name easy_collector_container easy-collector:latest \
+    # bash -c "cd .. && bash run_backend.sh"

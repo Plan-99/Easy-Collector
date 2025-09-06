@@ -4,8 +4,24 @@ export const POLICY_CONFIGS = {
         'chunk_size': { 'label': 'Chunk Size', 'value': 15, 'type': 'number' },
         'n_action_steps': { 'label': 'Number of Action Steps', 'value': 1, 'type': 'number' },
         'temporal_ensemble_coeff': { 'label': 'Temporal Ensemble Coefficient', 'value': 0.9, 'type': 'number', 'nullable': true },
-        'vision_backbone': { 'label': 'Vision Backbone', 'value': 'resnet18', 'type': 'select', 'options': ['resnet18', 'resnet34', 'resnet50'] },
-        'pretrained_backbone_weights': { 'label': 'Pretrained Backbone Weights', 'value': 'ResNet18_Weights.IMAGENET1K_V1', 'type': 'select', options: ['ResNet18_Weights.IMAGENET1K_V1', 'ResNet34_Weights.IMAGENET1K_V1', 'ResNet50_Weights.IMAGENET1K_V1'] },
+        'vision_backbone': { 
+            'label': 'Vision Backbone', 
+            'value': 'resnet18', 
+            'type': 'select', 
+            'options': ['resnet18', 'resnet34', 'resnet50', 'dinov2', 'dinov3'] // Assuming DinoV2 is a valid option,
+        },
+        'pretrained_backbone_weights': { 
+            'label': 'Pretrained Backbone Weights', 
+            value: 'ResNet18_Weights.IMAGENET1K_V1', 
+            type: 'select',
+            options: {
+                'resnet18': ['ResNet18_Weights.IMAGENET1K_V1'], 
+                'resnet34': ['ResNet34_Weights.IMAGENET1K_V1'], 
+                'resnet50': ['ResNet50_Weights.IMAGENET1K_V1'],
+                'dinov2': ['dinov2_vits14'], // Assuming DinoV2 is a valid option
+                'dinov3': ['facebook/dinov3-vitb16-pretrain-lvd1689m'] // Assuming DinoV3 is a valid option
+            }
+        },
         'replace_final_stride_with_dilation': { 'label': 'Replace Final Stride', 'value': false, 'type': 'boolean' },
         'pre_norm': { 'label': 'Pre-Normalization', 'value': false, 'type': 'boolean' },
         'dim_model': { 'label': 'Model Dimension', 'value': 512, 'type': 'number' },
@@ -51,6 +67,40 @@ export const POLICY_CONFIGS = {
 
         // --- Loss 계산 ---
         'do_mask_loss_for_padding': { 'label': 'Mask Loss for Padding', 'value': false, 'type': 'boolean' },
+    },
+    'VLAsEn': {
+        'n_obs_steps': { 'label': 'Number of Observation Steps', 'value': 1, 'type': 'number' },
+        'chunk_size': { 'label': 'Chunk Size', 'value': 15, 'type': 'number' },
+        'n_action_steps': { 'label': 'Number of Action Steps', 'value': 1, 'type': 'number' },
+        'temporal_ensemble_coeff': { 'label': 'Temporal Ensemble Coefficient', 'value': 0.9, 'type': 'number', 'nullable': true },
+        'vision_backbone': { 
+            'label': 'Vision Backbone', 
+            'value': 'resnet18', 
+            'type': 'select', 
+            'options': ['resnet18', 'resnet34', 'resnet50', 'dinov2'] // Assuming DinoV2 is a valid option,
+        },
+        'pretrained_backbone_weights': { 
+            'label': 'Pretrained Backbone Weights', 
+            value: 'ResNet18_Weights.IMAGENET1K_V1', 
+            type: 'select',
+            options: {
+                'resnet18': ['ResNet18_Weights.IMAGENET1K_V1'], 
+                'resnet34': ['ResNet34_Weights.IMAGENET1K_V1'], 
+                'resnet50': ['ResNet50_Weights.IMAGENET1K_V1'],
+                'dinov2': ['dinov2_vits14'] // Assuming DinoV2 is a valid option
+            }
+        },
+        'replace_final_stride_with_dilation': { 'label': 'Replace Final Stride', 'value': false, 'type': 'boolean' },
+        'pre_norm': { 'label': 'Pre-Normalization', 'value': false, 'type': 'boolean' },
+        'dim_model': { 'label': 'Model Dimension', 'value': 512, 'type': 'number' },
+        'n_heads': { 'label': 'Number of Heads', 'value': 8, 'type': 'number' },
+        'dim_feedforward': { 'label': 'Feedforward Dimension', 'value': 3200, 'type': 'number' },
+        'feedforward_activation': { 'label': 'Feedforward Activation', 'value': 'relu', 'type': 'select', 'options': ['relu', 'gelu', 'silu'] },
+        'n_encoder_layers': { 'label': 'Number of Encoder Layers', 'value': 4, 'type': 'number' },
+        'n_decoder_layers': { 'label': 'Number of Decoder Layers', 'value': 1, 'type': 'number' },
+        'use_vae': { 'label': 'Use VAE', 'value': true, 'type': 'boolean' },
+        'latent_dim': { 'label': 'Latent Dimension', 'value': 32, 'type': 'number' },
+        'n_vae_encoder_layers': { 'label': 'Number of VAE Encoder Layers', 'value': 4, 'type': 'number' }
     }
 };
 
@@ -75,6 +125,9 @@ export const TRAIN_CONFIGS = {
         // --- Scheduler 설정 ---
         'scheduler_name': { 'label': 'LR Scheduler Name', 'value': 'cosine', 'type': 'select', 'options': ['cosine', 'linear', 'constant'] },
         'scheduler_warmup_steps': { 'label': 'LR Scheduler Warmup Steps', 'value': 500, 'type': 'number' }
+    },
+    'VLAsEn': {
+        'optimizer_lr': { 'label': 'Optimizer Learning Rate', 'value': 1e-5, 'type': 'number' },
     },
     'Common': {
         'num_epochs': { 'label': 'Number of Epochs', 'value': 1000, 'type': 'number' },

@@ -111,14 +111,15 @@ def test_vla(
                     if key.startswith("observation.images"):
                         info[key] = PolicyFeature(FeatureType.VISUAL, shape=val[0].shape)
                     if key == "observation.state":
-                        info[key] = PolicyFeature(FeatureType.STATE, shape=val[0].shape)
-                        
-                info['action'] = PolicyFeature(FeatureType.ACTION, shape=[7])
-                        
+                        info[key] = PolicyFeature(FeatureType.STATE, shape=val[0].shape)     
+                info['action'] = PolicyFeature(FeatureType.ACTION, shape=[7])      
                 policy.config.input_features = {k: v for k, v in info.items() if k.startswith("observation")}
                 policy.config.output_features = {k: v for k, v in info.items() if k.startswith("action")}
                 
+                
+                
                 with torch.inference_mode():
+                    print(state['observation.images.sensor_1'].shape)
                     action = policy.select_action(state)
                     
                     

@@ -18,4 +18,4 @@ class InsertPi0ToPolicyTable(Migration):
 
     def down(self):
 
-        self.db.table('policy').where('name', 'pi0_basic').delete()
+        self.db.table('policies').where('name', 'pi0_basic').delete()

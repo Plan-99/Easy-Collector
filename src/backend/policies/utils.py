@@ -13,13 +13,18 @@ import readline
 from sensor_msgs.msg import CompressedImage
 from types import SimpleNamespace
 from ..lerobot.configs.types import PolicyFeature, FeatureType
+from torchvision import transforms
+from transformers import AutoImageProcessor
+from PIL import Image
+
+
 
 
 e = IPython.embed
 
 
 class EpisodicDataset(torch.utils.data.Dataset):
-    def __init__(self, episode_ids, dataset_dir, sensor_ids, norm_stats, chunk_size, n_obs_steps=1):
+    def __init__(self, episode_ids, dataset_dir, sensor_ids, norm_stats, chunk_size, vision_backbone='resnet18', n_obs_steps=1):
         super(EpisodicDataset).__init__()
         self.episode_ids = episode_ids
         self.dataset_dir = dataset_dir
@@ -76,35 +81,17 @@ class EpisodicDataset(torch.utils.data.Dataset):
         is_pad = np.zeros(self.chunk_size)
         is_pad[action_len:] = 1
 
-        # # new axis for different cameras
-        # all_cam_images = []
-        # for sensor_id in self.sensor_ids:
-        #     all_cam_images.append(image_dict[f"sensor_{sensor_id}"])
-        # all_cam_images = np.stack(all_cam_images, axis=0)
-
-        # # construct observations
-        # image_data = torch.from_numpy(all_cam_images)
-        # qpos_data = torch.from_numpy(qpos).float()
-        # action_data = torch.from_numpy(padded_action).float()
-        # is_pad = torch.from_numpy(is_pad).bool()
-
-        # # channel last
-        # image_data = torch.einsum('k h w c -> k c h w', image_data)
-
-        # # normalize image and change dtype to float
-        # image_data = image_data / 255.0
-        # action_data = (action_data - self.norm_stats["qpos_mean"]) / self.norm_stats["qpos_std"]
-        # qpos_data = (qpos_data - self.norm_stats["qpos_mean"]) / self.norm_stats["qpos_std"]
-
-        # return image_data, qpos_data, action_data, is_pad
-
-
         item = dict()
         for sensor_id in self.sensor_ids:
-            image = torch.from_numpy(np.array(image_dict[f"sensor_{sensor_id}"]))
-            image = torch.einsum('n h w c -> n c h w', image)  # channel last to channel first
-            image = image / 255.0  # normalize image
-            item[f"observation.images.sensor_{sensor_id}"] = image
+            processed_images = []
+            for image in image_dict[f"sensor_{sensor_id}"]:
+                image = Image.fromarray(np.array(image))
+                image = process_image(image)
+                processed_images.append(image)
+            # image = torch.from_numpy(np.array(image_dict[f"sensor_{sensor_id}"]))
+            # image = torch.einsum('n h w c -> n c h w', image)  # channel last to channel first
+            # image = image / 255.0  # normalize image
+            item[f"observation.images.sensor_{sensor_id}"] = torch.stack(processed_images)  # stack images along the batch dimension
         item["observation.state"] = torch.from_numpy(np.array(qpos)).float()
         item["action"] = torch.from_numpy(padded_action).float()
         item["action_is_pad"] = torch.from_numpy(is_pad).bool()
@@ -123,6 +110,16 @@ class EpisodicDataset(torch.utils.data.Dataset):
         return item
 
 
+
+def process_image(image, vision_backbone='resnet18', to_cuda=False):
+    if vision_backbone not in VISION_BACKBONE_MAP:
+        tensor_transform = transforms.ToTensor()
+        image = tensor_transform(image)
+    else:
+        image_processor = AutoImageProcessor.from_pretrained(VISION_BACKBONE_MAP[vision_backbone])
+        image = image_processor(image)['pixel_values'][0]  # Assuming the image is a PIL Image or numpy array
+
+    return image.cuda() if to_cuda else image  # Add batch dimension
 
 
 def get_norm_stats(dataset_dir, num_episodes):
@@ -210,7 +207,7 @@ def get_concatenated_pos(pos_path, target_id=None, target_range=None):
     return pos
 
 
-def load_data(dataset_dir, num_episodes, sensor_ids, batch_size_train, batch_size_val, chunk_size, num_workers=1, n_obs_steps=1):
+def load_data(dataset_dir, num_episodes, sensor_ids, batch_size_train, batch_size_val, chunk_size, vision_backbone='resnet18', num_workers=1, n_obs_steps=1):
     print(f'\nData from: {dataset_dir}\n')
     # obtain train test split
     train_ratio = 0.8
@@ -222,8 +219,8 @@ def load_data(dataset_dir, num_episodes, sensor_ids, batch_size_train, batch_siz
     norm_stats = get_norm_stats(dataset_dir, num_episodes)
 
     # construct dataset and dataloader
-    train_dataset = EpisodicDataset(train_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, n_obs_steps=n_obs_steps)
-    val_dataset = EpisodicDataset(val_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, n_obs_steps=n_obs_steps)
+    train_dataset = EpisodicDataset(train_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, vision_backbone, n_obs_steps=n_obs_steps)
+    val_dataset = EpisodicDataset(val_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, vision_backbone, n_obs_steps=n_obs_steps)
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train, shuffle=True, pin_memory=True, num_workers=num_workers, prefetch_factor=1)
     val_dataloader = DataLoader(val_dataset, batch_size=batch_size_val, shuffle=True, pin_memory=True, num_workers=num_workers, prefetch_factor=1)
 
@@ -276,74 +273,6 @@ def zoom_image(img, point, size):
     
     return cropped
 
-
-
-# def fetch_image_with_config(image, config, memory=None, yolo_config=None, no_yolo=False, no_zoom=False):
-#     if memory is None:
-#         memory = {
-#             'is_first_image': True,
-#             'fixed_boxes': [],
-#             'last_box': {}
-#         }
-
-#     if 'zoom' in config and not no_zoom:
-#         size = config['zoom']['size']
-#         point = config['zoom']['point']
-#         image = zoom_image(image, point, size)
-#     if 'resize' in config:
-#         size = config['resize']['size']
-#         image = cv2.resize(image, size)
-#     if 'masked_yolo' in config and not no_yolo:
-#         classes = config['masked_yolo']['classes']
-#         masked_image = np.zeros_like(image)
-#         show_boxes = []
-#         yolo_model = yolo_config['model']
-
-#         results = yolo_model(image, conf=yolo_config['conf'])
-#         result = results[0]
-#         boxes = result.boxes
-#         names = result.names
-#         masked_image = np.zeros_like(image)
-
-#         for class_name, class_config in classes.items():
-#             class_boxes = []
-#             last_box = memory['last_box'][class_name] if class_name in memory['last_box'] else None
-#             for box in boxes:
-#                 box_id = int(box.cls.item())
-#                 if box_id == class_config['id']:
-#                     class_boxes.append(box)
-
-#             if class_config['is_fixed_mask']:
-
-#                 if memory['is_first_image']:
-
-#                     if class_config['show_id'] == -1:
-#                         memory['fixed_boxes'] += class_boxes
-#                         memory['is_first_image'] = False
-#                     elif len(class_boxes) > class_config['show_id']:
-#                         memory['fixed_boxes'].append(class_boxes[class_config['show_id']])
-#                         memory['is_first_image'] = False
-
-#                 show_boxes += memory['fixed_boxes']
-
-#             else:
-#                 if class_config['show_id'] == -1:
-#                     show_boxes += class_boxes
-#                 elif len(class_boxes) > class_config['show_id']:
-#                     show_boxes.append(class_boxes[class_config['show_id']])
-
-#             if class_config['keep_last_box']:
-#                 if last_box is not None:
-#                     show_boxes.append(last_box)
-#                 if len(class_boxes) > 0:
-#                     memory['last_box'][class_name] = class_boxes[0]
-
-#         if len(show_boxes) > 0:
-#             masked_image = mask_outside_boxes(image, show_boxes, padding=yolo_config['padding'])
-#         image = masked_image
-
-    
-#     return image, memory
 
 
 def input_caching(prompt):
@@ -447,39 +376,6 @@ def forward_pass(batch, policy):
     # image_data, qpos_data, action_data, is_pad = image_data.cuda(), qpos_data.cuda(), action_data.cuda(), is_pad.cuda()
     # return policy(qpos_data, image_data, action_data, is_pad) # TODO remove None
 
-# def get_image(ts, sensor_ids, camera_config, memories, yolo_config=None):
-#     curr_images = []
-#     raw_images = []
-
-#     for index, cam_name in enumerate(camera_names):
-#         image = ts.observation['images'][cam_name]
-
-#         # if cam_name in camera_config:
-#         #     image, memories[index] = fetch_image_with_config(image, camera_config[cam_name], memories[index], yolo_config)
-
-
-#         raw_images.append(image)
-#         curr_image = rearrange(image, 'h w c -> c h w')
-#         curr_images.append(curr_image)
-
-#     if len(raw_images):           
-#         # 이미지 크기 맞추기 (최대 크기로 맞추거나 다른 방식으로 조정)
-#         max_height = 480
-#         max_width = 640
-#         resized_images = [cv2.resize(img, (max_width, max_height)) for img in raw_images]
-
-#         # 이미지를 가로로 나열
-#         combined_image = cv2.hconcat(resized_images)
-
-#     else:
-#         print("No images to display.")
-
-
-#     curr_image = np.stack(curr_images, axis=0)
-#     curr_image = torch.from_numpy(curr_image / 255.0).float().cuda().unsqueeze(0)
-
-#     return curr_image, memories
-
 
 def convert_lists_to_tuples(obj):
     """
@@ -494,3 +390,9 @@ def convert_lists_to_tuples(obj):
     # 딕셔너리나 리스트가 아니면 그대로 반환
     else:
         return obj
+    
+
+VISION_BACKBONE_MAP = {
+    'dinov2': 'facebook/dinov2-base',
+    'dinov3': 'facebook/dinov3-vitb16-pretrain-lvd1689m',
+}

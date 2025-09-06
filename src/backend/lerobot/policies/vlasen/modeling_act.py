@@ -336,27 +336,20 @@ class ACT(nn.Module):
 
         # Backbone for image feature extraction.
         if self.config.image_features:
-            if config.vision_backbone == "dinov2":
-                from ..vision_backbones.dino import DinoBackbone
+            if config.vision_backbone == "dinov2" or config.vision_backbone == "dinov3":
+                from ..vision_backbones.dino import DinoVisionBackbone
 
-                self.backbone = DinoBackbone()
-                num_channels = self.backbone.num_channels
-            elif config.vision_backbone == "dinov3":
-                from ..vision_backbones.dino import DinoBackbone
-
-                self.backbone = DinoBackbone("facebook/dinov3-vitb16-pretrain-lvd1689m")
-                num_channels = self.backbone.num_channels
+                self.backbone = DinoVisionBackbone(model_name=config.vision_backbone, pretrained=True)
             else:
                 backbone_model = getattr(torchvision.models, config.vision_backbone)(
                     replace_stride_with_dilation=[False, False, config.replace_final_stride_with_dilation],
                     weights=config.pretrained_backbone_weights,
                     norm_layer=FrozenBatchNorm2d,
                 )
-                # Note: The assumption here is that we are using a ResNet model (and hence layer4 is the final
-                # feature map).
-                # Note: The forward method of this returns a dict: {"feature_map": output}.
-                self.backbone = IntermediateLayerGetter(backbone_model, return_layers={"layer4": "feature_map"})
-                num_channels = backbone_model.fc.in_features
+            # Note: The assumption here is that we are using a ResNet model (and hence layer4 is the final
+            # feature map).
+            # Note: The forward method of this returns a dict: {"feature_map": output}.
+            self.backbone = IntermediateLayerGetter(backbone_model, return_layers={"layer4": "feature_map"})
 
         # Transformer (acts as VAE decoder when training with the variational objective).
         self.encoder = ACTEncoder(config)
@@ -375,7 +368,7 @@ class ACT(nn.Module):
         self.encoder_latent_input_proj = nn.Linear(config.latent_dim, config.dim_model)
         if self.config.image_features:
             self.encoder_img_feat_input_proj = nn.Conv2d(
-                num_channels, config.dim_model, kernel_size=1
+                backbone_model.fc.in_features, config.dim_model, kernel_size=1
             )
         # Transformer encoder positional embeddings.
         n_1d_tokens = 1  # for the latent

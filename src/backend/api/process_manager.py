@@ -9,6 +9,9 @@ class ProcessManager:
         self.tasks = {}
         self.socketio = socketio
         self.debug = debug
+        self.process_queue = {
+            'train_task': [],
+        }
         atexit.register(self.stop_all_processes)
         print("ProcessManager initialized and cleanup registered.")
 
@@ -49,13 +52,23 @@ class ProcessManager:
             self.socketio.start_background_task(target=self._stream_reader, process_name=name, process_stream=process.stdout, log_emit_id=log_emit_id, stream_type='stdout', sid=sid)
             self.socketio.start_background_task(target=self._stream_reader, process_name=name, process_stream=process.stderr, log_emit_id=log_emit_id, stream_type='stderr', sid=sid)
 
+            if name in self.process_queue:
+                self.process_queue[name].pop(0)
+
             def wait_for_process_end():
                 return_code = process.wait()
                 print(f"Process '{name}' (PID: {process.pid}) has finished with return code {return_code}.")
                 # 프로세스 종료 후 딕셔너리에서 제거
                 if name in self.processes:
                     del self.processes[name]
+
                 self.socketio.emit(f"stop_process", {'id': name, 'return_code': return_code}, to=sid)
+
+                if name in self.process_queue and len(self.process_queue[name]) > 0:
+                    next_command = self.process_queue[name][0]['command']
+                    print(f"Starting next queued process for '{name}': {' '.join(next_command)}")
+                    self.start_process(name, next_command, log_emit_id=log_emit_id, sid=sid)
+                
 
 
             self.socketio.start_background_task(target=wait_for_process_end)

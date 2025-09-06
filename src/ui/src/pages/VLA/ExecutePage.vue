@@ -130,17 +130,13 @@
 
 <script setup>
 import { onMounted, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
 import { api } from 'src/boot/axios';
 import { useRobot } from 'src/composables/useRobot.js';
 import { useSensor } from 'src/composables/useSensor.js';
 import WebRtcVideo from 'src/components/WebRtcVideo.vue';
 import ProcessConsole from 'src/components/ProcessConsole.vue';
 import { Notify } from 'quasar';
-import { useSocket } from 'src/composables/useSocket.js';
 
-const route = useRoute();
-const { socket } = useSocket();
 
 const testing = ref(false);
 
@@ -186,7 +182,7 @@ function listSensors() {
 
 function listCheckpoints() {
     return api.get('/checkpoints').then((response) => {
-        checkpoints.value = response.data.checkpoints.filter(e => e.is_vla === 1)
+        checkpoints.value = response.data.checkpoints
     }).catch((error) => {
         console.error('Error fetching checkpoints:', error);
     });

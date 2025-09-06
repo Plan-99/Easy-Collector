@@ -7,11 +7,15 @@ import cv2
 from einops import rearrange
 from ...utils.image_parser import fetch_image_with_config
 
-from ...policies.utils import make_policy
+from ...policies.utils import make_policy, VISION_BACKBONE_MAP, process_image
 from ...env.env import Env
 
 from ...lerobot.policies.act.modeling_act import ACTPolicy
 from ...lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
+
+import torchvision.transforms as transforms
+from transformers import AutoImageProcessor
+
 
 def checkpoint_test(
     node,
@@ -42,8 +46,11 @@ def checkpoint_test(
         for robot in robots:
             state_dim += robot['joint_dim']
 
-            
         env = Env(node, robots, sensors)
+
+        vision_backbone = policy_obj.get('vision_backbone')
+
+
     except Exception as e:
         import traceback
         error_string = traceback.format_exc()
@@ -96,10 +103,11 @@ def checkpoint_test(
                     image = fetch_image_with_config(image, {
                         'resize': task['sensor_img_size'],
                     })
-                    image = image / 255.0
-                    image = torch.from_numpy(image).float().cuda().unsqueeze(0)
-                    image = rearrange(image, 'b h w c -> b c h w')
-                    state[f'observation.images.sensor_{sensor["id"]}'] = image
+                    image = process_image(image, vision_backbone, to_cuda=True)
+                    # image = image / 255.0
+                    # image = torch.from_numpy(image).float().cuda().unsqueeze(0)
+                    # image = rearrange(image, 'b h w c -> b c h w')
+                    state[f'observation.images.sensor_{sensor["id"]}'] = image.unsqueeze(0)
                 
                 with torch.inference_mode():
                     action = policy.select_action(state)

@@ -1,8 +1,10 @@
 from flask import Blueprint, request, current_app, Response
 from ...database.models.task_model import Task as TaskModel
 import json
-from ..process.train import train_task
 from ...database.models.checkpoint_model import Checkpoint as CheckpointModel
+
+import os
+import shutil
 
 task_bp = Blueprint('task', __name__)
 
@@ -24,14 +26,14 @@ def get_task(id):
         'status': 'success',
         'task': task.to_dict()
     }, 200
-    
-@task_bp.route('/task:start_training', methods=['POST'])
-def start_training():
+
+
+@task_bp.route('/checkpoint', methods=['POST'])
+def create_checkpoint():
     data = request.json
     task_id = data.get('task_id')
     policy_id = data.get('policy_id')
     dataset_info = data.get('dataset_info', {})
-    dataset_ids = list(dataset_info.keys())
     load_model_id = data.get('load_model_id', None)
     checkpoint_name = data.get('name')
     train_settings = data.get('train_settings', {})
@@ -41,46 +43,73 @@ def start_training():
         task_id=task_id,
         policy_id=policy_id,
         dataset_info=dataset_info,
-        is_training=True,
+        status='waiting',
         train_settings=train_settings,
         load_model_id=load_model_id,
     )
+    return {'status': 'success', 'message': 'Checkpoint Created', 'id': new_checkpoint.id}, 200
+
+
+@task_bp.route('/task:start_training', methods=['POST'])
+def start_training():
+    data = request.json
+    checkpoint_id = data.get('checkpoint_id')
 
     command_list = ['python3', '-u', '-m', 'backend.scripts.train',
-                    '--task_id', str(task_id), '--policy_id', str(policy_id),
-                    '--dataset_ids', json.dumps(dataset_ids),
-                    '--checkpoint_id', str(new_checkpoint.id)]
-    
-    # for key, value in data.items():
-    #     command_list.extend([f'--{key}', str(value)])
-
-    if load_model_id:
-        command_list.extend(['--load_model_id', str(load_model_id)])
+                    '--checkpoint_id', str(checkpoint_id)]
 
     process_id = f"train_task"
-    print(command_list)
-    process = current_app.pm.start_process(process_id, command_list)
+
+    current_app.pm.process_queue['train_task'].append({
+        'checkpoint_id': checkpoint_id,
+        'command': command_list
+    })
+
+    if process_id not in current_app.pm.processes:
+        process = current_app.pm.start_process(process_id, command_list)
     
-    if process:
         return {
             'status': 'success',
-            'message': f'Training started for task {task_id} with policy {policy_id}',
+            'message': f'Training started for checkpoint {checkpoint_id}',
             'process_id': process_id,
-            'checkpoint_id': new_checkpoint.id,
+            'checkpoint_id': checkpoint_id,
             'pid': process.pid
         }, 200
     else:
-        return {'status': 'error', 'message': f'Failed to train'}, 500
-    
+        return {
+            'status': 'success',
+            'message': f'Training queued for checkpoint {checkpoint_id}',
+            'process_id': process_id,
+            'checkpoint_id': checkpoint_id,
+            'pid': None
+        }, 200
+
+
 @task_bp.route('/task:stop_training', methods=['POST'])
 def stop_training():
+    checkpoint = CheckpointModel.where('status', 'training').first()
+    if checkpoint:
+        checkpoint.delete()  # Delete the checkpoint if it exists
+
     current_app.pm.stop_process('train_task')
-    checkpoint = CheckpointModel.where('is_training', 1).first()
+    
+    temp_dir = "/root/src/backend/datasets/tmp"
+    if os.path.exists(temp_dir):
+        shutil.rmtree(temp_dir)
+    return {'status': 'success', 'message': 'Training stopped'}, 200
+
+@task_bp.route('/task:cancel_training', methods=['POST'])
+def cancel_training():
+    data = request.json
+    checkpoint_id = data.get('checkpoint_id')
+    checkpoint = CheckpointModel.find(checkpoint_id)
     if checkpoint:
         checkpoint.delete()  # Delete the checkpoint if it exists
     
-    return {'status': 'success', 'message': 'Training stopped'}, 200
+    current_app.pm.process_queue['train_task'] = [proc for proc in current_app.pm.process_queue['train_task'] if proc['checkpoint_id'] != checkpoint_id]
     
+    return {'status': 'success', 'message': 'Training cancelled'}, 200
+
     
 @task_bp.route('/task', methods=['POST'])
 def create_task():

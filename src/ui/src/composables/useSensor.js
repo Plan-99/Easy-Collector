@@ -30,7 +30,7 @@ export function useSensor(sensor, sensorOnCallback=() => {}) {
     });
   }
 
-  function checkSensorTopic(maxSteps = 10) {
+  function checkSensorTopic(maxSteps = 20) {
     if (sensorTopicChecker) {
       clearInterval(sensorTopicChecker);
     }

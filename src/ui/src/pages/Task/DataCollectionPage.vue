@@ -33,9 +33,16 @@
                     </div>
                 </div>
             </div>
-            
+            <div class="col" v-if="!datasets.length">
+                <q-card class="full-height" flat bordered>
+                    <q-card-section class="text-center">
+                        <div class="text-h6">No Datasets Found</div>
+                        <div class="text-subtitle2">Click the button below to add a new dataset folder.</div>
+                    </q-card-section>
+                </q-card>
+            </div>
             <div class="col-6 col-sm-4 col-md-3 col-lg-2" style="min-height: 150px;">
-                <q-btn color="grey-8" class="full-height full-width" outline size="lg" icon="add" @click="showDatasetForm = true"></q-btn>
+                <q-btn color="primary" class="full-height full-width" outline size="lg" icon="add" @click="showDatasetForm = true"></q-btn>
             </div>
         </div>
         <right-drawer v-model="showRightDrawer" v-if="!datasets.length">
@@ -138,7 +145,7 @@
                     </div>
                     <div class="col">
                         <q-input
-                            label="Width"
+                            label="Height"
                             v-model.number="task.sensor_img_size[1]"
                             dense
                             outlined
@@ -453,9 +460,6 @@ function listDatasets() {
         datasets.value.forEach(dataset => {
             dataset.onTerminal = false;
         });
-        if (datasets.value.length === 0) {
-            showRightDrawer.value = true;
-        }
     }).catch((error) => {
         console.error('Error fetching datasets:', error);
     });
@@ -536,6 +540,9 @@ const task = ref(null);
 function getTask() {
     return api.get(`/tasks/${taskId}`).then((response) => {
         task.value = response.data.task;
+        if (datasets.value.length === 0) {
+            showRightDrawer.value = true;
+        }
     }).catch((error) => {
         console.error('Error fetching task:', error);
     });

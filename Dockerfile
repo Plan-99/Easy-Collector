@@ -76,6 +76,9 @@ RUN mkdir -p /etc/apt/keyrings && \
 # Node.js 설치 (npm도 함께 설치됨)
 RUN apt-get update && apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git
+
 # GUI 관련 라이브러리
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1-mesa-glx \

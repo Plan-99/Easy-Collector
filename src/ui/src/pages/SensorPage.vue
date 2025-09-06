@@ -44,9 +44,18 @@
                     </q-card-section>
                 </q-card>
             </div>
+
+            <div class="col" v-if="!sensors.length">
+                <q-card class="full-height" flat bordered>
+                    <q-card-section class="text-center">
+                        <div class="text-h6">No Sensors Found</div>
+                        <div class="text-subtitle2">Click the button below to add a new sensor.</div>
+                    </q-card-section>
+                </q-card>
+            </div>
             
             <div class="col-6 col-sm-4 col-md-3 col-lg-2" style="min-height: 220px;">
-                <q-btn color="grey-8" class="full-height full-width" outline size="lg" icon="add" @click="showSensorForm = true"></q-btn>
+                <q-btn color="primary" class="full-height full-width" outline size="lg" icon="add" @click="showSensorForm = true"></q-btn>
             </div>
         </div>
         <bottom-terminal

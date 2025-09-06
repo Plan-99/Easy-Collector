@@ -14,7 +14,7 @@ class Checkpoint(Model, SoftDeletes):
         'task_id',
         'policy_id',
         'dataset_info',
-        'is_training',
+        'status',
         'train_settings',
         'load_model_id',
         'loss',
@@ -23,7 +23,6 @@ class Checkpoint(Model, SoftDeletes):
     
     __casts__ = {
         'dataset_info': 'json',
-        'is_training': 'boolean',
         'train_settings': 'json',
     }
     

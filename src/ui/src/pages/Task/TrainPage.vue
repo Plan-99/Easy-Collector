@@ -130,7 +130,16 @@
                             </div>
                             <div v-for="(config, key) in policyForm.settings" :key="key" class="col-4">
                                 <q-select
-                                    v-if="config.type === 'select'"
+                                    v-if="key === 'pretrained_backbone_weights'"
+                                    dense
+                                    outlined
+                                    v-model="config.value"
+                                    :options="pretrained_backbone_weight_options"
+                                    :label="config.label"
+                                    class="full-height"
+                                />
+                                <q-select
+                                    v-else-if="config.type === 'select'"
                                     dense
                                     outlined
                                     v-model="config.value"
@@ -195,7 +204,7 @@
                 <div class="q-gutter-y-md">
                     <q-form class="q-col-gutter-md row">
                         <div class="col-12">
-                            <q-input dense outlined v-model="newCheckpointName" label="Checkpoint Name" :disable="isTraining" />
+                            <q-input dense outlined v-model="newCheckpointName" label="Checkpoint Name" />
                         </div>
 
                         <div v-for="(config, key) in trainingForm" :key="key" class="col-4">
@@ -206,7 +215,6 @@
                                 v-model="config.value"
                                 :options="config.options"
                                 :label="config.label"
-                                :disable="isTraining"
                                 emit-value
                                 map-options
                                 class="full-height"
@@ -216,7 +224,6 @@
                                 outlined
                                 v-model.number="config.value"
                                 :label="config.label"
-                                :disable="isTraining"
                                 v-else-if="config.type === 'number'"
                                 type="number"
                                 class="full-height"
@@ -229,7 +236,6 @@
                                 v-model="config.value"
                                 :options="[{ label: config.label, value: true }, { label: 'No', value: false }]"
                                 :label="config.label"
-                                :disable="isTraining"
                                 spread
                                 class="full-height"
                             ></q-btn-toggle>
@@ -238,7 +244,6 @@
                                 outlined
                                 v-model="config.value"
                                 :label="config.label"
-                                :disable="isTraining"
                                 v-else
                                 type="text"
                                 class="full-height"
@@ -246,34 +251,7 @@
                         </div>
                     </q-form>
                     <div class="text-center">
-                        <q-btn v-if="!isTraining" color="primary" label="Start Training" @click="startTraining" :loading="isLoadingApi" :disable="isTraining" />
-                        <q-btn v-else color="negative" label="Stop Training" @click="stopTraining" />
-
-                    </div>
-
-                    <q-linear-progress
-                        v-if="isTraining"
-                        instant-feedback
-                        :value="trainingProgress"
-                        size="20px"
-                        color="primary"
-                    >
-                        <div class="absolute-full flex flex-center">
-                            <q-badge color="white" text-color="primary" :label="`${Number(trainingProgress * 100).toFixed(2)}%`" />
-                        </div>
-                    </q-linear-progress>
-
-                    <div class="row q-col-gutter-x-md ">
-                        <div class="col-6">
-                            <process-console
-                                v-if="step === 3"
-                                process="train_task"
-                            />
-                        </div>
-
-                        <div  class="col-6" >
-                            <Line :data="data" :options="options"/>
-                        </div>
+                        <q-btn color="primary" label="Start Training" @click="createCheckpoint" />
                     </div>
 
                 </div>
@@ -282,11 +260,26 @@
 
             <template v-slot:navigation>
                 <q-stepper-navigation class="text-center">
-                    <q-btn v-if="step > 1 && !isTraining" flat color="primary" @click="$refs.stepper.previous()" label="Back" class="q-mr-sm" />
+                    <q-btn v-if="step > 1" flat color="primary" @click="$refs.stepper.previous()" label="Back" class="q-mr-sm" />
                     <q-btn @click="nextStep" color="primary" :label="'Continue'" v-show="step !== 3" />
                 </q-stepper-navigation>
             </template>
         </q-stepper>
+
+        <q-page-sticky position="bottom-right" :offset="[18, 18]">
+            <q-btn
+                push
+                round
+                size="xl"
+                :color="trainingCheckpoint.id === cp.id ? 'deep-orange' : 'grey-5'"
+                :icon="trainingCheckpoint.id === cp.id ? 'model_training' : 'pending'"
+                @click="watchCheckpoint(cp)"
+                v-for="cp in unfinishedCheckpoints.toReversed()"
+                :key="cp.id"
+                class="q-ml-sm"
+            />
+
+        </q-page-sticky>
 
         <q-dialog v-model="showSaveAsDialog">
             <q-card style="min-width: 350px">
@@ -302,49 +295,32 @@
                 </q-card-actions>
             </q-card>
         </q-dialog>
+        <TrainingDialog v-model="showTrainingDialog" :checkpoint="watchingCheckpoint" :isTraining="watchingIsTraining" @hide="unwatchCheckpoint" @cpRemoved="getUnfinishedCheckpoint" />
     </div>
 </template>
 
 <script setup>
-import { ref, onMounted, computed, watch, shallowRef } from 'vue';
+import { ref, onMounted, computed, watch } from 'vue';
 import { useQuasar, Notify } from 'quasar';
 import { useRoute } from 'vue-router';
 import { api } from 'src/boot/axios';
-import ProcessConsole from 'src/components/ProcessConsole.vue';
+import { POLICY_CONFIGS, TRAIN_CONFIGS } from 'src/configs/modelConfigs';
+// import { useTraining } from 'src/composables/useTraining';
+import TrainingDialog from 'src/components/TrainingDialog.vue';
 import { useSocket } from 'src/composables/useSocket';
 import { useProcessStore } from 'src/stores/processStore';
-import { POLICY_CONFIGS, TRAIN_CONFIGS } from 'src/configs/modelConfigs';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend
-} from 'chart.js'
-import { Line } from 'vue-chartjs'
-
-
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend
-)
 
 
 const processStore = useProcessStore();
 
-const $q = useQuasar();
+
 const route = useRoute();
+const taskId = Number(route.params.id);
+// const { unfinishedCheckpoints, getUnfinishedCheckpoint, startTraining } = useTraining();
+
+const $q = useQuasar();
 const step = ref(1);
 const stepper = ref(null);
-const taskId = Number(route.params.id);
 
 // Step 1: Dataset Selection
 const availableDatasets = ref([]);
@@ -364,12 +340,10 @@ const taskVal = ref({});
 
 // Step 3: Training
 const trainingForm = ref({});
-const isLoadingApi = ref(false); // For API call loading state
-const { socket } = useSocket();
-
-
 
 const policyTypes = Object.keys(POLICY_CONFIGS);
+
+const { socket } = useSocket();
 
 // --- Computed Properties for Step 2 ---
 const checkpointOptions = computed(() => {
@@ -396,7 +370,6 @@ const isNameReadonly = computed(() => !!selectedCheckpoint.value || (selectedPol
 const isTypeReadonly = computed(() => !!selectedCheckpoint.value || (selectedPolicy.value && selectedPolicy.value !== 'new'));
 const isSettingsReadonly = computed(() => !!selectedCheckpoint.value);
 const showFormButtons = computed(() => selectedPolicy.value && !selectedCheckpoint.value);
-const isTraining = computed(() => processStore.isRunning('train_task'));
 
 function validatePolicyForm() {
     const form = policyForm.value;
@@ -455,6 +428,26 @@ watch(selectedCheckpoint, (newVal) => {
        } else {
             resetPolicyForm();
        }
+    }
+});
+
+const pretrained_backbone_weight_options = computed(() => {
+    if (!policyForm.value.type || !POLICY_CONFIGS[policyForm.value.type]['pretrained_backbone_weight']) return [];
+    if (!policyForm.value.settings || !policyForm.value.settings.vision_backbone) return [];
+    const backbone = policyForm.value.settings.vision_backbone.value;
+    return POLICY_CONFIGS[policyForm.value.type].pretrained_backbone_weights.options[backbone] || [];
+});
+
+watch(() => policyForm.value.settings?.vision_backbone?.value, (newVal) => {
+    if (!policyForm.value.type || !POLICY_CONFIGS[policyForm.value.type]['pretrained_backbone_weight']) return;
+    if (newVal && policyForm.value.type) {
+        policyForm.value.settings.pretrained_backbone_weights.options = pretrained_backbone_weight_options.value;
+        if (!policyForm.value.settings.pretrained_backbone_weights.value) {
+            policyForm.value.settings.pretrained_backbone_weights.value = pretrained_backbone_weight_options.value[0] || null;
+        }
+        if (!pretrained_backbone_weight_options.value.includes(policyForm.value.settings.pretrained_backbone_weights.value)) {
+            policyForm.value.settings.pretrained_backbone_weights.value = pretrained_backbone_weight_options.value[0] || null;
+        }
     }
 });
 
@@ -520,7 +513,7 @@ function deselectDataset(dataset) {
 function listCheckpoints() {
     return api.get('/checkpoints', {
         params: {
-            where: `task_id,=,${taskId}|is_training,=,0`,
+            where: `task_id,=,${taskId}|status,=,finished`,
             order: 'created_at DESC'
         }
     }).then(response => {
@@ -730,154 +723,128 @@ function getTrainingPayload() {
     return trainingParams;
 }
 
-async function startTraining() {
-    isLoadingApi.value = true;
-    trainingProgress.value = 0;
-    data.value.labels = [];
-    data.value.datasets[0].data = [];
-    data.value.datasets[1].data = [];
-    try {
-        const trainingPayload = getTrainingPayload();
-        await api.post('/task:start_training', {
-            task_id: taskId,
-            policy_id: selectedPolicy.value,
-            load_model_id: selectedCheckpoint.value,
-            dataset_info: Object.fromEntries(selectedDatasets.value.map(d => [d.id, { episode_num: d.episode_num }])),
-            name: newCheckpointName.value,
-            train_settings: trainingPayload
+const showTrainingDialog = ref(false);
+const watchingCheckpoint = ref(null);
+function createCheckpoint() {
+    const trainingPayload = getTrainingPayload();
+    api.post('/checkpoint', {
+        task_id: taskId,
+        policy_id: selectedPolicy.value,
+        load_model_id: selectedCheckpoint.value,
+        dataset_info: Object.fromEntries(selectedDatasets.value.map(d => [d.id, { episode_num: d.episode_num }])),
+        name: newCheckpointName.value,
+        train_settings: trainingPayload
+    }).then((res) => {
+        const checkpointId = res.data.id;
+        getUnfinishedCheckpoint().then(() => {
+            watchCheckpoint(unfinishedCheckpoints.value.find(cp => cp.id === checkpointId));
+            startTraining(watchingCheckpoint.value.id);
         });
-        await getTrainingCheckpoint();
-    } catch (error) {
+    }).catch(error => {
         Notify.create({ color: 'negative', message: `${error}: Failed to start training: ` });
-    } finally {
+    }).finally(() => {
         listCheckpoints();
-        isLoadingApi.value = false;
-    }
+    });
 }
 
-async function stopTraining() {
-    if (!isTraining.value) return;
-    try {
-        await api.post('/task:stop_training');
-    } catch (error) {
-        Notify.create({ color: 'negative', message: `${error}: Failed to stop training.` });
-    }
-}
-
-const trainingCheckpoint = ref(null);
-function getTrainingCheckpoint() {
-    return api.get(`/checkpoints`, {
-        params: {
-            where: `task_id,=,${taskId}|is_training,=,1`
-        }
-    }).then(response => {
-        trainingCheckpoint.value = response.data.checkpoints.at(-1) || null;
-        if (trainingCheckpoint.value) {
-            newCheckpointName.value = trainingCheckpoint.value.name || '';
-        }
+function startTraining(checkpoint_id) {
+    api.post('/task:start_training', { checkpoint_id }).catch(error => {
+        Notify.create({ color: 'negative', message: `Error starting training: ${error}` });
     })
 }
 
-const trainingProgress = ref(0);
-
-const data = shallowRef({
-    labels: [], // Example labels
-    datasets: [{
-        label: 'Train Loss',
-        backgroundColor: 'rgba(0, 0, 192, 1)',
-        borderColor: 'rgba(0, 0, 192, 1)',
-        data: [], // Example data
-    }, {
-        label: 'Validate Loss',
-        backgroundColor: 'rgba(0, 192, 0, 1)',
-        borderColor: 'rgba(0, 192, 0, 1)',
-        data: []
-    }]
+const trainingCheckpoint = computed(() => {
+    if (!unfinishedCheckpoints.value.length) return {};
+    return unfinishedCheckpoints.value.find(cp => cp.status === 'training') || unfinishedCheckpoints.value.at();
 });
 
-function addLoss(epoch, trainLoss, valLoss) {
-    if (data.value.labels.length > 50) {
-        data.value.labels.shift(); // Remove oldest label if more than 100
-        data.value.datasets[0].data.shift(); // Remove oldest train loss
-        data.value.datasets[1].data.shift(); // Remove oldest validation loss
-    }
-    const newLabels = [...data.value.labels, epoch]; // Add new label
-    const newTrainData = [...data.value.datasets[0].data, trainLoss]; // Add random data
-    const newValData = [...data.value.datasets[1].data, valLoss]; // Add random data
-    data.value = {
-        labels: newLabels,
-        datasets: [{
-            ...data.value.datasets[0],
-            data: newTrainData
-        }, {
-            ...data.value.datasets[1],
-            data: newValData
-        }]
-    };
+const isTraining = computed(() => {
+    return processStore.processIds.includes('train_task')
+})
+
+const watchingIsTraining = computed(() => {
+    return watchingCheckpoint.value && trainingCheckpoint.value && watchingCheckpoint.value.id === trainingCheckpoint.value.id && isTraining.value;
+}); 
+
+const unfinishedCheckpoints = ref([]);
+function getUnfinishedCheckpoint() {
+    return api.get(`/checkpoints`, {
+        params: {
+            where: `status,!=,finished`,
+        }
+    }).then(response => {
+        unfinishedCheckpoints.value = response.data.checkpoints
+    })
 }
 
-const options = {
-  responsive: true,
-  maintainAspectRatio: false
+function watchCheckpoint(checkpoint) {
+    watchingCheckpoint.value = checkpoint;
+    showTrainingDialog.value = true;
 }
 
+function unwatchCheckpoint() {
+    watchingCheckpoint.value = null;
+    showTrainingDialog.value = false;
+}
+
+function removeTrainingCheckpoint() {
+    unfinishedCheckpoints.value = unfinishedCheckpoints.value.filter(cp => cp.id !== watchingCheckpoint.value?.id);
+    unwatchCheckpoint();
+}
 
 
 onMounted(async () => {
     listDatasets();
     await listPolicies(); // Wait for policies to load first
     await listCheckpoints();
+    await getUnfinishedCheckpoint();
     const taskResponse = await api.get(`/tasks/${taskId}`);
     taskVal.value = taskResponse.data.task;
 
-    if (isTraining.value) {
-        step.value = 3;
-        await getTrainingCheckpoint();
-        if (trainingCheckpoint.value) {
-            const policy = policies.value.find(p => p.id === trainingCheckpoint.value.policy_id);
-            if (policy) {
-                const policyType = policy.type;
-                const commonConfigs = JSON.parse(JSON.stringify(TRAIN_CONFIGS.Common));
-                const policySpecificConfigs = policyType && TRAIN_CONFIGS[policyType] ? JSON.parse(JSON.stringify(TRAIN_CONFIGS[policyType])) : {};
-                const currentTrainingForm = { ...commonConfigs, ...policySpecificConfigs };
-
-                // Populate with values from the checkpoint
-                if (trainingCheckpoint.value.train_settings) {
-                    for (const key in currentTrainingForm) {
-                        if (trainingCheckpoint.value.train_settings[key] !== undefined) {
-                            currentTrainingForm[key].value = trainingCheckpoint.value.train_settings[key];
-                        }
-                    }
-                }
-                trainingForm.value = currentTrainingForm;
-            }
-        }
-    }
-
     socket.on('stop_process', (data) => {
         if (data.id === 'train_task') {
-            if (!trainingCheckpoint.value) return;
             api.get(`/checkpoint/${trainingCheckpoint.value.id}/:check_create_successed`).then(response => {
                 if (response.data.check_create_successed) {
                     Notify.create({ color: 'positive', message: 'Training completed successfully.' });
                 } else {
-                    console.log(response.data);
                     Notify.create({ color: 'negative', message: 'Training failed.' });
                 }
+                removeTrainingCheckpoint()
             }).catch(error => {
                 Notify.create({ color: 'negative', message: `Error stopping training: ${error}` });
             });
         }
     });
 
-    socket.on('log_train_task', (data) => {
-        if (data.log.includes('[TRAIN_LOG]')) {
-            const trainLogStr = data.log.replace('[TRAIN_LOG] ', '')
-            const trainLogJson = JSON.parse(trainLogStr)
-            trainingProgress.value = trainLogJson.epoch / trainLogJson.total_epoch
-            addLoss(trainLogJson.epoch, trainLogJson.train_loss, trainLogJson.val_loss)
+    socket.on('start_process', (data) => {
+        if (data.id === 'train_task') {
+            getUnfinishedCheckpoint()
         }
     });
+
+    // if (isTraining.value) {
+    //     step.value = 3;
+    //     await getTrainingCheckpoint();
+    //     if (trainingCheckpoint.value) {
+    //         const policy = policies.value.find(p => p.id === trainingCheckpoint.value.policy_id);
+    //         if (policy) {
+    //             const policyType = policy.type;
+    //             const commonConfigs = JSON.parse(JSON.stringify(TRAIN_CONFIGS.Common));
+    //             const policySpecificConfigs = policyType && TRAIN_CONFIGS[policyType] ? JSON.parse(JSON.stringify(TRAIN_CONFIGS[policyType])) : {};
+    //             const currentTrainingForm = { ...commonConfigs, ...policySpecificConfigs };
+
+    //             // Populate with values from the checkpoint
+    //             if (trainingCheckpoint.value.train_settings) {
+    //                 for (const key in currentTrainingForm) {
+    //                     if (trainingCheckpoint.value.train_settings[key] !== undefined) {
+    //                         currentTrainingForm[key].value = trainingCheckpoint.value.train_settings[key];
+    //                     }
+    //                 }
+    //             }
+    //             trainingForm.value = currentTrainingForm;
+    //         }
+    //     }
+    // }
 });
 </script>
 
