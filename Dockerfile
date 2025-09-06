@@ -1,5 +1,6 @@
 # ===================================================================
 # ROS 2 Humble (Desktop-Full) on Ubuntu 22.04 Dockerfile
+# with tmux for multi-terminal support
 # ===================================================================
 
 # 베이스 이미지 설정
@@ -10,7 +11,11 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Asia/Seoul
 
 # ROS 설치를 위한 준비 작업 및 필수 패키지 설치
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN \
+    # 1. 패키지 저장소를 archive.ubuntu.com에서 mirror.kakao.com으로 변경
+    sed -i 's/archive.ubuntu.com/mirror.kakao.com/g' /etc/apt/sources.list && \
+    \
+    apt-get update && apt-get install -y --no-install-recommends \
     apt-utils \
     curl \
     gnupg \
@@ -25,7 +30,6 @@ RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | g
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(lsb_release -sc) main" | tee /etc/apt/sources.list.d/ros2-latest.list > /dev/null
 
 # Intel RealSense 저장소 및 GPG 키 등록 (수정된 방식)
-# 기존 키 파일 URL이 더 이상 유효하지 않으므로, 키 서버에서 ID로 직접 키를 받아옵니다.
 RUN curl -sSL "http://keyserver.ubuntu.com/pks/lookup?op=get&search=0xF6E65AC044F831AC80A06380C8B3A55A6F3EFCDE" | gpg --dearmor -o /usr/share/keyrings/intel-librealsense.gpg && \
     echo "deb [signed-by=/usr/share/keyrings/intel-librealsense.gpg] https://librealsense.intel.com/Debian/apt-repo $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/librealsense.list > /dev/null
 
@@ -66,6 +70,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # ROS 2 환경 설정
 RUN echo "source /opt/ros/humble/setup.bash" >> /etc/bash.bashrc
+# Note: The following line is for interactive shells. The entrypoint script will source the workspace setup manually.
 RUN echo "source /root/ros2_ws/install/setup.bash" >> /etc/bash.bashrc
 
 # NodeSource 저장소 설정 (Node.js 20 설치용)
@@ -76,21 +81,30 @@ RUN mkdir -p /etc/apt/keyrings && \
 # Node.js 설치 (npm도 함께 설치됨)
 RUN apt-get update && apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git
-
-# GUI 관련 라이브러리
+# GUI 관련 라이브러리 및 tmux 설치
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1-mesa-glx \
     libglib2.0-0 \
     libxext6 \
     libx11-6 \
+    tmux \
     && rm -rf /var/lib/apt/lists/*
 
 # pip 패키지 설치
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 컨테이너 시작 시 실행할 기본 명령어 설정
-WORKDIR /root/src/ui
-CMD ["npm", "run", "dev"]
+# --- ROS2 Workspace & UI Setup ---
+WORKDIR /root
+# src 디렉토리 전체를 복사하여 ui와 backend를 모두 포함하도록 수정
+COPY src /root/src
+RUN cd /root/src/ui && npm install
+
+# --- Entrypoint Setup ---
+# 위에서 생성한 entrypoint.sh 스크립트를 컨테이너에 복사
+COPY entrypoint.sh /usr/local/bin/
+# 스크립트에 실행 권한 부여
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# 컨테이너 시작 시 실행할 기본 명령어로 entrypoint 스크립트 지정
+ENTRYPOINT ["entrypoint.sh"]

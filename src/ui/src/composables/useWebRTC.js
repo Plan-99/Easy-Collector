@@ -2,7 +2,7 @@
 import { ref, onUnmounted } from 'vue';
 // import { api } from 'src/boot/axios';
 
-const streaming_server = 'http://192.168.50.46:5002'
+const streaming_server = 'http://localhost:5002'
 
 export function useWebRTC() {
     const pc = ref(null);
