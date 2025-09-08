@@ -1,3 +1,17 @@
+### 리눅스 도커 설치
+```
+sudo apt-get update
+sudo apt-get install docker.io
+sudo ln -sf /usr/bin/docker.io /usr/local/bin/docker
+sudo usermod -aG docker user
+newgrp docker
+sudo wget -qO /etc/apt/keyrings/nvidia-container-toolkit.asc https://nvidia.github.io/libnvidia-container/gpgkey
+echo "deb [signed-by=/etc/apt/keyrings/nvidia-container-toolkit.asc] https://nvidia.github.io/libnvidia-container/stable/deb/amd64 /" \
+  | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+
+```
+
+
 ### 도커 이미지 빌드
 
 ```

@@ -12,7 +12,6 @@ class InsertPi0ToCheckpointsTable(Migration):
             'dataset_info': json.dumps({}),
             'num_epochs': 0,
             'batch_size': 0,
-            'status': 'finished',
             'train_settings': json.dumps({}),
             'best_epoch': 0,
             'num_workers': 0,
