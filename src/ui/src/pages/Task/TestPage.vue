@@ -84,6 +84,8 @@
                                     </div>
                                 </div>
                             </div>
+                            <div class="text-bold">Loss: <span class="text-body1">{{ watchingCheckpoint.loss?.toFixed(5) }}</span></div>
+                            <div class="text-bold">Best Epoch: <span class="text-body1">{{ watchingCheckpoint.best_epoch }}</span></div>
                         </div>
                     </div>
                     <div v-else class="text-center text-grey-6 q-pa-md">
@@ -158,7 +160,7 @@
                             </q-btn>
                         </div>
                         <div>
-                            <q-input dense outlined label="Timesteps per episode" class="bg-white" v-model="timesteps"></q-input>
+                            <q-input dense outlined label="Timesteps per episode" class="bg-white" v-model.number="timesteps"></q-input>
                         </div>
                     </div>
                     <div class="col-10 q-pa-md">

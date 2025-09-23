@@ -224,7 +224,6 @@ def main(args):
         
         # Load data from the temporary directory
         train_dataloader, val_dataloader, stats, input_features, output_features = load_data(temp_dir, episode_counter, sensor_ids, batch_size, batch_size, chunk_size, vision_backbone, num_workers, n_obs_steps)
-
         # Start the training process
         best_epoch, min_val_loss, best_state_dict = train(
             train_dataloader,

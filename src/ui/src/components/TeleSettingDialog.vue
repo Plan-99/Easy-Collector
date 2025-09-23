@@ -69,7 +69,7 @@
                                             color="green"
                                             label="Go to Origin Position"
                                             icon="home"
-                                            @click="goOriginPos"
+                                            @click="robot.handler.goOriginPos"
                                             class="full-width q-mt-md"
                                             outline
                                         />
@@ -192,7 +192,7 @@ import ProcessConsole from './ProcessConsole.vue';
 import { useROS } from '../composables/useROS';
 import { useLeaderTeleoperation } from '../composables/useLeaderTeleoperation';
 import { api } from 'src/boot/axios';
-import { Notify } from 'quasar';
+// import { Notify } from 'quasar';
 
 const props = defineProps({
     robot: {
@@ -237,23 +237,23 @@ function saveLeaderSetting() {
     })
 }
 
-function goOriginPos() {
-    const robot = props.robot;
-    api.post(`/robot/${robot.id}/:move_to`, {
-        goal_pos: [0, 0, 0, 0, 0, 0] // Default to zero if not set
-    }).then(() => {
-        Notify.create({
-            color: 'positive',
-            message: 'Robot moved to origin position'
-        })
-    }).catch((error) => {
-        console.error('Error moving robot to origin:', error);
-        Notify.create({
-            color: 'negative',
-            message: 'Failed to move robot to origin'
-        })
-    });
-}
+// function goOriginPos() {
+//     const robot = props.robot;
+//     api.post(`/robot/${robot.id}/:move_to`, {
+//         goal_pos: [0, 0, 0, 0, 0, 0] // Default to zero if not set
+//     }).then(() => {
+//         Notify.create({
+//             color: 'positive',
+//             message: 'Robot moved to origin position'
+//         })
+//     }).catch((error) => {
+//         console.error('Error moving robot to origin:', error);
+//         Notify.create({
+//             color: 'negative',
+//             message: 'Failed to move robot to origin'
+//         })
+//     });
+// }
 
 onMounted(() => {
     connectROS();

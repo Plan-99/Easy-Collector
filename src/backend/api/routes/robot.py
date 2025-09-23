@@ -44,17 +44,18 @@ def start_robot():
     process_id = data.get('process_id')
     id = data.get('id')
     type = data.get('type')
+    settings = data.get('settings', {})
 
     command = ''
     if type == 'piper':
-        script_path = os.path.expanduser('~/ros2_ws/src/piper_ros/can_activate.sh')
+        script_path = os.path.expanduser('~/ros2_ws/src/piper_ros/can_activate_main.sh')
         current_app.pm.start_process(
             name='can_config',
-            command=['bash', script_path , 'can0', '1000000'],
+            command=['bash', script_path],
             log_emit_id = 'log_' +  process_id
         )
         time.sleep(1)
-        command = ['ros2', 'launch', 'piper', 'start_single_piper.launch.py', f'namespace:=ec_robot_{id}']
+        command = ['ros2', 'launch', 'piper', 'start_single_piper.launch.py', f'namespace:=ec_robot_{id}', f'can_port:={settings.get("can_port", "can_0")}', 'auto_enable:=true', 'rviz_ctrl_flag:=false', 'gripper_exist:=true', 'gripper_val_mutiple:=1']
 
 
     print(f"Attempting to start robot")
@@ -97,6 +98,10 @@ def create_robot():
             'joint_lower_bounds': request.json.get('joint_lower_bounds', []),
             'joint_upper_bounds': request.json.get('joint_upper_bounds', []),
         }
+    if type == 'piper':
+        settings = {
+            'can_port': request.json.get('can_port', 'can_0'),
+        }
     RobotModel.create(
         name=name,
         type=type,
@@ -126,6 +131,11 @@ def update_robot(id):
             'joint_upper_bounds': request.json.get('joint_upper_bounds', []),
         }
 
+    if type == 'piper':
+        robot.settings = {
+            'can_port': request.json.get('can_port', 'can_0'),
+        }   
+
     robot.save()
     return {'status': 'success', 'message': 'Robot Updated'}, 200
 
@@ -154,4 +164,5 @@ def move_robot(id):
     agent = Agent(current_app.node, robot.to_dict())
 
     agent.move_to(goal_pos, step_size)
+    time.sleep(3)
     return {'status': 'success', 'message': 'Robot moved'}, 200

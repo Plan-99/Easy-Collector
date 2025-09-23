@@ -44,6 +44,7 @@ class Robot(Model, SoftDeletes):
         'write_topic_msg',
         'move_action',
         'yml_path',
+        'can_port',
     ]
 
     @has_one
@@ -135,7 +136,7 @@ class Robot(Model, SoftDeletes):
     def joint_upper_bounds(self):
         type = self.get_raw_attribute('type')
         if type == 'piper':
-            return [2.618, 2.618, 0, 1.745, 1.22, 2.094, 0.0726]
+            return [2.618, 2.618, 0, 1.745, 1.22, 2.094, 0.087]
         if type == 'ur5e': 
             return [2.618, 2.618, 2.618, 1.745, 1.22, 2.094, 0]
 
@@ -155,11 +156,18 @@ class Robot(Model, SoftDeletes):
     def gripper_range(self):
         type = self.get_raw_attribute('type')
         if type == 'piper':
-            return [0, 0.0726]
+            return [0, 0.087]
         if type == 'ur5e':
             return [0, 0.08]
 
         return []
+    
+    @accessor
+    def can_port(self):
+        type = self.get_raw_attribute('type')
+        if type == 'piper':
+            return self.settings.get('can_port', 'can_0')
+        return None
     
     @staticmethod
     def boot():

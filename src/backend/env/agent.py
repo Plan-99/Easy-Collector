@@ -57,7 +57,6 @@ class Agent:
             # self.move_to_ur5(target_pos)
         if self.robot_type == 'piper':
             self.move_step(target_pos)
-            time.sleep(3)
         else:
             while True:
                 with self.js_mutex:

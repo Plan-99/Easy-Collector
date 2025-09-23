@@ -27,6 +27,8 @@ class Leader():
         
         self.agent = agent
         self.dxl_controller = DxlController(port, self.dxl_ids)
+
+        self.target_pos = [0] * 7  # 목표 위치 초기화 (7개의 관절)
         
 
     def get_rad_pos(self, position, dxl_id):
@@ -74,8 +76,12 @@ class Leader():
             })
             
             gripper_pos = self.dxl_controller.read_dynamixel(self.dxl_ids[-1])  # 그리퍼의 현재 위치를 읽어오기
-            while gripper_pos > self.gripper_dxl_range[1]:
-                gripper_pos = self.dxl_controller.read_dynamixel(self.dxl_ids[-1])  # 그리퍼의 현재 위치를 읽어오기
+            if self.gripper_dxl_range[0] < self.gripper_dxl_range[1]:
+                while gripper_pos < self.gripper_dxl_range[1]:
+                    gripper_pos = self.dxl_controller.read_dynamixel(self.dxl_ids[-1])  # 그리퍼의 현재 위치를 읽어오기
+            else:
+                while gripper_pos > self.gripper_dxl_range[1]:
+                    gripper_pos = self.dxl_controller.read_dynamixel(self.dxl_ids[-1])  # 그리퍼의 현재 위치를 읽어오기
 
             self.is_synced = True
             self.dxl_controller.remove_torque()
@@ -88,23 +94,34 @@ class Leader():
             gripper_pos_low = self.agent.gripper_range[0]
             gripper_pos_high = self.agent.gripper_range[-1]
             gripper_pos = (gripper_tick_pos - self.gripper_dxl_range[1]) / (self.gripper_dxl_range[0] - self.gripper_dxl_range[1]) * (gripper_pos_high - gripper_pos_low) + gripper_pos_low
+            if gripper_pos < gripper_pos_low:
+                return gripper_pos_low
+            elif gripper_pos > gripper_pos_high:
+                return gripper_pos_high
             return gripper_pos
         else:
             return 0.0
 
 
     def position_pub(self, task_control):
-        target_pos = [0] * 7
         while not task_control['stop']:
             for index, dxl_id in enumerate(self.dxl_ids[:-1]):
                 # 다이나믹셀 값 읽어오기
-                position = self.dxl_controller.read_dynamixel(dxl_id)
+                try:
+                    position = self.dxl_controller.read_dynamixel(dxl_id)
+                except Exception as e:
+                    self.socketio_instance.emit(self.log_emit_id, {
+                        'log': f'Error reading from Dynamixel ID {dxl_id}: {str(e)}',
+                        'type': 'stderr'
+                    })
+                    print(f"Error reading from Dynamixel ID {dxl_id}: {str(e)}")
+                    continue
                     
-                target_pos[index] = self.get_rad_pos(position, dxl_id)
+                self.target_pos[index] = self.get_rad_pos(position, dxl_id)
 
             # 그리퍼 매핑
-            target_pos[-1] = self.get_gripper_pos()
+            self.target_pos[-1] = self.get_gripper_pos()
                 
-            self.agent.move_step(target_pos)
+            self.agent.move_step(self.target_pos)
         
         self.dxl_controller.portHandler.closePort()

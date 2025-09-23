@@ -46,9 +46,24 @@ def record_episode(node, dataset_id, robots, sensors, task, socketio_instance, t
         })
         for agent in env.agents:
             agent.move_to(home_pose[str(agent.id)])
-            if tele_type == 'leader':
+        time.sleep(3)
+
+
+        if tele_type == 'leader':
+            leaders = []
+            for agent in env.agents:
                 leader = Leader(agent, socketio_instance, agent.leader_robot_preset, log_emit_id='record_episode', port=agent.leader_robot_preset['port_name'])
-                leader.sync_leader_robot()
+                print('aaaa')
+                socketio_instance.start_background_task(
+                    target=leader.sync_leader_robot,
+                )
+                print('bbb')
+                leaders.append(leader)
+
+            while not all([leader.is_synced for leader in leaders]):
+                time.sleep(0.1)
+
+            for leader in leaders:
                 socketio_instance.start_background_task(
                     target=leader.position_pub,
                     task_control=tele_control

@@ -52,6 +52,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
                 action_dim += root['qaction'][key].shape[1]
 
             original_action_shape = (self.chunk_size, action_dim)
+
                 
             if sample_full_episode:
                 start_ts = 0
@@ -142,15 +143,15 @@ def get_norm_stats(dataset_dir, num_episodes):
     all_action_data = torch.stack(all_action_data)
 
     # normalize action data
-    action_min = all_action_data.view(-1, 7).min(dim=0)[0]
-    action_max = all_action_data.view(-1, 7).max(dim=0)[0]
+    action_min = all_action_data.view(-1, action.shape[-1]).min(dim=0)[0]
+    action_max = all_action_data.view(-1, action.shape[-1]).max(dim=0)[0]
     action_mean = all_action_data.mean(dim=[0, 1], keepdim=True)
     action_std = all_action_data.std(dim=[0, 1], keepdim=True)
     action_std = torch.clip(action_std, 1e-2, np.inf) # clipping
 
     # normalize qpos data
-    qpos_min = all_qpos_data.view(-1, 7).min(dim=0)[0]
-    qpos_max = all_qpos_data.view(-1, 7).max(dim=0)[0]
+    qpos_min = all_qpos_data.view(-1, qpos.shape[-1]).min(dim=0)[0]
+    qpos_max = all_qpos_data.view(-1, qpos.shape[-1]).max(dim=0)[0]
     qpos_mean = all_qpos_data.mean(dim=[0, 1], keepdim=True)
     qpos_std = all_qpos_data.std(dim=[0, 1], keepdim=True)
     qpos_std = torch.clip(qpos_std, 1e-2, np.inf) # clipping
@@ -195,7 +196,7 @@ def get_concatenated_pos(pos_path, target_id=None, target_range=None):
         if target_id is None and target_range is None:
             pos_list.append(pos_path[key][()])
             if len(pos_list) > 0:
-                pos = np.concatenate(pos_list, axis=0)
+                pos = np.concatenate(pos_list, axis=1)
         elif target_range is None:
             pos_list.append(pos_path[key][target_id])
             if len(pos_list) > 0:
@@ -203,7 +204,7 @@ def get_concatenated_pos(pos_path, target_id=None, target_range=None):
         else:
             pos_list.append(pos_path[key][target_range[0]:target_range[1]])
             if len(pos_list) > 0:
-                pos = np.concatenate(pos_list, axis=0)
+                pos = np.concatenate(pos_list, axis=1)
     return pos
 
 

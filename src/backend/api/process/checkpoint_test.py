@@ -77,6 +77,8 @@ def checkpoint_test(
         home_pose = task['home_pose']
         for agent in env.agents:
             agent.move_to(home_pose[str(agent.id)])
+
+        time.sleep(3)
             
         socketio_instance.emit('log_checkpoint_test', {
             'log': 'Robot moved to homepose',
@@ -127,7 +129,7 @@ def checkpoint_test(
                     'type': 'stdout '
                 })
 
-                time.sleep(0.1)  # Simulate processing time
+                time.sleep(0.05)  # Simulate processing time
 
                 ts = env.record_step()
                 timesteps.append(ts)

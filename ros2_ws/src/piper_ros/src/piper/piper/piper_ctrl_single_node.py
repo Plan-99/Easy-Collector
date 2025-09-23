@@ -294,25 +294,25 @@ class PiperRosNode(Node):
             # 夹爪控制
             if self.gripper_exist:
                 
-                _max = 72600
-                # 0 2612 26116 52240 60074 70000
-                angle_vals = [0, 2612, 26116, 52240, 60074, 70000]
+                # _max = 72600
+                # # 0 2612 26116 52240 60074 70000
+                # angle_vals = [0, 2612, 26116, 52240, 60074, 70000]
                 
-                num_levels = len(angle_vals)
-                level_size = _max / num_levels
+                # num_levels = len(angle_vals)
+                # level_size = _max / num_levels
 
-                if joint_6 == _max:
-                    index = num_levels - 1
-                else:
-                    index = math.floor(joint_6 / level_size)
+                # if joint_6 == _max:
+                #     index = num_levels - 1
+                # else:
+                #     index = math.floor(joint_6 / level_size)
 
-                if index >= num_levels:
-                    index = num_levels - 1
-                elif index < 0:
-                    index = 0
+                # if index >= num_levels:
+                #     index = num_levels - 1
+                # elif index < 0:
+                #     index = 0
                     
-                # 계산된 인덱스로 angle_vals에서 값을 찾아 반환
-                joint_6 = angle_vals[index]
+                # # 계산된 인덱스로 angle_vals에서 값을 찾아 반환
+                # joint_6 = angle_vals[index]
 
                 if len(joint_data.effort) >= 7:
                     gripper_effort = clip(joint_data.effort[6], 0.5, 3)

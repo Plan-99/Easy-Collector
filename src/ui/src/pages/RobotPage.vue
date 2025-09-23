@@ -136,6 +136,18 @@
                         emit-value
                     />
 
+                    <div v-if="robotForm.type === 'piper'">
+                        <q-input
+                            dense
+                            v-for="input in robotTypeOptions.find((e) => e.value === 'piper').form"
+                            :key="input.label"
+                            v-model="robotForm[input.key]"
+                            :label="input.label"
+                            :type="input.type"
+                            class="q-mb-md"
+                        />
+                    </div>
+
                     <div v-if="robotForm.type === 'custom'">
                         <q-input
                             dense
@@ -224,7 +236,9 @@ const watchingRobot = ref(null);
 
 const robotTypeOptions = [
     { label: 'UR5e', value: 'ur5e' },
-    { label: 'PIPER', value: 'piper' },
+    { label: 'PIPER', value: 'piper', form: [
+        { label: 'CAN Port', key: 'can_port', type: 'text', default: 'can_0' }
+    ]},
     { label: 'Custom Robot', value: 'custom'}
 ]
 
@@ -293,17 +307,19 @@ function saveRobot() {
         'joint_names': typeof(robotForm.value.joint_names) === String ? robotForm.value.joint_names.split(',') : robotForm.value.joint_names,
         'joint_lower_bounds': typeof(robotForm.value.joint_lower_bounds) === String ? robotForm.value.joint_lower_bounds.split(',').map(Number) : robotForm.value.joint_lower_bounds,
         'joint_upper_bounds': typeof(robotForm.value.joint_upper_bounds) === String ? robotForm.value.joint_upper_bounds.split(',').map(Number) : robotForm.value.joint_upper_bounds,
+        'can_port': robotForm.value.can_port || 'can_0',
     };
     if (robotForm.value.id) {
         return api.put(`/robot/${robotForm.value.id}`, data).then(() => {
             showRobotForm.value = false;
             robotForm.value = {};
+            listRobots()
         })
     } else {
         return api.post(`/robot`, data).then(() => {
             showRobotForm.value = false;
             robotForm.value = {};
-            initialize()
+            listRobots()
         })
     }
 }

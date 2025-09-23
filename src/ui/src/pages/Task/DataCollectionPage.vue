@@ -45,7 +45,7 @@
                 <q-btn color="primary" class="full-height full-width" outline size="lg" icon="add" @click="showDatasetForm = true"></q-btn>
             </div>
         </div>
-        <right-drawer v-model="showRightDrawer" v-if="!datasets.length">
+        <right-drawer v-model="showRightDrawer">
             <div class="row">
                 <div class="col text-center q-py-sm cursor-pointer" :class="{ 'bg-grey-4': settingTab !== 'robot', 'text-dark': settingTab !== 'robot' }" @click="settingTab = 'robot'">Robot</div>
                 <div class="col text-center q-py-sm cursor-pointer" :class="{ 'bg-grey-4': settingTab !== 'sensor', 'text-dark': settingTab !== 'sensor' }" @click="settingTab = 'sensor'">Sensor</div>
@@ -106,16 +106,18 @@
                     
                     <q-separator class="q-my-md" color="grey-6"></q-separator>
 
-                    <div>
-                        <q-input
-                            v-model="task.episode_len"
-                            label="Episode Length"
-                            type="number"
-                            outlined
-                            bg-color="grey-2"
-                            class="q-mb-md"
-                        ></q-input>
-                    </div>
+
+                </div>
+                <div>
+                    <q-input
+                        v-model.number="task.episode_len"
+                        label="Episode Length"
+                        type="number"
+                        outlined
+                        bg-color="grey-2"
+                        class="q-mb-md"
+                        :disable="datasets.length > 0"
+                    ></q-input>
                 </div>
             </q-scroll-area>
             <q-scroll-area v-else class="q-pa-lg" style="height: 800px; width: 600px">
@@ -131,6 +133,7 @@
                     class="q-mb-md"
                     outlined
                     bg-color="grey-2"
+                    :disable="datasets.length > 0"
                 ></q-select>
                 <div class="row q-col-gutter-sm q-mb-md">
                     <div class="col">
@@ -141,6 +144,7 @@
                             outlined
                             bg-color="grey-2"
                             type="number"
+                            :disable="datasets.length > 0"
                         ></q-input>
                     </div>
                     <div class="col">
@@ -151,6 +155,7 @@
                             outlined
                             bg-color="grey-2"
                             type="number"
+                            :disable="datasets.length > 0"
                         ></q-input>
                     </div>
                 </div>
