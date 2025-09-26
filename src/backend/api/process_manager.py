@@ -132,6 +132,7 @@ class ProcessManager:
         try:
             # 4. 래퍼 함수에 *args와 **kwargs를 올바르게 전달합니다.
             self.socketio.start_background_task(target=task_wrapper, *args, **kwargs)
+            self.socketio.emit('start_process', {'id': name})
             print(f"Task '{name}' has been started in the background.")
         except Exception as e:
             print(f"[ERROR] Failed to start task '{name}': {e}")

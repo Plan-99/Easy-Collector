@@ -17,11 +17,14 @@ def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
             return i
     raise Exception(f"Error getting auto index, or more than {max_idx} episodes")
 
-def record_episode(node, dataset_id, robots, sensors, task, socketio_instance, task_control, tele_type='leader'):
+def record_episode(node, dataset_id, robots, sensors, task, socketio_instance, task_control, tele_type='leader', iter=100000):
     env = Env(node, robots=robots, sensors=sensors)
     dataset_dir = f"{DATASET_DIR}/{dataset_id}"
 
-    while not task_control['stop']:
+    for i in range(iter):
+
+        if task_control['stop']:
+            break
 
         tele_control = {
             'stop': task_control['stop'],
@@ -44,20 +47,19 @@ def record_episode(node, dataset_id, robots, sensors, task, socketio_instance, t
             'progress': 0,
             'type': 'stdout '
         })
-        for agent in env.agents:
-            agent.move_to(home_pose[str(agent.id)])
-        time.sleep(3)
+        if home_pose is not None:
+            for agent in env.agents:
+                agent.move_to(home_pose[str(agent.id)])
+            time.sleep(3)
 
 
         if tele_type == 'leader':
             leaders = []
             for agent in env.agents:
                 leader = Leader(agent, socketio_instance, agent.leader_robot_preset, log_emit_id='record_episode', port=agent.leader_robot_preset['port_name'])
-                print('aaaa')
                 socketio_instance.start_background_task(
                     target=leader.sync_leader_robot,
                 )
-                print('bbb')
                 leaders.append(leader)
 
             while not all([leader.is_synced for leader in leaders]):
@@ -75,6 +77,8 @@ def record_episode(node, dataset_id, robots, sensors, task, socketio_instance, t
         dataset_path = os.path.join(dataset_dir, dataset_name)
         if os.path.isfile(dataset_path):
             print(f'Dataset already exist at \n{dataset_path}\nHint: set overwrite to True.')
+        
+        time.sleep(1)
 
         ts = env.reset()
         timesteps = [ts]
@@ -116,6 +120,7 @@ def record_episode(node, dataset_id, robots, sensors, task, socketio_instance, t
             for agent in env.agents:
                 data_dict[f'/observations/qpos/robot_{agent.id}'].append(ts.observation['robot_states'][agent.id]['qpos'])
                 data_dict[f'/qaction/robot_{agent.id}'].append(ts.observation['robot_states'][agent.id]['qaction'])
+                print(np.array(ts.observation['robot_states'][agent.id]['qaction']).shape, np.array(ts.observation['robot_states'][agent.id]['qpos']).shape, agent.id)
             
             for sensor in sensors:
                 image = ts.observation['images']['sensor_' + str(sensor['id'])]
@@ -134,6 +139,7 @@ def record_episode(node, dataset_id, robots, sensors, task, socketio_instance, t
         # HDF5
         t0 = time.time()
         image_size = (task['sensor_img_size'][1], task['sensor_img_size'][0])
+        print("image size", image_size)
         with h5py.File(dataset_path, 'w', rdcc_nbytes=1024**2*2) as root:
             root.attrs['sim'] = False
             obs = root.create_group('observations')
@@ -150,7 +156,7 @@ def record_episode(node, dataset_id, robots, sensors, task, socketio_instance, t
 
             for name, array in data_dict.items():
                 root[name][...] = array
-
+            
         socketio_instance.emit('log_record_episode', {
             'log': f'Saved Data: {dataset_name} in {time.time() - t0:.2f} seconds',
             'type': 'stdout '

@@ -61,90 +61,89 @@ def checkpoint_test(
         })
         return
             
-    while True:
-        policy.reset()
+    policy.reset()
+    
+    print(policy.config.output_features)
+    
+    # if temporal_agg:
+    #     all_time_actions = torch.zeros([max_timesteps, max_timesteps+num_queries, state_dim]).cuda()
         
-        print(policy.config.output_features)
-        
-        # if temporal_agg:
-        #     all_time_actions = torch.zeros([max_timesteps, max_timesteps+num_queries, state_dim]).cuda()
-            
-        socketio_instance.emit('checkpoint_test_progress', {
-            'progress': 0,
-            'type': 'stdout '
-        })
-            
-        home_pose = task['home_pose']
+    socketio_instance.emit('checkpoint_test_progress', {
+        'progress': 0,
+        'type': 'stdout '
+    })
+    
+    home_pose = task['home_pose']
+
+    if home_pose is not None:
         for agent in env.agents:
             agent.move_to(home_pose[str(agent.id)])
 
-        time.sleep(3)
-            
-        socketio_instance.emit('log_checkpoint_test', {
-            'log': 'Robot moved to homepose',
-            'type': 'stdout '
-        })
+    time.sleep(3)
         
-        ts = env.reset()
+    socketio_instance.emit('log_checkpoint_test', {
+        'log': 'Robot moved to homepose',
+        'type': 'stdout '
+    })
+    
+    ts = env.reset()
 
-        timesteps = [ts]
-        
-        for t in range(max_timesteps):
+    timesteps = [ts]
+    
+    while True:
 
-            try:
-                state = {}
+        try:
+            start = time.time()
+            state = {}
 
-                obs = ts.observation
-                qpos_list = [item['qpos'] for item in obs['robot_states'].values()]
-                qpos = np.concatenate(qpos_list)
-                qpos = torch.from_numpy(qpos).float().cuda().unsqueeze(0)
+            obs = ts.observation
+            qpos_list = [item['qpos'] for item in obs['robot_states'].values()]
+            qpos = np.concatenate(qpos_list)
+            qpos = torch.from_numpy(qpos).float().cuda().unsqueeze(0)
 
-                state['observation.state'] = qpos
-                for sensor in sensors:
-                    image = obs['images'][f'sensor_{sensor["id"]}']
-                    image = fetch_image_with_config(image, {
-                        'resize': task['sensor_img_size'],
-                    })
-                    image = process_image(image, vision_backbone, to_cuda=True)
-                    # image = image / 255.0
-                    # image = torch.from_numpy(image).float().cuda().unsqueeze(0)
-                    # image = rearrange(image, 'b h w c -> b c h w')
-                    state[f'observation.images.sensor_{sensor["id"]}'] = image.unsqueeze(0)
-                
-                with torch.inference_mode():
-                    action = policy.select_action(state)
-
-                # Prepare the action for the environment
-                action = action.squeeze(0).to("cpu").numpy()
-                start_action_id = 0
-                for agent in env.agents:
-                    target_qpos = action[start_action_id:start_action_id + agent.joint_len]
-                    print(f"To:{target_qpos} / Now:{qpos_list}")
-                    start_action_id += agent.joint_len
-                    agent.move_step(target_qpos)
-                    
-                    
-                socketio_instance.emit('checkpoint_test_progress', {
-                    'progress': (t+1) / max_timesteps,
-                    'type': 'stdout '
+            state['observation.state'] = qpos
+            for sensor in sensors:
+                image = obs['images'][f'sensor_{sensor["id"]}']
+                image = fetch_image_with_config(image, {
+                    'resize': task['sensor_img_size'],
                 })
-
-                time.sleep(0.05)  # Simulate processing time
-
-                ts = env.record_step()
-                timesteps.append(ts)
-                
-                if task_control['stop']:
-                    return
+                image = process_image(image, vision_backbone, to_cuda=True)
+                # image = image / 255.0
+                # image = torch.from_numpy(image).float().cuda().unsqueeze(0)
+                # image = rearrange(image, 'b h w c -> b c h w')
+                state[f'observation.images.sensor_{sensor["id"]}'] = image.unsqueeze(0)
             
-            except Exception as e:
-                import traceback
-                error_string = traceback.format_exc()
-                socketio_instance.emit('log_checkpoint_test', {
-                    'log': f'Error in Checkpoint Test: {error_string}',
-                    'type': 'stdout '
-                })
+            with torch.inference_mode():
+                action = policy.select_action(state)
+
+            # Prepare the action for the environment
+            action = action.squeeze(0).to("cpu").numpy()
+            start_action_id = 0
+            for agent in env.agents:
+                target_qpos = action[start_action_id:start_action_id + agent.joint_len]
+                print(f"To:{target_qpos} / Now:{qpos_list}")
+                start_action_id += agent.joint_len
+                agent.move_step(target_qpos)
+
+            # time.sleep(0.03)  # Simulate processing time
+
+            ts = env.record_step()
+            timesteps.append(ts)
+            
+            if task_control['stop']:
                 return
+                            
+            end = time.time()
+            print(f"Step Time: {end - start}")
+
+        except Exception as e:
+            import traceback
+            error_string = traceback.format_exc()
+            socketio_instance.emit('log_checkpoint_test', {
+                'log': f'Error in Checkpoint Test: {error_string}',
+                'type': 'stdout '
+            })
+            return
 
             # curr_image, memories = get_image(ts, camera_names, config['camera_config'], yolo_config, memories)
             

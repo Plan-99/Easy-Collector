@@ -140,7 +140,8 @@ def start_collection(id):
         task=data.get('task'),
         tele_type=data.get('tele_type', 'leader'),
         socketio_instance=current_app.pm.socketio,
-        name=f"record_episode_dataset{id}",
+        iter=data.get('iter', 100000),
+        name=f"record_episode",
     )
 
     return {'status': 'success', 'message': 'Data collection started'}, 200
@@ -148,7 +149,7 @@ def start_collection(id):
 @dataset_bp.route('/dataset/<id>/:stop_collection', methods=['POST'])
 def stop_collection(id):
     current_app.pm.stop_function(
-        name=f"record_episode_dataset{id}",
+        name=f"record_episode",
     )
     return {'status': 'success', 'message': 'Data collection stopped'}, 200
 
