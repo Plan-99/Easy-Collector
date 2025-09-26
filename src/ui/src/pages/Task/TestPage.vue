@@ -147,6 +147,19 @@
                 </div>
                 <div class="row col bg-grey-9">
                     <div class="col-2 q-pa-md">
+                        <q-select
+                            v-model="dataset"
+                            :options="datasets"
+                            option-label="name"
+                            option-value="id"
+                            label="Select Dataset"
+                            emit-value
+                            map-options
+                            class="q-mb-md"
+                            outlined
+                            bg-color="grey-2"
+                            v-if="status === 'collecting'"
+                        ></q-select>
                         <div v-for="robot in robots.filter(e => task.robot_ids.includes(e.id))" :key="robot.id" class="q-mb-md">
                             <q-btn color="grey-7 full-width" icon="power_settings_new" v-if="robot.handler.status() === 'off'" @click="robot.handler.startRobot()">
                                 {{ robot.name }}
@@ -159,9 +172,7 @@
                                 {{ robot.name }}
                             </q-btn>
                         </div>
-                        <div>
-                            <q-input dense outlined label="Timesteps per episode" class="bg-white" v-model.number="timesteps"></q-input>
-                        </div>
+                        
                     </div>
                     <div class="col-10 q-pa-md">
                         <div v-if="
@@ -173,23 +184,63 @@
                             Start all robots and sensors to start test
                         </div>
                         <div v-else class="text-center">
-                            <div v-if="!testing">
+                            <div v-if="status === 'pending'">
                                 <q-btn class="full-width bg-white" outline color="primary" @click="startTest">Start Test</q-btn>
                             </div>
-                            <div v-else>
-                                <div class="q-mb-md">
-                                    <q-linear-progress size="25px" instant-feedback :value="testingProgress" color="accent">
-                                        <div class="absolute-full flex flex-center">
-                                            <q-badge color="white" text-color="accent" :label="`${Number(testingProgress * 100).toFixed(0)}%`" />
-                                        </div>
-                                    </q-linear-progress>
+                            <div class="q-mb-md" v-if="status === 'collecting'">
+                                <q-linear-progress size="25px" instant-feedback :value="collectingProgress" color="accent">
+                                    <div class="absolute-full flex flex-center">
+                                        <q-badge color="white" text-color="accent" :label="`${Number(collectingProgress * 100).toFixed(0)}%`" />
+                                    </div>
+                                </q-linear-progress>
+                            </div>
+                            <div v-if="status !== 'pending'" class="row q-col-gutter-sm">
+
+                                <div class="col">
+                                    <q-btn 
+                                        class="full-width bg-white" 
+                                        outline 
+                                        color="orange-8" 
+                                        @click="stopTest"
+                                        v-if="status === 'testing'"
+                                    >Stop</q-btn>
+                                    <q-btn 
+                                        class="full-width bg-white" 
+                                        outline 
+                                        color="orange-8" 
+                                        @click="stopRecording"
+                                        v-else-if="status === 'collecting'"
+                                    >Stop</q-btn>
                                 </div>
-                                <q-btn 
-                                    class="full-width bg-white" 
+                                <!-- <div class="col">
+                                    <q-btn 
+                                        class="full-width bg-white" 
+                                        outline 
+                                        color="red-8" 
+                                        @click="stopTest"
+                                    >Fail</q-btn>
+                                </div> -->
+                                <div class="col-2" v-if="status === 'testing'">
+                                    <q-btn 
+                                        class="full-width bg-white" 
+                                        outline
+                                        color="green-8" 
+                                        @click="startRecording"
+                                    >Correct</q-btn>
+                                </div>
+
+                                <!-- <q-btn 
+                                    class="full-width bg-white col-2" 
                                     outline 
-                                    color="orange-8" 
-                                    @click="stopTest" 
-                                >Stop</q-btn>
+                                    color="purple-8" 
+                                    @click="stopTest"
+                                >Record</q-btn>
+                                <q-btn 
+                                    class="full-width bg-white col-2" 
+                                    outline 
+                                    color="green-8" 
+                                    @click="stopTest"
+                                >Correct</q-btn> -->
                             </div>
                             <process-console
                                 process="checkpoint_test"
@@ -206,7 +257,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue';
+import { onMounted, ref, computed } from 'vue';
 import { useRoute } from 'vue-router';
 import { api } from 'src/boot/axios';
 import BottomTerminal from 'src/components/BottomTerminal.vue';
@@ -216,9 +267,21 @@ import WebRtcVideo from 'src/components/WebRtcVideo.vue';
 import ProcessConsole from 'src/components/ProcessConsole.vue';
 import { Notify } from 'quasar';
 import { useSocket } from 'src/composables/useSocket.js';
+import { useProcessStore } from 'src/stores/processStore';
 
 const route = useRoute();
 const { socket } = useSocket();
+const processStore = useProcessStore();
+
+const status = computed(() => {
+    if (processStore.isRunning('checkpoint_test')) {
+        return 'testing';
+    } else if (processStore.isRunning('record_episode')) {
+        return 'collecting';
+    } else {
+        return 'pending';
+    }
+});
 
 const taskId = Number(route.params.id);
 
@@ -234,13 +297,10 @@ const checkpointForm = ref({
 });
 
 const showTestDialog = ref(false);
-const testing = ref(false);
 
 const task = ref(null);
 const robots = ref([]);
 const sensors = ref([]);
-
-const testingProgress = ref(0);
 
 function listCheckpoints() {
     return api.get('/checkpoints', {
@@ -251,6 +311,23 @@ function listCheckpoints() {
         checkpoints.value = response.data.checkpoints
     })
 }
+
+const datasets = ref([]);
+const dataset = ref(null);
+function listDatasets() {
+    return api.get('/datasets', {
+        params: {
+            task_id: taskId
+        }
+    }).then((response) => {
+        // Filter datasets by task_id from the route
+        datasets.value = response.data.datasets || []
+        dataset.value = datasets.value.length > 0 ? datasets.value[datasets.value.length - 1] : null;
+    }).catch((error) => {
+        console.error('Error fetching datasets:', error);
+    });
+}
+
 
 function editCheckpoint() {
     api.put(`/checkpoint/${checkpointForm.value.id}`, {
@@ -295,7 +372,6 @@ function listPolicies() {
 function getTask() {
     return api.get(`/tasks/${taskId}`).then((response) => {
         task.value = response.data.task;
-        timesteps.value = task.value.episode_len;
     }).catch((error) => {
         console.error('Error fetching task:', error);
     });
@@ -349,16 +425,13 @@ function closeCheckpointTab(checkpoint) {
     }
 }
 
-const timesteps = ref(100)
 function startTest() {
     api.post(`/checkpoint/${watchingCheckpoint.value.id}/:start_test`, {
-        timesteps: timesteps.value,
         task: task.value,
         policy: activePolicy.value,
         robots: robots.value.filter(e => task.value.robot_ids.includes(e.id)),
         sensors: sensors.value.filter(e => task.value.sensor_ids.includes(e.id)),
     }).then(() => {
-        testing.value = true;
         Notify.create({
             color: 'positive',
             message: 'Test started'
@@ -373,13 +446,11 @@ function startTest() {
 }
 
 function stopTest() {
-    api.post(`/checkpoint/${watchingCheckpoint.value.id}/:stop_test`).then(() => {
-        testing.value = false;
+    return api.post(`/checkpoint/${watchingCheckpoint.value.id}/:stop_test`).then(() => {
         Notify.create({
             color: 'positive',
             message: 'Test stopped'
         });
-        testingProgress.value = 0;
     }).catch((error) => {
         console.error('Error stopping test:', error);
         Notify.create({
@@ -390,32 +461,83 @@ function stopTest() {
 }
 
 function onHideTestDialog() {
-    if (testing.value) {
+    if (status.value !== 'pending') {
         stopTest();
     }
+}
+
+const collectingProgress = ref(0);
+
+function startRecording() {
+    stopTest().then(() => {
+        collectingProgress.value = 0;
+        const daggerTask = {
+            ...task.value,
+            home_pose: null,
+        }
+        api.post(`/dataset/${dataset.value.id}/:start_collection`, {
+            task: daggerTask,
+            robots: robots.value.filter(e => task.value.robot_ids.includes(e.id)),
+            sensors: sensors.value.filter(e => task.value.sensor_ids.includes(e.id)),
+            tele_type: 'leader',
+            iter: 1,
+        }).then(() => {
+            Notify.create({
+                color: 'positive',
+                message: 'Data collection started'
+            });
+        }).catch((error) => {
+            console.error('Error starting data collection:', error);
+            Notify.create({
+                color: 'negative',
+                message: 'Error starting data collection'
+            });
+        });
+    });
+}
+
+function stopRecording() {
+    api.post(`/dataset/${dataset.value.id}/:stop_collection`).then(() => {
+        Notify.create({
+            color: 'positive',
+            message: 'Data collection stopped'
+        });
+        collectingProgress.value = 0;
+    }).catch((error) => {
+        console.error('Error stopping data collection:', error);
+        Notify.create({
+            color: 'negative',
+            message: 'Error stopping data collection'
+        });
+    });
 }
 
 onMounted(() => {
     listCheckpoints();
     listPolicies();
+    listDatasets();
     getTask();
     listRobots();
     listSensors();
 
-    socket.on('checkpoint_test_progress', (data) => {
-        testingProgress.value = data.progress;
-        console.log('Checkpoint test progress:', testingProgress.value);
-    });
-
     socket.on('stop_process', (data) => {
         if (data.id === 'checkpoint_test') {
-            testing.value = false;
-            testingProgress.value = 0;
             Notify.create({
                 color: 'positive',
                 message: 'Test stopped'
             });
         }
+        if (data.id === 'record_episode') {
+            collectingProgress.value = 0;
+            Notify.create({
+                color: 'positive',
+                message: 'Data collection stopped'
+            });
+        }
+    });
+
+    socket.on('record_episode_progress', (data) => {
+        collectingProgress.value = data.progress;
     });
 
 });

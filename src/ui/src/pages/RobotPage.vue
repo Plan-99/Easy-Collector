@@ -7,10 +7,14 @@
                         <div class="absolute-bottom text-h6 row q-gutter-x-sm">
                             <div>{{ robot.name }}</div>
                             <q-space></q-space>
-                            <q-icon v-if="robot.status === 'on' && watchingRobot && watchingRobot.id === robot.id" color="positive" name="visibility" size="sm" class="cursor-pointer"></q-icon>
-                            <q-icon v-if="robot.status === 'on'" color="positive" name="power_settings_new" size="sm" class="cursor-pointer" @click.stop="toggleRobot(robot)"></q-icon>
-                            <q-icon v-if="robot.status === 'off'" name="power_settings_new" size="sm" class="cursor-pointer" @click.stop="toggleRobot(robot)"></q-icon>
-                            <q-icon v-if="robot.status === 'loading'" color="orange-6" name="power_settings_new" size="sm" class="cursor-pointer"></q-icon>
+                            <span v-if="robot.type !== 'custom'">
+                                <q-icon v-if="robot.status === 'on' && watchingRobot && watchingRobot.id === robot.id" color="positive" name="visibility" size="sm" class="cursor-pointer"></q-icon>
+                                <q-icon v-if="robot.status === 'on'" color="positive" name="power_settings_new" size="sm" class="cursor-pointer" @click.stop="toggleRobot(robot)"></q-icon>
+                                <q-icon v-if="robot.status === 'off'" name="power_settings_new" size="sm" class="cursor-pointer" @click.stop="toggleRobot(robot)"></q-icon>
+                                <q-icon v-if="robot.status === 'loading'" color="orange-6" name="power_settings_new" size="sm" class="cursor-pointer"></q-icon>
+                            </span>
+                            <q-badge v-else-if="robot.status === 'on'" color="green-6">topic on</q-badge>
+                            <q-badge v-else-if="robot.status === 'off'" color="grey-6">topic off</q-badge>
                         </div>
                         <q-menu context-menu>
                             <q-list bordered separator>
@@ -173,27 +177,56 @@
                             label="Write Topic Message Type"
                             class="q-mb-md"
                         />
-                        <q-input
-                            dense
-                            v-model="robotForm.joint_names"
-                            label="Joint Names"
-                            class="q-mb-md"
-                            hint="Comma separated joint names"
-                        />
-                        <q-input
-                            dense
-                            v-model="robotForm.joint_lower_bounds"
-                            label="Joint Lower Bounds"
-                            class="q-mb-md"
-                            hint="Comma separated lower bounds for each joint"
-                        />
-                        <q-input
-                            dense
-                            v-model="robotForm.joint_upper_bounds"
-                            label="Joint Upper Bounds"
-                            class="q-mb-md"
-                            hint="Comma separated upper bounds for each joint"
-                        />
+                        <div class="row q-mb-md q-col-gutter-sm">
+                            <q-input
+                                outlined
+                                dense
+                                v-model="robotForm.joint_names[i]"
+                                :label="`Joint Name ${i + 1}`"
+                                class="col-3"
+                                v-for="(joint, i) in robotForm.joint_names"
+                                :key="i"
+                            >
+                                <template v-slot:append>
+                                    <q-icon size="xs" name="close" @click="robotForm.joint_names.splice(i, 1); robotForm.joint_lower_bounds.splice(i, 1); robotForm.joint_upper_bounds.splice(i, 1);" class="cursor-pointer" />
+                                </template>
+                            </q-input>
+                            <div class="col-3">
+                                <q-btn
+                                    dense
+                                    outline
+                                    color="primary"
+                                    label="+ Add Joint"
+                                    class="full-width full-height"
+                                    @click="robotForm.joint_names.push(''); robotForm.joint_lower_bounds.push(-3.14); robotForm.joint_upper_bounds.push(3.14);"
+                                ></q-btn>
+                            </div>
+                        </div>
+                        <q-separator class="q-my-md"></q-separator>
+                        <div class="row q-mb-md q-col-gutter-sm">
+                            <q-input
+                                outlined
+                                dense
+                                v-model.number="robotForm.joint_lower_bounds[i]"
+                                :label="`Joint ${i + 1} Lower Bound`"
+                                class="col-3"
+                                v-for="(joint, i) in robotForm.joint_lower_bounds"
+                                :key="i"
+                            ></q-input>
+                        </div>
+                        <q-separator class="q-my-md"></q-separator>
+                        <div class="row q-mb-md q-col-gutter-sm">
+                            <q-input
+                                outlined
+                                dense
+                                v-model.number="robotForm.joint_upper_bounds[i]"
+                                :label="`Joint ${robotForm.joint_names[i] || i + 1} Upper Bound`"
+                                class="col-3"
+                                v-for="(joint, i) in robotForm.joint_upper_bounds"
+                                :key="i"
+                            ></q-input>
+                        </div>
+
                     </div>
                 </q-card-section>
 
@@ -231,7 +264,17 @@ const { leaderTeleStarted, startLeaderTele, stopLeaderTele } = useLeaderTeleoper
 
 const robots = ref([]);
 
-const robotForm = ref({});
+const robotForm = ref({
+    name: '',
+    type: '',
+    read_topic: '',
+    read_topic_msg: '',
+    write_topic: '',
+    write_topic_msg: '',
+    joint_names: [],
+    joint_lower_bounds: [],
+    joint_upper_bounds: [],
+});
 const watchingRobot = ref(null);
 
 const robotTypeOptions = [
@@ -276,26 +319,30 @@ function saveRobot() {
         })
         return;
     }
-    if (robotForm.value.type === 'custom' && (!robotForm.value.joint_names || !robotForm.value.joint_lower_bounds || !robotForm.value.joint_upper_bounds)) {
+    if (robotForm.value.type === 'custom' && robotForm.value.joint_names.length === 0) {
         Notify.create({
             color: 'negative',
-            message: 'Please fill all joint fields'
+            message: 'Please add at least one joint'
         })
         return;
     }
-    if (robotForm.value.type === 'custom' && robotForm.value.joint_names.split(',').length !== robotForm.value.joint_lower_bounds.split(',').length) {
-        Notify.create({
-            color: 'negative',
-            message: 'Joint names and lower bounds must have the same number of elements'
-        })
-        return;
-    }
-    if (robotForm.value.type === 'custom' && robotForm.value.joint_names.split(',').length !== robotForm.value.joint_upper_bounds.split(',').length) {
-        Notify.create({
-            color: 'negative',
-            message: 'Joint names and upper bounds must have the same number of elements'
-        })
-        return;
+    if (robotForm.value.type === 'custom') {
+        for (let i = 0; i < robotForm.value.joint_names.length; i++) {
+            if (robotForm.value.joint_names[i] === '' || robotForm.value.joint_lower_bounds[i] === undefined || robotForm.value.joint_upper_bounds[i] === undefined) {
+                Notify.create({
+                    color: 'negative',
+                    message: 'Please fill all joint fields'
+                })
+                return;
+            }
+            if (robotForm.value.joint_lower_bounds[i] >= robotForm.value.joint_upper_bounds[i]) {
+                Notify.create({
+                    color: 'negative',
+                    message: `Joint ${robotForm.value.joint_names[i]} lower bound must be less than upper bound`
+                })
+                return;
+            }
+        }
     }
     const data = {
         'name': robotForm.value.name,
@@ -304,9 +351,9 @@ function saveRobot() {
         'read_topic_msg': robotForm.value.read_topic_msg || '',
         'write_topic': robotForm.value.write_topic || '',
         'write_topic_msg': robotForm.value.write_topic_msg || '',
-        'joint_names': typeof(robotForm.value.joint_names) === String ? robotForm.value.joint_names.split(',') : robotForm.value.joint_names,
-        'joint_lower_bounds': typeof(robotForm.value.joint_lower_bounds) === String ? robotForm.value.joint_lower_bounds.split(',').map(Number) : robotForm.value.joint_lower_bounds,
-        'joint_upper_bounds': typeof(robotForm.value.joint_upper_bounds) === String ? robotForm.value.joint_upper_bounds.split(',').map(Number) : robotForm.value.joint_upper_bounds,
+        'joint_names': robotForm.value.joint_names,
+        'joint_lower_bounds': robotForm.value.joint_lower_bounds,
+        'joint_upper_bounds': robotForm.value.joint_upper_bounds,
         'can_port': robotForm.value.can_port || 'can_0',
     };
     if (robotForm.value.id) {
