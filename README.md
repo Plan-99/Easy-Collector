@@ -54,13 +54,11 @@ npm run dev
 
 
 ## For User
-### 터미널1을 켜고 (roscore)
+### 터미널1을 켜고 (docker)
 ```
 bash ./run.sh
 ```
-```
-roscore
-```
+
 
 ### 터미널2를 켜고 (backend)
 ```
