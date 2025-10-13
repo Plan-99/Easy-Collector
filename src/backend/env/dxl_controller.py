@@ -4,11 +4,12 @@ import time
 
 
 class DxlController:
-    def __init__(self, serial_port, dxl_ids):
+    def __init__(self, serial_port, dxl_ids, gripper_dxl_ids=[]):
         self.portHandler = dxl.PortHandler(serial_port)  # 다이나믹셀 포트
         self.packetHandler = dxl.PacketHandler(2.0)         # 프로토콜 2.0 사용
         self.port_lock = threading.Lock()
         self.dxl_ids = dxl_ids
+        self.gripper_dxl_ids = gripper_dxl_ids
 
         # 포트 열기 및 Baud rate 설정
         if not self.portHandler.openPort():
@@ -20,7 +21,11 @@ class DxlController:
 
     def enable_torque(self):
         torque_enable_address = 64  # MX, X 시리즈 기준
-        for index, dxl_id in enumerate(self.dxl_ids[:-1]):
+        for index, dxl_id in enumerate(self.dxl_ids):
+            print(f"Enabling torque for DXL ID: {dxl_id}")
+            print(f"Gripper DXL IDs: {self.gripper_dxl_ids}")
+            if dxl_id in self.gripper_dxl_ids:
+                continue
             with self.port_lock:
                 dxl_comm_result, dxl_error = self.packetHandler.write1ByteTxRx(self.portHandler, dxl_id, torque_enable_address, 1)
             if dxl_comm_result != dxl.COMM_SUCCESS:
@@ -59,7 +64,7 @@ class DxlController:
     
     def read_all_dynamixel(self):
         positions = []
-        for index, dxl_id in enumerate(self.dxl_ids[:-1]):
+        for index, dxl_id in enumerate(self.dxl_ids):
             position = self.read_dynamixel(dxl_id)
             positions.append(position)
         return positions
@@ -74,7 +79,9 @@ class DxlController:
         self.enable_torque()
 
         # 1. 속도 설정 (각 모터 동일한 속도)
-        for dxl_id in self.dxl_ids[:-1]:
+        for dxl_id in self.dxl_ids:
+            if dxl_id in self.gripper_dxl_ids:
+                continue  # 그리퍼 모터는 건너뜀
             with self.port_lock:
                 dxl_comm_result, dxl_error = self.packetHandler.write4ByteTxRx(self.portHandler, dxl_id, velocity_address, 10)
             if dxl_comm_result != dxl.COMM_SUCCESS:
@@ -88,7 +95,10 @@ class DxlController:
         current_positions = self.read_all_dynamixel()
         
         # 3. 목표 위치 패킷 구성
-        for index, dxl_id in enumerate(self.dxl_ids[:-1]):
+        for index, dxl_id in enumerate(self.dxl_ids):
+            if dxl_id in self.gripper_dxl_ids:
+                continue  # 그리퍼 모터는 건너뜀
+            print(current_positions, index, dxl_id)
             original_goal = goal_position[index]
             current_pos = current_positions[index]
             new_goal = calculate_shortest_path_goal(current_pos, original_goal)
@@ -110,10 +120,13 @@ class DxlController:
         groupSyncWrite.clearParam()
 
         # 5. 모든 모터가 도달할 때까지 대기
-        reached = [False] * len(self.dxl_ids[:-1])
+        reached = [False] * len(self.dxl_ids)
 
         while not all(reached):
-            for i, dxl_id in enumerate(self.dxl_ids[:-1]):
+            for i, dxl_id in enumerate(self.dxl_ids):
+                if dxl_id in self.gripper_dxl_ids:
+                    reached[i] = True
+                    
                 if reached[i]:
                     continue
 

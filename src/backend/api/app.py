@@ -182,7 +182,7 @@ def main():
         executor_thread = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
         executor_thread.start()
         # 이 함수는 서버가 종료(예: Ctrl+C)될 때까지 여기서 멈춥니다.
-        socketio.run(app, host='0.0.0.0', port=5000, debug=True, use_reloader=True)
+        socketio.run(app, host='0.0.0.0', port=5000, debug=False)
 
     finally:
         import subprocess

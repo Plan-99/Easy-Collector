@@ -2,6 +2,7 @@ import subprocess
 import os
 import signal
 import atexit
+import traceback
 
 class ProcessManager:
     def __init__(self, socketio, debug=False):
@@ -120,7 +121,9 @@ class ProcessManager:
                 # 2. 실제 작업 함수(func)를 실행합니다.
                 func(*wrapper_args, **wrapper_kwargs)
             except Exception as e:
-                print(f"[ERROR] An error occurred in task '{name}': {e}")
+                error_traceback = traceback.format_exc()
+                # 콘솔에도 출력하고, 로그로도 남길 수 있습니다.
+                print(f"[ERROR] An error occurred in task '{name}':\n{error_traceback}")
             finally:
                 # 3. 작업이 어떻게 끝나든(성공, 실패, 중단) 항상 상태를 정리합니다.
                 print(f"Task '{name}' finished. Cleaning up.")

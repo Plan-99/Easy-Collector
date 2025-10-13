@@ -10,7 +10,8 @@ class LeaderRobotPreset(Model, SoftDeletes):
         'gripper_dxl_range',
         'dxl_ids',
         'sign_corrector',
-        'port_name'
+        'port_name',
+        'gripper_dxl_ids',
     ]
 
     __casts__ = {
@@ -18,4 +19,5 @@ class LeaderRobotPreset(Model, SoftDeletes):
         'gripper_dxl_range': 'json',
         'dxl_ids': 'json',
         'sign_corrector': 'json',
+        'gripper_dxl_ids': 'json',
     }

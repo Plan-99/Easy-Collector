@@ -9,11 +9,16 @@ import base64 # 이미지 인코딩을 위해 추가
 from .augment_dataset import adjust_lightness, draw_rectangles, add_salt_and_pepper_noise, add_gaussian_noise, generate_rect_params
 from PIL import Image
 
+
 config = {}
 
-def read_hdf5(hdf5_path, socketio_instance, sid, task_control):
+def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=False):
     global config
     config = {}
+    if move_robot:
+        from ...env.env import Env
+        env = Env(node, task_control['robots'], task_control['sensors'])
+
     while True:
         image_data = {}
         qpos_data = {}
@@ -31,9 +36,11 @@ def read_hdf5(hdf5_path, socketio_instance, sid, task_control):
             for name in sensor_names:
                 image_data[name] = f[f"observations/images/{name}"][:]
 
-            for name in robot_names:
+            for i, name in enumerate(robot_names):
                 qpos_data[name] = f[f"observations/qpos/{name}"][:]
                 qaction_data[name] = f[f"qaction/{name}"][:]
+
+  
 
             # 타임스텝별로 데이터 전송
             for i in range(len(qaction_data[robot_names[0]])):
@@ -44,6 +51,7 @@ def read_hdf5(hdf5_path, socketio_instance, sid, task_control):
                 
                 # --- 이미지를 Base64 문자열로 인코딩 ---
                 encoded_images = {}
+
                 for cam_name in sensor_names:
                     img_array = image_data[cam_name][i]
 
@@ -83,6 +91,10 @@ def read_hdf5(hdf5_path, socketio_instance, sid, task_control):
                         'qaction': qaction_array.tolist(),
                     }
 
+                if move_robot:
+                    for agent in env.agents:
+                        agent.move_to(qpos_data[f'robot_{agent.id}'][0])  
+
                 time.sleep(0.1)
                 socketio_instance.emit('show_episode_step', {
                     'hdf5_path': hdf5_path,
@@ -93,6 +105,7 @@ def read_hdf5(hdf5_path, socketio_instance, sid, task_control):
                     # 'xpos': xpos_data[i].tolist(),
                     # 'xvel': xvel_data[i].tolist()
                 }, to=sid)
+
 
 
 def add_config(config_data):

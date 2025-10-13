@@ -26,7 +26,7 @@
                                 <div class="col">
                                     <q-select
                                         label="Serial Port"
-                                        :options="['/dev/ttyUSB0', '/dev/ttyUSB1']"
+                                        :options="['/dev/ttyUSB0', '/dev/ttyUSB1', '/dev/ttyUSB2', '/dev/ttyUSB3', '/dev/ttyUSB4', '/dev/ttyUSB5']"
                                         v-model="leaderSettingForm.port_name"
                                         dense
                                         outlined
@@ -98,28 +98,44 @@
                                 >
                                     Open and close your leader robot's gripper and press the button below to save the gripper position.
                                     <div class="row q-col-gutter-sm q-mt-md">
+                                        <q-select
+                                            v-model="leaderSettingForm.gripper_dxl_ids"
+                                            dense
+                                            :options="
+                                                leaderSettingForm.dxl_ids.map(id => ({
+                                                    label: `Dynamixel ${id}`,
+                                                    value: id
+                                                }))"
+                                            label="Select Gripper Dynamixel IDs"
+                                            multiple
+                                            @update:model-value="onGripperDxlIdsChange"
+                                            map-options
+                                            emit-value
+                                            class="q-mb-md full-width"/>
+                                    </div>
+                                    <div class="row q-col-gutter-sm q-mt-md" v-for="(dxl_id, id) in leaderSettingForm.gripper_dxl_ids" :key="id">
                                         <div class="col-6" v-for="i in [0, 1]" :key="i">
                                             <q-input
-                                                v-model="leaderSettingForm.gripper_dxl_range[i]"
+                                                v-model.number="leaderSettingForm.gripper_dxl_range[id][i]"
                                                 :label="`${i === 0 ? 'Open' : 'Close'} Position`"
                                                 type="number"
                                                 dense
                                                 outlined
-                                                v-if="i === 0 || gripperDxlRangeSaved[0]"
+                                                v-if="i === 0 || gripperDxlRangeSaved[id][0]"
                                             >
                                                 <template v-slot:append>
                                                     <q-btn
                                                         color="primary"
-                                                        :outline="!gripperDxlRangeSaved[i]"
+                                                        :outline="!gripperDxlRangeSaved[id][i]"
                                                         size="sm"
-                                                        @click="() => { gripperDxlRangeSaved[i] = !gripperDxlRangeSaved[i]; }"
+                                                        @click="() => { gripperDxlRangeSaved[id][i] = !gripperDxlRangeSaved[id][i]; }"
                                                     >Save</q-btn>
                                                 </template>
                                             </q-input>
                                         </div>
                                     </div>
                                     <q-stepper-navigation>
-                                        <q-btn @click="() => { leaderSettingStep = 3; saveLeaderSetting() }" color="primary" label="Go Next" :disable="!(gripperDxlRangeSaved[0] && gripperDxlRangeSaved[1])" />
+                                        <q-btn @click="() => { leaderSettingStep = 3; saveLeaderSetting() }" color="primary" label="Go Next" :disable="!gripperDxlRangeSaved.every((saved) => saved[0] && saved[1])" />
                                         <q-btn flat @click="leaderSettingStep = 1" color="primary" label="Back" class="q-ml-sm" />
                                     </q-stepper-navigation>
                                 </q-step>
@@ -150,7 +166,7 @@
                                         />
                                     </div>
                                     <div class="row q-col-gutter-sm q-mt-md">
-                                        <div class="col-3" v-for="(sign, i) in leaderSettingForm.sign_corrector" :key="i">
+                                        <div class="col-6" v-for="(sign, i) in leaderSettingForm.sign_corrector" :key="i">
                                             <q-toggle
                                                 v-model="leaderSettingForm.sign_corrector[i]"
                                                 :label="robot.joint_names[i]"
@@ -210,12 +226,17 @@ const leaderSettingStep = ref(1);
 const leaderRobotStarted = ref(false);
 // const robotId = ref(props.robot.id);
 const leaderSettingForm = ref(props.robot.leader_robot_preset || {
-    gripper_dxl_range: [0, 0],
-    sign_corrector: [1, 1, 1, 1, 1, 1, 1],
+    gripper_dxl_ids: [],
+    gripper_dxl_range: [],
+    dxl_ids: [],
+    origin: [],
+    sign_corrector: Array(props.robot.joint_names.length).fill(1),
     port_name: '/dev/ttyUSB0',
 });
-const gripperDxlRangeSaved = ref([false, false]);
+const gripperDxlRangeSaved = ref([[]]);
+gripperDxlRangeSaved.value = leaderSettingForm.value.gripper_dxl_ids.map(() => [false, false]);
 
+leaderSettingForm.value.gripper_dxl_range = []
 
 function startLeaderRobot() {
     api.post('/leader_robot:start', {
@@ -255,27 +276,46 @@ function saveLeaderSetting() {
 //     });
 // }
 
+function onGripperDxlIdsChange(val) {
+    for (let i = 0; i < val.length; i++) {
+        if (!leaderSettingForm.value.gripper_dxl_range[i]) {
+            leaderSettingForm.value.gripper_dxl_range[i] = [0, 0];
+        }
+        gripperDxlRangeSaved.value[i] = [false, false];
+    }
+}
+
 onMounted(() => {
     connectROS();
 
     socket.on('start_process', (data) => {
         if (data.id === 'start_leader_robot') {
             leaderRobotStarted.value = true;
-            let gripperDxlId;
-            let gripperDxlIdIndex;
             createSubscriber('/dynamixel/data', 'dynamixel_ros/DynamixelData', (msg) => {
-                console.log('Dynamixel Data:', msg);
-                gripperDxlId = Math.max(...msg.ids);
-                gripperDxlIdIndex = msg.ids.indexOf(gripperDxlId);
+                // gripperDxlIdIndex = msg.ids.indexOf(gripperDxlId);
                 if (leaderSettingStep.value === 1) {
                     leaderSettingForm.value.dxl_ids = [...msg.ids];
                     leaderSettingForm.value.origin = [...msg.values];
                 }
-                if (!gripperDxlRangeSaved.value[0]) {
-                    leaderSettingForm.value.gripper_dxl_range[0] = Number(msg.values[gripperDxlIdIndex]);
-                } else if (!gripperDxlRangeSaved.value[1]) {
-                    leaderSettingForm.value.gripper_dxl_range[1] = msg.values[gripperDxlIdIndex];
-                }
+
+                leaderSettingForm.value.gripper_dxl_ids.forEach((gripperDxlId, i) => {
+                    const gripperDxlIdIndex = msg.ids.indexOf(gripperDxlId);
+
+                    // 해당 그리퍼 ID가 메시지에 없으면 건너뛰기
+                    if (gripperDxlIdIndex === -1) return;
+
+                    const currentValue = Number(msg.values[gripperDxlIdIndex]);
+
+
+                    // i번째 그리퍼의 최소값이 아직 저장되지 않았다면 현재 값으로 업데이트
+                    if (!gripperDxlRangeSaved.value[i][0]) {
+                        leaderSettingForm.value.gripper_dxl_range[i][0] = currentValue;
+                    }
+                    // i번째 그리퍼의 최대값이 아직 저장되지 않았다면 현재 값으로 업데이트
+                    else if (!gripperDxlRangeSaved.value[i][1]) {
+                        leaderSettingForm.value.gripper_dxl_range[i][1] = currentValue;
+                    }
+                });
             });
         }
         if (data.id === 'leader_teleoperation') {

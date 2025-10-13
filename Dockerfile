@@ -100,11 +100,11 @@ WORKDIR /root
 COPY src /root/src
 RUN cd /root/src/ui && npm install
 
-# --- Entrypoint Setup ---
-# 위에서 생성한 entrypoint.sh 스크립트를 컨테이너에 복사
-COPY entrypoint.sh /usr/local/bin/
-# 스크립트에 실행 권한 부여
-RUN chmod +x /usr/local/bin/entrypoint.sh
+# # --- Entrypoint Setup ---
+# # 위에서 생성한 entrypoint.sh 스크립트를 컨테이너에 복사
+# COPY entrypoint.sh /usr/local/bin/
+# # 스크립트에 실행 권한 부여
+# RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# 컨테이너 시작 시 실행할 기본 명령어로 entrypoint 스크립트 지정
-ENTRYPOINT ["entrypoint.sh"]
+# # 컨테이너 시작 시 실행할 기본 명령어로 entrypoint 스크립트 지정
+# ENTRYPOINT ["entrypoint.sh"]

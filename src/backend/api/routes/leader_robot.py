@@ -48,6 +48,7 @@ def save_leader_robot():
     preset.dxl_ids = preset_form['dxl_ids']
     preset.origin = preset_form['origin']
     preset.gripper_dxl_range = preset_form['gripper_dxl_range']
+    preset.gripper_dxl_ids = preset_form['gripper_dxl_ids']
     preset.sign_corrector = preset_form['sign_corrector']
     preset.port_name = preset_form['port_name']
     preset.save()
@@ -81,4 +82,4 @@ def start_leader_teleoperation():
 @leader_robot_bp.route('/leader_robot:tele_stop', methods=['POST'])
 def stop_leader_teleoperation():    
     current_app.pm.stop_function(name='leader_teleoperation')
-    return {'status': 'success', 'message': 'Leader teleoperation stopped'}, 200    
+    return {'status': 'success', 'message': 'Leader teleoperation stopped'}, 200 

@@ -104,6 +104,7 @@ def delete_dataset_file(id, file_name):
 def start_read_hdf5(id, file_name):
     current_app.pm.start_function(
         func=read_hdf5,
+        node=current_app.node,
         name=f"read_hdf5_{id}_{file_name}",
         hdf5_path=os.path.join(DATASET_DIR, id, file_name),
         socketio_instance=current_app.pm.socketio,

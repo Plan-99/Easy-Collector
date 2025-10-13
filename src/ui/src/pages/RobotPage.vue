@@ -95,6 +95,7 @@
                         <process-console 
                             :process="robot.process_id" 
                             :key="robot.id"
+                            style="height: 100%"
                         />
                     </div>
                     <div class="col">
@@ -226,6 +227,17 @@
                                 :key="i"
                             ></q-input>
                         </div>
+                        <div class="row q-mb-md q-col-gutter-sm">
+                            <q-input
+                                outlined
+                                dense
+                                v-model.number="robotForm.gripper_range[i]"
+                                :label="`Gripper Range`"
+                                class="col-6"
+                                v-for="i in [0, 1]"
+                                :key="i"
+                            ></q-input>
+                        </div>
 
                     </div>
                 </q-card-section>
@@ -274,6 +286,7 @@ const robotForm = ref({
     joint_names: [],
     joint_lower_bounds: [],
     joint_upper_bounds: [],
+    gripper_range: [0, 1],
 });
 const watchingRobot = ref(null);
 
@@ -342,6 +355,13 @@ function saveRobot() {
                 })
                 return;
             }
+            if (robotForm.value.gripper_range[0] >= robotForm.value.gripper_range[1]) {
+                Notify.create({
+                    color: 'negative',
+                    message: 'Please set valid gripper range'
+                })
+                return;
+            }
         }
     }
     const data = {
@@ -355,6 +375,7 @@ function saveRobot() {
         'joint_lower_bounds': robotForm.value.joint_lower_bounds,
         'joint_upper_bounds': robotForm.value.joint_upper_bounds,
         'can_port': robotForm.value.can_port || 'can_0',
+        'gripper_range': robotForm.value.gripper_range || [0, 1],
     };
     if (robotForm.value.id) {
         return api.put(`/robot/${robotForm.value.id}`, data).then(() => {

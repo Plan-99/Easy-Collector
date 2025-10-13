@@ -29,6 +29,7 @@ class Robot(Model, SoftDeletes):
 
     __casts__ = {
         'joint_names': 'json',
+        'gripper_names': 'json',
         'settings': 'json',
     }
 
@@ -160,7 +161,7 @@ class Robot(Model, SoftDeletes):
         if type == 'ur5e':
             return [0, 0.08]
 
-        return []
+        return self.settings['gripper_range'] if 'gripper_range' in self.settings else [0, 1]
     
     @accessor
     def can_port(self):
@@ -172,4 +173,3 @@ class Robot(Model, SoftDeletes):
     @staticmethod
     def boot():
         Robot.observe(RobotObserver())
-    

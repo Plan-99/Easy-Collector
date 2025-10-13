@@ -73,6 +73,7 @@ class ACTPolicy(PreTrainedPolicy):
         )
 
         self.model = ACT(config)
+        self.uncertainty = 0
 
         if config.temporal_ensemble_coeff is not None:
             self.temporal_ensembler = ACTTemporalEnsembler(config.temporal_ensemble_coeff, config.chunk_size)
@@ -119,7 +120,8 @@ class ACTPolicy(PreTrainedPolicy):
 
         if self.config.temporal_ensemble_coeff is not None:
             actions = self.predict_action_chunk(batch)
-            action = self.temporal_ensembler.update(actions)
+            action, action_std = self.temporal_ensembler.update(actions)
+            self.uncertainty = action_std.mean().item()
             return action
 
         # Action queue logic for n_action_steps > 1. When the action_queue is depleted, populate it by
@@ -230,6 +232,7 @@ class ACTTemporalEnsembler:
         self.ensembled_actions = None
         # (chunk_size,) count of how many actions are in the ensemble for each time step in the sequence.
         self.ensembled_actions_count = None
+        self.ensembled_actions_m2 = None
 
     def update(self, actions: Tensor) -> Tensor:
         """
@@ -247,25 +250,71 @@ class ACTTemporalEnsembler:
             self.ensembled_actions_count = torch.ones(
                 (self.chunk_size, 1), dtype=torch.long, device=self.ensembled_actions.device
             )
+            self.ensembled_actions_m2 = torch.zeros_like(self.ensembled_actions)
         else:
+            # 온라인 업데이트를 수행할 액션들 (마지막 액션 제외)
+            new_actions_chunk = actions[:, :-1]
+            
+            # 현재 가중치 (업데이트 전)
+            current_weights = self.ensemble_weights[self.ensembled_actions_count]
+            
+            # 평균 업데이트 전 이전 평균값 저장
+            old_mean = self.ensembled_actions.clone()
+
             # self.ensembled_actions will have shape (batch_size, chunk_size - 1, action_dim). Compute
             # the online update for those entries.
             self.ensembled_actions *= self.ensemble_weights_cumsum[self.ensembled_actions_count - 1]
             self.ensembled_actions += actions[:, :-1] * self.ensemble_weights[self.ensembled_actions_count]
             self.ensembled_actions /= self.ensemble_weights_cumsum[self.ensembled_actions_count]
+
+            # Welford's algorithm의 가중치 버전 적용
+            # M2_new = M2_old + w_new * (x_new - mean_old) * (x_new - mean_new)
+            self.ensembled_actions_m2 += current_weights * (new_actions_chunk - old_mean) * (new_actions_chunk - self.ensembled_actions)
+            
             self.ensembled_actions_count = torch.clamp(self.ensembled_actions_count + 1, max=self.chunk_size)
             # The last action, which has no prior online average, needs to get concatenated onto the end.
             self.ensembled_actions = torch.cat([self.ensembled_actions, actions[:, -1:]], dim=1)
             self.ensembled_actions_count = torch.cat(
                 [self.ensembled_actions_count, torch.ones_like(self.ensembled_actions_count[-1:])]
             )
-        # "Consume" the first action.
-        action, self.ensembled_actions, self.ensembled_actions_count = (
-            self.ensembled_actions[:, 0],
-            self.ensembled_actions[:, 1:],
-            self.ensembled_actions_count[1:],
-        )
-        return action
+
+            # <<< 새로 추가된 액션의 M2는 0으로 초기화 >>>
+            self.ensembled_actions_m2 = torch.cat(
+                [self.ensembled_actions_m2, torch.zeros_like(actions[:, -1:])], dim=1
+            )
+
+        # # "Consume" the first action.
+        # action, self.ensembled_actions, self.ensembled_actions_count = (
+        #     self.ensembled_actions[:, 0],
+        #     self.ensembled_actions[:, 1:],
+        #     self.ensembled_actions_count[1:],
+        # )
+        # return action
+
+        # "소비"할 첫 번째 액션 분리
+        action = self.ensembled_actions[:, 0]
+        action_m2 = self.ensembled_actions_m2[:, 0]
+        action_count = self.ensembled_actions_count[0]
+
+        # <<< 표준편차 계산 >>>
+        # 분산 = M2 / (가중치의 합)
+        # action_count가 1보다 작거나 같으면 (샘플이 하나) 분산은 0입니다.
+        if action_count.item() <= 1:
+            variance = torch.zeros_like(action_m2)
+        else:
+            # ensembled_actions_count는 1부터 시작하므로 인덱싱을 위해 -1
+            sum_of_weights = self.ensemble_weights_cumsum[action_count - 1]
+            variance = action_m2 / sum_of_weights
+        
+        # 수치적 안정성을 위해 작은 epsilon 값을 더해줍니다.
+        std_dev = torch.sqrt(variance + 1e-8)
+
+        # 사용한 액션을 시퀀스에서 제거
+        self.ensembled_actions = self.ensembled_actions[:, 1:]
+        self.ensembled_actions_count = self.ensembled_actions_count[1:]
+        self.ensembled_actions_m2 = self.ensembled_actions_m2[:, 1:]
+        
+        return action, std_dev
 
 
 class ACT(nn.Module):

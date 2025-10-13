@@ -121,9 +121,10 @@ def checkpoint_test(
             start_action_id = 0
             for agent in env.agents:
                 target_qpos = action[start_action_id:start_action_id + agent.joint_len]
-                print(f"To:{target_qpos} / Now:{qpos_list}")
+                # print(f"To:{target_qpos} / Now:{qpos_list}")
                 start_action_id += agent.joint_len
                 agent.move_step(target_qpos)
+
 
             # time.sleep(0.03)  # Simulate processing time
 
@@ -134,7 +135,12 @@ def checkpoint_test(
                 return
                             
             end = time.time()
+            print(f"Uncertainty: {policy.uncertainty}")
             print(f"Step Time: {end - start}")
+            socketio_instance.emit('checkpoint_test_step', {
+                'uncertainty': policy.uncertainty,
+                'step_time': end - start,
+            })
 
         except Exception as e:
             import traceback
