@@ -1,6 +1,12 @@
 <template>
     <div class="row q-pt-md">
         <img :src="image" alt="" v-for="(image, name) in images" :key="name" class="col" style="width: 100%; height: 100%; object-fit: contain;">
+        <div class="absolute-bottom-right">
+            <div v-for="(robot, index) in robot_states" :key="index">
+                <div>Current: {{ robot.qpos }}</div>
+                <div>Action: {{ robot.qaction }}</div>
+            </div>
+        </div>
     </div>
 </template>
 <script setup>
