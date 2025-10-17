@@ -121,12 +121,16 @@ def list_devices():
 
 @app.route('/api/topics', methods=['GET'])
 def list_topics():
-    topics = node.get_topic_names_and_types()
-    topic_list = [{'name': topic[0], 'type': topic[1][0]} for topic in topics]
+    all_topics = node.get_topic_names_and_types()
+    active_topic_list = [
+        {'name': topic_name, 'type': topic_types[0]}
+        for topic_name, topic_types in all_topics
+        if node.count_publishers(topic_name) > 0
+    ]
     
     return {
         'status': 'success',
-        'topics': topic_list
+        'topics': active_topic_list
     }, 200
 
 @app.route('/api/stop_process', methods=['POST'])

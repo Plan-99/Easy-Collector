@@ -47,7 +47,7 @@ def record_episode(node, dataset_id, robots, sensors, task, socketio_instance, t
             'progress': 0,
             'type': 'stdout '
         })
-        if home_pose is not None:
+        if home_pose is not None and tele_type != 'externel':
             for agent in env.agents:
                 agent.move_to(home_pose[str(agent.id)])
             time.sleep(3)
@@ -82,6 +82,32 @@ def record_episode(node, dataset_id, robots, sensors, task, socketio_instance, t
 
         ts = env.reset()
         timesteps = [ts]
+
+        for agent in env.agents:
+            if agent.joint_states is None:
+                socketio_instance.emit('log_record_episode', {
+                    'log': f'[ERROR]: No joint states from robot {agent.id}',
+                    'type': 'stderr'
+                })
+                tele_control['stop'] = True
+                return
+            if agent.joint_actions is None:
+                socketio_instance.emit('log_record_episode', {
+                    'log': f'[ERROR]: No joint commands from robot {agent.id}',
+                    'type': 'stderr'
+                })
+                tele_control['stop'] = True
+                return
+            
+        for sensor in sensors:
+            if getattr(env, f'sensor_{sensor["id"]}') is None:
+                socketio_instance.emit('log_record_episode', {
+                    'log': f'[ERROR]: No image data from sensor {sensor["id"]}',
+                    'type': 'stderr'
+                })
+                tele_control['stop'] = True
+                return
+            
         for t in range(max_timesteps):
             socketio_instance.emit('record_episode_progress', {
                 'progress': (t+1) / max_timesteps,
@@ -161,6 +187,7 @@ def record_episode(node, dataset_id, robots, sensors, task, socketio_instance, t
             'log': f'Saved Data: {dataset_name} in {time.time() - t0:.2f} seconds',
             'type': 'stdout '
         })
+
         tele_control['stop'] = True
 
         time.sleep(5)

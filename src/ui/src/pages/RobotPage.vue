@@ -71,14 +71,14 @@
             @update:model-value="watchRobot($event)"
         >
             <template v-for="robot in robots.filter((e) => e.status !== 'off')" :key="robot.id" v-slot:[robot.id]>
-                <div class="row q-pa-md row q-gutter-x-md ">
+                <div class="row q-pa-md row q-gutter-x-md" style="height: 100%;">
                     <div class="col-3 column">
                         <div class="col" 
                             v-for="(joint, i) in watchingRobot.joint_names" :key="joint"
                         >
                             <div class="text-caption">{{ joint }}</div>
                             <q-slider
-                                v-model="watchingRobot.joint_pos[i]"
+                                v-model.number="watchingRobot.joint_pos[i]"
                                 :min="watchingRobot.joint_lower_bounds[i]"
                                 :max="watchingRobot.joint_upper_bounds[i]"
                                 :step="0.0001"
@@ -221,7 +221,7 @@
                                 outlined
                                 dense
                                 v-model.number="robotForm.joint_upper_bounds[i]"
-                                :label="`Joint ${robotForm.joint_names[i] || i + 1} Upper Bound`"
+                                :label="`Joint ${i + 1} Upper Bound`"
                                 class="col-3"
                                 v-for="(joint, i) in robotForm.joint_upper_bounds"
                                 :key="i"
@@ -418,13 +418,14 @@ function toggleRobot(robot) {
 }
 
 function watchRobot(robot) {
+    canControl.value = false;
     robot.handler.subscribeRobot((msg) => {
         if (!canControl.value) {
             robot.joint_pos = msg.position
+            canControl.value = true;
         }
     })
     robot.handler.publishRobot()
-    canControl.value = true
     watchingRobot.value = robot
 }
 

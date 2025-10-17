@@ -384,7 +384,8 @@
                             <div v-if="!dataCollecting">Select Teleoperation Method</div>
                             <div class="q-col-gutter-sm" v-if="!dataCollecting">
                                 <q-radio dark v-model="teleoperationMethod" val="leader" label="Leader Robot" />
-                                <q-radio dark v-model="teleoperationMethod" val="keyboard" label="Keyboard" disable/>
+                                <!-- <q-radio dark v-model="teleoperationMethod" val="keyboard" label="Keyboard" disable/> -->
+                                <q-radio dark v-model="teleoperationMethod" val="externel" label="Externel"/>
                             </div>
                             <div v-if="dataCollecting" class="q-mb-md">
                                 <q-linear-progress size="25px" instant-feedback :value="collectingProgress" color="accent">
@@ -682,19 +683,8 @@ function startDataCollection() {
 
 function stopDataCollection() {
     api.post(`/dataset/${watchingDataset.value.id}/:stop_collection`).then(() => {
-        dataCollecting.value = false;
-        Notify.create({
-            color: 'positive',
-            message: 'Data collection stopped'
-        });
         collectingProgress.value = 0;
-    }).catch((error) => {
-        console.error('Error stopping data collection:', error);
-        Notify.create({
-            color: 'negative',
-            message: 'Error stopping data collection'
-        });
-    });
+    })
 }
 
 function onHideDataCollectionDialog() {
@@ -743,6 +733,13 @@ onMounted(() => {
             }
         });
     })
+
+    socket.on('stop_process', (data) => {
+        if (data.id === 'record_episode') {
+            dataCollecting.value = false;
+            collectingProgress.value = 0;
+        }
+    });
 
     socket.on('record_episode_progress', (data) => {
         collectingProgress.value = data.progress;

@@ -22,7 +22,8 @@ const props = defineProps({
 });
 
 const logHandler = (data) => {
-    logs.value.push({ type: data.type, message: data.log });
+    const type = data.log.startsWith('[ERROR]') ? 'error' : 'stdout';
+    logs.value.push({ type: type, message: data.log });
 };
 
 watch(() => props.process, (newProcess, oldProcess) => {

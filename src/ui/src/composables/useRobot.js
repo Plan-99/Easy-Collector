@@ -10,7 +10,7 @@ export function useRobot(robot, robotOnCallback=() => {}) {
 
   connectROS();
 
-  let jointSub = null;
+  robot.jointSub = null;
   let publishJointPos = () => {};
 
   function status() {
@@ -41,10 +41,10 @@ export function useRobot(robot, robotOnCallback=() => {}) {
     if (robot.status === 'off') {
       return;
     }
-    if (jointSub) {
-      jointSub.unsubscribe();
+    if (robot.jointSub) {
+      robot.jointSub.unsubscribe();
     }
-    jointSub = createSubscriber(robot.read_topic, robot.read_topic_msg, callback);
+    robot.jointSub = createSubscriber(robot.read_topic, robot.read_topic_msg, callback);
   }
 
   function publishRobot() {
@@ -55,9 +55,9 @@ export function useRobot(robot, robotOnCallback=() => {}) {
   }
 
   function unSubscribeRobot() {
-    if (jointSub) {
-      jointSub.unsubscribe();
-      jointSub = null;
+    if (robot.jointSub) {
+      robot.jointSub.unsubscribe();
+      robot.jointSub = null;
     }
   }
 
@@ -84,7 +84,7 @@ export function useRobot(robot, robotOnCallback=() => {}) {
     });
   }
 
-  function checkRobotTopic(maxSteps = 20) {
+  function checkRobotTopic(maxSteps = 10) {
     if (robotTopicChecker) {
       clearInterval(robotTopicChecker);
     }

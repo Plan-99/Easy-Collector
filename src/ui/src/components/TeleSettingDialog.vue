@@ -192,8 +192,7 @@
                     </q-tab-panel>
 
                     <q-tab-panel name="keyboard">
-                        <div class="text-h6">Alarms</div>
-                        Lorem ipsum dolor sit amet consectetur adipisicing elit.
+                        <div class="text-h6">Keyboard Teleoperation will be supported soon.</div>
                     </q-tab-panel>
                 </q-tab-panels>
             </q-card-section>
