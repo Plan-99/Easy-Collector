@@ -235,8 +235,6 @@ const leaderSettingForm = ref(props.robot.leader_robot_preset || {
 const gripperDxlRangeSaved = ref([[]]);
 gripperDxlRangeSaved.value = leaderSettingForm.value.gripper_dxl_ids.map(() => [false, false]);
 
-leaderSettingForm.value.gripper_dxl_range = []
-
 function startLeaderRobot() {
     api.post('/leader_robot:start', {
         serial_port: leaderSettingForm.value.port_name
