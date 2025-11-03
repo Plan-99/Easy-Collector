@@ -9,7 +9,7 @@ body {
 }
 
 .border-rounded {
-    border-radius: 12px;
+    border-radius: 12px !important;
 }
 
 .border-white {
@@ -18,4 +18,12 @@ body {
 
 .border-primary {
     border: 1px solid var(--q-primary);
+}
+
+.border-dotted {
+    border-style: dotted;
+}
+
+.border-red {
+    background-color: red !important;
 }

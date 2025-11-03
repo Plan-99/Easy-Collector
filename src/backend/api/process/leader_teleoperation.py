@@ -93,8 +93,8 @@ class Leader():
     def get_gripper_pos(self, dxl_pos, dxl_id):
         gripper_index = self.gripper_dxl_ids.index(dxl_id)
         if self.gripper_config is None:
-            gripper_pos_low = self.agent.gripper_range[0]
-            gripper_pos_high = self.agent.gripper_range[-1]
+            gripper_pos_low = self.agent.joint_lower_bound[gripper_index]
+            gripper_pos_high = self.agent.joint_upper_bound[gripper_index]
             gripper_pos = (dxl_pos - self.gripper_dxl_range[gripper_index][1]) / (self.gripper_dxl_range[gripper_index][0] - self.gripper_dxl_range[gripper_index][1]) * (gripper_pos_high - gripper_pos_low) + gripper_pos_low
             if gripper_pos < gripper_pos_low:
                 return gripper_pos_low

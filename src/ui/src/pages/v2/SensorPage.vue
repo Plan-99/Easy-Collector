@@ -7,23 +7,14 @@
                 <div class="text-body text-white">{{ $t('sensorIntroBody') }}</div>
                 <div class="text-body text-white">{{ $t('sensorIntroBody2') }}</div>
             </div>
-            
         </div>
         <div class="row q-col-gutter-md">
-            <div class="col-6 col-sm-4 col-md-3"  v-for="sensor in sensors" :key="sensor.id">
-                <q-card class="q-pa-md bg-secondary border-rounded border-white text-white" :class="sensor.status === 'on' ? 'border-primary' : ''">
+            <div class="col-6 col-sm-4 col-md-3 col-lg-2"  v-for="sensor in sensors" :key="sensor.id">
+                <q-card class="q-pa-md bg-secondary border-rounded border-white text-white" :class="watchingSensor && sensor.id === watchingSensor.id ? 'border-primary' : ''">
                     <q-img :src="sensor.image" @click="watchSensor(sensor)" class="cursor-pointer bg-white" ratio="2.5" fit="contain">
-                        <!-- <div class="absolute-bottom text-h6 row q-gutter-x-sm">
-                            <div>{{ sensor.name }}</div>
-                            <q-space></q-space>
-                            <q-icon v-if="sensor.status === 'on' && watchingSensor && watchingSensor.id === sensor.id" color="positive" name="visibility" size="sm" class="cursor-pointer"></q-icon>
-                            <q-icon v-if="sensor.status === 'on'" color="positive" name="power_settings_new" size="sm" class="cursor-pointer" @click.stop="toggleSensor(sensor)"></q-icon>
-                            <q-icon v-if="sensor.status === 'off'" name="power_settings_new" size="sm" class="cursor-pointer" @click.stop="toggleSensor(sensor)"></q-icon>
-                            <q-icon v-if="sensor.status === 'loading'" color="orange-6" name="power_settings_new" size="sm" class="cursor-pointer"></q-icon>
-                        </div> -->
                         <q-menu context-menu>
                             <q-list bordered separator>
-                                <q-item clickable v-ripple v-close-popup @click="showSensorForm = true; sensorForm = sensor">
+                                <q-item clickable v-ripple v-close-popup @click="openEditSensorForm(sensor)">
                                     <q-item-section>Edit Sensor</q-item-section>
                                     <q-item-section side>
                                         <q-icon name="edit" size="xs" />
@@ -41,11 +32,13 @@
 
 
                     <q-card-section class="q-pa-none q-mt-sm">
-                        <div class="text-h6">{{ sensor.name }}</div>
+                        <div class="text-bold">{{ sensor.name }}</div>
                         <div class="text-grey-6 text-caption" v-if="sensor.serial_no">Serial No. {{ sensor.serial_no }}</div>
                     </q-card-section>
                     <q-card-section class="q-pa-none q-mt-sm row">
-                        <div class="text-primary">ONLINE</div>
+                        <div class="text-primary text-caption" v-if="sensor.status === 'on'">ONLINE</div>
+                        <div class="text-orange text-caption" v-if="sensor.status === 'loading'">LOADING</div>
+                        <div class="text-grey-7 text-caption" v-if="sensor.status === 'off'">OFFLINE</div>
                         <q-space></q-space>
                         <q-toggle
                             :model-value="sensor.status === 'on'"
@@ -61,7 +54,7 @@
             </div>
 
             <div class="col" v-if="!sensors.length">
-                <q-card class="full-height border-rounded" flat bordered>
+                <q-card class="full-height border-rounded border-white bg-dark text-white" flat bordered>
                     <q-card-section class="text-center">
                         <div class="text-h6">No Sensors Found</div>
                         <div class="text-subtitle2">Click the button below to add a new sensor.</div>
@@ -69,8 +62,8 @@
                 </q-card>
             </div>
             
-            <div class="col-6 col-sm-4 col-md-3" style="min-height: 220px;">
-                <q-btn color="primary" class="full-height full-width border-rounded" outline size="lg" icon="add" @click="showSensorForm = true"></q-btn>
+            <div class="col-6 col-sm-4 col-md-3  col-lg-2" style="min-height: 220px;" >
+                <q-btn color="white" class="full-height full-width border-rounded" outline size="lg" icon="add" @click="openAddSensorForm"></q-btn>
             </div>
         </div>
         <bottom-terminal
@@ -82,13 +75,13 @@
             @update:model-value="watchSensor($event)"
         >
             <template v-for="sensor in sensors.filter((e) => e.status !== 'off')" :key="sensor.id" v-slot:[sensor.id]>
-                <div class="q-pa-md row q-gutter-x-md">
+                <div class="row q-gutter-x-md">
                     <web-rtc-video
                         :process-id="`sensor_${sensor.id}`"
                         :topic="sensor.topic"
                         ref="sensorVideo"
-                        style="height: 330px;"
                         :loading="sensor.status !== 'on'"
+                        style="height: 300px"
                     ></web-rtc-video>
                     <div class="col">
                         <process-console 
@@ -99,43 +92,13 @@
                 </div>
             </template>
         </bottom-terminal>
-        <q-dialog v-model="showSensorForm">
-            <q-card style="min-width: 350px">
-                <q-card-section class="q-pt-none">
-                    <q-card-section>
-                        <div class="text-h6 text-center">Sensor</div>
-                    </q-card-section>
-                    <q-input
-                        dense
-                        v-model="sensorForm.name"
-                        label="Sensor Name"
-                        autofocus
-                        class="q-mb-md"
-                    />
-
-                    <q-select
-                        dense
-                        v-model="sensorForm.type"
-                        :options="sensorTypeOptions"
-                        label="Sensor Type"
-                        class="q-mb-md"
-                        map-options
-                        emit-value
-                    />
-
-                    <q-input
-                        dense
-                        v-model="sensorForm.serial_no"
-                        label="Serial Number"
-                    />
-                </q-card-section>
-
-                <q-card-actions align="center" class="text-primary">
-                    <q-btn flat label="Save" v-close-popup @click="saveSensor" />
-                    <q-btn flat color="grey-7" label="Close" v-close-popup @click="sensorForm = {}" />
-                </q-card-actions>
-            </q-card>
-        </q-dialog>
+        <form-dialog
+            v-model="showSensorForm"
+            :title="$t('sensorFormTitle')"
+            :form="sensorForm"
+            @submit="saveSensor"
+            :ok-button-label="$t(sensorFormMode === 'add' ? 'add' : 'save')"
+        ></form-dialog>
     </q-page>
 </template>
 
@@ -148,16 +111,28 @@ import { Notify } from 'quasar';
 import BottomTerminal from 'src/components/v2/BottomTerminal.vue';
 import WebRtcVideo from 'src/components/v2/WebRtcVideo.vue';
 import { useSensor } from '../../composables/useSensor';
+import FormDialog from 'src/components/v2/FormDialog.vue';
+
+import { useI18n } from 'vue-i18n'
+const { t } = useI18n()
 
 
 const sensors = ref([]);
 
-const sensorForm = ref({});
+const sensorForm = ref([
+    { key: 'name', label: t('sensorName'), value: '', default: '', type: 'text' },
+    { key: 'type', label: t('sensorType'), value: '', default: '', type: 'select', options: [
+        { label: 'Realsense Camera', value: 'realsense_camera' }
+    ] },
+    { key: 'serial_no', label: t('serialNUmber'), value: '', default: '', type: 'text', show: (form) => form.find(f => f.key === 'type').value === 'realsense_camera' }
+]);
+const showSensorForm = ref(false);
+const sensorFormMode = ref('add'); // 'add' or 'edit'
 const watchingSensor = ref(null);
 
-const sensorTypeOptions = [
-    { label: 'Realsense Camera', value: 'realsense_camera' }
-]
+// const sensorTypeOptions = [
+//     { label: 'Realsense Camera', value: 'realsense_camera' }
+// ]
 
 function listSensors() {                                                                                                     
     return api.get('/sensors').then((response) => {
@@ -173,32 +148,33 @@ function listSensors() {
     });
 }
 
-function saveSensor() {
-    if (!sensorForm.value.name || !sensorForm.value.type || !sensorForm.value.serial_no) {
-        Notify.create({
-            color: 'negative',
-            message: 'Please fill the form'
-        })
-        return;
-    }
-    if (sensorForm.value.id) {
-        return api.put(`/sensor/${sensorForm.value.id}`, {
-            'serial_no': sensorForm.value.serial_no,
-            'name': sensorForm.value.name,
-            'type': sensorForm.value.type
-        }).then(() => {
-            sensorForm.value = {};
-        })
-    } else {
-        return api.post(`/sensor`, {
-            'serial_no': sensorForm.value.serial_no,
-            'name': sensorForm.value.name,
-            'type': sensorForm.value.type
-        }).then(() => {
-            sensorForm.value = {};
+function openAddSensorForm() {
+    sensorFormMode.value = 'add';
+    sensorForm.value.forEach(field => {
+        field.value = field.default;
+    });
+    showSensorForm.value = true;
+}
+
+function openEditSensorForm(sensor) {
+    sensorFormMode.value = 'edit';
+    sensorForm.value.forEach(field => {
+        field.value = sensor[field.key] || field.default;
+    });
+    showSensorForm.value = true;
+}   
+
+function saveSensor(formData) {
+    if (sensorFormMode.value === 'edit') {
+        return api.put(`/sensor/${formData.id}`, formData).then(() => {
+            sensorForm.value.forEach(field => field.value = field.default); // Reset form fields
             listSensors()
         })
     }
+    return api.post(`/sensor`, formData).then(() => {
+        sensorForm.value.forEach(field => field.value = field.default); // Reset form fields
+        listSensors()
+    })
 }
 
 function deleteSensor(sensor) {
@@ -235,7 +211,6 @@ function watchSensor(sensor) {
     watchingSensor.value = sensor; // Start watching the selected sensor
 }
 
-const showSensorForm = ref(false)
 
 onMounted(() => {
     listSensors()

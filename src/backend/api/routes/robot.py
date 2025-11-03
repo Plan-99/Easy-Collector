@@ -129,7 +129,6 @@ def update_robot(id):
             'joint_names': request.json.get('joint_names', []),
             'joint_lower_bounds': request.json.get('joint_lower_bounds', []),
             'joint_upper_bounds': request.json.get('joint_upper_bounds', []),
-            'gripper_range': request.json.get('gripper_range', [0, 1]),
         }
 
     if type == 'piper':

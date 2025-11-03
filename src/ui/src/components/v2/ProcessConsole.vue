@@ -1,5 +1,5 @@
 <template>
-    <q-scroll-area class="bg-dark q-pa-sm" style="height: 330px;">
+    <q-scroll-area class="bg-dark q-pa-sm border-rounded" style="height: 100%">
         <div v-for="(log, index) in logs" :key="index" :class="log.type === 'error' ? 'text-red-5' : 'text-white'">
             {{ log.message }}
         </div>

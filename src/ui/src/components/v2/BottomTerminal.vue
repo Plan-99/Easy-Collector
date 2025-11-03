@@ -1,28 +1,33 @@
 <template>
-  <div class="absolute-bottom">
-    <div class="row">
-      <div
-        v-for="tab in tabs"
-        :key="tab[tabValue]"
-        @click="model = tab"
-        class="q-pa-sm col-1 text-center cursor-pointer ellipsis"
-        :class="{ 'text-white': model === tab, 'text-grey-8': model !== tab, 'bg-grey-6': model === tab, 'bg-grey-4': model !== tab }"
-      >
-        {{ tab[tabLabel] }}
-      </div>
-      <q-space class="col"></q-space>
-      <div class="col-1 text-right">
+  <div class="absolute-bottom bg-dark q-pb-lg q-pr-lg">
+    <div class="border-rounded bg-secondary q-pa-lg">
+      <div class="row">
+        <q-tabs
+          v-model="model[props.tabValue]"
+          dense
+          align="left"
+          :breakpoint="0"
+          class="text-white"
+          active-color="primary"
+        >
+          <q-tab 
+            v-for="tab in tabs"
+            :key="tab[props.tabValue]"
+            :name="tab[props.tabValue]"
+            :label="tab[props.tabLabel]"
+          />
+        </q-tabs>
+        <q-space></q-space>
         <q-btn
-          color="grey-8"
-          class="q-pa-sm col-1"
+          flat
+          class="q-pa-sm text-white"
           icon="close"
           style="z-index: 1000"
           @click="model = null; $emit('close')"
         ></q-btn>
       </div>
-    </div>
-    <q-separator />
-    <div class="bg-grey-4" style="min-height: 350px;">
+
+      <q-separator class="q-mb-lg" color="white"/>
       <div
         v-for="tab in tabs"
         :key="tab[props.tabValue]"

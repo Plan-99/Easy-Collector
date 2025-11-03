@@ -17,6 +17,8 @@ class Agent:
         self.robot_type = robot['type']
         self.joint_len = len(robot['joint_names'])
         self.joint_names = robot['joint_names']
+        self.joint_upper_bounds = robot['joint_upper_bounds']
+        self.joint_lower_bounds = robot['joint_lower_bounds']
         
         if gripper is None:
             self.gripper_range = robot['gripper_range']
