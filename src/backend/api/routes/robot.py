@@ -25,7 +25,7 @@ class RobotNamespace(Namespace):
 
 @robot_bp.route('/robots', methods=['GET'])
 def get_robots():
-    robots = RobotModel.with_('leader_robot_preset').get()
+    robots = RobotModel.with_('leader_robot_preset').where('hide', False).get()
     robots = [robot.to_dict() for robot in robots]
 
     for robot in robots:
@@ -144,8 +144,8 @@ def update_robot(id):
 @robot_bp.route('/robot/<id>', methods=['DELETE'])
 def delete_robot(id):
     robot = RobotModel.find(id)
-
-    robot.delete()
+    robot.hide = True
+    robot.save()
     return {'status': 'success', 'message': 'Robot Deleted'}, 200
 
 

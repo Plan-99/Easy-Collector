@@ -27,6 +27,7 @@ class Sensor(Model, SoftDeletes):
         'name',
         'type',
         'settings',
+        'hide'
     ]
 
     __casts__ = {

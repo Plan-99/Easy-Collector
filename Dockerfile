@@ -38,6 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     librealsense2-utils \
     librealsense2-dev \
     librealsense2-dbg \
+    libyaml-cpp-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # 네트워크 관련 도구 설치
@@ -62,6 +63,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-ros2-control \
     ros-humble-ros2-controllers \
     ros-humble-controller-manager \
+    ros-humble-rmw-cyclonedds-cpp \
+    ros-humble-rosidl-generator-dds-idl \
     python3-pip \
     python3-rosdep \
     python3-colcon-common-extensions \

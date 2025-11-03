@@ -1,1 +1,21 @@
 // app global css in SCSS form
+@font-face {
+    font-family: 'Paperozi';
+    src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/2408-3@1.0/Paperlogy-5Medium.woff2') format('woff2');
+}
+
+body {
+    font-family: 'Paperozi';
+}
+
+.border-rounded {
+    border-radius: 12px;
+}
+
+.border-white {
+    border: 1px solid white;
+}
+
+.border-primary {
+    border: 1px solid var(--q-primary);
+}

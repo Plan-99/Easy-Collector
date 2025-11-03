@@ -25,6 +25,7 @@ class Robot(Model, SoftDeletes):
         'name',
         'type',
         'settings',
+        'hide'
     ]
 
     __casts__ = {

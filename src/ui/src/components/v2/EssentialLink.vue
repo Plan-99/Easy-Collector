@@ -2,8 +2,7 @@
   <q-item
     clickable
     :to="link"
-    class="border-rounded"
-    :class="{ 'bg-primary text-dark': isActive }"
+    :active="isActive"
   >
     <q-item-section
       v-if="icon"
@@ -54,3 +53,9 @@ const isActive = computed(() => {
   return route.path === props.link
 })
 </script>
+
+<style>
+.q-router-link--active .q-item__label {
+  color: blue;
+}
+</style>

@@ -1,5 +1,7 @@
 xhost +
 
+docker stop easy_collector_container
+
 docker run -it --rm \
     --privileged \
     -v /dev:/dev \
@@ -8,6 +10,7 @@ docker run -it --rm \
     -v "./ros2_ws":"/root/ros2_ws" \
     -v /tmp/.X11-unix:/tmp/.X11-unix \
     -e DISPLAY=$DISPLAY \
+    -e ROS_DOMAIN_ID=30 \
     --env "XAUTHORITY=$HOME/.Xauthority" \
     --net=host \
     --gpus all \
