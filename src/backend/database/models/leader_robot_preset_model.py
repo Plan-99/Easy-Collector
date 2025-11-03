@@ -12,6 +12,7 @@ class LeaderRobotPreset(Model, SoftDeletes):
         'sign_corrector',
         'port_name',
         'gripper_dxl_ids',
+        'ema'
     ]
 
     __casts__ = {

@@ -20,6 +20,7 @@ class Leader():
         self.sign_corrector = leader_robot_preset['sign_corrector']
         self.dxl_ids = leader_robot_preset['dxl_ids']  # 다이나믹셀 ID
         self.gripper_dxl_ids = leader_robot_preset.get('gripper_dxl_ids', [])
+        self.ema = float(leader_robot_preset.get('ema', 0.0)) # EMA 필터 값
 
         # 트리거 그리퍼 설정 (기본값: 첫 번째 그리퍼)
         self.trigger_gripper_index = 0
@@ -106,17 +107,33 @@ class Leader():
         
 
     def position_pub(self, task_control):
+
+        first_flag = True
+        prev_pos = [0] * self.agent.joint_len
+
         while not task_control['stop']:
+
             start = time.time()
+
+            # 타겟 포지션 가져오기 ------------------
             positions = self.dxl_controller.read_all_dynamixel()
             for index, dxl_id in enumerate(self.dxl_ids):
-                # 다이나믹셀 값 읽어오기
                 try:
                     position = positions[index]
                     if dxl_id in self.gripper_dxl_ids:
                         self.target_pos[index] = self.get_gripper_pos(position, dxl_id)
                     else:
                         self.target_pos[index] = self.get_rad_pos(position, dxl_id)
+
+                        if first_flag:  # 첫 번째 루프에서 이전 위치 초기화
+                            prev_pos[index] = self.target_pos[index]
+
+                        # EMA 필터 적용
+                        self.target_pos[index] = self.ema * prev_pos[index] + (1 - self.ema) * self.target_pos[index]
+                        print(self.target_pos[index])
+                        
+                        prev_pos[index] = self.target_pos[index]
+
                 except Exception as e:
                     self.socketio_instance.emit(self.log_emit_id, {
                         'log': f'Error reading from Dynamixel ID {dxl_id}: {str(e)}',
@@ -125,9 +142,10 @@ class Leader():
                     print(f"Error reading from Dynamixel ID {dxl_id}: {str(e)}")
                     continue
 
-            print(f"Target Positions: {self.target_pos}")
-            # # 그리퍼 매핑
+            first_flag = False
+
             # self.target_pos[-1] = self.get_gripper_pos()
+            #-----------------------------------------
 
 
 
@@ -150,7 +168,7 @@ class Leader():
                 self.is_paused = True
                 self.dxl_controller.enable_torque()
                 self.socketio_instance.emit(self.log_emit_id, {
-                    'log': '✅ Teleoperation Paused',
+                    'log': 'Teleoperation Paused',
                     'type': 'stdout'
                 })
                 print("Teleoperation Paused")
@@ -159,10 +177,11 @@ class Leader():
                 self.is_paused = False
                 self.dxl_controller.remove_torque()
                 self.socketio_instance.emit(self.log_emit_id, {
-                    'log': '▶️ Teleoperation Resumed',
+                    'log': 'Teleoperation Resumed',
                     'type': 'stdout'
                 })
                 print("Teleoperation Resumed")
+            #--------------------------------------------
 
 
             self.agent.move_step(self.target_pos)

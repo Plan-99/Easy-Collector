@@ -51,6 +51,7 @@ def save_leader_robot():
     preset.gripper_dxl_ids = preset_form['gripper_dxl_ids']
     preset.sign_corrector = preset_form['sign_corrector']
     preset.port_name = preset_form['port_name']
+    preset.ema = preset_form['ema']
     preset.save()
 
     
