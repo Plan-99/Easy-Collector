@@ -69,7 +69,7 @@ export function useRobot(robot, robotOnCallback=() => {}) {
 
   function goOriginPos() {
     api.post(`/robot/${robot.id}/:move_to`, {
-      goal_pos: [0, 0, 0, 0, 0, 0, 0]
+      goal_pos: robot.homepose
     }).then(() => {
       Notify.create({
         color: 'positive',

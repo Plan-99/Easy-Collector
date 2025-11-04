@@ -100,8 +100,20 @@
                     </div>
                     <div class="col">
                         <div class="q-gutter-sm">
-                            <q-btn @click="watchingRobot.handler.goOriginPos" icon="home" color="green">
+                            <q-btn @click="() => { 
+                                if (watchingRobot.homepose && watchingRobot.homepose.length === watchingRobot.joint_names.length) {
+                                    watchingRobot.handler.goOriginPos();
+                                    for (let i = 0; i < watchingRobot.joint_names.length; i++) {
+                                        watchingRobot.joint_pos[i] = watchingRobot.homepose[i];
+                                    }
+                                } else {
+                                    openHomeposeSetting();
+                                }}"
+                                icon="home" color="green">
                                 <q-tooltip class="text-body2">Click to go origin position</q-tooltip>
+                                <q-badge @click.stop="openHomeposeSetting" color="orange" floating>
+                                    <q-icon name="settings" size="xs" class="cursor-pointer" />
+                                </q-badge>
                             </q-btn>
                             <div v-if="watchingRobot.leader_robot_preset">
                                 <q-btn @click="() => { startLeaderTele(watchingRobot, watchingRobot.leader_robot_preset, 'log_' + watchingRobot.process_id) }" icon="play_arrow" color="blue" v-if="!leaderTeleStarted">
@@ -149,7 +161,7 @@
                             v-model="robotForm[input.key]"
                             :label="input.label"
                             :type="input.type"
-                            class="q-mb-md"
+                            class="q-mb-md" 
                         />
                     </div>
 
@@ -238,7 +250,6 @@
                                 :key="i"
                             ></q-input>
                         </div>
-
                     </div>
                 </q-card-section>
 
@@ -254,6 +265,31 @@
             :robot="teleSettingRobot"
             @hide="closeTeleSetting"
         />
+        <q-dialog v-model="showHomeposeSettingDialog" persistent>
+            <q-card style="min-width: 400px;">
+                <q-card-section>
+                    <div class="text-h6 text-center">Homepose Setting</div>
+                </q-card-section>
+                <q-card-section>
+                    <div class="row q-col-gutter-sm" v-if="watchingRobot">
+                        <div class="col" 
+                            v-for="(joint, i) in watchingRobot.joint_names" :key="joint"
+                        >
+                            <div class="text-caption">{{ joint }}</div>
+                            <q-input
+                                v-model.number="homeposeForm[i]"
+                                type="number"
+                                dense
+                            />
+                        </div>
+                    </div>
+                </q-card-section>
+                <q-card-actions align="center" class="text-primary">
+                    <q-btn flat label="Save" @click="saveHomepose" />
+                    <q-btn flat color="grey-7" label="Close" v-close-popup @click="showHomeposeSettingDialog = false" />
+                </q-card-actions>
+            </q-card>
+        </q-dialog>
     </q-page>
 </template>
 
@@ -286,14 +322,15 @@ const robotForm = ref({
     joint_names: [],
     joint_lower_bounds: [],
     joint_upper_bounds: [],
-    gripper_range: [0, 1],
+    gripper_range: [0, 1]
 });
 const watchingRobot = ref(null);
+const homeposeForm = ref([]);
 
 const robotTypeOptions = [
     { label: 'UR5e', value: 'ur5e' },
-    { label: 'PIPER', value: 'piper', form: [
-        { label: 'CAN Port', key: 'can_port', type: 'text', default: 'can_0' }
+    { label: 'PIPER', value: 'piper', joint_len: 7, form: [
+        { label: 'CAN Port', key: 'can_port', type: 'text', default: 'can_0' },
     ]},
     { label: 'Custom Robot', value: 'custom'}
 ]
@@ -392,6 +429,22 @@ function saveRobot() {
     }
 }
 
+function saveHomepose() {
+    if (watchingRobot.value && watchingRobot.value.handler) {
+        if (watchingRobot.value.id) {
+            watchingRobot.value.homepose = [...homeposeForm.value];
+
+            return api.put(`/robot/${watchingRobot.value.id}`, watchingRobot.value).then(() => {
+                Notify.create({
+                    color: 'positive',
+                    message: 'Homepose saved successfully.'
+                });
+                showHomeposeSettingDialog.value = false;
+            })
+        }
+    }
+}
+
 // function deleteRobot(robot) {
 //     if (robot.status === 'on') {
 //         Notify.create({
@@ -434,6 +487,23 @@ const showRobotForm = ref(false)
 
 const showTeleSetting = ref(false)
 const teleSettingRobot = ref(null)
+
+const showHomeposeSettingDialog = ref(false);
+
+function openHomeposeSetting() {
+    if (watchingRobot.value) {
+        let initialHomepose = [];
+        if (watchingRobot.value.homepose && watchingRobot.value.homepose.length === watchingRobot.value.joint_names.length) {
+            initialHomepose = watchingRobot.value.homepose;
+        } else if (watchingRobot.value.joint_pos) {
+            initialHomepose = watchingRobot.value.joint_pos;
+        } else {
+            initialHomepose = Array(watchingRobot.value.joint_names.length).fill(0);
+        }
+        homeposeForm.value = [...initialHomepose]; // Create a copy for the form
+        showHomeposeSettingDialog.value = true;
+    }
+}
 
 function openTeleSetting(robot) {
     if (robot.status === 'off') {

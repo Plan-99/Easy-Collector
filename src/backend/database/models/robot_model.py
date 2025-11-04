@@ -31,6 +31,7 @@ class Robot(Model, SoftDeletes):
         'joint_names': 'json',
         'gripper_names': 'json',
         'settings': 'json',
+        'homepose': 'json',
     }
 
     __appends__ = [

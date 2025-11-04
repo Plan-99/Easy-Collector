@@ -86,6 +86,7 @@ def stop_robot():
 def create_robot():
     name = request.json.get('name')
     type = request.json.get('type')
+    homepose = request.json.get('homepose', [])
     settings = {}
     if type == 'custom':
         settings = {
@@ -105,7 +106,8 @@ def create_robot():
     RobotModel.create(
         name=name,
         type=type,
-        settings=settings
+        settings=settings,
+        homepose=homepose
     )
     
     return {'status': 'success', 'message': 'Robot Created'}, 200
@@ -119,6 +121,9 @@ def update_robot(id):
     robot = RobotModel.find(id)
     robot.name = name
     robot.type = type
+
+    if 'homepose' in request.json:
+        robot.homepose = request.json.get('homepose')
 
     if type == 'custom':
         robot.settings = {
