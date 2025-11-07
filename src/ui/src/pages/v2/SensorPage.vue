@@ -94,10 +94,10 @@
         </bottom-terminal>
         <form-dialog
             v-model="showSensorForm"
-            :title="$t('sensorFormTitle')"
+            :title="$t(sensorForm.find((e) => e.key === 'id').value ? 'sensorEditFormTitle' : 'sensorAddFormTitle')"
             :form="sensorForm"
             @submit="saveSensor"
-            :ok-button-label="$t(sensorFormMode === 'add' ? 'add' : 'save')"
+            :ok-button-label="$t(sensorForm.find((e) => e.key === 'id').value ? 'save' : 'add')"
         ></form-dialog>
     </q-page>
 </template>
@@ -120,6 +120,7 @@ const { t } = useI18n()
 const sensors = ref([]);
 
 const sensorForm = ref([
+    { key: 'id', value: null },
     { key: 'name', label: t('sensorName'), value: '', default: '', type: 'text' },
     { key: 'type', label: t('sensorType'), value: '', default: '', type: 'select', options: [
         { label: 'Realsense Camera', value: 'realsense_camera' }
@@ -127,7 +128,6 @@ const sensorForm = ref([
     { key: 'serial_no', label: t('serialNUmber'), value: '', default: '', type: 'text', show: (form) => form.find(f => f.key === 'type').value === 'realsense_camera' }
 ]);
 const showSensorForm = ref(false);
-const sensorFormMode = ref('add'); // 'add' or 'edit'
 const watchingSensor = ref(null);
 
 // const sensorTypeOptions = [
@@ -149,7 +149,6 @@ function listSensors() {
 }
 
 function openAddSensorForm() {
-    sensorFormMode.value = 'add';
     sensorForm.value.forEach(field => {
         field.value = field.default;
     });
@@ -157,15 +156,15 @@ function openAddSensorForm() {
 }
 
 function openEditSensorForm(sensor) {
-    sensorFormMode.value = 'edit';
     sensorForm.value.forEach(field => {
         field.value = sensor[field.key] || field.default;
     });
+    sensorForm.value.find((e) => e.key === 'id').value = sensor.id; // Set ID for edit
     showSensorForm.value = true;
 }   
 
 function saveSensor(formData) {
-    if (sensorFormMode.value === 'edit') {
+    if (sensorForm.value.find((e) => e.key === 'id').value) {
         return api.put(`/sensor/${formData.id}`, formData).then(() => {
             sensorForm.value.forEach(field => field.value = field.default); // Reset form fields
             listSensors()

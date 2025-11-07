@@ -20,10 +20,19 @@ body {
     border: 1px solid var(--q-primary);
 }
 
+.border-red {
+    border: 1px solid red;
+}
+
+.border-grey {
+    border: 1px solid grey;
+}
+
+.border-dark {
+    border: 1px solid var(--q-dark);
+}
+
 .border-dotted {
     border-style: dotted;
 }
 
-.border-red {
-    background-color: red !important;
-}

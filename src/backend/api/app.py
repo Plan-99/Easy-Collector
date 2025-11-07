@@ -31,6 +31,7 @@ import os
 import argparse
 
 import threading
+from ..env.agent import Agent
 
 argparse = argparse.ArgumentParser(description='Easy Collector Web API')
 argparse.add_argument('--debug', action='store_true', help='Enable debug mode')
@@ -173,6 +174,11 @@ def handle_offer_event(sid, data):
     """클라이언트의 offer 요청을 처리 (올바른 방식)"""
     print('offer event received', sid, data)
     # return await sm.offer(data)
+
+@socketio.on('move_robot')
+def handle_move_robot_event(data):
+    agent = Agent(app.node, data['robot'])
+    agent.move_step(data['goal_pos'])
 
 
 def main():

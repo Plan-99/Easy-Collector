@@ -4,6 +4,7 @@ from ...database.models.robot_model import Robot as RobotModel
 import time
 import os
 from ...env.agent import Agent
+from ..process.subscribe_robot import subscribe_robot_topic
 
 # 1. Blueprint 생성
 # 이 블루프린트는 카메라와 관련된 'HTTP' 라우트를 관리합니다.
@@ -64,6 +65,14 @@ def start_robot():
         command=command,
     )
 
+    current_app.pm.start_function(
+        name='subscribe_robot_' + str(id),\
+        node=current_app.node,
+        func=subscribe_robot_topic,
+        socketio_instance=current_app.pm.socketio,
+        robot=data,
+    )
+
     if process:
         return {
             'status': 'success',
@@ -76,9 +85,11 @@ def start_robot():
 
 @robot_bp.route('/robot:stop', methods=['POST'])
 def stop_robot():
+    robot_id = request.json.get('id')
     process_id = request.json.get('process_id')
     current_app.pm.stop_process(process_id)
     current_app.pm.stop_process('leader_teleoperation')
+    current_app.pm.stop_function('subscribe_robot_' + str(robot_id))
     return {'status': 'success', 'message': 'Robot process stopped'}, 200
 
 

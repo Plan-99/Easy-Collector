@@ -1,34 +1,38 @@
 <template>
-    <q-dialog maximized @show="startDialog">
-        <q-card>
-            <q-card-section class="row items-center q-pb-none">
+    <q-dialog maximized @show="startDialog" persistent>
+        <q-card class="text-white full-height column">
+            <q-card-section class="row items-center bg-dark text-white">
                 <div class="text-h6">Augment Dataset</div>
                 <q-space />
                 <q-btn icon="close" flat round dense v-close-popup />
             </q-card-section>
-
-            <q-card-section>
+            <q-separator></q-separator>
+            <q-card-section class="bg-secondary q-px-xl q-py-lg col">
                 <div class="row q-col-gutter-lg">
-                    <div class="col-md-5 col-sm-12">
+                    <div class="col-md-4 col-sm-12">
                         <q-input
-                            v-model="form.name"
-                            type="text"
-                            label="New Dataset Name"
-                            outlined
                             dense
-                            class="q-mb-md"
-                            bg-color="grey-2"
+                            outlined
+                            dark
+                            bg-color="dark"
+                            :label="$t('datasetName')"
+                            v-model="form.name"
                         />
 
-                        <q-list bordered class="rounded-borders q-my-md">
+                        <q-list 
+                            bordered
+                            class="border-rounded q-mt-md"
+                            separator
+                            dark
+                        >
                             <q-expansion-item
                                 expand-separator
                                 icon="brightness_6"
                                 label="Lightness"
                                 caption="Adjust image brightness"
                             >
-                                <q-card>
-                                    <q-card-section>
+                                <q-card class="bg-secondary" dark>
+                                    <q-card-section class="q-pa-md">
                                         <q-slider
                                             v-model="form.lightness"
                                             :min="-100"
@@ -47,7 +51,7 @@
                                 label="Disturbances"
                                 caption="Add random disturbances"
                             >
-                                <q-card>
+                                <q-card class="bg-secondary" dark>
                                     <q-card-section>
                                         <q-input
                                             v-model.number="form.rectangles.count"
@@ -55,8 +59,8 @@
                                             label="Number of Disturbances"
                                             outlined
                                             dense
-                                            class="q-mb-md"
-                                            bg-color="grey-2"
+                                            dark
+                                            bg-color="dark"
                                             @change="addConfig"
                                         />
                                         <q-checkbox
@@ -64,6 +68,8 @@
                                             label="Random Color"
                                             class="q-mb-md"
                                             @update:model-value="addConfig"
+                                            color="primary"
+                                            dark
                                         />
                                         <div class="text-caption q-mb-sm">Rectangle Color</div>
                                         <q-color v-model="form.rectangles.color" :disable="form.rectangles.randomColor" 
@@ -79,7 +85,7 @@
                                 label="Salt and Pepper Noise"
                                 caption="Add salt and pepper noise"
                             >
-                                <q-card>
+                                <q-card class="bg-secondary" dark>
                                     <q-card-section>
                                         <q-slider
                                             v-model="form.saltAndPepper.amount"
@@ -100,7 +106,7 @@
                                 label="Gaussian Noise"
                                 caption="Add Gaussian noise"
                             >
-                                <q-card>
+                                <q-card class="bg-secondary" dark>  
                                     <q-card-section>
                                         <div class="text-caption">Mean</div>
                                         <q-slider
@@ -125,22 +131,23 @@
                             </q-expansion-item>
                         </q-list>
                     </div>
-                    <div class="col-md-7 col-sm-12">
-                        <q-card flat bordered>
+                    <div class="col-md-8 col-sm-12">
+                        <q-card flat bordered dark class="bg-dark border-rounded border-white">
                             <q-card-section>
                                 <div class="text-subtitle1">Preview from {{ dataset ? dataset.name : '' }}</div>
                             </q-card-section>
-                            <q-separator />
-                            <q-card-section class="flex flex-center" style="min-height: 600px;">
+                            <q-separator color="white" />
+                            <q-card-section class="flex flex-center">
                                 <hdf5-viewer
                                     v-if="dataset && augmentationPreviewFile"
                                     :path="`${dataset.id}/${augmentationPreviewFile.name}`"
-                                    class="full-width full-height"
+                                    class="full-width full-height q-gutter-x-sm"
+                                    style="width: 100%; height: 100%;"
+                                    image-class="border-rounded border-white"
                                 />
                             </q-card-section>
-                            <div class="row justify-start q-mt-md">
-                                <q-btn label="Start Augmentation" color="primary" @click="augmentDataset" />
-                                <q-btn label="Cancel" color="grey-6" v-close-popup class="q-mr-sm" />
+                            <div class="row justify-center q-my-md q-gutter-sm">
+                                <q-btn label="Start Augmentation" color="positive" @click="augmentDataset" />
                             </div>
                         </q-card>
                     </div>
@@ -154,11 +161,11 @@
 import { ref, defineProps } from 'vue';
 import { api } from 'src/boot/axios';
 import { Notify } from 'quasar';
-import Hdf5Viewer from 'src/components/Hdf5Viewer.vue';
+import Hdf5Viewer from 'src/components/v2/Hdf5Viewer.vue';
 
 const props = defineProps({
   taskId: {
-    type: String,
+    type: Number,
     required: true,
   },
   dataset: {
@@ -211,7 +218,7 @@ function augmentDataset() {
 const augmentationPreviewFile = ref(null);
 
 function startDialog() {
-    form.value.name = props.dataset ? props.dataset.name + '_augmented' : '';
+    form.value.name = props.dataset ? props.dataset.name + '_' + new Date().toISOString() : '';
     if (props.dataset) {
         api.get(`/datasets/${props.dataset.id}/:get_one`).then((res) => {
             augmentationPreviewFile.value = res.data.file; // Assuming the first file is the one to preview

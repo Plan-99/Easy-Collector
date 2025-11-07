@@ -13,7 +13,7 @@
                 <div v-for="(data, index) in form.filter((d) => d.show === undefined || d.show(form))" :key="index"
                 >
                     <div class="text-white row">
-                        <div class="q-mr-md">{{ data.label }}</div>
+                        <div class="q-mr-md col">{{ data.label }}</div>
                         <q-icon name="error" size="xs" v-if="data.validated === false" color="red"></q-icon>
                     </div>
                     <q-input
@@ -50,6 +50,25 @@
                         class="q-mb-md q-mt-xs"
                         v-else-if="data.type === 'select'"
                     />
+                    <q-scroll-area v-else-if="data.type === 'multiselect'" style="height: 150px" class="q-mb-md q-mt-xs">
+                        <q-list bordered separator dark>
+                            <q-item clickable v-ripple  v-for="option in data.options" :key="option.value"
+                                @click="{
+                                    if (data.value.includes(option.value)) {
+                                        data.value = data.value.filter(v => v !== option.value);
+                                    } else {
+                                        data.value = [...data.value, option.value];
+                                    }
+                                }"
+                                :class="{'bg-grey-8': data.value.includes(option.value)}"
+                            >
+                                <q-item-section>{{ option.label }}</q-item-section>
+                                <q-item-section side>
+                                    <q-icon v-if="data.value.includes(option.value)" name="check" color="positive" />
+                                </q-item-section>
+                            </q-item>
+                        </q-list>
+                    </q-scroll-area>
                     <slot :name="data.key" v-else-if="data.type === 'custom'"></slot>
                 </div>
                 <div class="row flex-center q-mt-xl">
@@ -99,7 +118,7 @@ function submitForm() {
         if (!(field.show === undefined || field.show(props.form))) {
             return;
         }
-        if (field.value === '' || field.value === null || field.value === undefined) {
+        if ((field.value === '' || field.value === null || field.value === undefined) && field.key !== 'id') {
             // Notify.create({
             //     type: 'negative',
             //     message: `Please fill in the ${field.label} field.`

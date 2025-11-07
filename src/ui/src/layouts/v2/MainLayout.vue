@@ -55,10 +55,15 @@ const linksList = [
     link: '/v2/robots'
   },
   {
-    title: 'Tasks',
+    title: 'Workspace',
     icon: 'cleaning_services',
-    link: '/v2/tasks'
+    link: '/v2/workspace'
   },
+  {
+    title: 'Train',
+    icon: 'school',
+    link: '/v2/train'
+  }
   // {
   //   title: 'VLA',
   //   icon: 'psychology',

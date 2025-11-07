@@ -1,20 +1,23 @@
 <template>
   <q-dialog full-width>
-    <q-card>
-      <q-card-section>
+    <q-card class="bg-secondary border-rounded border-white" dark>
+      <q-card-section class="row bg-dark text-white">
         <div class="text-h6">{{ checkpoint.name }}</div>
+        <q-space></q-space>
+        <q-btn dense color="white" round icon="close" text-color="dark" @click="$emit('update:modelValue', false)"/>
       </q-card-section>
+      <q-separator color="white"></q-separator>
       <q-card-section>
-        <div class="row q-col-gutter-sm" v-if="props.checkpoint">
+        <div class="row q-col-gutter-lg" v-if="props.checkpoint">
           <div class="col-4">
-            <div class="rounded-borders" style="border: 1px solid rgba(0,0,0,0.12);">
-              <div class="row q-pa-sm bg-grey-2 text-weight-bold">
+            <div style="border: 1px solid rgba(0,0,0,0.12);">
+              <div class="row q-pa-sm bg-grey-8 text-weight-bold">
                 <div class="col-6">Policy Parameters</div>
                 <div class="col-6">Value</div>
               </div>
-              <q-scroll-area style="height: 200px;">
+              <q-scroll-area style="height: 200px;" class="bg-dark">
                 <div v-for="(value, key) in { model: props.checkpoint.policy.type, ...props.checkpoint.policy.settings }" :key="key">
-                  <q-separator />
+                  <q-separator color="white" />
                   <div class="row q-pa-sm">
                     <div class="col-6" style="word-wrap: break-word;">{{ key }}</div>
                     <div class="col-6" style="word-wrap: break-word;">{{ value }}</div>
@@ -25,13 +28,13 @@
           </div>
           <div class="col-4">
             <div class="rounded-borders" style="border: 1px solid rgba(0,0,0,0.12);">
-              <div class="row q-pa-sm bg-grey-2 text-weight-bold">
+              <div class="row q-pa-sm bg-grey-8 text-weight-bold">
                 <div class="col-6">Train Parameters</div>
                 <div class="col-6">Value</div>
               </div>
-              <q-scroll-area style="height: 200px;">
+              <q-scroll-area style="height: 200px;" class="bg-dark">
                 <div v-for="(value, key) in { finetuned_from: props.checkpoint.load_model?.name, ...props.checkpoint.train_settings }" :key="key">
-                  <q-separator />
+                  <q-separator color="white"/>
                   <div class="row q-pa-sm">
                     <div class="col-6" style="word-wrap: break-word;">{{ key }}</div>
                     <div class="col-6" style="word-wrap: break-word;">{{ value }}</div>
@@ -40,18 +43,57 @@
               </q-scroll-area>
             </div>
           </div>
-          <div class="col-4 q-pa-md text-h6">
-            <div class="text-bold">Datasets: </div>
-            <div class="q-ml-lg">
-                <div v-for="(info, id) in props.checkpoint.dataset_info" :key="id">
-                    <div class="text-grey-8 text-body1">
-                        <span class="text-black">{{ info.name }}</span> (Number of Episodes: {{ info.episode_num }})
-                    </div>
+          <div class="col-4 full-height">
+            <!-- <div class="q-pa-md bg-dark border-rounded border-white">
+              <q-card
+                  class="q-pa-md bg-secondary border-rounded border-white text-white col-2 flex flex-center" 
+                  v-for="dataset in props.checkpoint.dataset_info"
+                  :key="dataset.id"
+                >
+                    <q-card-section class="q-pa-none q-mt-sm text-center">
+                        <q-img
+                            src="images/folder-icon.png"
+                            class="cursor-pointer"
+                            fit="contain"
+                            width="50px"
+                        >
+                            <div style="background: none;" class="absolute-full flex flex-center q-mt-xs text-primary">
+                                {{ dataset.episode_num }}
+                            </div>
+                        </q-img>
+                        <div class="text-bold q-mt-md">{{ dataset.name }}</div>
+                    </q-card-section>
+                </q-card>
+            </div> -->
+            <div class="rounded-borders" style="border: 1px solid rgba(0,0,0,0.12);">
+              <div class="q-pa-sm bg-grey-8 text-weight-bold">
+                Datasets
+              </div>
+              <q-scroll-area style="height: 200px;" class="bg-dark q-pa-md">
+                <div class="row q-gutter-x-md">
+                  <q-card
+                    class="q-pa-md bg-secondary border-rounded border-white text-white col-3 flex flex-center" 
+                    v-for="dataset in props.checkpoint.dataset_info"
+                    :key="dataset.id"
+                  >
+                      <q-card-section class="q-pa-none q-mt-sm text-center">
+                          <q-img
+                              src="images/folder-icon.png"
+                              class="cursor-pointer"
+                              fit="contain"
+                              width="50px"
+                          >
+                              <div style="background: none;" class="absolute-full flex flex-center q-mt-xs text-primary">
+                                  {{ dataset.episode_num }}
+                              </div>
+                          </q-img>
+                          <div class="text-bold q-mt-md">{{ dataset.name }}</div>
+                      </q-card-section>
+                  </q-card>
                 </div>
+              </q-scroll-area>
             </div>
-            <div class="text-bold">Loss: <span class="text-body1">{{ props.checkpoint.loss?.toFixed(5) }}</span></div>
-            <div class="text-bold">Best Epoch: <span class="text-body1">{{ props.checkpoint.best_epoch }}</span></div>
-          </div>
+            </div>  
         </div>
       </q-card-section>
       <q-card-section>
@@ -68,9 +110,10 @@
             :value="trainingProgress"
             size="20px"
             color="primary"
+            track-color="black"
           >
             <div class="absolute-full flex flex-center">
-              <q-badge color="white" text-color="primary" :label="`${Number(trainingProgress * 100).toFixed(2)}%`" />
+              <q-badge color="white" text-color="dark" :label="`${Number(trainingProgress * 100).toFixed(2)}%`" />
             </div>
           </q-linear-progress>
 
@@ -79,15 +122,11 @@
               <process-console process="train_task" />
             </div>
             <div class="col-6">
-              <Line :data="data" :options="options" />
+              <Line class="bg-dark" :data="data" :options="options" />
             </div>
           </div>
         </div>
       </q-card-section>
-
-      <q-card-actions align="right">
-        <q-btn flat label="Close" color="primary" v-close-popup />
-      </q-card-actions>
     </q-card>
   </q-dialog>
 </template>
@@ -133,13 +172,13 @@ const data = shallowRef({
     labels: [],
     datasets: [{
         label: 'Train Loss',
-        backgroundColor: 'rgba(0, 0, 192, 1)',
-        borderColor: 'rgba(0, 0, 192, 1)',
+        backgroundColor: 'rgba(192, 0, 192, 1)',
+        borderColor: 'rgba(192, 0, 192, 1)',
         data: [],
     }, {
         label: 'Validate Loss',
-        backgroundColor: 'rgba(0, 192, 0, 1)',
-        borderColor: 'rgba(0, 192, 0, 1)',
+        backgroundColor: 'rgba(192, 192, 0, 1)',
+        borderColor: 'rgba(192, 192, 0, 1)',
         data: []
     }]
 });

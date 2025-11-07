@@ -30,15 +30,8 @@ const routes = [
       { path: '', component: () => import('pages/v2/IndexPage.vue') },
       { path: 'sensors', component: () => import('src/pages/v2/SensorPage.vue') },
       { path: 'robots', component: () => import('src/pages/v2/RobotPage.vue') },
-      { path: 'tasks', component: () => import('src/pages/v2/Task/ListPage.vue') },
-      { path: 'tasks/:id', component: () => import('src/pages/v2/Task/DetailPage.vue'),
-        children: [
-          // { path: 'overview', component: () => import('src/pages/Task/OverviewPage.vue') },
-          { path: 'data_collection', component: () => import('src/pages/v2/Task/DataCollectionPage.vue') },
-          { path: 'train', component: () => import('src/pages/v2/Task/TrainPage.vue') },
-          { path: 'test', component: () => import('src/pages/v2/Task/TestPage.vue') },
-        ]
-      },
+      { path: 'workspace', component: () => import('src/pages/v2/WorkspacePage.vue') },
+      { path: 'train', component: () => import('src/pages/v2/TrainPage.vue') },
       { path: 'datasets', component: () => import('pages/v2/DatasetPage.vue') }
     ]
   },

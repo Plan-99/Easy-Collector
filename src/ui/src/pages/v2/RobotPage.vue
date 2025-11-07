@@ -1,5 +1,5 @@
 <template>
-    <q-page class="q-pt-lg full-height">
+    <q-page class="q-pt-lg q-pr-lg full-height">
         <div class="border-rounded bg-secondary q-pa-lg q-mb-lg row">
             <q-img src="images/robot1.png" style="width: 100px" class="q-mr-xl"></q-img>
             <div>
@@ -54,7 +54,8 @@
                     </q-card-section>
                     <q-card-section class="q-pa-none q-mt-sm row" v-else>
                         <div class="text-primary text-caption" v-if="robot.status === 'on'">TOPIC ON</div>
-                        <div class="text-grey-7 text-caption" v-if="robot.status === 'off'">TOPIC OFF</div>
+                        <div class="text-grey-7 text-caption" v-else-if="robot.status === 'off'">TOPIC OFF</div>
+                        <div class="text-grey-7 text-caption" v-else>LOADING</div>
                     </q-card-section>   
                     <q-inner-loading :showing="robot.status === 'loading'">
                         <q-spinner-gears size="50px" color="primary" />
@@ -98,7 +99,7 @@
                                 track-color="white"
                                 switch-label-side
                                 thumb-size="1px"
-                                color="red"
+                                color="accent"
                                 :disable="!canControl"
                                 @update:model-value="(e) => watchingRobot.handler.moveRobot(i, e)"
                             />
@@ -132,10 +133,10 @@
         </bottom-terminal>
         <form-dialog
             v-model="showRobotForm"
-            :title="$t('robotFormTitle')"
+            :title="$t(robotForm.find((e) => e.key === 'id').value ? 'robotEditFormTitle' : 'robotAddFormTitle')"
             :form="robotForm"
             @submit="saveRobot"
-            :ok-button-label="$t(robotForm.id ? 'save' : 'add')"
+            :ok-button-label="$t(robotForm.find((e) => e.key === 'id').value ? 'save' : 'add')"
         >
             <template v-slot:joint_names>
                 <div class="row q-mb-md q-col-gutter-sm">
@@ -215,7 +216,7 @@ import { useROS } from 'src/composables/useROS';
 import { useLeaderTeleoperation } from 'src/composables/useLeaderTeleoperation';
 import { api } from 'src/boot/axios';
 import ProcessConsole from 'src/components/v2/ProcessConsole.vue';
-import TeleSettingDialog from 'src/components/TeleSettingDialog.vue';
+import TeleSettingDialog from 'src/components/v2/TeleSettingDialog.vue';
 import { Notify } from 'quasar';
 import BottomTerminal from 'src/components/v2/BottomTerminal.vue';
 import { useRobot } from 'src/composables/useRobot';
@@ -228,6 +229,7 @@ const { leaderTeleStarted, startLeaderTele, stopLeaderTele } = useLeaderTeleoper
 const robots = ref([]);
 
 const robotForm = ref([
+    { key: 'id', value: null },
     { label: 'Robot Name', key: 'name', type: 'text', value: '', default: '' },
     { label: 'Robot Type', key: 'type', type: 'select', value: '', default: '', options: [
         { label: 'UR5e', value: 'ur5e' },
@@ -275,12 +277,10 @@ function listRobots() {
     });
 }
 
-const robotFormMode = ref('add'); // 'add' or 'edit'
 function openAddSensorForm() {
     robotForm.value.forEach(field => {
         field.value = field.default;
     });
-    robotFormMode.value = 'add';
     showRobotForm.value = true;
 }
 
@@ -288,7 +288,7 @@ function openEditRobotForm(robot) {
     robotForm.value.forEach(field => {
         field.value = robot[field.key] || field.default;
     });
-    robotFormMode.value = 'edit';
+    robotForm.value.find((e) => e.key === 'id').value = robot.id; // Set ID for edit
     showRobotForm.value = true;
 }
 
@@ -311,7 +311,7 @@ function removeJoint(index) {
 }
 
 function saveRobot(formData) {
-    if (robotFormMode.value === 'edit') {
+    if (robotForm.value.find((e) => e.key === 'id').value) {
         return api.put(`/robot/${formData.id}`, formData).then(() => {
             robotForm.value.forEach(field => field.value = field.default); // Reset form fields
             listRobots()
@@ -350,13 +350,15 @@ function toggleRobot(robot) {
 
 function watchRobot(robot) {
     canControl.value = false;
-    robot.handler.subscribeRobot((msg) => {
-        if (!canControl.value) {
-            robot.joint_pos = msg.position
+    if (!robot) {
+        return;
+    }
+    robot.handler.subscribeRobot((js) => {
+        if (!canControl.value && js) {
+            robot.joint_pos = js
             canControl.value = true;
         }
     })
-    robot.handler.publishRobot()
     watchingRobot.value = robot
 }
 

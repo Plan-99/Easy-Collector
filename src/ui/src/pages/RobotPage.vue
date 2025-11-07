@@ -419,13 +419,12 @@ function toggleRobot(robot) {
 
 function watchRobot(robot) {
     canControl.value = false;
-    robot.handler.subscribeRobot((msg) => {
-        if (!canControl.value) {
-            robot.joint_pos = msg.position
+    robot.handler.subscribeRobot((js) => {
+        if (!canControl.value && js) {
+            robot.joint_pos = js;
             canControl.value = true;
         }
     })
-    robot.handler.publishRobot()
     watchingRobot.value = robot
 }
 

@@ -1,9 +1,7 @@
 <template>
   <div class="relative-position">
-    <video ref="videoElement" class="border-rounded" autoplay playsinline muted style="height: 100%; width: 100%;"></video>
+    <video ref="videoElement" autoplay playsinline muted style="height: 100%; width: 100%;"></video>
     <q-inner-loading :showing="props.loading">
-      <q-spinner-gears size="50px" color="primary" />
-      <div class="q-mt-md">Waiting for topic to be published...</div>
     </q-inner-loading>
   </div>
 </template>

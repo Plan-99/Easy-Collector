@@ -1,16 +1,12 @@
 <template>
     <div class="row q-pt-md">
-        <img :src="image" alt="" v-for="(image, name) in images" :key="name" class="col" style="width: 100%; height: 100%; object-fit: contain;">
-        <div class="absolute-bottom-right">
-            <div v-for="(robot, index) in robot_states" :key="index">
-                <div>Current: {{ robot.qpos }}</div>
-                <div>Action: {{ robot.qaction }}</div>
-            </div>
-        </div>
+        <img :src="image" alt="" v-for="(image, name) in images" :key="name" class="col" style="width: 100%; height: 100%; object-fit: contain;"
+            :class="imageClass"
+        >
     </div>
 </template>
 <script setup>
-import { defineProps, onMounted, watch, ref, onUnmounted } from 'vue';
+import { defineProps, onMounted, watch, ref, onUnmounted, defineEmits } from 'vue';
 import { api } from 'src/boot/axios';
 import { LocalStorage } from 'quasar';
 import { useSocket } from 'src/composables/useSocket.js';
@@ -25,8 +21,14 @@ const props = defineProps({
   config: {
     type: Object,
     default: () => ({})
+  },
+  imageClass: {
+    type: String,
+    default: ''
   }
 });
+
+const emit = defineEmits(['update:robotStates']);
 
 const images = ref([]);
 const robot_states = ref({});
@@ -77,6 +79,7 @@ onMounted(() => {
         // }
         images.value = data.images
         robot_states.value = data.robot_states || {};
+        emit('update:robotStates', robot_states.value);
     });
 });
 

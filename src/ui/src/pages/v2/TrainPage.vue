@@ -1,59 +1,77 @@
 <template>
-    <div class="q-pa-md">
-        <q-stepper v-model="step" ref="stepper" color="primary" animated>
+    <q-page class="q-pt-lg full-height column q-pr-lg">
+        <div class="border-rounded bg-secondary q-pa-lg q-mb-lg row">
+            <q-img src="images/robot1.png" style="width: 100px" class="q-mr-xl"></q-img>
+            <div>
+                <div class="row">
+                    <div class="text-h5 text-primary text-bold q-mb-lg">{{ $t('trainIntroTitle') }}</div>
+                    <q-select
+                        dense
+                        outlined
+                        dark
+                        bg-color="dark"
+                        v-model="selectedWorkspaceId"
+                        :options="workspaces"
+                        label="Select Workspace"
+                        style="width: 400px"
+                        class="q-ml-lg"
+                        map-options
+                        emit-value
+                        option-label="name"
+                        option-value="id"
+                    >
+                    </q-select>
+                </div>
+                <div class="text-body text-white">{{ $t('trainIntroBody') }}</div>
+                <div class="text-body text-white">{{ $t('trainIntroBody2') }}</div>
+            </div>
+        </div>
+        <div class="col q-mb-lg border-rounded border-grey text-grey flex-center flex text-h6" v-if="!selectedWorkspaceId">
+            Select Workspace First
+        </div>
+        <q-stepper v-model="step" ref="stepper" animated dark v-else flat class="col" active-color="accent" done-color="accent" >
             <q-step
                 :name="1"
                 title="Select Datasets"
                 icon="collections_bookmark"
                 :done="step > 1"
+                class="border-white border-rounded q-mt-lg bg-secondary col"
             >
                 <div class="text-h6 q-mb-md">Select datasets for training</div>
-                <div class="row q-col-gutter-md">
-                    <div class="col-6">
-                        <q-card>
-                            <q-card-section>
-                                <div class="text-subtitle1">Available Datasets</div>
-                            </q-card-section>
-                            <q-separator />
-                            <q-list bordered>
-                                <q-item v-for="dataset in availableDatasets" :key="dataset.id">
-                                    <q-item-section avatar>
-                                        <q-icon name="folder" size="24px" color="amber" />
-                                    </q-item-section>
-                                    <q-item-section>{{ dataset.name }}</q-item-section>
-                                    <q-item-section side>
-                                        <q-btn icon="add" size="sm" flat round @click="selectDataset(dataset)" />
-                                    </q-item-section>
-                                </q-item>
-                                <q-item v-if="!availableDatasets.length">
-                                    <q-item-section class="text-grey">No available datasets</q-item-section>
-                                </q-item>
-                            </q-list>
-                        </q-card>
+                <q-scroll-area style="height: 500px">                
+                    <div class="row q-col-gutter-md">
+                        <div class="col-6 col-sm-4 col-md-3 col-lg-2" v-for="dataset in availableDatasets" :key="dataset.id">
+                            <q-card
+                                class="q-pa-md bg-dark border-rounded border-white text-white"
+                                :class="selectedDatasetIds.includes(dataset.id) ? 'border-primary' : ''"
+                            >
+                                <div class="absolute-top-right">
+                                    <q-checkbox
+                                        v-model="selectedDatasetIds"
+                                        :val="dataset.id"
+                                        dark
+                                    />
+                                </div>
+                                <q-card-section class="q-pa-none q-mt-sm text-center">
+                                    <q-img
+                                        src="images/folder-icon.png"
+                                        class="cursor-pointer"
+                                        fit="contain"
+                                        width="80px"
+                                    >
+                                        <div style="background: none;" class="absolute-full flex flex-center text-h6 text-primary q-mt-sm">
+                                            {{ dataset.episodes.length }}
+                                        </div>
+                                    </q-img>
+                                    <div class="text-bold q-mt-md">{{ dataset.name }}</div>
+                                </q-card-section>
+                            </q-card>
+                        </div>
                     </div>
-                    <div class="col-6">
-                        <q-card>
-                            <q-card-section>
-                                <div class="text-subtitle1">Selected Datasets</div>
-                            </q-card-section>
-                            <q-separator />
-                            <q-list bordered>
-                                <q-item v-for="dataset in selectedDatasets" :key="dataset.id">
-                                    <q-item-section avatar>
-                                        <q-icon name="folder" size="24px" color="amber" />
-                                    </q-item-section>
-                                    <q-item-section>{{ dataset.name }}</q-item-section>
-                                    <q-item-section side>
-                                        <q-btn icon="remove" size="sm" flat round @click="deselectDataset(dataset)" />
-                                    </q-item-section>
-                                </q-item>
-                                <q-item v-if="!selectedDatasets.length">
-                                    <q-item-section class="text-grey">No datasets selected</q-item-section>
-                                </q-item>
-                            </q-list>
-                        </q-card>
-                    </div>
-                </div>
+                </q-scroll-area>
+                <q-stepper-navigation align="right" class="q-mt-md">
+                    <q-btn @click="nextStep" color="primary" outline :label="'Continue'"/>
+                </q-stepper-navigation>
             </q-step>
 
             <q-step
@@ -61,107 +79,198 @@
                 title="Select Policy"
                 icon="policy"
                 :done="step > 2"
+                class="border-white border-rounded q-mt-lg bg-secondary col"
             >
                 <div class="text-h6 q-mb-md">Configure Policy</div>
-                <div class="row q-col-gutter-md">
-                    <div class="col-12">
-                        <q-select
-                            outlined
-                            v-model="selectedCheckpoint"
-                            :options="checkpointOptions"
-                            label="Load Model from Checkpoint"
-                            emit-value
-                            map-options
-                            clearable
-                            @clear="handleCheckpointClear"
-                        >
-                            <template v-slot:option="scope">
-                                <q-item v-bind="scope.itemProps">
-                                    <q-item-section>
-                                        <q-item-label>{{ scope.opt.label }}</q-item-label>
-                                    </q-item-section>
-                                    <q-item-section side v-if="scope.opt.value">
-                                        <q-btn icon="delete" size="sm" flat round @click.stop="deleteCheckpoint(scope.opt.value)" />
-                                    </q-item-section>
-                                </q-item>
-                            </template>
-                        </q-select>
-                    </div>
-                    <div class="col-12">
-                        <q-select
-                            outlined
-                            v-model="selectedPolicy"
-                            :options="policyOptions"
-                            label="Select Policy"
-                            emit-value
-                            map-options
-                            :disable="!!selectedCheckpoint"
-                        >
-                            <template v-slot:option="scope">
-                                <q-item v-if="scope.opt.value === 'new'" v-bind="scope.itemProps" @click="handleCreateNewPolicy">
-                                    <q-item-section>
-                                        <q-item-label class="text-grey">Create New Policy +</q-item-label>
-                                    </q-item-section>
-                                </q-item>
-                                <q-item v-else v-bind="scope.itemProps">
-                                     <q-item-section>
-                                        <q-item-label>{{ scope.opt.label }}</q-item-label>
-                                    </q-item-section>
-                                    <q-item-section side>
-                                        <q-btn icon="delete" size="sm" flat round @click.stop="deletePolicy(scope.opt.value)" />
-                                    </q-item-section>
-                                </q-item>
-                            </template>
-                        </q-select>
-                    </div>
-                </div>
-
-                <q-card class="q-mt-md" v-if="policyForm.name !== undefined">
-                    <q-card-section>
-                        <div class="text-h6">{{ formTitle }}</div>
-                    </q-card-section>
-                    <q-card-section>
-                        <q-form class="q-col-gutter-md row">
-                            <div class="col-4">
-                                <q-input dense outlined v-model="policyForm.name" label="Policy Name" :readonly="isNameReadonly" />
-                            </div>
-                            <div class="col-4">
-                                <q-select dense outlined v-model="policyForm.type" :options="policyTypes" label="Policy Type" :readonly="isTypeReadonly" @update:model-value="handlePolicyTypeChange" />
-                            </div>
-                            <div v-for="(config, key) in policyForm.settings" :key="key" class="col-4">
+                <div class="row">
+                    <q-scroll-area class="col-12" style="height: 500px">                
+                        <div class="row q-col-gutter-md">
+                            <div class="col-6">
                                 <q-select
-                                    v-if="key === 'pretrained_backbone_weights'"
-                                    dense
                                     outlined
-                                    v-model="config.value"
-                                    :options="pretrained_backbone_weight_options"
-                                    :label="config.label"
-                                    class="full-height"
-                                />
+                                    v-model="selectedCheckpoint"
+                                    :options="checkpointOptions"
+                                    label="Load Model from Checkpoint"
+                                    emit-value
+                                    map-options
+                                    clearable
+                                    dark
+                                    dense
+                                    bg-color="dark"
+                                    @clear="handleCheckpointClear"
+                                >
+                                    <template v-slot:option="scope">
+                                        <q-item v-bind="scope.itemProps">
+                                            <q-item-section>
+                                                <q-item-label>{{ scope.opt.label }}</q-item-label>
+                                            </q-item-section>
+                                            <q-item-section side v-if="scope.opt.value">
+                                                <q-btn icon="delete" size="sm" flat round @click.stop="deleteCheckpoint(scope.opt.value)" />
+                                            </q-item-section>
+                                        </q-item>
+                                    </template>
+                                </q-select>
+                            </div>
+                            <div class="col-6">
                                 <q-select
-                                    v-else-if="config.type === 'select'"
+                                    outlined
+                                    v-model="selectedPolicy"
+                                    :options="policyOptions"
+                                    label="Select Policy"
+                                    emit-value
+                                    map-options
+                                    :disable="!!selectedCheckpoint"
+                                    dark
+                                    dense
+                                    bg-color="dark"
+                                >
+                                    <template v-slot:option="scope">
+                                        <q-item v-if="scope.opt.value === 'new'" v-bind="scope.itemProps" @click="handleCreateNewPolicy">
+                                            <q-item-section>
+                                                <q-item-label class="text-grey">Create New Policy +</q-item-label>
+                                            </q-item-section>
+                                        </q-item>
+                                        <q-item v-else v-bind="scope.itemProps">
+                                            <q-item-section>
+                                                <q-item-label>{{ scope.opt.label }}</q-item-label>
+                                            </q-item-section>
+                                            <q-item-section side>
+                                                <q-btn icon="delete" size="sm" flat round @click.stop="deletePolicy(scope.opt.value)" />
+                                            </q-item-section>
+                                        </q-item>
+                                    </template>
+                                </q-select>
+                            </div>
+                        </div>
+                        <q-card class="q-mt-md border-rounded bg-dark" v-if="policyForm.name !== undefined">
+                            <q-card-section class="text-h6 text-center">
+                                {{ formTitle }}
+                            </q-card-section>
+                            <q-card-section>
+                                <q-form class="q-col-gutter-md row">
+                                    <div class="col-6">
+                                        <q-input dense outlined v-model="policyForm.name" class="bg-secondary" dark label="Policy Name" :readonly="isNameReadonly" />
+                                    </div>
+                                    <div class="col-6">
+                                        <q-select dense outlined v-model="policyForm.type" :options="policyTypes" dark class="bg-secondary" label="Policy Type" :readonly="isTypeReadonly" @update:model-value="handlePolicyTypeChange" />
+                                    </div>
+                                    <div v-for="(config, key) in policyForm.settings" :key="key" class="col-4">
+                                        <q-select
+                                            v-if="key === 'pretrained_backbone_weights'"
+                                            dense
+                                            outlined
+                                            v-model="config.value"
+                                            :options="pretrained_backbone_weight_options"
+                                            :label="config.label"
+                                            class="full-height bg-secondary"
+                                            dark
+                                        />
+                                        <q-select
+                                            v-else-if="config.type === 'select'"
+                                            dense
+                                            outlined
+                                            v-model="config.value"
+                                            :options="config.options"
+                                            :label="config.label"
+                                            :readonly="isSettingsReadonly"
+                                            :disable="isSettingsReadonly"
+                                            emit-value
+                                            map-options
+                                            class="full-height bg-secondary"
+                                            dark
+                                        />
+                                        <q-input
+                                            dense
+                                            outlined
+                                            v-model.number="config.value"
+                                            :label="config.label"
+                                            :readonly="isSettingsReadonly"
+                                            :disable="isSettingsReadonly"
+                                            v-else-if="config.type === 'number'"
+                                            type="number"
+                                            class="full-height bg-secondary"
+                                            dark
+                                        />
+                                        <q-btn-toggle
+                                            v-else-if="config.type === 'boolean'"
+                                            dense
+                                            v-model="config.value"
+                                            :options="[{ label: config.label, value: true }, { label: 'No', value: false }]"
+                                            :label="config.label"
+                                            :readonly="isSettingsReadonly"
+                                            :disable="isSettingsReadonly"
+                                            spread
+                                            color="secondary"
+                                            toggle-color="primary"
+                                            toggle-text-color="dark"
+                                            class="full-height"
+                                        ></q-btn-toggle>
+                                        <q-input
+                                            dense
+                                            outlined
+                                            v-model="config.value"
+                                            :label="config.label"
+                                            :readonly="isSettingsReadonly"
+                                            :disable="isSettingsReadonly"
+                                            v-else
+                                            type="text"
+                                            class="full-height bg-secondary"
+                                            dark
+                                        />
+                                    </div>
+                                </q-form>
+                            </q-card-section>
+                        </q-card>
+                    </q-scroll-area>
+                </div>
+                <q-stepper-navigation align="right" class="q-mt-md q-gutter-x-md">
+                    <q-btn @click="step = 1" color="grey" outline :label="'Back'"/>
+                    <q-btn @click="savePolicy" color="primary" outline :label="'Save'" v-if="selectedPolicy === 'new' || isPolicyFormChanged" />
+                    <q-btn @click="showSaveAsDialog = true" color="primary" outline :label="'Save As'" v-if="isPolicyFormChanged && selectedPolicy !== 'new'"/>
+                    <q-btn @click="nextStep" color="primary" outline :label="'Continue'" v-if="!isPolicyFormChanged && selectedPolicy !== 'new'" />
+                </q-stepper-navigation>
+            </q-step>
+
+            <q-step
+                :name="3"
+                title="Train Model"
+                icon="model_training"
+                class="border-white border-rounded q-mt-lg bg-secondary col"
+
+            >
+                <div class="text-h6 q-mb-md">Training Configuration</div>
+                <q-scroll-area class="col-12" style="height: 500px">
+                    <div class="q-gutter-y-md">
+                        <q-form class="q-col-gutter-md row">
+                            <div class="col-12">
+                                <q-input dense outlined v-model="newCheckpointName" label="Checkpoint Name" 
+                                    class="bg-dark" dark
+                                />
+                            </div>
+
+                            <div v-for="(config, key) in trainingForm" :key="key" class="col-4">
+                                <q-select
+                                    v-if="config.type === 'select'"
                                     dense
                                     outlined
                                     v-model="config.value"
                                     :options="config.options"
                                     :label="config.label"
-                                    :readonly="isSettingsReadonly"
-                                    :disable="isSettingsReadonly"
                                     emit-value
                                     map-options
-                                    class="full-height"
+                                    class="full-height bg-dark"
+                                    dark
                                 />
                                 <q-input
                                     dense
                                     outlined
                                     v-model.number="config.value"
                                     :label="config.label"
-                                    :readonly="isSettingsReadonly"
-                                    :disable="isSettingsReadonly"
                                     v-else-if="config.type === 'number'"
                                     type="number"
-                                    class="full-height"
-
+                                    class="full-height bg-dark"
+                                    step="any"
+                                    dark
                                 />
                                 <q-btn-toggle
                                     v-else-if="config.type === 'boolean'"
@@ -170,100 +279,28 @@
                                     v-model="config.value"
                                     :options="[{ label: config.label, value: true }, { label: 'No', value: false }]"
                                     :label="config.label"
-                                    :readonly="isSettingsReadonly"
-                                    :disable="isSettingsReadonly"
                                     spread
-                                    class="full-height"
+                                    class="full-height bg-dark"
                                 ></q-btn-toggle>
                                 <q-input
                                     dense
                                     outlined
                                     v-model="config.value"
                                     :label="config.label"
-                                    :readonly="isSettingsReadonly"
-                                    :disable="isSettingsReadonly"
                                     v-else
                                     type="text"
-                                    class="full-height"
+                                    dark
+                                    class="full-height bg-dark"
                                 />
                             </div>
                         </q-form>
-                    </q-card-section>
-                    <q-card-actions align="right" v-if="showFormButtons">
-                        <q-btn flat label="Save" color="primary" @click="savePolicy" v-if="selectedPolicy === 'new'" />
-                        <q-btn flat label="Save As..." color="secondary" @click="showSaveAsDialog = true" v-if="selectedPolicy && selectedPolicy !== 'new'" />
-                    </q-card-actions>
-                </q-card>
-            </q-step>
-
-            <q-step
-                :name="3"
-                title="Train Model"
-                icon="model_training"
-            >
-                <div class="q-gutter-y-md">
-                    <q-form class="q-col-gutter-md row">
-                        <div class="col-12">
-                            <q-input dense outlined v-model="newCheckpointName" label="Checkpoint Name" />
-                        </div>
-
-                        <div v-for="(config, key) in trainingForm" :key="key" class="col-4">
-                            <q-select
-                                v-if="config.type === 'select'"
-                                dense
-                                outlined
-                                v-model="config.value"
-                                :options="config.options"
-                                :label="config.label"
-                                emit-value
-                                map-options
-                                class="full-height"
-                            />
-                            <q-input
-                                dense
-                                outlined
-                                v-model.number="config.value"
-                                :label="config.label"
-                                v-else-if="config.type === 'number'"
-                                type="number"
-                                class="full-height"
-                                step="any"
-                            />
-                            <q-btn-toggle
-                                v-else-if="config.type === 'boolean'"
-                                dense
-                                outlined
-                                v-model="config.value"
-                                :options="[{ label: config.label, value: true }, { label: 'No', value: false }]"
-                                :label="config.label"
-                                spread
-                                class="full-height"
-                            ></q-btn-toggle>
-                            <q-input
-                                dense
-                                outlined
-                                v-model="config.value"
-                                :label="config.label"
-                                v-else
-                                type="text"
-                                class="full-height"
-                            />
-                        </div>
-                    </q-form>
-                    <div class="text-center">
-                        <q-btn color="primary" label="Start Training" @click="createCheckpoint" />
                     </div>
-
-                </div>
-                
-            </q-step>
-
-            <template v-slot:navigation>
-                <q-stepper-navigation class="text-center">
-                    <q-btn v-if="step > 1" flat color="primary" @click="$refs.stepper.previous()" label="Back" class="q-mr-sm" />
-                    <q-btn @click="nextStep" color="primary" :label="'Continue'" v-show="step !== 3" />
+                </q-scroll-area>
+                <q-stepper-navigation align="right" class="q-mt-md q-gutter-x-md">
+                    <q-btn @click="step = 2" color="grey" outline :label="'Back'"/>
+                    <q-btn @click="createCheckpoint" color="primary" outline :label="'Start Training'"/>
                 </q-stepper-navigation>
-            </template>
+            </q-step>
         </q-stepper>
 
         <q-page-sticky position="bottom-right" :offset="[18, 18]">
@@ -282,12 +319,12 @@
         </q-page-sticky>
 
         <q-dialog v-model="showSaveAsDialog">
-            <q-card style="min-width: 350px">
+            <q-card style="min-width: 350px" dark>
                 <q-card-section>
                     <div class="text-h6">Save Policy As</div>
                 </q-card-section>
                 <q-card-section class="q-pt-none">
-                    <q-input dense v-model="newPolicyName" label="New Policy Name" autofocus />
+                    <q-input dense outlined v-model="newPolicyName" dark label="New Policy Name" autofocus />
                 </q-card-section>
                 <q-card-actions align="right">
                     <q-btn flat label="Cancel" v-close-popup />
@@ -296,27 +333,20 @@
             </q-card>
         </q-dialog>
         <TrainingDialog v-model="showTrainingDialog" :checkpoint="watchingCheckpoint" :isTraining="watchingIsTraining" @hide="unwatchCheckpoint" @cpRemoved="getUnfinishedCheckpoint" />
-    </div>
+    </q-page>
 </template>
 
 <script setup>
 import { ref, onMounted, computed, watch } from 'vue';
 import { useQuasar, Notify } from 'quasar';
-import { useRoute } from 'vue-router';
 import { api } from 'src/boot/axios';
 import { POLICY_CONFIGS, TRAIN_CONFIGS } from 'src/configs/modelConfigs';
 // import { useTraining } from 'src/composables/useTraining';
-import TrainingDialog from 'src/components/TrainingDialog.vue';
+import TrainingDialog from 'src/components/v2/TrainingDialog.vue';
 import { useSocket } from 'src/composables/useSocket';
 import { useProcessStore } from 'src/stores/processStore';
 
-
 const processStore = useProcessStore();
-
-
-const route = useRoute();
-const taskId = Number(route.params.id);
-// const { unfinishedCheckpoints, getUnfinishedCheckpoint, startTraining } = useTraining();
 
 const $q = useQuasar();
 const step = ref(1);
@@ -324,7 +354,7 @@ const stepper = ref(null);
 
 // Step 1: Dataset Selection
 const availableDatasets = ref([]);
-const selectedDatasets = ref([]);
+const selectedDatasetIds = ref([]);
 
 // Step 2: Policy Selection
 const checkpoints = ref([]);
@@ -336,8 +366,6 @@ const showSaveAsDialog = ref(false);
 const newPolicyName = ref('');
 const newCheckpointName = ref('');
 
-const taskVal = ref({});
-
 // Step 3: Training
 const trainingForm = ref({});
 
@@ -345,11 +373,31 @@ const policyTypes = Object.keys(POLICY_CONFIGS);
 
 const { socket } = useSocket();
 
+const selectedWorkspaceId = ref(null);
+const workspaces = ref([]);
+watch(selectedWorkspaceId, (newVal) => {
+    if (newVal) {
+        listDatasets();
+        listPolicies();
+        listCheckpoints();
+        getUnfinishedCheckpoint();
+    }
+});
+
+function listWorkspaces() {
+    return api.get('/tasks').then((response) => {
+        workspaces.value = response.data.tasks;
+    });
+}
+
+// const selectedWorkpace = computed(() => {
+//     return workspaces.value.find(w => w.id === selectedWorkspaceId.value);
+// });
 // --- Computed Properties for Step 2 ---
 const checkpointOptions = computed(() => {
     return [
         { label: 'Start without checkpoint', value: null },
-        ...checkpoints.value.filter(c => c.task_id === taskId).map(c => ({ label: c.name, value: c.id }))
+        ...checkpoints.value.filter(c => c.task_id === selectedWorkspaceId.value).map(c => ({ label: c.name, value: c.id }))
     ];
 });
 
@@ -369,7 +417,6 @@ const formTitle = computed(() => {
 const isNameReadonly = computed(() => !!selectedCheckpoint.value || (selectedPolicy.value && selectedPolicy.value !== 'new'));
 const isTypeReadonly = computed(() => !!selectedCheckpoint.value || (selectedPolicy.value && selectedPolicy.value !== 'new'));
 const isSettingsReadonly = computed(() => !!selectedCheckpoint.value);
-const showFormButtons = computed(() => selectedPolicy.value && !selectedCheckpoint.value);
 
 function validatePolicyForm() {
     const form = policyForm.value;
@@ -491,29 +538,18 @@ watch(selectedPolicy, (newVal) => {
 // --- Methods for Step 1 ---
 function listDatasets() {
     api.get('/datasets').then((response) => {
-        availableDatasets.value = response.data.datasets.filter(dataset => dataset.task_id == taskId) || [];
+        availableDatasets.value = response.data.datasets.filter(dataset => dataset.task_id == selectedWorkspaceId.value) || [];
     }).catch((error) => {
         console.error('Error fetching datasets:', error);
         Notify.create({ color: 'negative', message: 'Failed to load datasets.' });
     });
 }
 
-function selectDataset(dataset) {
-    selectedDatasets.value.push(dataset);
-    availableDatasets.value = availableDatasets.value.filter(d => d.id !== dataset.id);
-}
-
-function deselectDataset(dataset) {
-    availableDatasets.value.push(dataset);
-    selectedDatasets.value = selectedDatasets.value.filter(d => d.id !== dataset.id);
-    availableDatasets.value.sort((a, b) => a.id - b.id);
-}
-
 // --- Methods for Step 2 ---
 function listCheckpoints() {
     return api.get('/checkpoints', {
         params: {
-            where: `task_id,=,${taskId}|status,=,finished`,
+            where: `task_id,=,${selectedWorkspaceId.value}|status,=,finished`,
             order: 'created_at DESC'
         }
     }).then(response => {
@@ -602,7 +638,8 @@ async function savePolicy() {
         try {
             const response = await api.post('/policy', payload);
             await listPolicies();
-            selectedPolicy.value = response.data.id; // Assuming API returns the new ID
+            console.log(response);
+            selectedPolicy.value = response.data.data.id; // Assuming API returns the new ID
             Notify.create({ color: 'positive', message: 'Policy created successfully!' });
         } catch (error) {
             Notify.create({ color: 'negative', message: `${error}: Failed to create policy.` });
@@ -632,7 +669,7 @@ async function savePolicyAs() {
     try {
         const response = await api.post('/policy', newPolicy);
         await listPolicies();
-        selectedPolicy.value = response.data.id;
+        selectedPolicy.value = response.data.data.id;
         newPolicyName.value = '';
         showSaveAsDialog.value = false;
         Notify.create({ color: 'positive', message: 'Policy saved as new entry.' });
@@ -644,7 +681,7 @@ async function savePolicyAs() {
 
 // --- Stepper Navigation ---
 function nextStep() {
-    if (step.value === 1 && selectedDatasets.value.length === 0) {
+    if (step.value === 1 && selectedDatasetIds.value.length === 0) {
         Notify.create({ color: 'negative', message: 'Please select at least one dataset.' });
         return;
     }
@@ -728,10 +765,10 @@ const watchingCheckpoint = ref(null);
 function createCheckpoint() {
     const trainingPayload = getTrainingPayload();
     api.post('/checkpoint', {
-        task_id: taskId,
+        task_id: selectedWorkspaceId.value,
         policy_id: selectedPolicy.value,
         load_model_id: selectedCheckpoint.value,
-        dataset_info: Object.fromEntries(selectedDatasets.value.map(d => [d.id, { episode_num: d.episode_num }])),
+        dataset_info: Object.fromEntries(selectedDatasetIds.value.map(d => [d, { episode_num: availableDatasets.value.find(ds => ds.id === d).episodes.length }])),
         name: newCheckpointName.value,
         train_settings: trainingPayload
     }).then((res) => {
@@ -792,15 +829,30 @@ function removeTrainingCheckpoint() {
     unwatchCheckpoint();
 }
 
+const isPolicyFormChanged = computed(() => {
+    if (!policyForm.value.id) return true; // New policy, no changes yet
+    const originalPolicy = policies.value.find(p => p.id === policyForm.value.id);
+    if (!originalPolicy) return false;
+
+    if (originalPolicy.name !== policyForm.value.name) return true;
+    if (originalPolicy.type !== policyForm.value.type) return true;
+
+    for (const key in policyForm.value.settings) {
+        if (originalPolicy.settings[key] !== policyForm.value.settings[key].value) {
+            return true;
+        }
+    }
+    return false;
+});
+
 
 onMounted(async () => {
-    listDatasets();
-    await listPolicies(); // Wait for policies to load first
-    await listCheckpoints();
-    await getUnfinishedCheckpoint();
-    const taskResponse = await api.get(`/tasks/${taskId}`);
-    taskVal.value = taskResponse.data.task;
-
+    listWorkspaces();
+    // listDatasets();
+    // await listPolicies(); // Wait for policies to load first
+    // await listCheckpoints();
+    // await getUnfinishedCheckpoint();
+    // const taskResponse = await api.get(`/tasks/${selectedWorkspaceId.value}`);
     socket.on('stop_process', (data) => {
         if (data.id === 'train_task') {
             api.get(`/checkpoint/${trainingCheckpoint.value.id}/:check_create_successed`).then(response => {

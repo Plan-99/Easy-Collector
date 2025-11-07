@@ -1,14 +1,14 @@
 <template>
     <q-dialog persistent>
-        <q-card style="min-width: 80%">
+        <q-card style="min-width: 80%" dark class="bg-dark border-rounded border-white">
             <q-card-section class="q-pt-none">
                 <q-btn class="absolute-top-right" size="md" icon="close" flat round style="z-index: 3;" @click="$emit('hide')"></q-btn>
                 <q-card-section>
                     <div class="text-h6 text-center">Teleoperation Setting</div>
                 </q-card-section>
+                <q-separator color="white"></q-separator>
                 <q-tabs
                     v-model="teleSettingTab"
-                    dense
                     class="text-grey"
                     active-color="primary"
                     indicator-color="primary"
@@ -18,10 +18,9 @@
                     <q-tab name="leader" label="Leader Robot" />
                     <q-tab name="keyboard" label="Keyboard" />
                 </q-tabs>
-                <q-separator />
                 <q-tab-panels v-model="teleSettingTab" animated>
-                    <q-tab-panel name="leader" class="row q-col-gutter-x-md">
-                        <div class="col">
+                    <q-tab-panel name="leader" class="row q-col-gutter-x-md bg-secondary">
+                        <div class="col ">
                             <div class="row q-col-gutter-x-md q-mt-md">
                                 <div class="col">
                                     <q-select
@@ -29,6 +28,8 @@
                                         :options="['/dev/ttyUSB0', '/dev/ttyUSB1', '/dev/ttyUSB2', '/dev/ttyUSB3', '/dev/ttyUSB4', '/dev/ttyUSB5']"
                                         v-model="leaderSettingForm.port_name"
                                         dense
+                                        dark
+                                        bg-color="dark"
                                         outlined
                                     ></q-select>
                                 </div>
@@ -39,7 +40,7 @@
                             </div>
                             <process-console 
                                 process="start_leader_robot"
-                                class="q-mt-md"
+                                class="q-mt-md border-white"
                                 style="height: 600px;"
                             />
                         </div>
@@ -52,6 +53,8 @@
                                 animated
                                 vertical
                                 style="height: 100%;"
+                                dark
+                                class="border-white border-rounded"
                             >
                                 <q-step
                                     :name="1"
@@ -82,11 +85,13 @@
                                                 type="number"
                                                 dense
                                                 outlined
+                                                dark
+                                                class="bg-dark"
                                             />
                                         </div>
                                     </div>
                                     <q-stepper-navigation>
-                                        <q-btn @click="() => { leaderSettingStep = 2 }" color="primary" label="Save & Go Next" :disable="!leaderSettingForm.origin" />
+                                        <q-btn @click="() => { leaderSettingStep = 2 }" color="primary" outline label="Save & Go Next" :disable="!leaderSettingForm.origin" />
                                     </q-stepper-navigation>
                                 </q-step>
 
@@ -111,7 +116,10 @@
                                             @update:model-value="onGripperDxlIdsChange"
                                             map-options
                                             emit-value
-                                            class="q-mb-md full-width"/>
+                                            dark
+                                            outlined
+                                            class="q-mb-md full-width bg-dark"
+                                        />
                                     </div>
                                     <div class="row q-col-gutter-sm q-mt-md" v-for="(dxl_id, id) in leaderSettingForm.gripper_dxl_ids" :key="id">
                                         <div class="col-6" v-for="i in [0, 1]" :key="i">
@@ -121,6 +129,7 @@
                                                 type="number"
                                                 dense
                                                 outlined
+                                                dark
                                                 v-if="i === 0 || gripperDxlRangeSaved[id][0]"
                                             >
                                                 <template v-slot:append>
@@ -135,7 +144,7 @@
                                         </div>
                                     </div>
                                     <q-stepper-navigation>
-                                        <q-btn @click="() => { leaderSettingStep = 3; saveLeaderSetting() }" color="primary" label="Go Next" :disable="!gripperDxlRangeSaved.every((saved) => saved[0] && saved[1])" />
+                                        <q-btn @click="() => { leaderSettingStep = 3; saveLeaderSetting() }" color="primary" outline label="Go Next" :disable="!gripperDxlRangeSaved.every((saved) => saved[0] && saved[1])" />
                                         <q-btn flat @click="leaderSettingStep = 1" color="primary" label="Back" class="q-ml-sm" />
                                     </q-stepper-navigation>
                                 </q-step>
@@ -149,7 +158,7 @@
                                     Please start teleoperation and map the direction of leader robot's motors to the worker robot's motors.
                                     <div>
                                         <q-btn
-                                            color="primary"
+                                            color="positive"
                                             label="Start Teleoperation"
                                             @click="startLeaderTele(robot, leaderSettingForm, 'log_start_leader_robot')"
                                             class="full-width q-mt-md"
@@ -176,14 +185,14 @@
                                                 @update:model-value="saveLeaderSetting"
                                             />
                                         </div>
-                                        <q-banner class="col-12 q-mt-md bg-primary text-white">
+                                        <div class="col-12 q-mt-md border-white border-rounded q-pa-md ">
                                             <div>
                                                 Check the joint of the robot which moves in the opposite direction of the leader's joint.
                                             </div>
-                                        </q-banner>
+                                        </div>
                                     </div>
-                                    <q-stepper-navigation>
-                                        <q-btn @click="$emit('hide', leaderSettingForm)" color="primary" label="Finish" />
+                                    <q-stepper-navigation align="right">
+                                        <q-btn @click="$emit('hide', leaderSettingForm)" color="primary" outline label="Finish" />
                                     </q-stepper-navigation>
                                 </q-step>
 
@@ -202,10 +211,10 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, defineProps } from 'vue';
-import { useSocket } from '../composables/useSocket';
+import { useSocket } from 'src/composables/useSocket';
 import ProcessConsole from './ProcessConsole.vue';
-import { useROS } from '../composables/useROS';
-import { useLeaderTeleoperation } from '../composables/useLeaderTeleoperation';
+import { useROS } from 'src/composables/useROS';
+import { useLeaderTeleoperation } from 'src/composables/useLeaderTeleoperation';
 import { api } from 'src/boot/axios';
 // import { Notify } from 'quasar';
 
