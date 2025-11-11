@@ -225,7 +225,7 @@
                 </div>
                 <q-stepper-navigation align="right" class="q-mt-md q-gutter-x-md">
                     <q-btn @click="step = 1" color="grey" outline :label="'Back'"/>
-                    <q-btn @click="savePolicy" color="primary" outline :label="'Save'" v-if="selectedPolicy === 'new' || isPolicyFormChanged" />
+                    <q-btn @click="savePolicy" color="primary" outline :label="'Save'" v-if="selectedPolicy === 'new'" />
                     <q-btn @click="showSaveAsDialog = true" color="primary" outline :label="'Save As'" v-if="isPolicyFormChanged && selectedPolicy !== 'new'"/>
                     <q-btn @click="nextStep" color="primary" outline :label="'Continue'" v-if="!isPolicyFormChanged && selectedPolicy !== 'new'" />
                 </q-stepper-navigation>

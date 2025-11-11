@@ -37,6 +37,8 @@ export default {
   trainCreateFormTitle: 'Create New Training Session',
   trainEditFormTitle: 'Edit Training Session',
 
+  checkpointEditFormTitle: 'Edit Checkpoint',
+
   sensorSetting: 'Sensor Settings',
   robotSetting: 'Robot Settings',
 

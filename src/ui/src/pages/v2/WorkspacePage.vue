@@ -48,7 +48,7 @@
             Select Workspace First
         </div>
         <div class="col row q-mb-lg" v-else>
-            <div class="col-3 bg-secondary q-mr-lg border-rounded q-pa-sm">
+            <div class="col-3 bg-secondary q-mr-lg border-rounded q-pa-sm" v-if="status === 'pending'">
                 <q-tabs
                     dense
                     v-model="selectedTab"
@@ -61,12 +61,12 @@
                     <q-tab name="inference" label="inference"></q-tab>
                 </q-tabs>
                 <div v-if="selectedTab === 'setting'" class="q-pt-md q-px-sm text-white">
-                    <q-list dark bordered separator class="border-rounded">
+                    <q-list dark bordered separator class="border-rounded bg-dark" >
                         <q-expansion-item
                             icon="camera"
                             :label="`${$t('sensorSetting')} (${sensors.filter(e => selectedWorkspace.sensor_ids.includes(e.id)).length})`"
                         >
-                            <q-card class="bg-grey-9">
+                            <q-card class="bg-dark">
                                 <q-card-section>
                                     <div
                                         class="q-pa-sm q-px-md q-my-sm border-rounded row"
@@ -123,10 +123,10 @@
                         </q-expansion-item>
 
                         <q-expansion-item
-                            icon="signal_wifi_off"
+                            icon="adb"
                             :label="`${$t('robotSetting')} (${robots.filter(e => selectedWorkspace.robot_ids.includes(e.id)).length})`"
                         >
-                            <q-card class="bg-grey-9">
+                            <q-card class="bg-dark border-rounded">
                             <q-card-section>
                                 <div
                                     class="q-pa-sm q-px-md q-my-sm border-rounded row"
@@ -207,12 +207,13 @@
                         outline
                         class="full-width q-mb-sm"
                         rounded
-                        color="primary"
+                        color="primary bg-dark"
                         icon="add"
+                        label="Add Dataset Folder"
                         @click="openAddDatasetForm"
                     ></q-btn>
                     <q-scroll-area class="full-height">
-                        <q-list bordered separator class="border-rounded" dark>
+                        <q-list bordered separator class="border-rounded bg-dark" dark>
                             <q-expansion-item
                                 expand-separator
                                 icon="folder"
@@ -282,7 +283,57 @@
                                 </q-list>
                             </q-expansion-item>
                         </q-list>
-                        
+                    </q-scroll-area>
+                </div>
+                <div v-else-if="selectedTab === 'inference'" style="height: 90%" class="q-pt-md q-px-sm text-white">
+                    <q-scroll-area class="full-height">
+                        <div class="row q-col-gutter-md">
+                        <div class="col-6" v-for="checkpoint in checkpoints" :key="checkpoint.id">
+                            <q-card
+                                class="q-pa-md bg-dark border-rounded border-white text-white"
+                                :class="selectedCheckpointId === checkpoint.id ? 'border-primary' : ''"
+                                @click="selectedCheckpointId = checkpoint.id"
+                            >
+                                <q-menu context-menu>
+                                    <q-list bordered separator>
+                                        <q-item
+                                            clickable
+                                            v-ripple
+                                            v-close-popup
+                                            @click="selectedCheckpointId = checkpoint.id"
+                                        >
+                                            <q-item-section>Show Details</q-item-section>
+                                            <q-item-section side>
+                                                <q-icon name="add" size="xs" />
+                                            </q-item-section>
+                                        </q-item>
+                                        <q-item clickable v-ripple v-close-popup @click="openCheckpointForm(checkpoint)">
+                                            <q-item-section>Edit Checkpoint</q-item-section>
+                                            <q-item-section side>
+                                                <q-icon name="edit" size="xs" />
+                                            </q-item-section>
+                                        </q-item>
+                                        <q-item clickable v-ripple class="text-negative" @click="deleteCheckpoint(checkpoint)">
+                                            <q-item-section>Delete Checkpoint</q-item-section>
+                                            <q-item-section side>
+                                                <q-icon color="negative" name="delete" size="xs" />
+                                            </q-item-section>
+                                        </q-item>
+                                    </q-list>
+                                </q-menu>
+                                <q-card-section class="q-pa-none q-mt-sm text-center">
+                                    <q-img
+                                        src="images/brain-icon.png"
+                                        class="cursor-pointer"
+                                        fit="contain"
+                                        width="80px"
+                                    >
+                                    </q-img>
+                                    <div class="text-bold q-mt-md">{{ checkpoint.name }}</div>
+                                </q-card-section>
+                            </q-card>
+                        </div>
+                    </div>
                     </q-scroll-area>
                 </div>
             </div>
@@ -335,8 +386,11 @@
                     </div>
 
                 </div>
-                <div class="col q-py-sm">
-                    <div class="text-grey bg-dark border-rounded row full-height flex flex-center" v-if="!dataCollecting">
+                <div class="flex flex-center col" v-if="!isRobotSensorAllOn">
+                    <div class="text-yellow">Start all sensors and robots to view live data streams.</div>
+                </div>
+                <div class="col q-py-sm" v-else-if="!selectedCheckpointId">
+                    <div class="text-grey bg-dark border-rounded row full-height flex flex-center" v-if="status === 'pending'">
                         <q-select
                             v-model="selectedDataset"
                             dense
@@ -385,6 +439,48 @@
                             label="STOP"
                             icon="stop"
                             @click="stopDataCollection"
+                        ></q-btn>
+                    </div>
+                </div>
+                <div v-else class="col">
+                    <div
+                        class="col q-pa-sm bg-dark border-rounded text-white row flex flex-center"
+                        v-if="status === 'pending'"
+                    >
+                        <div>
+                            <div class="text-h6">{{ selectedCheckpoint?.name }}</div>
+                        </div>
+                        <div>
+                            <q-btn
+                                icon="close"
+                                round
+                                flat
+                                @click="selectedCheckpointId = null"
+                            ></q-btn>
+                        </div>
+                        <q-space class="col"></q-space>
+                        <div>
+                            <q-btn
+                                color="red"
+                                text-color="white"
+                                label="Start Inference"
+                                icon="play_arrow"
+                                @click="startInference"
+                                v-if="status === 'pending'"
+                            ></q-btn>
+                        </div>
+                    </div>
+                    <div
+                        class="col q-pa-sm bg-dark border-rounded text-white row flex flex-center"
+                        v-else
+                    >
+                        <q-space></q-space>
+                        <q-btn
+                            color="white"
+                            text-color="red"
+                            label="Stop Inference"
+                            icon="stop"
+                            @click="stopInference"
                         ></q-btn>
                     </div>
                 </div>
@@ -455,6 +551,13 @@
             @submit="saveDataset"
             :ok-button-label="$t(datasetForm.id ? 'save' : 'add')"
         ></form-dialog>
+        <form-dialog
+            v-model="showCheckpointForm"
+            :title="$t('checkpointEditFormTitle')"
+            :form="checkpointForm"
+            @submit="saveCheckpoint"
+            :ok-button-label="$t('save')"
+        ></form-dialog>
 
         <data-augmentation-dialog
             v-model="showAugmentationForm"
@@ -496,6 +599,9 @@ import { useI18n } from 'vue-i18n';
 import DataAugmentationDialog from 'src/components/v2/DataAugmentationDialog.vue';
 import { useSocket } from 'src/composables/useSocket.js';
 import ProcessConsole from 'src/components/v2/ProcessConsole.vue';
+import { useProcessStore } from 'src/stores/processStore';
+
+const processStore = useProcessStore();
 
 const { socket } = useSocket();
 
@@ -620,6 +726,8 @@ watch(selectedWorkspaceId, (newVal) => {
     }
     focused.value = {};
     listDatasets();
+    listCheckpoints();
+
 });
 
 const showRobotForm = ref(false);
@@ -784,7 +892,16 @@ function deleteWorkspace(workspace) {
 
 const teleType = ref('leader');
 
-const dataCollecting = ref(false);
+const status = computed(() => {
+    if (processStore.isRunning('checkpoint_test')) {
+        return 'testing';
+    } else if (processStore.isRunning('record_episode')) {
+        return 'inferencing';
+    } else {
+        return 'pending';
+    }
+});
+
 const collectingProgress = ref(0);
 function startDataCollection() {
     if (!selectedDataset.value) {
@@ -802,7 +919,6 @@ function startDataCollection() {
         sensors: sensors.value.filter(e => selectedWorkspace.value.sensor_ids.includes(e.id)),
         tele_type: teleType.value
     }).then(() => {
-        dataCollecting.value = true;
         Notify.create({
             color: 'positive',
             message: 'Data collection started'
@@ -824,13 +940,100 @@ function stopDataCollection() {
 
 const showProcessConsole = ref(false)
 
+const selectedCheckpointId = ref(null);
+const selectedCheckpoint = computed(() => {
+    return checkpoints.value.find(c => c.id === selectedCheckpointId.value) || null;
+});
+const checkpoints = ref([]);
+function listCheckpoints() {
+    return api.get('/checkpoints', {
+        params: {
+            where: `task_id,=,${selectedWorkspaceId.value}|status,=,finished`,
+            order: 'created_at DESC'
+        }
+    }).then(response => {
+        checkpoints.value = response.data.checkpoints;
+    });
+}
 
+function startInference() {
+    api.post(`/checkpoint/${selectedCheckpointId.value}/:start_test`, {
+        task: selectedWorkspace.value,
+        policy: selectedCheckpoint.value.policy,
+        robots: robots.value.filter(e => selectedWorkspace.value.robot_ids.includes(e.id)),
+        sensors: sensors.value.filter(e => selectedWorkspace.value.sensor_ids.includes(e.id)),
+    }).then(() => {
+        Notify.create({
+            color: 'positive',
+            message: 'Test started'
+        });
+    }).catch((error) => {
+        console.error('Error starting test:', error);
+        Notify.create({
+            color: 'negative',
+            message: 'Error starting test'
+        });
+    });
+}
+
+function stopInference() {
+    return api.post(`/checkpoint/${selectedCheckpointId.value}/:stop_test`).catch((error) => {
+        console.error('Error stopping test:', error);
+        Notify.create({
+            color: 'negative',
+            message: 'Error stopping test'
+        });
+    });
+}
+
+const isRobotSensorAllOn = computed(() => {
+    const selectedRobots = robots.value.filter(r => selectedWorkspace.value?.robot_ids.includes(r.id));
+    const selectedSensors = sensors.value.filter(s => selectedWorkspace.value?.sensor_ids.includes(s.id));
+    const allRobotsOn = selectedRobots.every(r => r.status === 'on');
+    const allSensorsOn = selectedSensors.every(s => s.status === 'on');
+    return allRobotsOn && allSensorsOn; 
+});
+
+const showCheckpointForm = ref(false);
+const checkpointForm = ref([
+    { key: 'id', value: null },
+    { key: 'name', label: 'Checkpoint Name', type: 'text', value: '', default: '' },
+]);
+function openCheckpointForm(checkpoint) {
+    showCheckpointForm.value = true;
+    checkpointForm.value.forEach((field) => {
+        field.value = checkpoint[field.key] || field.default;
+    });
+}
+function deleteCheckpoint(checkpoint) {
+    Notify.create({
+        message: `Are you sure you want to delete checkpoint "${checkpoint.name}"?`,
+        color: 'negative',
+        actions: [
+            { label: 'Cancel', color: 'white', handler: () => { /* do nothing */ } },
+            { label: 'Delete', color: 'white', handler: () => {
+                api.delete(`/checkpoint/${checkpoint.id}`).then(() => {
+                    listCheckpoints();
+                    if (selectedCheckpointId.value === checkpoint.id) {
+                        selectedCheckpointId.value = null;
+                    }
+                });
+            }}
+        ]
+    });
+}
+function saveCheckpoint(form) {
+    return api.put(`/checkpoint/${form.id}`, form).then(() => {
+        checkpointForm.value.forEach(field => field.value = field.default); // Reset form fields
+        listCheckpoints()
+        
+    })
+}
 
 onMounted(() => {
     listWorkspaces();
     listSensors();
     listRobots();
-
     socket.on('augmentation_complete', (data) => {
         Notify.create({
             color: 'positive',
@@ -849,13 +1052,24 @@ onMounted(() => {
 
     socket.on('stop_process', (data) => {
         if (data.id === 'record_episode') {
-            dataCollecting.value = false;
             collectingProgress.value = 0;
+        }
+        if (data.id === 'checkpoint_test') {
+            Notify.create({
+                color: 'positive',
+                message: 'Inference stopped'
+            });
         }
     });
 
     socket.on('record_episode_progress', (data) => {
         collectingProgress.value = data.progress;
+    });
+
+    socket.on('episode_added', (data) => {
+        selectedDataset.value?.episodes.push({
+            name: data.name,
+        });
     });
 });
 </script>

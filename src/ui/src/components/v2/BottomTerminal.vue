@@ -3,7 +3,7 @@
     <div class="border-rounded bg-secondary q-pa-lg">
       <div class="row">
         <q-tabs
-          v-model="model[props.tabValue]"
+          :model-value="model[props.tabValue]"
           dense
           align="left"
           :breakpoint="0"
@@ -15,6 +15,7 @@
             :key="tab[props.tabValue]"
             :name="tab[props.tabValue]"
             :label="tab[props.tabLabel]"
+            @click="model = tab"
           />
         </q-tabs>
         <q-space></q-space>
