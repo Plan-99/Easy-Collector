@@ -41,6 +41,7 @@ export default {
 
   sensorSetting: 'Sensor Settings',
   robotSetting: 'Robot Settings',
+  taskSetting: 'Task Settings',
 
   sensorConfig: 'Sensor Configuration',
   robotConfig: 'Robot Configuration',

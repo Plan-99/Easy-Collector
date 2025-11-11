@@ -159,9 +159,30 @@
                             </q-card-section>
                             </q-card>
                         </q-expansion-item>
+                        <q-expansion-item
+                            icon="cleaning_services"
+                            :label="`${$t('taskSetting')}`"
+                        >
+                            <q-card class="bg-dark border-rounded">
+                                <q-card-section>
+                                    <div class="row q-gutter-x-sm">
+                                        <q-input
+                                            dense
+                                            outlined
+                                            dark
+                                            bg-color="dark"
+                                            label="Episode Length"
+                                            class="col"
+                                            v-model.number="selectedWorkspace.episode_len"
+                                            @change="updateWorkspace({ episode_len: selectedWorkspace.episode_len })"
+                                        ></q-input>
+                                    </div>
+                                </q-card-section>
+                            </q-card>
+                        </q-expansion-item>
                     </q-list>
                     <div v-if="focused.id" class="q-pa-md text-white h6">
-                        <div>{{ $t(`${focused.device_type}Config`) }} <span class="text-primary">{{ focused.name }}</span></div>
+                        <div>{{ $t(`${focused.device_type} Config`) }} <span class="text-primary">{{ focused.name }}</span></div>
                         <div
                             class="q-pa-sm q-px-md q-mt-sm border-rounded row border-white"
                             v-if="focused.device_type === 'sensor'"
@@ -223,8 +244,8 @@
                                 :key="dataset.id"
                                 class="text-white"
                                 dark
-                                :model-value="selectedDataset && selectedDataset.id === dataset.id"
-                                @show="selectedDataset = dataset"
+                                :model-value="selectedDatasetId === dataset.id"
+                                @show="selectedDatasetId = dataset.id"
                                 header-class="items-center"
                             >
                                 <template v-slot:header>
@@ -258,7 +279,7 @@
                                     </div>
                                     <q-space class="col"></q-space>
                                 </template>
-                                <q-list bordered separator dark dense v-if="selectedDataset && selectedDataset.id === dataset.id">
+                                <q-list bordered separator dark dense v-if="selectedDatasetId === dataset.id">
                                     <q-item
                                         v-for="episode in dataset.episodes"
                                         :key="episode.name"
@@ -337,158 +358,23 @@
                     </q-scroll-area>
                 </div>
             </div>
-            <div class="col bg-secondary border-rounded border-white column q-px-sm" v-if="!selectedEpisode.name">
-                <div class="col-6 row flex felx-center">
-                    <div v-for="sensor in sensors.filter(e => selectedWorkspace.sensor_ids.includes(e.id))" :key="sensor.id" class="col q-py-sm q-px-xs relative-position">
-                        <web-rtc-video
-                            :process-id="`sensor_${sensor.id}`"
-                            :topic="sensor.topic"
-                            class="full-height border-rounded cursor-pointer"
-                            :key="sensor.id"
-                            :loading="sensor.status !== 'on'"
-                            v-if="sensor.status !== 'off'"
-                            :class="{
-                                'border-primary': focused.id === sensor.id && focused.device_type === 'sensor',
-                            }"
-                            @click="focusSensorRobot(sensor, 'sensor')"
-                            :resize="[selectedWorkspace.sensor_img_size[0], selectedWorkspace.sensor_img_size[1]]"
-                        ></web-rtc-video>
-                        <div class="full-height border-white bg-dark border-rounded flex flex-center" v-else>
-                            <q-btn round flat icon="play_arrow" text-color="white" size="xl" @click="sensor.handler.startSensor(sensor)"></q-btn>
-                        </div>
-                        <q-chip color="blue-10" text-color="white" class="absolute-top-left" style="top: 20px; left: 15px">{{ sensor.name }} sensor</q-chip>
-                    </div>
-                </div>
-                <div class="col-5 row">
-                    <div v-for="robot in robots.filter(e => selectedWorkspace.robot_ids.includes(e.id))" :key="robot.id" class="col column q-pa-md relative-position border-rounded border-white text-white cursor-pointer"
-                            :class="{
-                                'border-primary': focused.id === robot.id && focused.device_type === 'robot',
-                                'bg-dark': robot.status === 'off',
-                            }"
-                            @click="focusSensorRobot(robot, 'robot')"    
-                        >
-                        <div v-for="(j, i) in robot.joint_names" :key="i" class="col flex flex-center q-gutter-x-md">
-                            <div class="border-rounded border-white q-px-md q-py-xs text-center">{{ j }} {{ robot.jointState ? robot.jointState[i]?.toFixed(4) : 'Unreadable' }}</div>
-                            <q-icon name="arrow_forward"></q-icon>
-                            <div class="border-rounded border-primary q-px-md q-py-xs text-center text-primary">{{ j }} {{ robot.jointAction ? robot.jointAction[i]?.toFixed(4) : 'Unreadable' }}</div>
-                        </div>
-                        <q-btn
-                            class="absolute-center q-mb-md q-mr-md"
-                            round
-                            flat
-                            icon="play_arrow"
-                            text-color="white"
-                            size="xl"
-                            @click="robot.handler.startRobot(robot)"
-                            v-if="robot.status === 'off'"
-                        ></q-btn>
-                        <q-chip color="green-10" text-color="white" class="absolute-top-left" style="top: 20px; left: 15px">{{ robot.name }} body</q-chip>
-                    </div>
-
-                </div>
-                <div class="flex flex-center col" v-if="!isRobotSensorAllOn">
-                    <div class="text-yellow">Start all sensors and robots to view live data streams.</div>
-                </div>
-                <div class="col q-py-sm" v-else-if="!selectedCheckpointId">
-                    <div class="text-grey bg-dark border-rounded row full-height flex flex-center" v-if="status === 'pending'">
-                        <q-select
-                            v-model="selectedDataset"
-                            dense
-                            outlined
-                            dark
-                            bg-color="dark"
-                            label="Select Dataset for Data Collection"
-                            style="width: 400px"
-                            :options="datasets"
-                            option-label="name"
-                            option-value="id"
-                        ></q-select>
-                        <q-space></q-space>
-                        <div class="q-mr-md">Teleoparation Type: </div>
-                        <div class="q-gutter-sm q-mr-xl">
-                            <q-radio dark v-model="teleType" val="leader" :label="$t('leaderTele')" />
-                            <q-radio dark v-model="teleType" val="keyboard" :label="$t('keyboardTele')" />
-                            <q-radio dark v-model="teleType" val="externel" :label="$t('externalTele')" />
-                        </div>
-                        <q-btn
-                            color="red"
-                            icon="fiber_manual_record"
-                            text-color="white"
-                            label="REC"
-                            @click="startDataCollection"
-                        ></q-btn>
-                    </div>
-                    <div class="row flex flex-center full-height" v-else>
-                        <div class="col q-pr-md">
-                            <q-linear-progress
-                                :value="collectingProgress"
-                                color="primary"
-                                track-color="black"
-                                size="30px"
-                                instant-feedback
-                            >
-                                <div class="absolute-full flex flex-center">
-                                    <q-badge color="white" text-color="dark" :label="`${Number(collectingProgress * 100).toFixed(0)}%`" />
-                                </div>
-                            </q-linear-progress>
-                        </div>
-
-                        <q-btn
-                            color="white"
-                            text-color="red"
-                            label="STOP"
-                            icon="stop"
-                            @click="stopDataCollection"
-                        ></q-btn>
-                    </div>
-                </div>
-                <div v-else class="col">
-                    <div
-                        class="col q-pa-sm bg-dark border-rounded text-white row flex flex-center"
-                        v-if="status === 'pending'"
-                    >
-                        <div>
-                            <div class="text-h6">{{ selectedCheckpoint?.name }}</div>
-                        </div>
-                        <div>
-                            <q-btn
-                                icon="close"
-                                round
-                                flat
-                                @click="selectedCheckpointId = null"
-                            ></q-btn>
-                        </div>
-                        <q-space class="col"></q-space>
-                        <div>
-                            <q-btn
-                                color="red"
-                                text-color="white"
-                                label="Start Inference"
-                                icon="play_arrow"
-                                @click="startInference"
-                                v-if="status === 'pending'"
-                            ></q-btn>
-                        </div>
-                    </div>
-                    <div
-                        class="col q-pa-sm bg-dark border-rounded text-white row flex flex-center"
-                        v-else
-                    >
-                        <q-space></q-space>
-                        <q-btn
-                            color="white"
-                            text-color="red"
-                            label="Stop Inference"
-                            icon="stop"
-                            @click="stopInference"
-                        ></q-btn>
-                    </div>
-                </div>
-            </div>
-            <div v-else-if="selectedEpisode.name && selectedDataset" class="col bg-secondary border-rounded border-white column q-px-sm">
+            <monitoring-window
+                v-if="!selectedEpisode.name"
+                class="col"
+                :workspace="selectedWorkspace"
+                :robots="robots.filter(e => selectedWorkspace.robot_ids.includes(e.id))"
+                :sensors="sensors.filter(e => selectedWorkspace.sensor_ids.includes(e.id))"
+                v-model:selected-dataset-id="selectedDatasetId"
+                v-model:selected-checkpoint-id="selectedCheckpointId"
+                v-model:focused="focused"
+                :datasets="datasets"
+                :checkpoints="checkpoints"
+                :status="status"
+            />
+            <div v-else-if="selectedEpisode.name && selectedDatasetId" class="col bg-secondary border-rounded border-white column q-px-sm">
                 <div class="col-6 row flex felx-center">
                     <hdf5-viewer
-                        :path="`${selectedDataset.id}/${selectedEpisode.name}`"
+                        :path="`${selectedDatasetId}/${selectedEpisode.name}`"
                         style="width: 100%; height: 100%;"
                         image-class="border-rounded border-white"
                         class="q-gutter-x-sm"
@@ -565,24 +451,6 @@
             :task-id="selectedWorkspaceId"
             v-if="selectedWorkspaceId"
         />
-        <div style="position: fixed; bottom: 20px; left: 20px; z-index: 1000;">
-            <q-btn
-                push
-                color="white"
-                label="Terminal"
-                text-color="dark"
-                @click="showProcessConsole = !showProcessConsole"
-                style=""
-            />
-            <process-console
-                process="record_episode"
-                class="q-mt-md"
-                style="border: 1px solid #ffffff; background-color: #1e1e1e; z-index: 1000; width: 800px; height: 400px;"
-                v-show="showProcessConsole"
-            >
-            </process-console> 
-        </div>
-        
     </q-page>
 </template>
 
@@ -592,14 +460,13 @@ import { api } from 'src/boot/axios';
 import FormDialog from 'src/components/v2/FormDialog.vue';
 import { useSensor } from '../../composables/useSensor';
 import { useRobot } from 'src/composables/useRobot';
-import WebRtcVideo from 'src/components/v2/WebRtcVideo.vue';
 import Hdf5Viewer from 'src/components/v2/Hdf5Viewer.vue';
 import { Notify } from 'quasar';
 import { useI18n } from 'vue-i18n';
 import DataAugmentationDialog from 'src/components/v2/DataAugmentationDialog.vue';
 import { useSocket } from 'src/composables/useSocket.js';
-import ProcessConsole from 'src/components/v2/ProcessConsole.vue';
 import { useProcessStore } from 'src/stores/processStore';
+import MonitoringWindow from 'src/components/v2/MonitoringWindow.vue';
 
 const processStore = useProcessStore();
 
@@ -720,6 +587,7 @@ function updateWorkspaceDeviceSetting(form) {
     });
 }
 
+const focused = ref({});
 watch(selectedWorkspaceId, (newVal) => {
     if (!newVal) {
         return;
@@ -751,19 +619,6 @@ function toggleRobot(robot) {
     }
 }
 
-const focused = ref({});
-function focusSensorRobot(device, type) {
-    if (device.status !== 'on') {
-        return;
-    }
-    if (focused.value && focused.value.id === device.id && focused.value.device_type === type) {
-        focused.value = {};
-        return;
-    }
-    focused.value = device;
-    focused.value.device_type = type;
-}
-
 const datasets = ref([]);
 function listDatasets() {
     return api.get('/datasets', {
@@ -792,7 +647,6 @@ function deleteFile(datasetId, file) {
 }
 
 const selectedEpisode = ref({});
-const selectedDataset = ref(null)
 function selectEpisode(episode) {
     selectedEpisode.value = episode;
 }
@@ -890,8 +744,6 @@ function deleteWorkspace(workspace) {
     });
 }
 
-const teleType = ref('leader');
-
 const status = computed(() => {
     if (processStore.isRunning('checkpoint_test')) {
         return 'testing';
@@ -902,48 +754,11 @@ const status = computed(() => {
     }
 });
 
-const collectingProgress = ref(0);
-function startDataCollection() {
-    if (!selectedDataset.value) {
-        Notify.create({
-            color: 'negative',
-            message: 'Please select a dataset for data collection'
-        });
-        return;
-    }
-    showProcessConsole.value = true;
-    collectingProgress.value = 0;
-    api.post(`/dataset/${selectedDataset.value.id}/:start_collection`, {
-        task: selectedWorkspace.value,
-        robots: robots.value.filter(e => selectedWorkspace.value.robot_ids.includes(e.id)),
-        sensors: sensors.value.filter(e => selectedWorkspace.value.sensor_ids.includes(e.id)),
-        tele_type: teleType.value
-    }).then(() => {
-        Notify.create({
-            color: 'positive',
-            message: 'Data collection started'
-        });
-    }).catch((error) => {
-        console.error('Error starting data collection:', error);
-        Notify.create({
-            color: 'negative',
-            message: 'Error starting data collection'
-        });
-    });
-}
-
-function stopDataCollection() {
-    api.post(`/dataset/${selectedDataset.value.id}/:stop_collection`).then(() => {
-        collectingProgress.value = 0;
-    })
-}
-
-const showProcessConsole = ref(false)
-
-const selectedCheckpointId = ref(null);
-const selectedCheckpoint = computed(() => {
-    return checkpoints.value.find(c => c.id === selectedCheckpointId.value) || null;
+const selectedDatasetId = ref(null);
+const selectedDataset = computed(() => {
+    return datasets.value.find(d => d.id === selectedDatasetId.value) || null;
 });
+const selectedCheckpointId = ref(null);
 const checkpoints = ref([]);
 function listCheckpoints() {
     return api.get('/checkpoints', {
@@ -955,44 +770,6 @@ function listCheckpoints() {
         checkpoints.value = response.data.checkpoints;
     });
 }
-
-function startInference() {
-    api.post(`/checkpoint/${selectedCheckpointId.value}/:start_test`, {
-        task: selectedWorkspace.value,
-        policy: selectedCheckpoint.value.policy,
-        robots: robots.value.filter(e => selectedWorkspace.value.robot_ids.includes(e.id)),
-        sensors: sensors.value.filter(e => selectedWorkspace.value.sensor_ids.includes(e.id)),
-    }).then(() => {
-        Notify.create({
-            color: 'positive',
-            message: 'Test started'
-        });
-    }).catch((error) => {
-        console.error('Error starting test:', error);
-        Notify.create({
-            color: 'negative',
-            message: 'Error starting test'
-        });
-    });
-}
-
-function stopInference() {
-    return api.post(`/checkpoint/${selectedCheckpointId.value}/:stop_test`).catch((error) => {
-        console.error('Error stopping test:', error);
-        Notify.create({
-            color: 'negative',
-            message: 'Error stopping test'
-        });
-    });
-}
-
-const isRobotSensorAllOn = computed(() => {
-    const selectedRobots = robots.value.filter(r => selectedWorkspace.value?.robot_ids.includes(r.id));
-    const selectedSensors = sensors.value.filter(s => selectedWorkspace.value?.sensor_ids.includes(s.id));
-    const allRobotsOn = selectedRobots.every(r => r.status === 'on');
-    const allSensorsOn = selectedSensors.every(s => s.status === 'on');
-    return allRobotsOn && allSensorsOn; 
-});
 
 const showCheckpointForm = ref(false);
 const checkpointForm = ref([
@@ -1043,28 +820,12 @@ onMounted(() => {
             showAugmentationForm.value = false;
             const new_dataset = datasets.value.find(d => d.id === data.dataset_id);
             if (new_dataset) {
-                selectedDataset.value = new_dataset;
+                selectedDatasetId.value = new_dataset.id;
             } else {
                 console.error(`Could not find the newly augmented dataset with id: ${data.dataset_id}`);
             }
         });
     })
-
-    socket.on('stop_process', (data) => {
-        if (data.id === 'record_episode') {
-            collectingProgress.value = 0;
-        }
-        if (data.id === 'checkpoint_test') {
-            Notify.create({
-                color: 'positive',
-                message: 'Inference stopped'
-            });
-        }
-    });
-
-    socket.on('record_episode_progress', (data) => {
-        collectingProgress.value = data.progress;
-    });
 
     socket.on('episode_added', (data) => {
         selectedDataset.value?.episodes.push({
