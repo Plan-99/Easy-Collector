@@ -6,7 +6,7 @@
                     <div class="col-6">Policy Parameters</div>
                     <div class="col-6">Value</div>
                 </div>
-                <q-scroll-area style="height: 200px;" class="bg-dark">
+                <q-scroll-area :style="`height: ${height}px;`" class="bg-dark">
                     <div v-for="(value, key) in { model: props.checkpoint.policy.type, ...props.checkpoint.policy.settings }" :key="key">
                         <q-separator color="white" />
                         <div class="row q-pa-sm">
@@ -23,7 +23,7 @@
                     <div class="col-6">Train Parameters</div>
                     <div class="col-6">Value</div>
                 </div>
-                <q-scroll-area style="height: 200px;" class="bg-dark">
+                <q-scroll-area :style="`height: ${height}px;`" class="bg-dark">
                     <div v-for="(value, key) in { finetuned_from: props.checkpoint.load_model?.name, ...props.checkpoint.train_settings }" :key="key">
                         <q-separator color="white"/>
                         <div class="row q-pa-sm">
@@ -39,7 +39,7 @@
                 <div class="q-pa-sm bg-grey-8 text-weight-bold">
                     Datasets
                 </div>
-                <q-scroll-area style="height: 200px;" class="bg-dark q-pa-md">
+                <q-scroll-area :style="`height: ${height}px;`" class="bg-dark q-pa-md">
                     <div class="row q-gutter-x-md">
                         <q-card
                             class="q-pa-md bg-secondary border-rounded border-white text-white col-3 flex flex-center" 
@@ -74,6 +74,10 @@ const props = defineProps({
     checkpoint: {
         type: Object,
         required: true
+    },
+    height: {
+        type: Number,
+        default: 200
     }
 });
 </script>

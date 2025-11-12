@@ -321,7 +321,7 @@
                                             clickable
                                             v-ripple
                                             v-close-popup
-                                            @click="selectedCheckpointId = checkpoint.id"
+                                            @click="openCheckpointInfoDialog(checkpoint)"
                                         >
                                             <q-item-section>Show Details</q-item-section>
                                             <q-item-section side>
@@ -451,6 +451,26 @@
             :task-id="selectedWorkspaceId"
             v-if="selectedWorkspaceId"
         />
+        <q-dialog v-model="showCheckpointInfo" full-width>
+            <q-card class="bg-secondary border-rounded border-white" dark>
+                <q-card-section class="bg-dark text-white row">
+                    <div class="text-h6">{{ $t('checkpointInfo') }}</div>
+                    <q-space></q-space>
+                    <q-btn dense color="white" round icon="close" text-color="dark" @click="showCheckpointInfo = false"/>
+                </q-card-section>
+
+                <q-separator />
+                <q-card-section class="bg-secondary q-px-xl q-py-lg">
+                    <checkpoint-info
+                        :checkpoint="selectedCheckpoint"
+                        :height="400"
+                    />
+                </q-card-section>
+                <q-card-section class="bg-secondary q-px-xl q-pt-none" align="right">
+                    <div>Loss: {{ selectedCheckpoint.loss.toFixed(4) }} / Best Epoch: {{ selectedCheckpoint.best_epoch }}</div>
+                </q-card-section>
+            </q-card>
+        </q-dialog>
     </q-page>
 </template>
 
@@ -467,6 +487,7 @@ import DataAugmentationDialog from 'src/components/v2/DataAugmentationDialog.vue
 import { useSocket } from 'src/composables/useSocket.js';
 import { useProcessStore } from 'src/stores/processStore';
 import MonitoringWindow from 'src/components/v2/MonitoringWindow.vue';
+import CheckpointInfo from 'src/components/v2/CheckpointInfo.vue';
 
 const processStore = useProcessStore();
 
@@ -759,6 +780,9 @@ const selectedDataset = computed(() => {
     return datasets.value.find(d => d.id === selectedDatasetId.value) || null;
 });
 const selectedCheckpointId = ref(null);
+const selectedCheckpoint = computed(() => {
+    return checkpoints.value.find(c => c.id === selectedCheckpointId.value) || null;
+});
 const checkpoints = ref([]);
 function listCheckpoints() {
     return api.get('/checkpoints', {
@@ -807,6 +831,11 @@ function saveCheckpoint(form) {
     })
 }
 
+const showCheckpointInfo = ref(false);
+const openCheckpointInfoDialog = (checkpoint) => {
+    selectedCheckpointId.value = checkpoint.id;
+    showCheckpointInfo.value = true;
+};  
 onMounted(() => {
     listWorkspaces();
     listSensors();
