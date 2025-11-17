@@ -191,10 +191,52 @@
                                             </div>
                                         </div>
                                     </div>
+                                    <q-stepper-navigation>
+                                        <q-btn flat @click="leaderSettingStep = 2" color="primary" label="Back" class="q-ml-sm" />
+                                        <q-btn @click="() => { leaderSettingStep = 4 }" color="primary" label="Go Next" />
+                                    </q-stepper-navigation>
+                                </q-step>
+                                <q-step
+                                    :name="4"
+                                    title="EMA Factor Setting"
+                                    :header-nav="leaderSettingStep > 4"
+                                >
+                                    Set the EMA factor for the leader robot's teleoperation here.
+                                    Bigger values result in smoother but more delayed movements.
+                                    <div>
+                                        <q-btn
+                                            color="primary"
+                                            label="Start Teleoperation"
+                                            @click="startLeaderTele(robot, leaderSettingForm, 'log_start_leader_robot')"
+                                            class="full-width q-mt-md"
+                                            outline
+                                            v-if="!leaderTeleStarted"
+                                        />
+                                        <q-btn
+                                            color="orange-8"
+                                            label="Stop Teleoperation"
+                                            @click="stopLeaderTele()"
+                                            class="full-width q-mt-md"
+                                            outline
+                                            v-else
+                                        />
+                                    </div>
+                                    <div class="row q-col-gutter-sm q-mt-md">
+                                        <q-input
+                                            v-model="leaderSettingForm.ema"
+                                            @update:model-value="saveLeaderSetting"
+                                            label="EMA filter value"
+                                            type="number"
+                                            dense
+                                            outlined
+                                            class="full-width"
+                                        />
+                                    </div>
                                     <q-stepper-navigation align="right">
                                         <q-btn @click="$emit('hide', leaderSettingForm)" color="primary" outline label="Finish" />
                                     </q-stepper-navigation>
                                 </q-step>
+                                
 
                             </q-stepper>
                         </div>
@@ -240,6 +282,7 @@ const leaderSettingForm = ref(props.robot.leader_robot_preset || {
     origin: [],
     sign_corrector: Array(props.robot.joint_names.length).fill(1),
     port_name: '/dev/ttyUSB0',
+    ema: 0.5,
 });
 const gripperDxlRangeSaved = ref([[]]);
 gripperDxlRangeSaved.value = leaderSettingForm.value.gripper_dxl_ids.map(() => [false, false]);

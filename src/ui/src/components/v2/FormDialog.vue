@@ -50,8 +50,22 @@
                         class="q-mb-md q-mt-xs"
                         v-else-if="data.type === 'select'"
                     />
-                    <q-scroll-area v-else-if="data.type === 'multiselect'" style="height: 150px" class="q-mb-md q-mt-xs">
-                        <q-list bordered separator dark>
+                    <q-select
+                        dense
+                        outlined
+                        dark
+                        bg-color="dark"
+                        v-model="data.value"
+                        map-options
+                        emit-value
+                        multiple
+                        :max-values="(isFunction(data.maxValues) ? data.maxValues() : data.maxValues) || null"
+                        :options="data.options || []"
+                        class="q-mb-md q-mt-xs"
+                        v-else-if="data.type === 'multiselect'"
+                    />
+                    <q-scroll-area v-else-if="data.type === 'multiselect_list'" style="height: 150px" class="q-mb-md q-mt-xs">
+                        <q-list bordered separator dark v-if="data.options.length > 0">
                             <q-item clickable v-ripple  v-for="option in data.options" :key="option.value"
                                 @click="{
                                     if (data.value.includes(option.value)) {
@@ -68,6 +82,9 @@
                                 </q-item-section>
                             </q-item>
                         </q-list>
+                        <div v-else class="q-pa-md bg-dark text-white text-center border-white">
+                            No {{ data.label }} Available.
+                        </div>
                     </q-scroll-area>
                     <slot :name="data.key" v-else-if="data.type === 'custom'"></slot>
                 </div>
@@ -80,6 +97,7 @@
     </q-dialog>
 </template>
 <script setup>
+import { isFunction } from 'chart.js/helpers';
 import { ref, watch } from 'vue';
 const props = defineProps({
     modelValue: {

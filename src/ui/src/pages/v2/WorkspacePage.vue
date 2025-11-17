@@ -586,7 +586,7 @@ function toggleSensor(sensor) {
 const showSensorForm = ref(false);
 const sensorForm = ref([
     { key: 'id', value: null },
-    { key: 'sensor_ids', label: 'Sensors', type: 'multiselect', options: computed(() => sensors.value.map(s => ({ label: s.name, value: s.id }))), value: [] }
+    { key: 'sensor_ids', label: 'Sensors', type: 'multiselect_list', options: computed(() => sensors.value.map(s => ({ label: s.name, value: s.id }))), value: [] }
 ])
 
 function openSensorForm() {
@@ -622,7 +622,7 @@ watch(selectedWorkspaceId, (newVal) => {
 const showRobotForm = ref(false);
 const robotForm = ref([
     { key: 'id', value: null },
-    { key: 'robot_ids', label: 'Robots', type: 'multiselect', options: computed(() => robots.value.map(r => ({ label: r.name, value: r.id }))), value: [] }
+    { key: 'robot_ids', label: 'Robots', type: 'multiselect_list', options: computed(() => robots.value.map(r => ({ label: r.name, value: r.id }))), value: [] }
 ])
 
 function openRobotForm() {

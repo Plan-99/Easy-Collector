@@ -114,8 +114,18 @@
                     </div>
                     <div class="col">
                         <div class="q-gutter-y-sm">
-                            <q-btn @click="watchingRobot.handler.goOriginPos" icon="home" color="green" class="full-width">
+                            <q-btn @click="() => { 
+                                if (watchingRobot.homepose && watchingRobot.homepose.length === watchingRobot.joint_names.length) {
+                                    watchingRobot.handler.goOriginPos();
+                                    watchRobot(robots.find((e) => e.id === watchingRobot.id));
+                                } else {
+                                    openHomeposeSetting();
+                                }}"
+                                icon="home" color="green">
                                 <q-tooltip class="text-body2">Click to go origin position</q-tooltip>
+                                <q-badge @click.stop="openHomeposeSetting" color="orange" floating>
+                                    <q-icon name="settings" size="xs" class="cursor-pointer" />
+                                </q-badge>
                             </q-btn>
                             <div v-if="watchingRobot.leader_robot_preset">
                                 <q-btn class="full-width" @click="() => { startLeaderTele(watchingRobot, watchingRobot.leader_robot_preset, 'log_' + watchingRobot.process_id) }" icon="play_arrow" color="blue" v-if="!leaderTeleStarted">
@@ -205,6 +215,34 @@
             :robot="teleSettingRobot"
             @hide="closeTeleSetting"
         />
+        <q-dialog v-model="showHomeposeSettingDialog" persistent>
+            <q-card style="min-width: 400px;" dark>
+                <q-card-section>
+                    <div class="text-h6 text-center">Homepose Setting</div>
+                </q-card-section>
+                <q-card-section>
+                    <div class="row q-col-gutter-sm" v-if="watchingRobot">
+                        <div class="col" 
+                            v-for="(joint, i) in watchingRobot.joint_names" :key="joint"
+                        >
+                            <div class="text-caption">{{ joint }}</div>
+                            <q-input
+                                v-model.number="homeposeForm[i]"
+                                type="number"
+                                dense
+                                dark
+                                bg-color="dark"
+                                outlined
+                            />
+                        </div>
+                    </div>
+                </q-card-section>
+                <q-card-actions align="center" class="text-primary">
+                    <q-btn flat label="Save" @click="saveHomepose" />
+                    <q-btn flat color="grey-7" label="Close" v-close-popup @click="showHomeposeSettingDialog = false" />
+                </q-card-actions>
+            </q-card>
+        </q-dialog>
     </q-page>
 </template>
 
@@ -237,6 +275,22 @@ const robotForm = ref([
         { label: 'Custom Robot', value: 'custom'}
     ]},
     { label: 'CAN Port', key: 'can_port', type: 'text', value: 'can_0', default: 'can_0', show: (form) => form.find((e) => e.key === 'type').value === 'piper' },
+    { label: 'Arm Type', key: 'role', type: 'select', value: 'single_arm', default: 'dual_arm', 
+        options: [
+            { label: 'Single Arm', value: 'single_arm' },
+            { label: 'Dual Arm', value: 'dual_arm' },
+            { label: 'Tool', value: 'tool' },
+        ],
+        show: (form) => form.find((e) => e.key === 'type').value === 'custom' 
+    },
+    { label: 'Tools', key: 'tools', type: 'multiselect', value: [], default: [], 
+        options: robots.value.filter((e) => e.type === 'tool').map((tool) => ({ label: tool.name, value: tool.id })),
+        show: (form) => form.find((e) => e.key === 'role').value !== 'tool',
+        max_values: (form) => form.find((e) => e.key === 'role').value === 'dual_arm' ? 2 : 1,
+    },
+    { label: 'Joint Names', key: 'joint_names', type: 'custom', value: [], default: [] , show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
+    { label: 'Joint Lower Bounds', key: 'joint_lower_bounds', type: 'custom', value: [], default: [] , show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
+    { label: 'Joint Upper Bounds', key: 'joint_upper_bounds', type: 'custom', value: [], default: [] , show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
     { label: 'Read Topic', key: 'read_topic', type: 'text', value: '', default: '', show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
     { label: 'Read Topic Message Type', key: 'read_topic_msg', type: 'select', value: '', default: 'sensor_msgs/JointState', 
         options: [
@@ -389,6 +443,40 @@ function closeTeleSetting(leaderSettingForm) {
     teleSettingRobot.value = null;
     canControl.value = true; // Reset control state
 }
+
+const homeposeForm = ref([]);
+const showHomeposeSettingDialog = ref(false);
+function openHomeposeSetting() {
+    if (watchingRobot.value) {
+        let initialHomepose = [];
+        if (watchingRobot.value.homepose && watchingRobot.value.homepose.length === watchingRobot.value.joint_names.length) {
+            initialHomepose = watchingRobot.value.homepose;
+        } else if (watchingRobot.value.joint_pos) {
+            initialHomepose = watchingRobot.value.joint_pos;
+        } else {
+            initialHomepose = Array(watchingRobot.value.joint_names.length).fill(0);
+        }
+        homeposeForm.value = [...initialHomepose]; // Create a copy for the form
+        showHomeposeSettingDialog.value = true;
+    }
+}
+
+function saveHomepose() {
+    if (watchingRobot.value && watchingRobot.value.handler) {
+        if (watchingRobot.value.id) {
+            watchingRobot.value.homepose = [...homeposeForm.value];
+
+            return api.put(`/robot/${watchingRobot.value.id}`, watchingRobot.value).then(() => {
+                Notify.create({
+                    color: 'positive',
+                    message: 'Homepose saved successfully.'
+                });
+                showHomeposeSettingDialog.value = false;
+            })
+        }
+    }
+}
+
 
 watch(watchingRobot, (newVal, oldVal) => {
     if (oldVal) {

@@ -52,6 +52,12 @@ class Robot(Model, SoftDeletes):
         'can_port',
     ]
 
+    role_map = {
+        'single_arm': ['piper', 'ur5er'],
+        'dual_arm': [],
+        'tool': [],
+    }
+
     @has_one
     def leader_robot_preset(self):
         return LeaderRobotPreset
@@ -182,6 +188,18 @@ class Robot(Model, SoftDeletes):
         if type == 'piper':
             return self.settings.get('can_port', 'can_0')
         return None
+    
+    @accessor
+    def role(self):
+        type = self.get_raw_attribute('type')
+        if type == 'custom':
+            return self.get_raw_attribute('role')
+        
+        for role, types in self.role_map.items():
+            if type in types:
+                return role
+            
+        return 'unknown'
     
     @staticmethod
     def boot():
