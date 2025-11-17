@@ -48,7 +48,7 @@
 <script setup>
 import { defineEmits, defineProps, onMounted, ref, shallowRef, onUnmounted, watch } from 'vue';
 // import { useTraining } from 'src/composables/useTraining';
-import ProcessConsole from 'src/components/ProcessConsole.vue';
+import ProcessConsole from 'src/components/v2/ProcessConsole.vue';
 import { Line } from 'vue-chartjs';
 import { Notify } from 'quasar';
 import { api } from 'src/boot/axios';

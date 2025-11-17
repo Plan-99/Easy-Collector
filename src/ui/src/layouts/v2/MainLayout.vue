@@ -41,28 +41,28 @@
 
 <script setup>
 import { ref } from 'vue'
-import EssentialLink from 'components/EssentialLink.vue'
+import EssentialLink from 'components/v2/EssentialLink.vue'
 
 const linksList = [
   {
     title: 'Sensors',
     icon: 'camera',
-    link: '/v2/sensors'
+    link: '/sensors'
   },
   {
     title: 'Robots',
     icon: 'adb',
-    link: '/v2/robots'
+    link: '/robots'
   },
   {
     title: 'Workspace',
     icon: 'cleaning_services',
-    link: '/v2/workspace'
+    link: '/workspace'
   },
   {
     title: 'Train',
     icon: 'school',
-    link: '/v2/train'
+    link: '/train'
   }
   // {
   //   title: 'VLA',
