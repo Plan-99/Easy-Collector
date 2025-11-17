@@ -18,7 +18,11 @@ def create_policy():
         type=data.get('type'),
         settings=data.get('settings')
     )
-    return {'status': 'success', 'message': 'Policy Created'}, 200
+    return {
+        'status': 'success', 
+        'message': 'Policy Created',
+        'data': new_policy.to_dict()
+    }, 200
 
 @policy_bp.route('/policy/<id>', methods=['PUT'])
 def update_policy(id):

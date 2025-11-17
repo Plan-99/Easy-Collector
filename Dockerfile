@@ -33,11 +33,8 @@ RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | g
 RUN curl -sSL "http://keyserver.ubuntu.com/pks/lookup?op=get&search=0xF6E65AC044F831AC80A06380C8B3A55A6F3EFCDE" | gpg --dearmor -o /usr/share/keyrings/intel-librealsense.gpg && \
     echo "deb [signed-by=/usr/share/keyrings/intel-librealsense.gpg] https://librealsense.intel.com/Debian/apt-repo $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/librealsense.list > /dev/null
 
-# librealsense2-sdk 와 개발용 헤더 파일 설치
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    librealsense2-utils \
-    librealsense2-dev \
-    librealsense2-dbg \
+    libyaml-cpp-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # 네트워크 관련 도구 설치
@@ -62,6 +59,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-ros2-control \
     ros-humble-ros2-controllers \
     ros-humble-controller-manager \
+    ros-humble-rmw-cyclonedds-cpp \
+    ros-humble-rosidl-generator-dds-idl \
     python3-pip \
     python3-rosdep \
     python3-colcon-common-extensions \
@@ -77,6 +76,30 @@ RUN echo "source /root/ros2_ws/install/setup.bash" >> /etc/bash.bashrc
 RUN mkdir -p /etc/apt/keyrings && \
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list
+
+RUN apt-get update && \
+    # 2. 인증서 등록
+    mkdir -p /etc/apt/keyrings && \
+    curl -sSL http://robotpkg.openrobots.org/packages/debian/robotpkg.asc \
+        | tee /etc/apt/keyrings/robotpkg.asc > /dev/null && \
+    \
+    # 3. 소스 리포지토리 추가
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/robotpkg.asc] http://robotpkg.openrobots.org/packages/debian/pub $(lsb_release -cs) robotpkg" \
+        | tee /etc/apt/sources.list.d/robotpkg.list && \
+    \
+    apt-get update && \
+    apt-get install -qqy robotpkg-py3*-pinocchio && \
+    \
+    rm -rf /var/lib/apt/lists/* && \
+    apt-get clean
+
+
+ENV PATH="/opt/openrobots/bin:${PATH}"
+ENV PKG_CONFIG_PATH="/opt/openrobots/lib/pkgconfig:${PKG_CONFIG_PATH}"
+ENV LD_LIBRARY_PATH="/opt/openrobots/lib:${LD_LIBRARY_PATH}"
+ENV PYTHONPATH="/opt/openrobots/lib/python3.10/site-packages:${PYTHONPATH}"
+ENV CMAKE_PREFIX_PATH="/opt/openrobots:${CMAKE_PREFIX_PATH}"
+
 
 # Node.js 설치 (npm도 함께 설치됨)
 RUN apt-get update && apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*

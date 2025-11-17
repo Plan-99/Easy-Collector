@@ -4,6 +4,7 @@ from ...database.models.robot_model import Robot as RobotModel
 import time
 import os
 from ...env.agent import Agent
+from ..process.subscribe_robot import subscribe_robot_topic
 
 # 1. Blueprint 생성
 # 이 블루프린트는 카메라와 관련된 'HTTP' 라우트를 관리합니다.
@@ -25,7 +26,7 @@ class RobotNamespace(Namespace):
 
 @robot_bp.route('/robots', methods=['GET'])
 def get_robots():
-    robots = RobotModel.with_('leader_robot_preset').get()
+    robots = RobotModel.with_('leader_robot_preset').where('hide', False).get()
     robots = [robot.to_dict() for robot in robots]
 
     for robot in robots:
@@ -78,6 +79,14 @@ def start_robot():
         command=command,
     )
 
+    current_app.pm.start_function(
+        name='subscribe_robot_' + str(id),\
+        node=current_app.node,
+        func=subscribe_robot_topic,
+        socketio_instance=current_app.pm.socketio,
+        robot=data,
+    )
+
     if process:
         return {
             'status': 'success',
@@ -90,9 +99,11 @@ def start_robot():
 
 @robot_bp.route('/robot:stop', methods=['POST'])
 def stop_robot():
+    robot_id = request.json.get('id')
     process_id = request.json.get('process_id')
     current_app.pm.stop_process(process_id)
     current_app.pm.stop_process('leader_teleoperation')
+    current_app.pm.stop_function('subscribe_robot_' + str(robot_id))
     return {'status': 'success', 'message': 'Robot process stopped'}, 200
 
 
@@ -155,7 +166,6 @@ def update_robot(id):
             'joint_names': request.json.get('joint_names', []),
             'joint_lower_bounds': request.json.get('joint_lower_bounds', []),
             'joint_upper_bounds': request.json.get('joint_upper_bounds', []),
-            'gripper_range': request.json.get('gripper_range', [0, 1]),
         }
 
     if type == 'piper':
@@ -171,8 +181,8 @@ def update_robot(id):
 @robot_bp.route('/robot/<id>', methods=['DELETE'])
 def delete_robot(id):
     robot = RobotModel.find(id)
-
-    robot.delete()
+    robot.hide = True
+    robot.save()
     return {'status': 'success', 'message': 'Robot Deleted'}, 200
 
 

@@ -110,7 +110,6 @@ def record_episode(node, dataset_id, robots, sensors, task, language_instruction
         for t in range(max_timesteps):
             socketio_instance.emit('record_episode_progress', {
                 'progress': (t+1) / max_timesteps,
-                'type': 'stdout '
             })
             if task_control['stop']:
                 socketio_instance.emit('log_record_episode', {
@@ -185,6 +184,10 @@ def record_episode(node, dataset_id, robots, sensors, task, language_instruction
 
             for name, array in data_dict.items():
                 root[name][...] = array
+
+        socketio_instance.emit('episode_added', {
+            'name': dataset_name,
+        })
             
         socketio_instance.emit('log_record_episode', {
             'log': f'Saved Data: {dataset_name} in {time.time() - t0:.2f} seconds',

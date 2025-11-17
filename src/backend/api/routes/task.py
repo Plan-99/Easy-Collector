@@ -116,14 +116,14 @@ def create_task():
     data = request.json
     TaskModel.create(
         name=data.get('name'),
-        robot_ids=data.get('robot_ids'),
-        sensor_ids=data.get('sensor_ids'),
-        home_pose=data.get('home_pose'),
-        end_pose=data.get('end_pose'),
-        prompt=data.get('prompt'),
-        image=data.get('image'),
-        episode_len=data.get('episode_len'),
-        dataset_dir=data.get('dataset_dir')
+        # robot_ids=data.get('robot_ids'),
+        # sensor_ids=data.get('sensor_ids'),
+        # home_pose=data.get('home_pose'),
+        # end_pose=data.get('end_pose'),
+        # prompt=data.get('prompt'),
+        # image=data.get('image'),
+        # episode_len=data.get('episode_len'),
+        # dataset_dir=data.get('dataset_dir')
     )
     return {'status': 'success', 'message': 'Task Created'}, 200
 
@@ -131,16 +131,54 @@ def create_task():
 def update_task(id):
     data = request.json
     task = TaskModel.find(id)
-    task.name = data.get('name')
-    task.robot_ids = data.get('robot_ids')
-    task.sensor_ids = data.get('sensor_ids')
-    task.home_pose = data.get('home_pose')
-    task.end_pose = data.get('end_pose')
-    task.image = data.get('image')
-    task.episode_len = data.get('episode_len')
-    task.sensor_img_size = data.get('sensor_img_size')
+    task.name = data.get('name', task.name)
+    task.robot_ids = data.get('robot_ids', task.robot_ids)
+    task.sensor_ids = data.get('sensor_ids', task.sensor_ids)
+    task.home_pose = data.get('home_pose', task.home_pose)
+    task.end_pose = data.get('end_pose', task.end_pose)
+    task.image = data.get('image', task.image)
+    task.episode_len = data.get('episode_len', task.episode_len)
+    task.sensor_img_size = data.get('sensor_img_size', task.sensor_img_size)
+    task.settings = data.get('settings', task.settings)
+
     task.save()
     return {'status': 'success', 'message': 'Task Updated'}, 200
+
+@task_bp.route('/task/<id>/device_settings', methods=['PUT'])  
+def update_task_device_settings(id):
+    data = request.json
+    task = TaskModel.find(id)
+
+    key = data.get('key')
+    setting = data.get('setting')
+    device_type = data.get('device_type')  # 'sensor' or 'robot'
+
+    original_settings = task.settings
+    for device_id, value in setting.items():
+        if device_id not in task.settings.get(device_type):
+            original_settings[device_type][device_id] = {}
+        
+        original_settings[device_type][device_id][key] = value
+
+    task.settings = original_settings
+
+    task.save()
+    return {'status': 'success', 'message': 'Task Settings Updated'}, 200
+
+    # device_id = data.get('device_id')
+    # device_type = data.get('device_type')  # 'sensor' or 'robot'
+    # key = data.get('key')
+    # value = data.get('value')
+
+    # setting = task.settings[device_type + 's']
+    # if device_id not in setting:
+    #     setting[device_id] = {}
+
+    # setting[device_id][key] = value
+    # task.settings[device_type + 's'] = setting
+
+    # task.save()
+    # return {'status': 'success', 'message': 'Task Settings Updated'}, 200   
 
 @task_bp.route('/task/<id>', methods=['DELETE'])
 def delete_task(id):

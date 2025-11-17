@@ -23,7 +23,7 @@ class SensorNamespace(Namespace):
 
 @sensor_bp.route('/sensors', methods=['GET'])
 def get_sensors():
-    sensors = SensorModel.all()
+    sensors = SensorModel.where('hide', False).get()
     sensors = [sensor.to_dict() for sensor in sensors]
     for sensor in sensors:
         sensor['process_id'] = 'sensor_' + str(sensor['id'])
@@ -111,7 +111,8 @@ def update_sensor(id):
 @sensor_bp.route('/sensor/<id>', methods=['DELETE'])
 def delete_sensor(id):
     sensor = SensorModel.find(id)
-    sensor.delete()
+    sensor.hide = True
+    sensor.save()
     return {'status': 'success', 'message': 'Sensor Deleted'}, 200
 
 

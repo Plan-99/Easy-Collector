@@ -1,17 +1,22 @@
 import { api } from 'boot/axios';
-import { useROS } from './useROS';
+// import { useROS } from './useROS';
 import { Notify } from 'quasar';
+import { useSocket } from 'src/composables/useSocket.js';
+
+const { socket } = useSocket();
 
 export function useRobot(robot, robotOnCallback=() => {}) {
-  const { createSubscriber, createPublisher, connectROS, sendJointState } = useROS();
+  // const { createSubscriber, connectROS } = useROS();
   let robotTopicChecker = null;
 
   checkRobotTopic(1);
 
-  connectROS();
+  // connectROS();
 
   robot.jointSub = null;
-  let publishJointPos = () => {};
+  robot.jointState = [];
+  robot.jointAction = [];
+  // let cmdPublisher = () => {};
 
   function status() {
     return robot.status
@@ -38,33 +43,36 @@ export function useRobot(robot, robotOnCallback=() => {}) {
   }
 
   function subscribeRobot(callback) {
-    if (robot.status === 'off') {
-      return;
-    }
-    if (robot.jointSub) {
-      robot.jointSub.unsubscribe();
-    }
-    robot.jointSub = createSubscriber(robot.read_topic, robot.read_topic_msg, callback);
-  }
-
-  function publishRobot() {
-    if (robot.status === 'off') {
-      return;
-    }
-    publishJointPos = createPublisher(robot.write_topic, robot.write_topic_msg);
+    socket.on(`robot_status_${robot.id}`, (data) => {
+      robot.jointState = data.joint_states;
+      robot.jointAction = data.joint_actions;
+      callback(data.joint_states, data.joint_actions);
+    });
+    // if (robot.status === 'off') {
+    //   return;
+    // }
+    // if (robot.jointSub) {
+    //   robot.jointSub.unsubscribe();
+    // }
+    // robot.jointSub = createSubscriber(robot.read_topic, robot.read_topic_msg, callback);
   }
 
   function unSubscribeRobot() {
-    if (robot.jointSub) {
-      robot.jointSub.unsubscribe();
-      robot.jointSub = null;
-    }
+    // if (robot.jointSub) {
+    //   robot.jointSub.unsubscribe();
+    //   robot.jointSub = null;
+    // }
+    socket.off(`robot_status_${robot.id}`);
   }
 
 
   function moveRobot(joint_index, joint_pos) {
     robot.joint_pos[joint_index] = joint_pos;
-    sendJointState(robot.joint_names, robot.joint_pos, publishJointPos);
+    socket.emit('move_robot', {
+      robot,
+      goal_pos: robot.joint_pos
+    });
+    // sendJointState(robot.joint_names, robot.joint_pos, write_topic_msg, cmdPublisher);
   }
 
   function goOriginPos() {
@@ -120,7 +128,6 @@ export function useRobot(robot, robotOnCallback=() => {}) {
     moveRobot,
     goOriginPos,
     subscribeRobot,
-    publishRobot,
     unSubscribeRobot,
   };
 }

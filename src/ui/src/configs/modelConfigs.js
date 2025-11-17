@@ -3,7 +3,7 @@ export const POLICY_CONFIGS = {
         'n_obs_steps': { 'label': 'Number of Observation Steps', 'value': 1, 'type': 'number' },
         'chunk_size': { 'label': 'Chunk Size', 'value': 15, 'type': 'number' },
         'n_action_steps': { 'label': 'Number of Action Steps', 'value': 1, 'type': 'number' },
-        'temporal_ensemble_coeff': { 'label': 'Temporal Ensemble Coefficient', 'value': 0.9, 'type': 'number', 'nullable': true },
+        'temporal_ensemble_coeff': { 'label': 'Temporal Ensemble Coefficient', 'value': 0.01, 'type': 'number', 'nullable': true },
         'vision_backbone': { 
             'label': 'Vision Backbone', 
             'value': 'resnet18', 

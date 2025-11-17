@@ -92,7 +92,6 @@ class Leader():
     
 
     def get_gripper_pos(self, dxl_pos, dxl_id):
-        print(dxl_pos, dxl_id)
         gripper_index = self.gripper_dxl_ids.index(dxl_id)
         gripper_pos_low = self.agent.gripper_range[0]
         gripper_pos_high = self.agent.gripper_range[-1]

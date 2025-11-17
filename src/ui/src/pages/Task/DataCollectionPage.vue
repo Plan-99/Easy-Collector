@@ -591,11 +591,10 @@ function openRobotControl(robot, poseType) {
     controllingPoseType.value = poseType;
     showRobotControlDialog.value = true;
     
-    controlledRobot.value.handler.subscribeRobot((msg) => {
-        controlledRobot.value.joint_pos = msg.position;
+    controlledRobot.value.handler.subscribeRobot((js) => {
+        controlledRobot.value.joint_pos = js;
         controlledRobot.value.handler.unSubscribeRobot();
     });
-    controlledRobot.value.handler.publishRobot();
 }
 
 function closeRobotControl() {
