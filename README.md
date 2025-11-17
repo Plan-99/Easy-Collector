@@ -15,7 +15,7 @@ echo "deb [signed-by=/etc/apt/keyrings/nvidia-container-toolkit.asc] https://nvi
 ### 도커 이미지 빌드
 
 ```
-docker build -t easy-collector:latest .
+docker build -t  easy-collector:latest .
 ```
 
 ### 도커 컨테이너 실행

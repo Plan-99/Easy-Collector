@@ -6,8 +6,9 @@ docker run -it --rm \
     --privileged \
     -v /dev:/dev \
     -v "./src":"/root/src" \
-    -v "./catkin_ws":"/root/catkin_ws" \
     -v "./ros2_ws":"/root/ros2_ws" \
+    -v "./python_pkgs":"/root/python_pkgs" \
+    -v "./requirements.txt":"/root/requirements.txt" \
     -v /tmp/.X11-unix:/tmp/.X11-unix \
     -e DISPLAY=$DISPLAY \
     -e ROS_DOMAIN_ID=30 \

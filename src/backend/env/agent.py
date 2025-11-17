@@ -1,31 +1,42 @@
 from sensor_msgs.msg import JointState
-from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+from geometry_msgs.msg import Pose
 
 import rclpy
 from rclpy.node import Node
 import threading
 from collections import deque
 import time
+from ..ik_solver.pinocchio_solver.piper_arm_ik import Piper_ArmIK
 
 class Agent:
-    def __init__(self, node: Node, robot, gripper=None):
+    def __init__(self, node: Node, robot, gripper=None, command_type='joint_position'):
         self.id = robot['id']
         self.leader_robot_preset = robot.get('leader_robot_preset', None)    
         self.js_mutex = threading.Lock()
         self.joint_states = None
         self.joint_actions = None
+        self.ee_pos = None
+        self.ee_target = None
         self.robot_type = robot['type']
         self.joint_len = len(robot['joint_names'])
         self.joint_names = robot['joint_names']
         self.joint_upper_bounds = robot['joint_upper_bounds']
         self.joint_lower_bounds = robot['joint_lower_bounds']
+
+        self.command_type = command_type            
         
+        if robot['type'] == 'piper':
+            self.ik_solver = Piper_ArmIK()
+
+
         if gripper is None:
             self.gripper_range = robot['gripper_range']
 
         node.create_subscription(JointState, robot['read_topic'], self.joint_state_cb, 10)
         node.create_subscription(JointState, robot['write_topic'], self.joint_action_cb, 10)
+
         self.move_robot_pub = node.create_publisher(JointState, robot['write_topic'], 10)
+
         time.sleep(0.1)  # Wait for subscriber to be ready
             
         
@@ -41,6 +52,15 @@ class Agent:
             js.velocity = [0.0] * self.joint_len
             js.velocity[-1] = 100
             self.move_robot_pub.publish(js)
+
+    def move_step_ee(self, ee_target):
+        if self.robot_type == 'piper':
+            with self.js_mutex:
+                current_pos = self.joint_states
+            if current_pos is None:
+                return
+            next_pos, _ = self.ik_solver.solve_ik(target_poses=ee_target, current_lr_arm_motor_q=current_pos)
+            # self.move_step(next_pos)
             
         
     def joint_state_cb(self, msg):
@@ -52,6 +72,37 @@ class Agent:
         with self.js_mutex:
             self.joint_actions = msg.position
 
+    def get_joint_states(self):
+        with self.js_mutex:
+            joint_positions = self.joint_states
+        return joint_positions
+    
+    def get_joint_actions(self):
+        with self.js_mutex:
+            joint_actions = self.joint_actions
+        return joint_actions
+
+    def get_ee_pos(self):
+        with self.js_mutex:
+            joint_positions = self.joint_states
+        if joint_positions is None:
+            return None
+        if self.robot_type == 'piper':
+            ee_pos = self.ik_solver.get_ee_position(joint_positions)
+            return ee_pos
+        else:
+            return None
+        
+    def get_ee_target(self):
+        with self.js_mutex:
+            joint_actions = self.joint_actions
+        if joint_actions is None:
+            return None
+        if self.robot_type == 'piper':
+            ee_target = self.ik_solver.get_ee_position(joint_actions)
+            return ee_target
+        else:
+            return None
 
     def move_to(self, target_pos, step_size=0.1):
         if self.robot_type == 'ur5e':
