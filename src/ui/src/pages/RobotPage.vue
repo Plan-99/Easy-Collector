@@ -103,9 +103,7 @@
                             <q-btn @click="() => { 
                                 if (watchingRobot.homepose && watchingRobot.homepose.length === watchingRobot.joint_names.length) {
                                     watchingRobot.handler.goOriginPos();
-                                    for (let i = 0; i < watchingRobot.joint_names.length; i++) {
-                                        watchingRobot.joint_pos[i] = watchingRobot.homepose[i];
-                                    }
+                                    watchRobot(robots.find((e) => e.id === watchingRobot.id));
                                 } else {
                                     openHomeposeSetting();
                                 }}"
@@ -116,10 +114,11 @@
                                 </q-badge>
                             </q-btn>
                             <div v-if="watchingRobot.leader_robot_preset">
-                                <q-btn @click="() => { startLeaderTele(watchingRobot, watchingRobot.leader_robot_preset, 'log_' + watchingRobot.process_id) }" icon="play_arrow" color="blue" v-if="!leaderTeleStarted">
+                                <q-btn @click="() => { startLeaderTele(watchingRobot, robots.find((e) => e.id === watchingRobot.tool_id), watchingRobot.leader_robot_preset, 'log_' + watchingRobot.process_id) }" 
+                                        icon="play_arrow" color="blue" v-if="!leaderTeleStarted">
                                     <q-tooltip class="text-body2">Start teleoperation with leader robot</q-tooltip>
                                 </q-btn>
-                                <q-btn @click="() => { stopLeaderTele() }" icon="pause" color="blue" v-else>
+                                <q-btn @click="() => { stopLeaderTele(); watchRobot(robots.find((e) => e.id === watchingRobot.id)); }" icon="pause" color="blue" v-else>
                                     <q-tooltip class="text-body2">Start teleoperation with leader robot</q-tooltip>
                                 </q-btn>
                             </div>
@@ -151,6 +150,42 @@
                         class="q-mb-md"
                         map-options
                         emit-value
+                        @update:model-value="(val) => {
+                            if (['piper', 'ur5e'].includes(val)) {
+                                robotForm.role = 'manipulator';
+                            } else if (val === 'custom') {
+                                robotForm.role = '';
+                            }
+                        }"
+                    />
+
+                    <div v-if="robotForm.type === 'custom'">
+                        <q-select
+                            dense
+                            v-model="robotForm.role"
+                            label="Robot Role"
+                            class="q-mb-md"
+                            :options="[
+                                { label: 'Manipulator', value: 'manipulator' },
+                                { label: 'Tool', value: 'tool' },
+                                { label: 'Humanoid', value: 'humanoid' }
+                            ]"
+                            map-options
+                            emit-value
+                        />
+                    </div>
+
+                    <q-select
+                        dense
+                        v-model="robotForm.tool_id"
+                        label="Select Tool"
+                        class="q-mb-md"
+                        :options="[
+                            { label: 'Internal', value: '' }
+                            ].concat(robots.filter((e) => e.role === 'tool').map((e) => ({ label: e.name, value: e.id })))"
+                        map-options
+                        emit-value
+                        v-if="robotForm.role !== 'tool'"
                     />
 
                     <div v-if="robotForm.type === 'piper'">
@@ -190,6 +225,7 @@
                             label="Write Topic Message Type"
                             class="q-mb-md"
                         />
+                        <div class="q-mb-xs text-caption">Joint Names</div>
                         <div class="row q-mb-md q-col-gutter-sm">
                             <q-input
                                 outlined
@@ -239,7 +275,7 @@
                                 :key="i"
                             ></q-input>
                         </div>
-                        <div class="row q-mb-md q-col-gutter-sm">
+                        <div class="row q-mb-md q-col-gutter-sm" v-if="robotForm.role !== 'tool'">
                             <q-input
                                 outlined
                                 dense
@@ -263,12 +299,18 @@
             v-if="showTeleSetting"
             v-model="showTeleSetting" 
             :robot="teleSettingRobot"
+            :tool="robots.find((e) => e.id === teleSettingRobot.tool_id)"
             @hide="closeTeleSetting"
         />
         <q-dialog v-model="showHomeposeSettingDialog" persistent>
             <q-card style="min-width: 400px;">
                 <q-card-section>
-                    <div class="text-h6 text-center">Homepose Setting</div>
+                    <div class="row justify-between items-center">
+                        <div class="text-h6 justify-center">Homepose Setting</div>
+                        <q-btn size="md" class="q-mt-sm justify-end" color="primary" outline @click="homeposeForm = [...watchingRobot.joint_pos]">
+                            Scan Position
+                        </q-btn>
+                    </div>
                 </q-card-section>
                 <q-card-section>
                     <div class="row q-col-gutter-sm" v-if="watchingRobot">
@@ -315,6 +357,8 @@ const robots = ref([]);
 const robotForm = ref({
     name: '',
     type: '',
+    role: '',
+    tool_id: '',
     read_topic: '',
     read_topic_msg: '',
     write_topic: '',
@@ -404,6 +448,8 @@ function saveRobot() {
     const data = {
         'name': robotForm.value.name,
         'type': robotForm.value.type,
+        'role': robotForm.value.role || '',
+        'tool_id': robotForm.value.tool_id || '',
         'read_topic': robotForm.value.read_topic || '',
         'read_topic_msg': robotForm.value.read_topic_msg || '',
         'write_topic': robotForm.value.write_topic || '',

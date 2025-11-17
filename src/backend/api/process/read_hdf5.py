@@ -40,7 +40,8 @@ def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=
                 qpos_data[name] = f[f"observations/qpos/{name}"][:]
                 qaction_data[name] = f[f"qaction/{name}"][:]
 
-  
+            language_instruction = f["language_instruction"][()].decode('utf-8')
+
 
             # 타임스텝별로 데이터 전송
             for i in range(len(qaction_data[robot_names[0]])):
@@ -100,6 +101,7 @@ def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=
                     'hdf5_path': hdf5_path,
                     'images': encoded_images,
                     'robot_states': robot_states,
+                    'language_instruction': language_instruction,
                     # 'xaction': xactions[i].tolist(),
                     # 'xvel_action': xvel_actions[i].tolist(),
                     # 'xpos': xpos_data[i].tolist(),

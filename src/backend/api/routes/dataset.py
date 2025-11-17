@@ -139,6 +139,7 @@ def start_collection(id):
         robots=data.get('robots'),
         sensors=data.get('sensors'),
         task=data.get('task'),
+        language_instruction=data.get('language_instruction'),
         tele_type=data.get('tele_type', 'leader'),
         socketio_instance=current_app.pm.socketio,
         iter=data.get('iter', 100000),

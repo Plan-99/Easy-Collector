@@ -11,4 +11,6 @@ class AddCommunicationConfigToRobotsTable(Migration):
     def down(self):
         with self.schema.table('robots') as table:
             table.drop_column('communication_config')
+        
+        with self.schema.table('robots') as table:
             table.drop_column('communication_type')

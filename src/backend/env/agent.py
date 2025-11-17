@@ -8,48 +8,75 @@ from collections import deque
 import time
 
 class Agent:
-    def __init__(self, node: Node, robot, gripper=None):
+    def __init__(self, node: Node, robot, tool=None):
         self.id = robot['id']
+        self.tool = tool
         self.leader_robot_preset = robot.get('leader_robot_preset', None)    
         self.js_mutex = threading.Lock()
         self.joint_states = None
         self.joint_actions = None
+        self.tool_states = None
+        self.tool_actions = None
         self.robot_type = robot['type']
         self.joint_len = len(robot['joint_names'])
         self.joint_names = robot['joint_names']
         
-        if gripper is None:
+        if tool is None:
             self.gripper_range = robot['gripper_range']
+        else:
+            self.gripper_range = [tool['joint_lower_bounds'][0], tool['joint_upper_bounds'][0]]
 
         node.create_subscription(JointState, robot['read_topic'], self.joint_state_cb, 10)
         node.create_subscription(JointState, robot['write_topic'], self.joint_action_cb, 10)
         self.move_robot_pub = node.create_publisher(JointState, robot['write_topic'], 10)
+
+        if tool is not None:
+            node.create_subscription(JointState, tool['read_topic'], self.tool_state_cb, 10)
+            node.create_subscription(JointState, tool['write_topic'], self.tool_action_cb, 10)
+            self.move_tool_pub = node.create_publisher(JointState, tool['write_topic'], 10)
         time.sleep(0.1)  # Wait for subscriber to be ready
-            
-        
-    def move_step(self, action):
+
+
+    def move_step(self, joint_action, tool_action=None):
+        print(tool_action)
+        self.move_step_joints(joint_action)
+        if self.tool is not None and tool_action is not None:
+            self.move_step_tool(tool_action)
+
+    def move_step_joints(self, action):
         action = [float(a) for a in action]
-        if self.robot_type == 'ur5e':
-            pass
-            # self.move_step_ur5(action)
-        else:
-            js = JointState()
-            js.name = self.joint_names
-            js.position = action
-            js.velocity = [0.0] * self.joint_len
-            js.velocity[-1] = 100
-            self.move_robot_pub.publish(js)
+        js = JointState()
+        js.name = self.joint_names
+        js.position = action
+        js.velocity = [0.0] * self.joint_len
+        js.velocity[-1] = 100
+        self.move_robot_pub.publish(js)
+
+    def move_step_tool(self, action):
+        action = [float(a) for a in action]
+        js = JointState()
+        js.name = self.tool['joint_names']
+        js.position = action
+        js.velocity = [0.0] * len(self.tool['joint_names'])
+        js.velocity[0] = 100
+        self.move_tool_pub.publish(js)
             
         
     def joint_state_cb(self, msg):
         with self.js_mutex:
             self.joint_states = msg.position
 
-
     def joint_action_cb(self, msg):
         with self.js_mutex:
             self.joint_actions = msg.position
 
+    def tool_state_cb(self, msg):
+        with self.js_mutex:
+            self.tool_states = msg.position
+
+    def tool_action_cb(self, msg):
+        with self.js_mutex:
+            self.tool_actions = msg.position
 
     def move_to(self, target_pos, step_size=0.1):
         if self.robot_type == 'ur5e':

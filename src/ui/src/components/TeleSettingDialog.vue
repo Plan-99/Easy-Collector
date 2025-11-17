@@ -152,7 +152,7 @@
                                         <q-btn
                                             color="primary"
                                             label="Start Teleoperation"
-                                            @click="startLeaderTele(robot, leaderSettingForm, 'log_start_leader_robot')"
+                                            @click="startLeaderTele(robot, tool, leaderSettingForm, 'log_start_leader_robot')"
                                             class="full-width q-mt-md"
                                             outline
                                             v-if="!leaderTeleStarted"
@@ -199,7 +199,7 @@
                                         <q-btn
                                             color="primary"
                                             label="Start Teleoperation"
-                                            @click="startLeaderTele(robot, leaderSettingForm, 'log_start_leader_robot')"
+                                            @click="startLeaderTele(robot, tool, leaderSettingForm, 'log_start_leader_robot')"
                                             class="full-width q-mt-md"
                                             outline
                                             v-if="!leaderTeleStarted"
@@ -257,6 +257,10 @@ const props = defineProps({
         type: Object,
         default: () => ({})
     },
+    tool: {
+        type: Object,
+        default: () => ({})
+    }
 })
 
 const { socket } = useSocket();

@@ -427,6 +427,7 @@ function closeCheckpointTab(checkpoint) {
 
 function startTest() {
     api.post(`/checkpoint/${watchingCheckpoint.value.id}/:start_test`, {
+        checkpoint: watchingCheckpoint.value,
         task: task.value,
         policy: activePolicy.value,
         robots: robots.value.filter(e => task.value.robot_ids.includes(e.id)),

@@ -665,6 +665,7 @@ function startDataCollection() {
         task: task.value,
         robots: robots.value.filter(e => task.value.robot_ids.includes(e.id)),
         sensors: sensors.value.filter(e => task.value.sensor_ids.includes(e.id)),
+        language_instruction: task.value.name,
         tele_type: teleoperationMethod.value
     }).then(() => {
         dataCollecting.value = true;

@@ -17,7 +17,7 @@ def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
             return i
     raise Exception(f"Error getting auto index, or more than {max_idx} episodes")
 
-def record_episode(node, dataset_id, robots, sensors, task, socketio_instance, task_control, tele_type='leader', iter=100000):
+def record_episode(node, dataset_id, robots, sensors, task, language_instruction, socketio_instance, task_control, tele_type='leader', iter=100000):
     env = Env(node, robots=robots, sensors=sensors)
     dataset_dir = f"{DATASET_DIR}/{dataset_id}"
 
@@ -52,6 +52,10 @@ def record_episode(node, dataset_id, robots, sensors, task, socketio_instance, t
                 agent.move_to(home_pose[str(agent.id)])
             time.sleep(3)
 
+        # Reset the environment to get the first timestep at the home_pose
+        ts = env.reset()
+        timesteps = [ts]
+        time.sleep(1)
 
         if tele_type == 'leader':
             leaders = []
@@ -77,11 +81,6 @@ def record_episode(node, dataset_id, robots, sensors, task, socketio_instance, t
         dataset_path = os.path.join(dataset_dir, dataset_name)
         if os.path.isfile(dataset_path):
             print(f'Dataset already exist at \n{dataset_path}\nHint: set overwrite to True.')
-        
-        time.sleep(1)
-
-        ts = env.reset()
-        timesteps = [ts]
 
         for agent in env.agents:
             if agent.joint_states is None:
@@ -137,6 +136,8 @@ def record_episode(node, dataset_id, robots, sensors, task, socketio_instance, t
         for sensor in sensors:
             data_dict[f'/observations/images/sensor_{sensor["id"]}'] = []
 
+        data_dict[f'/language_instruction'] = language_instruction if language_instruction is not None else ''
+
         timesteps.pop(len(timesteps) - 1)
 
         step = 0
@@ -146,7 +147,7 @@ def record_episode(node, dataset_id, robots, sensors, task, socketio_instance, t
             for agent in env.agents:
                 data_dict[f'/observations/qpos/robot_{agent.id}'].append(ts.observation['robot_states'][agent.id]['qpos'])
                 data_dict[f'/qaction/robot_{agent.id}'].append(ts.observation['robot_states'][agent.id]['qaction'])
-                print(np.array(ts.observation['robot_states'][agent.id]['qaction']).shape, np.array(ts.observation['robot_states'][agent.id]['qpos']).shape, agent.id)
+                # print(np.array(ts.observation['robot_states'][agent.id]['qaction']).shape, np.array(ts.observation['robot_states'][agent.id]['qpos']).shape, agent.id)
             
             for sensor in sensors:
                 image = ts.observation['images']['sensor_' + str(sensor['id'])]
@@ -172,6 +173,8 @@ def record_episode(node, dataset_id, robots, sensors, task, socketio_instance, t
             image = obs.create_group('images')
             qpos = obs.create_group('qpos')
             qaction = root.create_group('qaction')
+            root.create_dataset('/language_instruction', shape=(), dtype=h5py.string_dtype(encoding='utf-8'))
+
             for sensor in sensors:
                 _ = image.create_dataset(f"sensor_{sensor['id']}", (max_timesteps, image_size[0], image_size[1], 3), dtype='uint8',
                                         chunks=(1, image_size[0], image_size[1], 3), )

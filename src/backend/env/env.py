@@ -8,11 +8,12 @@ from sensor_msgs.msg import Image, CompressedImage
 from ..utils.image_parser import ros_image_to_numpy
 
 class Env:
-    def __init__(self, node, robots, sensors):
+    def __init__(self, node, robots, sensors, language_instruction=None):
         self.sensors = sensors
         self.agents = []
         self.node = node
         self.agents = [Agent(node, robot) for robot in robots]
+        self.language_instruction = language_instruction
 
         for sensor in sensors:
             setattr(self, f'sensor_{sensor["id"]}', None)
@@ -28,6 +29,7 @@ class Env:
         obs = collections.OrderedDict()
         obs['robot_states'] = self.get_robot_states()
         obs['images'] = self.get_images()
+        obs['language_instruction'] = self.get_language_instruction()
         return obs
     
     
@@ -67,6 +69,9 @@ class Env:
                 'qaction': agent.joint_actions,
             }
         return robot_state_dict
+    
+    def get_language_instruction(self):
+        return self.language_instruction
     
     
     def get_reward(self):

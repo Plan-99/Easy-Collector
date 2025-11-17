@@ -5,6 +5,7 @@
             <div v-for="(robot, index) in robot_states" :key="index">
                 <div>Current: {{ robot.qpos }}</div>
                 <div>Action: {{ robot.qaction }}</div>
+                <div v-if="language_instruction">Instruction: {{ language_instruction }}</div>
             </div>
         </div>
     </div>
@@ -30,6 +31,7 @@ const props = defineProps({
 
 const images = ref([]);
 const robot_states = ref({});
+const language_instruction = ref('');
 
 function startReadingHdf5(path) {
     api.post(`/dataset/${path}/:start_read_hdf5`, {
@@ -77,6 +79,7 @@ onMounted(() => {
         // }
         images.value = data.images
         robot_states.value = data.robot_states || {};
+        language_instruction.value = data.language_instruction || '';
     });
 });
 

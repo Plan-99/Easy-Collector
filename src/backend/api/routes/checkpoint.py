@@ -68,7 +68,7 @@ def start_test(id):
     current_app.pm.start_function(
         func=checkpoint_test,
         node=current_app.node,
-        checkpoint_id=id,
+        checkpoint=data.get('checkpoint'),
         task=data.get('task'),
         policy_obj=data.get('policy'),
         robots=data.get('robots'),

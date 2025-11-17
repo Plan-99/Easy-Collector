@@ -37,6 +37,20 @@ def get_robots():
         'robots': robots
     }, 200
 
+@robot_bp.route('/robot/<id>', methods=['GET'])
+def get_robot(id):
+    robot = RobotModel.find(id)
+    if robot:
+        return {
+            'status': 'success',
+            'robot': robot.to_dict()
+        }, 200
+    else:
+        return {
+            'status': 'error',
+            'message': 'Robot not found'
+        }, 404
+
 @robot_bp.route('/robot:start', methods=['POST'])
 def start_robot():
     data = request.json
@@ -87,9 +101,13 @@ def create_robot():
     name = request.json.get('name')
     type = request.json.get('type')
     homepose = request.json.get('homepose', [])
+    role = request.json.get('role', '')
+
     settings = {}
+
     if type == 'custom':
         settings = {
+            'tool_id': request.json.get('tool_id', ''),
             'read_topic': request.json.get('read_topic', ''),
             'read_topic_msg': request.json.get('read_topic_msg', ''),
             'write_topic': request.json.get('write_topic', ''),
@@ -101,11 +119,13 @@ def create_robot():
         }
     if type == 'piper':
         settings = {
+            'tool_id': request.json.get('tool_id', ''),
             'can_port': request.json.get('can_port', 'can_0'),
         }
     RobotModel.create(
         name=name,
         type=type,
+        role=role,
         settings=settings,
         homepose=homepose
     )
@@ -127,6 +147,7 @@ def update_robot(id):
 
     if type == 'custom':
         robot.settings = {
+            'tool_id': request.json.get('tool_id', ''),
             'read_topic': request.json.get('read_topic', ''),
             'read_topic_msg': request.json.get('read_topic_msg', ''),
             'write_topic': request.json.get('write_topic', ''),
@@ -139,8 +160,9 @@ def update_robot(id):
 
     if type == 'piper':
         robot.settings = {
+            'tool_id': request.json.get('tool_id', ''),
             'can_port': request.json.get('can_port', 'can_0'),
-        }   
+        }
 
     robot.save()
     return {'status': 'success', 'message': 'Robot Updated'}, 200

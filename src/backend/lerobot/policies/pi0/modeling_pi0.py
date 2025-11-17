@@ -497,13 +497,24 @@ class PI0Policy(PreTrainedPolicy):
     def prepare_language(self, batch) -> tuple[Tensor, Tensor]:
         """Tokenize the text input"""
         device = batch[OBS_STATE].device
-        tasks = batch["task"]
+        # print(batch.keys()) # 디버깅용이므로 주석 처리
+        language_instruction = batch.get("language_instruction", [""])
+        # print(f"Language instruction: {language_instruction}") # 디버깅용이므로 주석 처리
 
-        # PaliGemma prompt has to end with a new line
-        tasks = [task if task.endswith("\n") else f"{task}\n" for task in tasks]
+        # **⭐ 1. 명령이 리스트인지 확인하고, 각 항목에 줄 바꿈 문자 추가**
+        if isinstance(language_instruction, str):
+            # 단일 문자열인 경우, 리스트로 변환하여 처리
+            language_instruction = [language_instruction]
+        
+        # PaliGemma 프롬프트 규칙에 따라 모든 명령에 '\n' 추가
+        language_instruction = [
+            instr if instr.endswith("\n") else f"{instr}\n" 
+            for instr in language_instruction
+        ]
 
-        tokenized_prompt = self.language_tokenizer.__call__(
-            tasks,
+        # **⭐ 2. 문자열 리스트 전체를 토크나이저에 전달 (배치 처리)**
+        tokenized_prompt = self.language_tokenizer( # __call__ 대신 직접 호출 가능
+            language_instruction, # 리스트를 전달하여 배치 전체를 토큰화
             padding="max_length",
             padding_side="right",
             max_length=self.config.tokenizer_max_length,
@@ -636,7 +647,9 @@ class PI0FlowMatching(nn.Module):
             img,
             img_mask,
         ) in zip(images, img_masks, strict=False):
+
             img_emb = self.paligemma_with_expert.embed_image(img)
+
             img_emb = img_emb.to(dtype=torch.bfloat16)
 
             # Normalize image embeddings

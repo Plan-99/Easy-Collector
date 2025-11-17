@@ -64,10 +64,10 @@ def start_leader_teleoperation():
     log_emit_id = data.get('log_emit_id', 'leader_teleoperation')
     robot = data.get('robot')
     preset = data.get('preset')
+    tool = data.get('tool', None)
 
     current_app.pm.stop_process(name='start_leader_robot')
-
-    agent = Agent(current_app.node, robot)
+    agent = Agent(current_app.node, robot, tool)
     
     leader = Leader(agent, current_app.pm.socketio, preset, log_emit_id=log_emit_id, port=preset['port_name'])
     leader.sync_leader_robot()

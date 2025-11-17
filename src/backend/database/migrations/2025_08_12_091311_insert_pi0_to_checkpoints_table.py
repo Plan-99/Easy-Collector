@@ -8,7 +8,8 @@ class InsertPi0ToCheckpointsTable(Migration):
     def up(self):
         self.db.table('checkpoints').insert({
             'name': 'pi0_basic',
-            'policy_id': 43,
+            'policy_id': 0,  # Assuming policy with ID 0 corresponds to PI0
+            'is_base_model': True,
             'dataset_info': json.dumps({}),
             'num_epochs': 0,
             'batch_size': 0,

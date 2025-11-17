@@ -68,40 +68,67 @@ export const POLICY_CONFIGS = {
         // --- Loss 계산 ---
         'do_mask_loss_for_padding': { 'label': 'Mask Loss for Padding', 'value': false, 'type': 'boolean' },
     },
-    'VLAsEn': {
+    'PI0': {
+        // Input / output structure
         'n_obs_steps': { 'label': 'Number of Observation Steps', 'value': 1, 'type': 'number' },
-        'chunk_size': { 'label': 'Chunk Size', 'value': 15, 'type': 'number' },
-        'n_action_steps': { 'label': 'Number of Action Steps', 'value': 1, 'type': 'number' },
-        'temporal_ensemble_coeff': { 'label': 'Temporal Ensemble Coefficient', 'value': 0.01, 'type': 'number', 'nullable': true },
-        'vision_backbone': { 
-            'label': 'Vision Backbone', 
-            'value': 'resnet18', 
-            'type': 'select', 
-            'options': ['resnet18', 'resnet34', 'resnet50', 'dinov2'] // Assuming DinoV2 is a valid option,
-        },
-        'pretrained_backbone_weights': { 
-            'label': 'Pretrained Backbone Weights', 
-            value: 'ResNet18_Weights.IMAGENET1K_V1', 
-            type: 'select',
-            options: {
-                'resnet18': ['ResNet18_Weights.IMAGENET1K_V1'], 
-                'resnet34': ['ResNet34_Weights.IMAGENET1K_V1'], 
-                'resnet50': ['ResNet50_Weights.IMAGENET1K_V1'],
-                'dinov2': ['dinov2_vits14'] // Assuming DinoV2 is a valid option
-            }
-        },
-        'replace_final_stride_with_dilation': { 'label': 'Replace Final Stride', 'value': false, 'type': 'boolean' },
-        'pre_norm': { 'label': 'Pre-Normalization', 'value': false, 'type': 'boolean' },
-        'dim_model': { 'label': 'Model Dimension', 'value': 512, 'type': 'number' },
-        'n_heads': { 'label': 'Number of Heads', 'value': 8, 'type': 'number' },
-        'dim_feedforward': { 'label': 'Feedforward Dimension', 'value': 3200, 'type': 'number' },
-        'feedforward_activation': { 'label': 'Feedforward Activation', 'value': 'relu', 'type': 'select', 'options': ['relu', 'gelu', 'silu'] },
-        'n_encoder_layers': { 'label': 'Number of Encoder Layers', 'value': 4, 'type': 'number' },
-        'n_decoder_layers': { 'label': 'Number of Decoder Layers', 'value': 1, 'type': 'number' },
-        'use_vae': { 'label': 'Use VAE', 'value': true, 'type': 'boolean' },
-        'latent_dim': { 'label': 'Latent Dimension', 'value': 32, 'type': 'number' },
-        'n_vae_encoder_layers': { 'label': 'Number of VAE Encoder Layers', 'value': 4, 'type': 'number' }
+        'chunk_size': { 'label': 'Chunk Size', 'value': 50, 'type': 'number' },
+        'n_action_steps': { 'label': 'Number of Action Steps', 'value': 50, 'type': 'number' },
+        'max_state_dim': { 'label': 'Max State Dimension', 'value': 32, 'type': 'number' },
+        'max_action_dim': { 'label': 'Max Action Dimension', 'value': 32, 'type': 'number' },
+        // Image preprocessing
+        'resize_imgs_with_padding': { 'label': 'Resize Images with Padding', 'value': [224, 224], 'type': 'array' },
+        'empty_cameras': { 'label': 'Empty Cameras', 'value': 0, 'type': 'number' },
+        // Aloha specific
+        'adapt_to_pi_aloha': { 'label': 'Adapt to Pi Aloha', 'value': false, 'type': 'boolean' },
+        'use_delta_joint_actions_aloha': { 'label': 'Use Delta Joint Actions Aloha', 'value': false, 'type': 'boolean' },
+        // Tokenizer
+        'tokenizer_max_length': { 'label': 'Tokenizer Max Length', 'value': 48, 'type': 'number' },
+        // Projector
+        'proj_width': { 'label': 'Projector Width', 'value': 1024, 'type': 'number' },
+        // Decoding
+        'num_steps': { 'label': 'Number of Decoding Steps', 'value': 10, 'type': 'number' },
+        // Attention utils
+        'use_cache': { 'label': 'Use Cache', 'value': true, 'type': 'boolean' },
+        'attention_implementation': { 'label': 'Attention Implementation', 'value': 'eager', 'type': 'select', 'options': ['eager', 'fa2', 'flex'] },
+        // Finetuning settings
+        'freeze_vision_encoder': { 'label': 'Freeze Vision Encoder', 'value': true, 'type': 'boolean' },
+        'train_expert_only': { 'label': 'Train Expert Only', 'value': false, 'type': 'boolean' },
+        'train_state_proj': { 'label': 'Train State Projector', 'value': true, 'type': 'boolean' },
     }
+    // 'VLAsEn': {
+    //     'n_obs_steps': { 'label': 'Number of Observation Steps', 'value': 1, 'type': 'number' },
+    //     'chunk_size': { 'label': 'Chunk Size', 'value': 15, 'type': 'number' },
+    //     'n_action_steps': { 'label': 'Number of Action Steps', 'value': 1, 'type': 'number' },
+    //     'temporal_ensemble_coeff': { 'label': 'Temporal Ensemble Coefficient', 'value': 0.01, 'type': 'number', 'nullable': true },
+    //     'vision_backbone': { 
+    //         'label': 'Vision Backbone', 
+    //         'value': 'resnet18', 
+    //         'type': 'select', 
+    //         'options': ['resnet18', 'resnet34', 'resnet50', 'dinov2'] // Assuming DinoV2 is a valid option,
+    //     },
+    //     'pretrained_backbone_weights': { 
+    //         'label': 'Pretrained Backbone Weights', 
+    //         value: 'ResNet18_Weights.IMAGENET1K_V1', 
+    //         type: 'select',
+    //         options: {
+    //             'resnet18': ['ResNet18_Weights.IMAGENET1K_V1'], 
+    //             'resnet34': ['ResNet34_Weights.IMAGENET1K_V1'], 
+    //             'resnet50': ['ResNet50_Weights.IMAGENET1K_V1'],
+    //             'dinov2': ['dinov2_vits14'] // Assuming DinoV2 is a valid option
+    //         }
+    //     },
+    //     'replace_final_stride_with_dilation': { 'label': 'Replace Final Stride', 'value': false, 'type': 'boolean' },
+    //     'pre_norm': { 'label': 'Pre-Normalization', 'value': false, 'type': 'boolean' },
+    //     'dim_model': { 'label': 'Model Dimension', 'value': 512, 'type': 'number' },
+    //     'n_heads': { 'label': 'Number of Heads', 'value': 8, 'type': 'number' },
+    //     'dim_feedforward': { 'label': 'Feedforward Dimension', 'value': 3200, 'type': 'number' },
+    //     'feedforward_activation': { 'label': 'Feedforward Activation', 'value': 'relu', 'type': 'select', 'options': ['relu', 'gelu', 'silu'] },
+    //     'n_encoder_layers': { 'label': 'Number of Encoder Layers', 'value': 4, 'type': 'number' },
+    //     'n_decoder_layers': { 'label': 'Number of Decoder Layers', 'value': 1, 'type': 'number' },
+    //     'use_vae': { 'label': 'Use VAE', 'value': true, 'type': 'boolean' },
+    //     'latent_dim': { 'label': 'Latent Dimension', 'value': 32, 'type': 'number' },
+    //     'n_vae_encoder_layers': { 'label': 'Number of VAE Encoder Layers', 'value': 4, 'type': 'number' }
+    // }
 };
 
 export const TRAIN_CONFIGS = {
@@ -128,6 +155,15 @@ export const TRAIN_CONFIGS = {
     },
     'VLAsEn': {
         'optimizer_lr': { 'label': 'Optimizer Learning Rate', 'value': 1e-5, 'type': 'number' },
+    },
+    'PI0': {
+        'optimizer_lr': { 'label': 'Optimizer Learning Rate', 'value': 2.5e-5, 'type': 'number' },
+        'optimizer_betas': { 'label': 'Optimizer Betas', 'value': [0.9, 0.95], 'type': 'array' },
+        'optimizer_eps': { 'label': 'Optimizer Epsilon', 'value': 1e-8, 'type': 'number' },
+        'optimizer_weight_decay': { 'label': 'Optimizer Weight Decay', 'value': 1e-10, 'type': 'number' },
+        'scheduler_warmup_steps': { 'label': 'Scheduler Warmup Steps', 'value': 1000, 'type': 'number' },
+        'scheduler_decay_steps': { 'label': 'Scheduler Decay Steps', 'value': 30000, 'type': 'number' },
+        'scheduler_decay_lr': { 'label': 'Scheduler Decay LR', 'value': 2.5e-6, 'type': 'number' },
     },
     'Common': {
         'num_epochs': { 'label': 'Number of Epochs', 'value': 1000, 'type': 'number' },

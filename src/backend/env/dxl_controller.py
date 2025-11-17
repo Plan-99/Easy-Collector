@@ -76,27 +76,27 @@ class DxlController:
     
     def read_all_dynamixel(self):
         """ GroupSyncRead를 사용해 모든 다이나믹셀 위치를 한 번에 읽어옵니다. """
-        
-        positions = []
-        
-        # 1. 단 한 번의 통신으로 모든 데이터를 요청하고 받음
-        dxl_comm_result = self.syncRead.txRxPacket()
-        if dxl_comm_result != COMM_SUCCESS:
-            print(f"SyncRead txRxPacket error: {self.packetHandler.getTxRxResult(dxl_comm_result)}")
-            # 통신 실패 시, 오류를 알리거나 비어 있는 리스트 반환
-            return [0] * len(self.dxl_ids) # 임시로 0 리스트 반환
+        with self.port_lock:
+            positions = []
+            
+            # 1. 단 한 번의 통신으로 모든 데이터를 요청하고 받음
+            dxl_comm_result = self.syncRead.txRxPacket()
+            if dxl_comm_result != COMM_SUCCESS:
+                print(f"SyncRead txRxPacket error: {self.packetHandler.getTxRxResult(dxl_comm_result)}")
+                # 통신 실패 시, 오류를 알리거나 비어 있는 리스트 반환
+                return [0] * len(self.dxl_ids) # 임시로 0 리스트 반환
 
-        # 2. 수신된 데이터에서 각 ID의 값을 *로컬*에서 추출
-        for dxl_id in self.dxl_ids:
-            # 개별 모터에서 데이터를 잘 수신했는지 확인
-            if self.syncRead.isAvailable(dxl_id, self.ADDR_PRESENT_POSITION, self.LEN_PRESENT_POSITION):
-                position = self.syncRead.getData(dxl_id, self.ADDR_PRESENT_POSITION, self.LEN_PRESENT_POSITION)
-                positions.append(position)
-            else:
-                print(f"[ID:{dxl_id}] SyncRead data not available")
-                positions.append(0) # 오류 발생 시 0 또는 이전 값으로 대체
-                        
-        return positions
+            # 2. 수신된 데이터에서 각 ID의 값을 *로컬*에서 추출
+            for dxl_id in self.dxl_ids:
+                # 개별 모터에서 데이터를 잘 수신했는지 확인
+                if self.syncRead.isAvailable(dxl_id, self.ADDR_PRESENT_POSITION, self.LEN_PRESENT_POSITION):
+                    position = self.syncRead.getData(dxl_id, self.ADDR_PRESENT_POSITION, self.LEN_PRESENT_POSITION)
+                    positions.append(position)
+                else:
+                    print(f"[ID:{dxl_id}] SyncRead data not available")
+                    positions.append(0) # 오류 발생 시 0 또는 이전 값으로 대체
+                            
+            return positions
     
 
     def move_controller(self, goal_position):

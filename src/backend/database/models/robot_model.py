@@ -24,6 +24,7 @@ class Robot(Model, SoftDeletes):
     __fillable__ = [
         'name',
         'type',
+        'role',
         'settings',
     ]
 
@@ -35,6 +36,7 @@ class Robot(Model, SoftDeletes):
     }
 
     __appends__ = [
+        'tool_id',
         'joint_upper_bounds',
         'joint_lower_bounds',
         'gripper_range',
@@ -53,7 +55,10 @@ class Robot(Model, SoftDeletes):
     def leader_robot_preset(self):
         return LeaderRobotPreset
     
-    
+    @accessor
+    def tool_id(self):
+        return self.settings.get('tool_id', '')
+
     @accessor
     def joint_dim(self):
         type = self.get_raw_attribute('type')
@@ -61,6 +66,8 @@ class Robot(Model, SoftDeletes):
             return 7
         if type == 'ur5e':
             return 6
+        if type == 'robotiq_2f_gripper':
+            return 2
 
         return self.settings['joint_names'].__len__()
     
@@ -68,9 +75,14 @@ class Robot(Model, SoftDeletes):
     def joint_names(self):
         type = self.get_raw_attribute('type')
         if type == 'piper':
-            return ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"]
+            if self.settings.get('tool_id') == '':
+                return ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"]
+            else:
+                return ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
         if type == 'ur5e':
             return ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
+        if type == 'robotiq_2f_gripper':
+            return ["gripper_joint"]
 
         return self.settings['joint_names']
     
@@ -131,7 +143,6 @@ class Robot(Model, SoftDeletes):
             return 'piper.yml'
         if type == 'ur5e':
             return 'ur5e.yml'
-
         return ''
     
     @accessor

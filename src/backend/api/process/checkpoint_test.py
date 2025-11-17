@@ -5,6 +5,7 @@ import numpy as np
 import time
 import cv2
 from einops import rearrange
+from ...lerobot.configs.types import PolicyFeature, FeatureType
 from ...utils.image_parser import fetch_image_with_config
 
 from ...policies.utils import make_policy, VISION_BACKBONE_MAP, process_image
@@ -12,6 +13,7 @@ from ...env.env import Env
 
 from ...lerobot.policies.act.modeling_act import ACTPolicy
 from ...lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
+from ...lerobot.policies.pi0.modeling_pi0 import PI0Policy
 
 import torchvision.transforms as transforms
 from transformers import AutoImageProcessor
@@ -19,7 +21,7 @@ from transformers import AutoImageProcessor
 
 def checkpoint_test(
     node,
-    checkpoint_id,
+    checkpoint,
     task,
     policy_obj,
     robots,
@@ -30,12 +32,19 @@ def checkpoint_test(
     ):
     
     try:
-        ckpt_dir = os.path.join("/root/src/backend/checkpoints", str(checkpoint_id))
+        if checkpoint.is_base_model:
+            if policy_obj['type'] == 'PI0':
+                ckpt_dir = "lerobot/pi0"
+        else:
+            ckpt_dir = os.path.join("/root/src/backend/checkpoints", str(checkpoint.id))
+            
         # policy = make_policy(ckpt_dir, seed, 0, 0, policy_obj, task, robots[0], sensors, gripper)
         if policy_obj['type'] == 'ACT':
             policy = ACTPolicy.from_pretrained(ckpt_dir)
         elif policy_obj['type'] == 'Diffusion':
             policy = DiffusionPolicy.from_pretrained(ckpt_dir)
+        elif policy_obj['type'] == 'PI0':
+            policy = PI0Policy.from_pretrained(ckpt_dir)
         
         socketio_instance.emit('log_checkpoint_test', {
             'log': f'Loaded Policy from {ckpt_dir}',
@@ -112,7 +121,23 @@ def checkpoint_test(
                 # image = torch.from_numpy(image).float().cuda().unsqueeze(0)
                 # image = rearrange(image, 'b h w c -> b c h w')
                 state[f'observation.images.sensor_{sensor["id"]}'] = image.unsqueeze(0)
+
+
+            # Prepare input features dynamically if base model
+            if checkpoint.is_base_model:
+                state['language_instruction'] = [task['name']]
+                info = dict()
+                for key, val in state.items():
+                    if key.startswith("observation.images"):
+                        info[key] = PolicyFeature(FeatureType.VISUAL, shape=val[0].shape)
+                    if key == "observation.state":
+                        info[key] = PolicyFeature(FeatureType.STATE, shape=val[0].shape)     
+                info['action'] = PolicyFeature(FeatureType.ACTION, shape=[7])      
+                policy.config.input_features = {k: v for k, v in info.items() if k.startswith("observation")}
+                policy.config.output_features = {k: v for k, v in info.items() if k.startswith("action")}
             
+
+
             with torch.inference_mode():
                 action = policy.select_action(state)
 

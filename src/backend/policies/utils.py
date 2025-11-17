@@ -24,7 +24,7 @@ e = IPython.embed
 
 
 class EpisodicDataset(torch.utils.data.Dataset):
-    def __init__(self, episode_ids, dataset_dir, sensor_ids, norm_stats, chunk_size, vision_backbone='resnet18', n_obs_steps=1):
+    def __init__(self, episode_ids, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone='resnet18', n_obs_steps=1):
         super(EpisodicDataset).__init__()
         self.episode_ids = episode_ids
         self.dataset_dir = dataset_dir
@@ -32,6 +32,8 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self.norm_stats = norm_stats
         self.chunk_size = chunk_size
         self.n_obs_steps = n_obs_steps
+        self.policy_type = policy_type
+        self.vision_backbone = vision_backbone
         self.info = None
         self.__getitem__(0) # initialize self.is_sim
 
@@ -53,6 +55,9 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
             original_action_shape = (self.chunk_size, action_dim)
 
+            language_instruction = root['language_instruction'][()]
+            if isinstance(language_instruction, bytes):
+                language_instruction = language_instruction.decode('utf-8')
                 
             if sample_full_episode:
                 start_ts = 0
@@ -83,6 +88,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
         is_pad[action_len:] = 1
 
         item = dict()
+        item['language_instruction'] = language_instruction
         for sensor_id in self.sensor_ids:
             processed_images = []
             for image in image_dict[f"sensor_{sensor_id}"]:
@@ -92,8 +98,18 @@ class EpisodicDataset(torch.utils.data.Dataset):
             # image = torch.from_numpy(np.array(image_dict[f"sensor_{sensor_id}"]))
             # image = torch.einsum('n h w c -> n c h w', image)  # channel last to channel first
             # image = image / 255.0  # normalize image
-            item[f"observation.images.sensor_{sensor_id}"] = torch.stack(processed_images)  # stack images along the batch dimension
-        item["observation.state"] = torch.from_numpy(np.array(qpos)).float()
+
+            if self.policy_type in ['PI0']:
+                item[f"observation.images.sensor_{sensor_id}"] = torch.stack(processed_images).squeeze()  # add time dim
+                print(item[f"observation.images.sensor_{sensor_id}"].shape)
+            else:
+                item[f"observation.images.sensor_{sensor_id}"] = torch.stack(processed_images)
+                
+        if self.policy_type in ['PI0']:
+            item["observation.state"] = torch.from_numpy(np.concatenate(qpos)).float()
+        else:
+            item["observation.state"] = torch.from_numpy(np.array(qpos)).float()
+
         item["action"] = torch.from_numpy(padded_action).float()
         item["action_is_pad"] = torch.from_numpy(is_pad).bool()
         item['next.done'] = torch.from_numpy(np.zeros(1, dtype=np.bool_)).bool()  # dummy done tensor
@@ -107,6 +123,8 @@ class EpisodicDataset(torch.utils.data.Dataset):
                     self.info[key] = PolicyFeature(FeatureType.STATE, shape=val[0].shape)
                 if key == "action":
                     self.info[key] = PolicyFeature(FeatureType.ACTION, shape=val[0].shape)
+                if key == "language_instruction":
+                    self.info[key] = PolicyFeature(FeatureType.STATE, shape=(1,)) # dummy shape
 
         return item
 
@@ -208,7 +226,7 @@ def get_concatenated_pos(pos_path, target_id=None, target_range=None):
     return pos
 
 
-def load_data(dataset_dir, num_episodes, sensor_ids, batch_size_train, batch_size_val, chunk_size, vision_backbone='resnet18', num_workers=1, n_obs_steps=1):
+def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_train, batch_size_val, chunk_size, vision_backbone='resnet18', num_workers=1, n_obs_steps=1):
     print(f'\nData from: {dataset_dir}\n')
     # obtain train test split
     train_ratio = 0.8
@@ -220,8 +238,8 @@ def load_data(dataset_dir, num_episodes, sensor_ids, batch_size_train, batch_siz
     norm_stats = get_norm_stats(dataset_dir, num_episodes)
 
     # construct dataset and dataloader
-    train_dataset = EpisodicDataset(train_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, vision_backbone, n_obs_steps=n_obs_steps)
-    val_dataset = EpisodicDataset(val_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, vision_backbone, n_obs_steps=n_obs_steps)
+    train_dataset = EpisodicDataset(train_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps)
+    val_dataset = EpisodicDataset(val_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps)
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train, shuffle=True, pin_memory=True, num_workers=num_workers, prefetch_factor=1)
     val_dataloader = DataLoader(val_dataset, batch_size=batch_size_val, shuffle=True, pin_memory=True, num_workers=num_workers, prefetch_factor=1)
 

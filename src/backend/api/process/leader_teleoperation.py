@@ -11,7 +11,7 @@ from ...env.dxl_controller import DxlController
 
 
 class Leader():
-    def __init__(self, agent, socketio_instance, leader_robot_preset, log_emit_id='leader_teleoperation', port='/dev/ttyUSB0', gripper=None) -> None:
+    def __init__(self, agent, socketio_instance, leader_robot_preset, log_emit_id='leader_teleoperation', port='/dev/ttyUSB0') -> None:
         # ROS 노드 초기화ur5e/ur5e_scaled_pos_joint_traj_controller/command
         self.socketio_instance = socketio_instance
         self.log_emit_id = log_emit_id
@@ -32,10 +32,10 @@ class Leader():
         self.address = 132  # 다이나믹셀의 현재 위치 주소 (주소 132번은 현재 위치)
         self.p_gain = 1
         self.is_synced = False
-        self.gripper_config = gripper
         self.agent = agent
         self.dxl_controller = DxlController(port, self.dxl_ids, self.gripper_dxl_ids)
         self.target_pos = [0] * self.agent.joint_len  # 목표 위치 초기화 (7개의 관절)
+        self.target_tool_pos = [0] * len(self.agent.tool['joint_names']) if self.agent.tool is not None else None
 
 
     def get_rad_pos(self, position, dxl_id):
@@ -92,18 +92,17 @@ class Leader():
     
 
     def get_gripper_pos(self, dxl_pos, dxl_id):
+        print(dxl_pos, dxl_id)
         gripper_index = self.gripper_dxl_ids.index(dxl_id)
-        if self.gripper_config is None:
-            gripper_pos_low = self.agent.gripper_range[0]
-            gripper_pos_high = self.agent.gripper_range[-1]
-            gripper_pos = (dxl_pos - self.gripper_dxl_range[gripper_index][1]) / (self.gripper_dxl_range[gripper_index][0] - self.gripper_dxl_range[gripper_index][1]) * (gripper_pos_high - gripper_pos_low) + gripper_pos_low
-            if gripper_pos < gripper_pos_low:
-                return gripper_pos_low
-            elif gripper_pos > gripper_pos_high:
-                return gripper_pos_high
-            return gripper_pos
-        else:
-            return 0.0
+        gripper_pos_low = self.agent.gripper_range[0]
+        gripper_pos_high = self.agent.gripper_range[-1]
+        gripper_pos = (dxl_pos - self.gripper_dxl_range[gripper_index][1]) / (self.gripper_dxl_range[gripper_index][0] - self.gripper_dxl_range[gripper_index][1]) * (gripper_pos_high - gripper_pos_low) + gripper_pos_low
+        if gripper_pos < gripper_pos_low:
+            return gripper_pos_low
+        elif gripper_pos > gripper_pos_high:
+            return gripper_pos_high
+        return gripper_pos
+
         
 
     def position_pub(self, task_control):
@@ -117,11 +116,16 @@ class Leader():
 
             # 타겟 포지션 가져오기 ------------------
             positions = self.dxl_controller.read_all_dynamixel()
+            tool_index = 0
             for index, dxl_id in enumerate(self.dxl_ids):
                 try:
                     position = positions[index]
                     if dxl_id in self.gripper_dxl_ids:
-                        self.target_pos[index] = self.get_gripper_pos(position, dxl_id)
+                        if self.agent.tool is None:
+                            self.target_pos[index] = self.get_gripper_pos(position, dxl_id)
+                            tool_index += 1
+                        else:
+                            self.target_tool_pos[tool_index] = self.get_gripper_pos(position, dxl_id)
                     else:
                         self.target_pos[index] = self.get_rad_pos(position, dxl_id)
 
@@ -130,8 +134,6 @@ class Leader():
 
                         # EMA 필터 적용
                         self.target_pos[index] = self.ema * prev_pos[index] + (1 - self.ema) * self.target_pos[index]
-                        print(self.target_pos[index])
-                        
                         prev_pos[index] = self.target_pos[index]
 
                 except Exception as e:
@@ -159,10 +161,10 @@ class Leader():
     
             if gripper_range[0] < gripper_range[1]:
                 should_pause = gripper_pos < gripper_range[0] - 300
-                should_resume = gripper_pos > gripper_range[1]
+                should_resume = gripper_pos > gripper_range[0] - 100
             else:
                 should_pause = gripper_pos > gripper_range[0] + 300
-                should_resume = gripper_pos < gripper_range[1]
+                should_resume = gripper_pos < gripper_range[0] + 100
 
             if not self.is_paused and should_pause:
                 self.is_paused = True
@@ -183,10 +185,8 @@ class Leader():
                 print("Teleoperation Resumed")
             #--------------------------------------------
 
-
-            self.agent.move_step(self.target_pos)
+            self.agent.move_step(self.target_pos, self.target_tool_pos)
             end = time.time()
-            print(f"Position pub loop time: {end - start:.4f} seconds")
 
-
+        self.dxl_controller.remove_torque()
         self.dxl_controller.portHandler.closePort()

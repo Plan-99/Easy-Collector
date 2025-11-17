@@ -8,5 +8,5 @@ class AddPortNameToLeaderTobotPresetsTable(Migration):
             table.string('port_name').default('/dev/ttyUSB0')
             
     def down(self):
-        with self.schema.table('leader_tobot_presets') as table:
+        with self.schema.table('leader_robot_presets') as table:
             table.drop_column('port_name')

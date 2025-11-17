@@ -27,6 +27,8 @@ from ..lerobot.policies.act.configuration_act import ACTConfig
 from ..lerobot.policies.act.modeling_act import ACTPolicy
 from ..lerobot.policies.diffusion.configuration_diffusion import DiffusionConfig
 from ..lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
+from ..lerobot.policies.pi0.configuration_pi0 import PI0Config
+from ..lerobot.policies.pi0.modeling_pi0 import PI0Policy
 from ..lerobot.policies.vlasen.configuration_vlasen import VLAsEnConfig
 from ..lerobot.policies.vlasen.modeling_vlasen import VLAsEnPolicy
 from ..lerobot.datasets.utils import dataset_to_policy_features
@@ -60,7 +62,6 @@ def train(
 
     
     if policy_obj['type'] == 'ACT':
-        # Create policy model
         cfg = ACTConfig(
             input_features=input_features,
             output_features=output_features,
@@ -69,7 +70,6 @@ def train(
         )
         policy = ACTPolicy(cfg, dataset_stats=stats)
     elif policy_obj['type'] == 'Diffusion':
-        
         cfg = DiffusionConfig(
             input_features=input_features,
             output_features=output_features,
@@ -77,8 +77,15 @@ def train(
             **train_settings,
         )
         policy = DiffusionPolicy(cfg, dataset_stats=stats)
+    elif policy_obj['type'] == 'PI0':
+        cfg = PI0Config(
+            input_features=input_features,
+            output_features=output_features,
+            **policy_settings,
+            **train_settings,
+        )
+        policy = PI0Policy(cfg, dataset_stats=stats)
     elif policy_obj['type'] == 'VLAsEn':
-        
         cfg = VLAsEnConfig(
             input_features=input_features,
             output_features=output_features,
@@ -216,14 +223,19 @@ def main(args):
         sensor_ids = task['sensor_ids']
         if policy['type'] in ['ACT', 'VLAsEn']:
             chunk_size = policy['settings']['chunk_size']
+            vision_backbone = policy['settings']['vision_backbone']
         elif policy['type'] in ['Diffusion']:
             chunk_size = policy['settings']['horizon']
+            vision_backbone = policy['settings']['vision_backbone']
+        elif policy['type'] in ['PI0']:
+            chunk_size = policy['settings']['chunk_size']
+            vision_backbone = None
         num_workers = checkpoint['train_settings']['num_workers']
         n_obs_steps = policy['settings']['n_obs_steps']  # Default to 1 if not specified
-        vision_backbone = policy['settings']['vision_backbone']
+        
         
         # Load data from the temporary directory
-        train_dataloader, val_dataloader, stats, input_features, output_features = load_data(temp_dir, episode_counter, sensor_ids, batch_size, batch_size, chunk_size, vision_backbone, num_workers, n_obs_steps)
+        train_dataloader, val_dataloader, stats, input_features, output_features = load_data(temp_dir, policy['type'], episode_counter, sensor_ids, batch_size, batch_size, chunk_size, vision_backbone, num_workers, n_obs_steps)
         # Start the training process
         best_epoch, min_val_loss, best_state_dict = train(
             train_dataloader,
