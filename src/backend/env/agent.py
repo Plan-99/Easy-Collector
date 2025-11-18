@@ -7,17 +7,17 @@ import threading
 from collections import deque
 import time
 from ..ik_solver.pinocchio_solver.piper_arm_ik import Piper_ArmIK
+import numpy as np
 
 class Agent:
-    def __init__(self, node: Node, robot, tool=None, command_type='joint_position'):
+    def __init__(self, node: Node, robot):
         self.id = robot['id']
-        self.tool = tool
+        self.tools = robot['tools'] if 'tools' in robot else []
+        self.tool_agents = [Agent(node, tool) for tool in self.tools]
         self.leader_robot_preset = robot.get('leader_robot_preset', None)    
         self.js_mutex = threading.Lock()
         self.joint_states = None
         self.joint_actions = None
-        self.tool_states = None
-        self.tool_actions = None
         self.ee_pos = None
         self.ee_target = None
         self.robot_type = robot['type']
@@ -25,14 +25,13 @@ class Agent:
         self.joint_names = robot['joint_names']
         self.joint_upper_bounds = robot['joint_upper_bounds']
         self.joint_lower_bounds = robot['joint_lower_bounds']
-
-        self.command_type = command_type            
         
-        if tool is None:
+        if len(self.tools) == 0:
             self.gripper_range = [self.joint_lower_bounds[-1], self.joint_upper_bounds[-1]]
-        else:
-            self.gripper_range = [tool['joint_lower_bounds'][0], tool['joint_upper_bounds'][0]]
+        # else:
+        #     self.gripper_range = [tool['joint_lower_bounds'][0], tool['joint_upper_bounds'][0]]
              
+        self.ik_solver = None
         if robot['type'] == 'piper':
             self.ik_solver = Piper_ArmIK()
 
@@ -40,20 +39,14 @@ class Agent:
         node.create_subscription(JointState, robot['write_topic'], self.joint_action_cb, 10)
 
         self.move_robot_pub = node.create_publisher(JointState, robot['write_topic'], 10)
-
-        if tool is not None:
-            node.create_subscription(JointState, tool['read_topic'], self.tool_state_cb, 10)
-            node.create_subscription(JointState, tool['write_topic'], self.tool_action_cb, 10)
-            self.move_tool_pub = node.create_publisher(JointState, tool['write_topic'], 10)
             
         time.sleep(0.1)  # Wait for subscriber to be ready
 
 
-    def move_step(self, joint_action, tool_action=None):
-        print(tool_action)
+    def move_step(self, joint_action, tool_actions=[]):
         self.move_step_joints(joint_action)
-        if self.tool is not None and tool_action is not None:
-            self.move_step_tool(tool_action)
+        for tool, tool_action in zip(self.tool_agents, tool_actions):
+            tool.move_step(tool_action)
 
     def move_step_joints(self, action):
         action = [float(a) for a in action]
@@ -64,15 +57,20 @@ class Agent:
         js.velocity[-1] = 100
         self.move_robot_pub.publish(js)
 
-    def move_step_tool(self, action):
-        action = [float(a) for a in action]
-        js = JointState()
-        js.name = self.tool['joint_names']
-        js.position = action
-        js.velocity = [0.0] * len(self.tool['joint_names'])
-        js.velocity[0] = 100
-        self.move_tool_pub.publish(js)
-            
+    def move_ee_step(self, target_ee_pos):
+        if self.ik_solver is not None:
+            with self.js_mutex:
+                current_joint_positions = self.joint_states
+            sol_q, sol_tauff = self.ik_solver.solve_ik(target_ee_pos, current_joint_positions[:-1])
+            if sol_q is not None:
+                print(f"IK solution found: {sol_q}")
+                sol_q = np.append(sol_q, current_joint_positions[-1])  # Keep gripper joint unchanged
+                self.move_step_joints(sol_q)
+            else:
+                print("IK solution not found for the given target EE position.")
+        else:
+            print("IK solver not initialized for this robot type.")
+
         
     def joint_state_cb(self, msg):
         with self.js_mutex:
@@ -89,6 +87,7 @@ class Agent:
     def tool_action_cb(self, msg):
         with self.js_mutex:
             self.tool_actions = msg.position
+            
     def get_joint_states(self):
         with self.js_mutex:
             joint_positions = self.joint_states
@@ -99,14 +98,14 @@ class Agent:
             joint_actions = self.joint_actions
         return joint_actions
 
-    def get_ee_pos(self):
+    def get_ee_position(self):
         with self.js_mutex:
             joint_positions = self.joint_states
         if joint_positions is None:
             return None
-        if self.robot_type == 'piper':
-            ee_pos = self.ik_solver.get_ee_position(joint_positions)
-            return ee_pos
+        if self.ik_solver is not None:
+            ee_pos_dict = self.ik_solver.get_ee_position(joint_positions[:-1])
+            return ee_pos_dict
         else:
             return None
         
@@ -115,8 +114,8 @@ class Agent:
             joint_actions = self.joint_actions
         if joint_actions is None:
             return None
-        if self.robot_type == 'piper':
-            ee_target = self.ik_solver.get_ee_position(joint_actions)
+        if self.ik_solver is not None:
+            ee_target = self.ik_solver.get_ee_position(joint_actions[:-1])
             return ee_target
         else:
             return None

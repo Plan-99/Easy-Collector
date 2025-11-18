@@ -16,6 +16,8 @@ export function useRobot(robot, robotOnCallback=() => {}) {
   robot.jointSub = null;
   robot.jointState = [];
   robot.jointAction = [];
+  robot.eePos = {};
+  robot.eeTarget = {};
   // let cmdPublisher = () => {};
 
   function status() {
@@ -46,6 +48,8 @@ export function useRobot(robot, robotOnCallback=() => {}) {
     socket.on(`robot_status_${robot.id}`, (data) => {
       robot.jointState = data.joint_states;
       robot.jointAction = data.joint_actions;
+      robot.eePos = data.ee_pos;
+      robot.eeTarget = data.ee_target;
       callback(data.joint_states, data.joint_actions);
     });
     // if (robot.status === 'off') {
@@ -66,13 +70,18 @@ export function useRobot(robot, robotOnCallback=() => {}) {
   }
 
 
-  function moveRobot(joint_index, joint_pos) {
-    robot.joint_pos[joint_index] = joint_pos;
-    socket.emit('move_robot', {
+  function moveRobotJoint(goal_pos) {
+    socket.emit('move_robot_joint', {
       robot,
-      goal_pos: robot.joint_pos
+      goal_pos
     });
-    // sendJointState(robot.joint_names, robot.joint_pos, write_topic_msg, cmdPublisher);
+  }
+
+  function moveRobotEE(goal_pos) {
+    socket.emit('move_robot_ee', {
+      robot,
+      goal_pos
+    });
   }
 
   function goOriginPos() {
@@ -125,7 +134,8 @@ export function useRobot(robot, robotOnCallback=() => {}) {
     startRobot,
     stopRobot,
     status,
-    moveRobot,
+    moveRobotJoint,
+    moveRobotEE,
     goOriginPos,
     subscribeRobot,
     unSubscribeRobot,

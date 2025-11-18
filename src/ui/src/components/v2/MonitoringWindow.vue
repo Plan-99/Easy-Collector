@@ -282,7 +282,7 @@ function startInference() {
     api.post(`/checkpoint/${selectedCheckpointId.value}/:start_test`, {
         task: props.workspace,
         policy: checkpoint.value.policy,
-        robots: props.robots,
+        robot_ids: props.robots.map(r => r.id),
         sensors: props.sensors,
     }).catch((error) => {
         console.error('Error starting test:', error);

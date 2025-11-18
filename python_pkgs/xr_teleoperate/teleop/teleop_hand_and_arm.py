@@ -332,6 +332,8 @@ if __name__ == '__main__':
 
             # solve ik using motor data and wrist pose, then use ik results to control arms.
             time_ik_start = time.time()
+            print("target left wrist:", tele_data.left_arm_pose)
+            print("target right wrist:", tele_data.right_arm_pose)
             sol_q, sol_tauff  = arm_ik.solve_ik(tele_data.left_arm_pose, tele_data.right_arm_pose)
             print("sol_q:", sol_q)
             print("sol_tauff:", sol_tauff)

@@ -32,7 +32,7 @@ class Piper_ArmIK(IK_Solver):
             'joint6_to_gripper_base', 'joint7', 'joint8'
         ]
         # 2. EE 프레임 정의 (기준 관절, 오프셋)
-        tool_def = ('tool_tcp', 'joint6', np.array([0.05, 0, 0]).T)
+        tool_def = ('ee', 'joint7', None)
 
         ee_definitions = [tool_def]
         

@@ -12,6 +12,28 @@ logger_mp = logging_mp.get_logger(__name__)
 parent2_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(parent2_dir)
 
+
+def xyzrpy_to_se3(xyzrpy):
+    """
+    (x, y, z, roll, pitch, yaw) 형식의 리스트를 SE3 객체로 변환합니다.
+    """
+    xyz = np.array(xyzrpy[:3])
+    rpy = np.array(xyzrpy[3:])
+    rotation_matrix = pin.rpy.rpyToMatrix(rpy)
+    se3_pose = pin.SE3(rotation_matrix, xyz)
+    return se3_pose.homogeneous
+
+
+def se3_to_xyzrpy(se3_matrix):
+    """
+    SE3 객체를 (x, y, z, roll, pitch, yaw) 형식의 리스트로 변환합니다.
+    """
+    xyz = se3_matrix.translation
+    rotation_matrix = se3_matrix.rotation
+    rpy = pin.rpy.matrixToRpy(rotation_matrix)
+    return np.concatenate([xyz, rpy]).tolist()
+
+
 # ---------------------------------------------------------------------------
 # 헬퍼 클래스 (변경 없음)
 # ---------------------------------------------------------------------------
@@ -113,6 +135,8 @@ class IK_Solver:
                 # 'name' (예: 'L_ee')을 키로, 'existing_frame_name' (예: 'left_palm_center')의 ID를 저장
                 self.ee_ids[name] = self.reduced_robot.model.getFrameId(existing_frame_name)
 
+
+        self.reduced_robot.data = self.reduced_robot.model.createData()
 
         # 4. Casadi 모델 생성
         self.cmodel = cpin.Model(self.reduced_robot.model)
@@ -228,9 +252,10 @@ class IK_Solver:
         # target_poses 딕셔너리를 기반으로 파라미터 설정
         for name, pose in target_poses.items():
             if name in self.ee_params:
-                self.opti.set_value(self.ee_params[name], pose)
+                se3_pose = xyzrpy_to_se3(pose)
+                self.opti.set_value(self.ee_params[name], se3_pose)
                 if self.Visualization:
-                    self.vis.viewer[f'{name}_target'].set_transform(pose)
+                    self.vis.viewer[f'{name}_target'].set_transform(se3_pose)
             else:
                 logger_mp.warn(f"Target pose for '{name}' ignored (not in ee_params).")
 
@@ -277,6 +302,10 @@ class IK_Solver:
         
         poses = {}
         for name, ee_id in self.ee_ids.items():
-            poses[name] = self.reduced_robot.data.oMf[ee_id]
+            se3_pose = self.reduced_robot.data.oMf[ee_id]
+
+            poses[name] = se3_to_xyzrpy(se3_pose)
             
         return poses
+
+

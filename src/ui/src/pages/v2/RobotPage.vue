@@ -85,27 +85,12 @@
         >
             <template v-for="robot in robots.filter((e) => e.status !== 'off')" :key="robot.id" v-slot:[robot.id]>
                 <div class="row row q-gutter-x-md">
-                    <div class="col-3 column">
-                        <div class="col" 
-                            v-for="(joint, i) in watchingRobot.joint_names" :key="joint"
-                        >
-                            <div class="text-caption text-white">{{ joint }}</div>
-                            <q-slider
-                                v-model.number="watchingRobot.joint_pos[i]"
-                                :min="watchingRobot.joint_lower_bounds[i]"
-                                :max="watchingRobot.joint_upper_bounds[i]"
-                                :step="0.0001"
-                                label
-                                track-color="white"
-                                switch-label-side
-                                thumb-size="1px"
-                                color="accent"
-                                :disable="!canControl"
-                                @update:model-value="(e) => watchingRobot.handler.moveRobot(i, e)"
-                            />
-                        </div>
+                    <div class="col-5">
+                        <robot-pendant
+                            :robot="watchingRobot"
+                        />
                     </div>
-                    <div class="col-8">
+                    <div class="col-6">
                         <process-console 
                             :process="robot.process_id" 
                             :key="robot.id"
@@ -259,6 +244,7 @@ import { Notify } from 'quasar';
 import BottomTerminal from 'src/components/v2/BottomTerminal.vue';
 import { useRobot } from 'src/composables/useRobot';
 import FormDialog from 'src/components/v2/FormDialog.vue';
+import RobotPendant from 'src/components/v2/RobotPendant.vue';
 
 const { socket } = useSocket();
 const { connectROS } = useROS();

@@ -31,7 +31,6 @@ import os
 import argparse
 
 import threading
-from ..env.agent import Agent
 
 argparse = argparse.ArgumentParser(description='Easy Collector Web API')
 argparse.add_argument('--debug', action='store_true', help='Enable debug mode')
@@ -175,15 +174,22 @@ def handle_offer_event(sid, data):
     print('offer event received', sid, data)
     # return await sm.offer(data)
 
-@socketio.on('move_robot')
-def handle_move_robot_event(data):
-    agent = Agent(app.node, data['robot'])
+
+@socketio.on('move_robot_joint')
+def handle_move_robot_joint_event(data):
+    agent = app.agents[data['robot']['id']]
     agent.move_step(data['goal_pos'])
+
+@socketio.on('move_robot_ee')
+def handle_move_robot_ee_event(data):
+    agent = app.agents[data['robot']['id']]
+    agent.move_ee_step(data['goal_pos'])
 
 
 def main():
     app.node = node  # Flask 앱에 ROS 노드 할당
     app.pm = pm  # Flask 앱에 프로세스 관리 객체 할당
+    app.agents = {}  # Flask 앱에 에이전트 딕셔너리 할당
     
     try:
         # 3. 메인 스레드에서 웹 서버 실행

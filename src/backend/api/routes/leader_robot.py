@@ -67,7 +67,7 @@ def start_leader_teleoperation():
     tool = data.get('tool', None)
 
     current_app.pm.stop_process(name='start_leader_robot')
-    agent = Agent(current_app.node, robot, tool)
+    agent = current_app.agents[robot['id']]
     
     leader = Leader(agent, current_app.pm.socketio, preset, log_emit_id=log_emit_id, port=preset['port_name'])
     leader.sync_leader_robot()

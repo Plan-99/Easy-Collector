@@ -37,7 +37,7 @@ class Robot(Model, SoftDeletes):
     }
 
     __appends__ = [
-        'tool_id',
+        'tools',
         'joint_upper_bounds',
         'joint_lower_bounds',
         'gripper_range',
@@ -63,8 +63,12 @@ class Robot(Model, SoftDeletes):
         return LeaderRobotPreset
     
     @accessor
-    def tool_id(self):
-        return self.settings.get('tool_id', '')
+    def tools(self):
+        tool_ids = self.settings.get('tool_ids', [])
+        if len(tool_ids) == 0:
+            return []
+        
+        return Robot.where_in('id', tool_ids).get()
 
     @accessor
     def joint_dim(self):

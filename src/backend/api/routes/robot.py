@@ -79,12 +79,16 @@ def start_robot():
         command=command,
     )
 
+    agent = Agent(current_app.node, data)
+
+    current_app.agents[id] = agent
+
     current_app.pm.start_function(
-        name='subscribe_robot_' + str(id),\
+        name='subscribe_robot_' + str(id),
         node=current_app.node,
         func=subscribe_robot_topic,
         socketio_instance=current_app.pm.socketio,
-        robot=data,
+        agent=agent,
     )
 
     if process:
@@ -199,7 +203,8 @@ def move_robot(id):
     if not goal_pos:
         return {'status': 'error', 'message': 'Action is required'}, 400
     
-    agent = Agent(current_app.node, robot.to_dict())
+    print(current_app.agents)
+    agent = current_app.agents[int(id)]
 
     agent.move_to(goal_pos, step_size)
     time.sleep(3)

@@ -18,6 +18,16 @@ echo "deb [signed-by=/etc/apt/keyrings/nvidia-container-toolkit.asc] https://nvi
 docker build -t  easy-collector:latest .
 ```
 
+### 도커 최초 빌드 시
+```
+cd ~/src/ui
+npm install
+
+cd ~/python_pkg
+bash install.sh
+```
+
+
 ### 도커 컨테이너 실행
 
 ```
@@ -38,6 +48,11 @@ docker exec -it easy_collector_container /bin/bash
 exit
 ```
 
+
+### torch upgrade
+```
+pip install --upgrade torch
+```
 
 ### 서버 시작
 ```
