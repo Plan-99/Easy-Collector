@@ -44,7 +44,7 @@
                             {{ r }} {{ p }}
                         </div>
                         <div class="q-mx-sm">
-                            {{ Object.values(props.robot.eePos).length ? Object.values(props.robot.eePos)[i][j]?.toFixed(4) : 'Unreadable' }}
+                            {{ props.robot.eePos && Object.values(props.robot.eePos).length ? Object.values(props.robot.eePos)[i][j]?.toFixed(4) : 'Unreadable' }}
                         </div>
                         <q-space></q-space>
                         <q-btn

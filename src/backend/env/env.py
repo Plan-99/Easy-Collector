@@ -10,7 +10,6 @@ from ..utils.image_parser import ros_image_to_numpy
 class Env:
     def __init__(self, node, agents, sensors, language_instruction=None):
         self.sensors = sensors
-        self.agents = []
         self.node = node
         self.agents = agents
         self.language_instruction = language_instruction

@@ -7,14 +7,12 @@ export function useLeaderTeleoperation() {
   const $q = useQuasar();
   const leaderTeleStarted = ref(false);
 
-  function startLeaderTele(robot, tool, preset, logEmitId = null) {
+  function startLeaderTele(robot, preset, logEmitId = null) {
     // if (logEmitId) {
     //   payload.log_emit_id = logEmitId;
     // }
-    console.log('Starting leader teleoperation for robot:', robot, 'with tool:', tool, 'and preset:', preset, 'and logEmitId:', logEmitId);
     api.post('/leader_robot:tele_start', {
       robot: robot,
-      tool: tool,
       preset: preset,
       log_emit_id: logEmitId
     })

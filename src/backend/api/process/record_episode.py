@@ -2,6 +2,7 @@ from tqdm import tqdm
 import os
 import numpy as np
 from ...env.env import Env
+from ...env.agent import Agent
 from ...configs.global_configs import DATASET_DIR
 from .leader_teleoperation import Leader
 from ...utils.image_parser import fetch_image_with_config
@@ -18,7 +19,10 @@ def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
     raise Exception(f"Error getting auto index, or more than {max_idx} episodes")
 
 def record_episode(node, dataset_id, robots, sensors, task, language_instruction, socketio_instance, task_control, tele_type='leader', iter=100000):
-    env = Env(node, robots=robots, sensors=sensors)
+    agents = []
+    for robot in robots:
+        agents.append(Agent(node, robot))
+    env = Env(node, agents=agents, sensors=sensors)
     dataset_dir = f"{DATASET_DIR}/{dataset_id}"
 
     for i in range(iter):

@@ -35,8 +35,7 @@ class Leader():
         self.agent = agent
         self.dxl_controller = DxlController(port, self.dxl_ids, self.gripper_dxl_ids)
         self.target_pos = [0] * self.agent.joint_len  # 목표 위치 초기화 (7개의 관절)
-        self.target_tool_pos = [0] * len(self.agent.tool['joint_names']) if self.agent.tool is not None else None
-
+        self.target_tool_pos = [0] * len(self.agent.tools)  # 도구 그리퍼 목표 위치 초기화
 
     def get_rad_pos(self, position, dxl_id):
         # pos = math.fmod((position - self.origin[dxl_id]), 4096)
@@ -120,7 +119,7 @@ class Leader():
                 try:
                     position = positions[index]
                     if dxl_id in self.gripper_dxl_ids:
-                        if self.agent.tool is None:
+                        if len(self.agent.tools) == 0:
                             self.target_pos[index] = self.get_gripper_pos(position, dxl_id)
                             tool_index += 1
                         else:
