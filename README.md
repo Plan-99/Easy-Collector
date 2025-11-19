@@ -23,7 +23,7 @@ docker build -t  easy-collector:latest .
 cd ~/src/ui
 npm install
 
-cd ~/python_pkg
+cd ~/python_pkgs
 bash install.sh
 ```
 
@@ -88,8 +88,14 @@ python3 -m backend.api.app
 ```
 docker exec -it easy_collector_container /bin/bash
 ```
+```
 cd ~/src/ui
 npm run dev
 ```
 
 
+### 데이터베이스에 column 추가 시 해야할 일
+1. migration
+2. model에 추가
+3. 프론트엔트에 추가
+4. api에 추가

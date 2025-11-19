@@ -64,6 +64,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     python3-rosdep \
     python3-colcon-common-extensions \
+    python3-pykdl \
     build-essential \
     && apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*
 
@@ -112,6 +113,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libx11-6 \
     tmux \
     && rm -rf /var/lib/apt/lists/*
+
+# Git 설치
+RUN apt-get update && apt-get install git -y
 
 # pip 패키지 설치
 COPY requirements.txt .
