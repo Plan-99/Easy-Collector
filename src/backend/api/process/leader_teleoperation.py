@@ -186,5 +186,5 @@ class Leader():
             self.agent.move_step(self.target_pos, self.target_tool_pos)
             end = time.time()
 
-        self.dxl_controller.remove_torque()
+        # self.dxl_controller.remove_torque()
         self.dxl_controller.portHandler.closePort()

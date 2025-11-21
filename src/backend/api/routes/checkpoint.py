@@ -72,7 +72,7 @@ def start_test(id):
         checkpoint=data.get('checkpoint'),
         task=data.get('task'),
         policy_obj=data.get('policy'),
-        robots=agents,
+        agents=agents,
         sensors=data.get('sensors'),
         max_timesteps=data.get('timesteps', 100),
         socketio_instance=current_app.pm.socketio,

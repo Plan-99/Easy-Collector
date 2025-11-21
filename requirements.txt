@@ -39,6 +39,14 @@ meshcat==0.3.2
 sshkeyboard==2.3.1
 numpy==1.26.4
 casadi
+scipy
+tqdm
+hydra-core
+scikit-learn
+matplotlib
+pandas
+zarr
+logging_mp
 
 # # diffusion policy
 # dill

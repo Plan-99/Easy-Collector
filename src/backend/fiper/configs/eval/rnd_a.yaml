@@ -1,0 +1,15 @@
+defaults:
+  - base
+  - rnd_parameters
+
+model_name: rnd_a
+
+required_tensors:
+  - "action_preds"
+
+required_actions:
+  - "all"
+
+optional_actions: []
+
+

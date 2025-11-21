@@ -1,0 +1,215 @@
+# Whether to overwrite the summaries or the data
+overwrite_summary: "all" # "oldest" or "latest" or "all" or {Anthing} (no overwriting)
+# Overwrite the data
+overwrite_data: True 
+# Create a summary (create plots options at the end of this file)
+create_summary: True 
+# Saving and printing hyperparameters requires the "Method" and "HID" columns to be present in the summary table at the end.
+print_hyperparameters: False # Print the hyperparameters in terminal
+save_hyperparameters: False # Save the hyperparameters as csv file
+include_hparams: # empty list = include all
+  - eval
+  - model
+print_hparams:
+  only_best: False
+  only_differences: True
+save_hparams:
+  only_best: False
+  only_differences: True
+
+# The following setting are executed in the order they are defined
+
+# Which columns contain the metrics. This columns are the ones being averaged or sorted or used to determine "best". False: Descending, True: Ascending. Listed in priority order.
+metric_columns:
+  TWA: False  
+  TWA_std: True
+  Accuracy: False
+  Accuracy_std: True
+  Det. Time: True
+  Det. Time_std: True
+  TPR: False
+  TPR_std: True
+  TNR: False
+  TNR_std: True
+  ID S: True
+  OOD S: True 
+  ID F: False
+  OOD F: False
+
+# Which columns to remove from the summary table.
+filter_columns: 
+  # - TWA
+  - ID S
+  - OOD S
+  - ID F
+  - OOD F
+  # - TPR
+  # - TNR
+
+# Keys: columns, Values: List of values to select or to remove (by using "!" in front of values).
+# If "best" included, the best value (of the remaining ones after processing the entries before best) is selected and the column is removed from the summary table.
+# Currently, now mixing between negative and positive values is allowed. (best works with both)
+drop_after_best: False # Drop the column after selecting the best value
+# Which columns to group by when selecting the best value (e.g. when grouping by Method, HID, Threshold the best value is calculated for each Method, HID, Threshold combination by averaging the metrics columns over the remaining columns)
+groups_for_best: ["Method", "HID", "Threshold"]
+# Which values to filter by. If a column is not listed,or a list is empty all values are used.
+filter_values:
+  Task:
+    # - push_chair
+    # - pretzel
+  Method:
+    - entropy
+    - rnd_oe
+    - logpzo
+    - tc
+    - rnd_a
+    - similarity
+    - rnd_oe_and_entropy
+    # - rnd_oe_or_entropy
+  Quantile: # Float values or "best" for the best value
+    # - best
+  Window:
+    - "best"
+    # - "1"
+    # - "2"
+    # - "3"
+    # - "4"
+    # - "5"
+    # - "7"
+    # - "9"
+    # - "11"
+    # - "13"
+    # - "15"
+    # - "20"
+    # - "25"
+    # - "30"
+    # - "35"
+    # - "40"
+    # - "45"
+    # - "50"
+  HID: # Integer values or "best" for the best value
+    - "best"
+  Threshold:
+    - "best"
+    # - "tvt_cp_band"
+    # - "tvt_quantile"
+    # - "ct_quantile"
+
+# Which columns to average over. Those columns are dropped after averaging.
+average_columns:
+  - Quantile
+  - Task 
+
+# Column order for the summary table (the remaining columns are sorted alphabetically)
+column_order:
+  - Method
+  - Task
+  - M
+  - TWA
+  - Accuracy
+  - Det. Time
+  - Window
+
+# Additional sorting of columns. True: Ascending False: Descending. Only for display purposes.
+sorting:
+  TWA: False
+  Accuracy: False
+
+extract_warning_frames:
+  create_plots: True
+
+# Uncertainty Scores over t (rollout steps) Plots
+uncertainty_plots:
+  create_plots: False 
+  exclude_all: True # Exclude cumulative plots
+  drop_after_best: False # Drop the column after selecting the best value
+  filter_values:
+    Method: # None/empty means all methods
+    Window: [best]
+    Quantile: best 
+    Threshold: [best]
+    HID: best # Only one value, best or an integer
+  combine_scores: mean # median or mean
+  # Which scores to show in the plots
+  show:
+    threshold: True 
+    calibration: True 
+    test:
+      all: False 
+      id_success: True 
+      ood_success: True 
+      id_fail: True 
+      ood_fail: True 
+
+
+quantile_impact:
+  create_plots: False 
+  exclude_all: True # Exclude cumulative windows
+  groups_for_best: ["Method", "HID", "Threshold"] # Which columns to group by when selecting the best value
+  drop_after_best: True # Drop the column after selecting the best value
+  filter_values:
+    Method: ["rnd_oe", "entropy", "rnd_oe_and_entropy"] # None/empty means all methods
+    Window: ["15"]
+    Quantile:  # None/empty means all quantiles 
+    HID: [best] # Only one value, best or an integer
+    Threshold: # [best]
+  average_columns: ["Task"]
+  metrics_to_plot: ["TWA", "Det. Time","TPR", "TNR"] # ["TPR", "TNR"] # "TWA" or "Accuracy", metric for the plot
+  thresholds_to_plot: ["tvt_cp_band", "ct_quantile", "tvt_quantile"] # Thresholds to plot, None/empty means all thresholds
+
+
+window_impact:
+  create_plots: False 
+  exclude_all: True # Exclude cumulative windows (all)
+  groups_for_best: ["Method", "HID", "Threshold"] # Which columns to group by when selecting the best value
+  drop_after_best: True # Drop the column after selecting the best value
+  filter_values:
+    Method: ["rnd_oe", "entropy", "rnd_oe_and_entropy"] # None/empty means all methods
+    Quantile: # None/empty means all
+    Window: # None/empty means all windows
+    HID: [best] # Only one value, best or an integer
+    Threshold: 
+  average_columns: ["Task", "Quantile"]
+  metrics_to_plot: ["TWA", "Accuracy", "Det. Time", "TNR"] # "TWA" or "Accuracy", metric for the plot
+  thresholds_to_plot: ["tvt_cp_band", "ct_quantile", "tvt_quantile"] # Thresholds to plot, None/empty means all thresholds
+
+
+threshold_impact:
+  create_plots: False 
+  exclude_all: True # Exclude cumulative windows (all)
+  groups_for_best: ["Method", "HID", "Threshold"] # Which columns to group by when selecting the best value
+  drop_after_best: True # Drop the column after selecting the best value
+  filter_values:
+    Method: ["rnd_oe", "entropy", "rnd_oe_and_entropy"] # None/empty means all methods
+    Quantile: # None/empty means all
+    Window: # None/empty means all windows
+    HID: [best] # Only one value, best or an integer
+    Threshold: 
+  average_columns: ["Task", "Quantile"]
+  metrics_to_plot: ["TWA", "Accuracy", "Det. Time", "TNR"] # "TWA" or "Accuracy", metric for the plot
+  thresholds_to_plot: ["tvt_cp_band", "ct_quantile", "tvt_quantile"] # Thresholds to plot, None/empty means all thresholds
+
+
+rollout_type_stats:
+  create_plots: False 
+  groups_for_best: ["Method", "HID", "Threshold"] # Which columns to group by when selecting the best value
+  filter_values:
+    Task: [push_t, sorting, stacking] # [push_t, sorting, stacking, push_chair, pretzel] # None/empty means all tasks
+    Method: # ["tc"] # ["entropy", "rnd_oe", "tc", "similarity", "logpzo", "rnd_a"] # None/empty means all methods
+    Quantile: [0.95] # None/empty means all
+    Window: ["1"] # None/empty means all windows
+    HID: ["best"] # Only one value, best or an integer
+    Threshold: ["tvt_cp_band"] # None/empty means all
+  average_columns: ["Task"]
+  filter_columns: 
+
+
+method_name_mapping:
+  rnd_oe: "RND-OE"
+  entropy: "ACE"
+  tc: "STAC"
+  similarity: "PCA-kmeans"
+  rnd_a: "RND-A"
+  logpzo: "logpZO"
+  rnd_oe_and_entropy: "FIPER"
+  rnd_oe_or_entropy: "RND-OE or ACE"
