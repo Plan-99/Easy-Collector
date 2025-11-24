@@ -5,7 +5,7 @@ import pickle
 import numpy as np
 from typing import Optional, Union, Dict, Any, Tuple
 import torch
-from shared_utils.utility_functions import ensure_list
+from .utility_functions import ensure_list
 import h5py
 
 supported_data_types = ["npy", "pkl", "pt", "hdf5"]

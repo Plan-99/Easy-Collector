@@ -5,11 +5,11 @@ import numpy as np
 from torch.utils.data import DataLoader, TensorDataset
 import torch.optim as optim
 from tqdm import tqdm
-from rnd.rnd_models import RND_OE, RND_A, RND_AO, RNDBase
-from datasets.rollout_datasets import ProcessedRolloutDataset
+from .rnd_models import RND_OE, RND_A, RND_AO, RNDBase
+from backend.fiper.datasets.rollout_datasets import ProcessedRolloutDataset
 from omegaconf import DictConfig, OmegaConf
-from shared_utils.hydra_utils import load_config
-from shared_utils.utility_functions import set_seed
+from backend.fiper.shared_utils.hydra_utils import load_config
+from backend.fiper.shared_utils.utility_functions import set_seed
 from typing import Union, Dict, Tuple
 from datetime import datetime
 import matplotlib.pyplot as plt

@@ -3,11 +3,11 @@ import torch
 import torch.nn as nn
 import numpy as np
 import os
-from shared_utils.data_compression import perform_pca_tensor
-from shared_utils.utility_functions import compare_dicts
+from backend.fiper.shared_utils.data_compression import perform_pca_tensor
+from backend.fiper.shared_utils.utility_functions import compare_dicts
 
-from rnd.rnd_ao_subblocks import RND_AO_base
-from rnd.rnd_ao_subblocks import Predictor, Target
+from .rnd_ao_subblocks import RND_AO_base
+from .rnd_ao_subblocks import Predictor, Target
 
 
 class RNDBase(nn.Module):

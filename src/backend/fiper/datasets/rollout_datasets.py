@@ -1,10 +1,10 @@
 import torch
-from shared_utils.normalizer import LinearNormalizer
+from backend.fiper.shared_utils.normalizer import LinearNormalizer
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import os
-from shared_utils.data_management import load_data, save_data
-from shared_utils.utility_functions import ensure_list
+from backend.fiper.shared_utils.data_management import load_data, save_data
+from backend.fiper.shared_utils.utility_functions import ensure_list
 from typing import Union, Optional, Dict, Any
 from omegaconf import DictConfig
 

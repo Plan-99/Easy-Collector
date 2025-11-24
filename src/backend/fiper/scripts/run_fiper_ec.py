@@ -38,29 +38,24 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 import torch
 
-# Add the root directory to the path
-ROOT_DIR = str(pathlib.Path(__file__).parent.parent)
-sys.path.append(ROOT_DIR)
-os.chdir(ROOT_DIR)
+# Define paths relative to this file's location to ensure robustness.
+FIPER_ROOT = pathlib.Path(__file__).parent.parent
+BASE_CONFIG_PATH = FIPER_ROOT / "configs"
+BASE_DATA_PATH = FIPER_ROOT / "data"
 
+from backend.fiper.rnd import RNDTrainer
+from backend.fiper.evaluation import EvaluationManager, ResultsManager
+from backend.fiper.tasks import TaskManager
 
-from rnd import RNDTrainer
-from evaluation import EvaluationManager, ResultsManager
-from tasks import TaskManager
-
-from shared_utils.hydra_utils import load_config
-from shared_utils.utility_functions import get_required_tensors, set_seed
-
-
-# Determine Config Path
-base_config_path = os.path.join(ROOT_DIR, "configs")
-base_data_path = os.path.join(ROOT_DIR, "data")
+from backend.fiper.shared_utils.hydra_utils import load_config
+from backend.fiper.shared_utils.utility_functions import get_required_tensors, set_seed
+from backend.fiper.shared_utils.embedding_helper import EmbeddingHelper
 
 
 # Add the config directory to the path
-@hydra.main(config_path=base_config_path, config_name="default.yaml", version_base="1.1")
+@hydra.main(config_path=str(BASE_CONFIG_PATH), config_name="default.yaml", version_base="1.1")
 def main(cfg: DictConfig):
-    # Tasks to be processed
+
     tasks = cfg.get("tasks", [])
     # Methods to be evaluated
     rnd_models = cfg.get("rnd_models", [])
@@ -81,10 +76,10 @@ def main(cfg: DictConfig):
         methods,
         combined_methods,
         combine_methods,
-        base_config_path,
+        str(BASE_CONFIG_PATH),
     )
     # Check which tensors are required for the methods
-    required_tensors, optional_tensors = get_required_tensors(methods, base_config_path)
+    required_tensors, optional_tensors = get_required_tensors(methods, str(BASE_CONFIG_PATH))
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -100,12 +95,12 @@ def main(cfg: DictConfig):
             # Load the complete config with only the task overridden
             cfg = load_config("task", task, return_only_subdict=False)
 
-            task_data_path = os.path.join(base_data_path, task)
+            task_data_path = os.path.join(BASE_DATA_PATH, task)
             # Initial Data Gathering and Processing
             taskmanager = TaskManager(
                 cfg,
                 task,
-                base_config_path,
+                str(BASE_CONFIG_PATH),
                 task_data_path,
                 required_tensors=required_tensors,
                 optional_tensors=optional_tensors,
@@ -120,13 +115,13 @@ def main(cfg: DictConfig):
 
             # Train RND models if required
             if train_rnd:
-                rndtrainer = RNDTrainer(base_config_path, task_data_path, dataset, device=device, task_cfg=cfg, seed=seed)
+                rndtrainer = RNDTrainer(str(BASE_CONFIG_PATH), task_data_path, dataset, device=device, task_cfg=cfg, seed=seed)
                 rndtrainer.train(rnd_models)
             else:
                 pass
 
             # Initialize the evaluation interface
-            evaluationmanager = EvaluationManager(base_config_path, task_data_path, dataset, device=device, seed=seed)
+            evaluationmanager = EvaluationManager(str(BASE_CONFIG_PATH), task_data_path, dataset, device=device, seed=seed)
             # Evaluate the methods including the combined methods
             results = evaluationmanager.evaluate(methods, combine_methods, combined_methods)
             # Save the results for the task
@@ -135,7 +130,7 @@ def main(cfg: DictConfig):
         all_seed_results.append(total_results.copy())
 
     # Create the results manager
-    resultsmanager = ResultsManager(base_config_path, base_data_path)
+    resultsmanager = ResultsManager(str(BASE_CONFIG_PATH), str(BASE_DATA_PATH))
 
     # Combine the results from all seeds ()
     total_results = resultsmanager.accumulate_seed_results(all_seed_results)

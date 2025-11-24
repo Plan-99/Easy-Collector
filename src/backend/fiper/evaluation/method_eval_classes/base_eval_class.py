@@ -6,12 +6,12 @@ from typing import Union
 import time
 import numpy as np
 from omegaconf import DictConfig
-from evaluation.utils import (
+from ..utils import (
     calculate_metrics,
     compute_thresholds,
     normalize_scores_by_threshold,
 )
-from datasets.rollout_datasets import ProcessedRolloutDataset
+from backend.fiper.datasets.rollout_datasets import ProcessedRolloutDataset
 
 
 class BaseEvalClass(ABC):

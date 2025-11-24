@@ -1,7 +1,7 @@
 from hydra import compose, initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import OmegaConf, DictConfig
-from shared_utils.utility_functions import ensure_list
+from .utility_functions import ensure_list
 import os
 import pathlib
 from typing import List, Dict, Union

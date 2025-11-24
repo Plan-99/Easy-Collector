@@ -1,11 +1,11 @@
 import torch
 import hydra
 import numpy as np
-from shared_utils import load_config
+from backend.fiper.shared_utils.hydra_utils import load_config
 from .method_eval_classes import BaseEvalClass
 from omegaconf import OmegaConf, DictConfig
-from evaluation.utils import calculate_metrics
-from datasets.rollout_datasets import ProcessedRolloutDataset
+from .utils import calculate_metrics
+from backend.fiper.datasets.rollout_datasets import ProcessedRolloutDataset
 
 
 class EvaluationManager:
@@ -217,7 +217,7 @@ class EvaluationManager:
             class_name = "rnd"
 
         class_name = f"{class_name.replace('_', '').upper()}Eval"  # Class name follows the pattern {METHOD}Eval where METHOD is the method name in uppercase without underscores
-        module_name = "evaluation.method_eval_classes."  # Base module name for method_eval_classes
+        module_name = "backend.fiper.evaluation.method_eval_classes."  # Base module name for method_eval_classes
 
         # Import the method_eval_classes module (which exposes all classes in its __init__.py)
         method_eval_class: BaseEvalClass = hydra.utils.get_class(module_name + class_name)
