@@ -64,6 +64,7 @@ class EvaluationManager:
         """
         total_results = {}  # Dictionary to store results for all methods
 
+
         for method in methods:
             # Load the configuration for the method
             cfg = self._load_config(method_name=method)

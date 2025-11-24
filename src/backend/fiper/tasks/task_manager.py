@@ -11,10 +11,11 @@ from backend.fiper.datasets.rollout_datasets import ProcessedRolloutDataset
 import torch
 import re
 from omegaconf import DictConfig
+from backend.fiper.shared_utils.embedding_helper import EmbeddingHelper
 
 
 class TaskManager:
-    def __init__(self, cfg: DictConfig, task: str, base_config_path: str, task_data_path: str, **kwargs):
+    def __init__(self, cfg: DictConfig, task: str, base_config_path: str, task_data_path: str, embedding_helper: EmbeddingHelper, **kwargs):
         """
         Manages task-specific data processing and rollouts.
 
@@ -46,6 +47,8 @@ class TaskManager:
         # self.optional_tensors = list(set(kwargs.get("optional_tensors", [])+ ["states"]))
         self.device = kwargs.get("device", "cpu")
         self.normalize_tensors = cfg.eval.get("normalize_tensors", {})
+
+        self.embedding_helper = embedding_helper
 
     def get_rollout_dataset(
         self,
@@ -149,14 +152,18 @@ class TaskManager:
 
         # Load the raw rollouts
         calibration_rollouts = load_raw_rollouts(
+            embedding_helper=self.embedding_helper,
             load_dirs=self.calibration_rollout_dir,
             searched_filenames=calibration_rollout_filenames,
             raise_error_if_not_found=False,
+            is_calibration=True,
         )
         test_rollouts = load_raw_rollouts(
+            embedding_helper=self.embedding_helper,
             load_dirs=self.test_rollout_dir,
             searched_filenames=test_rollout_filenames,
             raise_error_if_not_found=False,
+            is_calibration=False,
         )
         if len(calibration_rollouts) == 0 and len(test_rollouts) == 0:
             return {}

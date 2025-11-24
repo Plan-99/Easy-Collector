@@ -85,6 +85,7 @@ class RNDTrainer:
             model_name=filename,
             world_model_dir=os.path.join(self.task_data_path, "sys_id"),
         )
+        
 
     def _get_datasets_for_model(self, model_name: str, cfg: DictConfig, **kwargs) -> Dict[str, torch.Tensor]:
         """
@@ -419,6 +420,7 @@ class RNDTrainer:
             best_state_dict = copy.deepcopy(model.state_dict())
         # Save the best model
         filename = f"{datetime.now().strftime('%Y-%m-%d_%H')}_epoch_{epoch + 1}_loss_{val_loss:.2g}_seed_{model_cfg['hparams']['seed']}.ckpt"
+
 
         model._save_checkpoint(
             save_dir,

@@ -7,6 +7,8 @@ from typing import Optional, Union, Dict, Any, Tuple
 import torch
 from .utility_functions import ensure_list
 import h5py
+from backend.fiper.shared_utils.embedding_helper import EmbeddingHelper
+from tqdm import tqdm
 
 supported_data_types = ["npy", "pkl", "pt", "hdf5"]
 
@@ -26,22 +28,13 @@ class LazyTensorManager:
         max_bytes_per_batch: int = 2**30,
         element_size: int = None,
     ):
-        """
-        Args:
-            save_dir (str): Directory where the tensors are saved.
-            key (str): Key for the tensor.
-            batch_size (int, optional): Size of each batch. Defaults to 1000.
-            max_batches_in_cache (int, optional): Maximum number of batches to keep in cache. Defaults to 1.
-            max_bytes (int, optional): Maximum size of a batch in bytes. Only applies when 'element_size' is given, then batch_size is calculated. Defaults to 2**30.
-            element_size (int, optional): Size of each element in bytes, i.e., tensor.shape[1:].numel() * tensor.element_size().
-        """
         if element_size is not None:
             batch_size = max_bytes_per_batch // element_size
         self.save_dir = save_dir
         self.key = key
         self.batch_size = batch_size
         self.max_batches_in_cache = max_batches_in_cache
-        self.cache = {}  # Cache for loaded parts
+        self.cache = {}
         if not os.path.exists(save_dir):
             os.makedirs(save_dir, exist_ok=True)
         if not os.path.exists(self._get_filepath(0)):
@@ -52,10 +45,8 @@ class LazyTensorManager:
     def get_batch(self, batch_index):
         if batch_index in self.cache:
             return self.cache[batch_index]
-        # Load batch from disk
         batch = torch.load(self._get_filepath(batch_index), weights_only=True)
         self.cache[batch_index] = batch
-        # Evict old batches if cache size exceeds limit
         if len(self.cache) > self.max_batches_in_cache:
             self.cache.pop(next(iter(self.cache)))
         return batch
@@ -76,9 +67,6 @@ class LazyTensorManager:
             raise FileExistsError(f"File {filepath} already exists. Use overwrite=True to replace it.")
         torch.save(tensor, filepath)
 
-    def save_list_as_tensor(self, list: list[Union[np.ndarray, torch.Tensor]], save_dir):
-        pass
-
     def save_full_tensor_in_batches(self, tensor, save_dir):
         os.makedirs(save_dir, exist_ok=True)
         num_batches = (tensor.shape[0] + self.batch_size - 1) // self.batch_size
@@ -90,68 +78,6 @@ class LazyTensorManager:
         return os.path.join(self.save_dir, f"{self.key}_part_{batch_index}.pt")
 
 
-def create_memmap_tensor(save_dir, filename, shape, dtype=torch.float32):
-    """
-    Create a memory-mapped tensor.
-
-    Args:
-        save_dir (str): Directory where the memory-mapped file will be created.
-        filename (str): Name of the memory-mapped file.
-        shape (tuple): Shape of the tensor.
-        dtype (torch.dtype): Data type of the tensor (default: torch.float32).
-
-    Returns:
-        torch.Tensor: Memory-mapped tensor.
-    """
-    os.makedirs(save_dir, exist_ok=True)
-    filepath = os.path.join(save_dir, filename)
-    if os.path.exists(filepath):
-        os.remove(filepath)
-    num_elements = torch.prod(torch.tensor(shape))
-    storage = torch.FloatStorage.from_file(filepath, shared=True, size=num_elements)
-    return torch.tensor(storage, dtype=dtype).reshape(shape)
-
-
-def append_to_memmap_tensor(filepath, tensor: torch.Tensor, new_tensor: torch.Tensor):
-    """
-    Append new data to a memory-mapped tensor.
-
-    Args:
-        filepath (str): Path to the memory-mapped file.
-        tensor (torch.Tensor): Existing memory-mapped tensor.
-        new_data (torch.Tensor): New data to append.
-
-    Returns:
-        torch.Tensor: Updated memory-mapped tensor.
-    """
-    # Ensure new_data has the same shape except for the first dimension
-    assert os.path.exists(filepath), f"File {filepath} does not exist."
-    assert new_tensor.shape[1:] == tensor.shape[1:], (
-        f"Shape mismatch between new tensor with shape {new_tensor.shape[1:]} and old tensor with shape {tensor.shape[1:]}. "
-    )
-
-    # Calculate the new size
-    current_size = tensor.shape[0]
-    new_size = current_size + new_tensor.shape[0]
-
-    # Resize the file
-    element_size = tensor.element_size()  # Size of each element in bytes
-    assert element_size == new_tensor.element_size(), (
-        f"Element size mismatch between new tensor with size {new_tensor.element_size()} and old tensor with size {element_size}."
-    )
-    with open(filepath, "ab") as f:
-        f.truncate(new_size * tensor.shape[1:].numel() * element_size)
-
-    # Update the storage and tensor
-    storage = torch.FloatStorage.from_file(filepath, shared=True, size=new_size * tensor.shape[1:].numel())
-    updated_tensor = torch.tensor(storage, dtype=tensor.dtype).reshape((new_size,) + tensor.shape[1:])
-
-    # Copy the new data into the updated tensor
-    updated_tensor[current_size:] = new_tensor
-
-    return updated_tensor
-
-
 def load_data(
     load_dirs: Union[str, list[str]],
     keywords: Optional[Union[str, list[str]]] = None,
@@ -160,22 +86,9 @@ def load_data(
     return_filenames: bool = False,
     error_if_not_found: bool = True,
 ) -> Union[Any, Tuple[Any, list[str]]]:
-    """Load data from specified directories optionally filtering by keywords and data types.
-    Args:
-        load_dirs (Union[str, list[str]]): Directory or list of directories to load data from.
-        keywords (Optional[Union[str, list[str]]], optional): Keywords to filter filenames. Defaults to None.
-        data_types (Optional[Union[str, list[str]]], optional): Types of data to load. Defaults to None.
-        weights_only (bool, optional): Whether to load only weights when loading torch tensors. Defaults to True.
-    Returns:
-        Any: Loaded data.
-    """
-
     load_dirs, keywords, data_types = ensure_list(load_dirs, keywords, data_types)
     if data_types is not None:
-        assert any(data_type in supported_data_types for data_type in data_types), (
-            "data_types must be either 'hdf5', 'npy', 'pkl' or 'pt'"
-        )
-
+        assert any(data_type in supported_data_types for data_type in data_types)
     not_found = 0
     data = []
     all_filenames = []
@@ -203,7 +116,6 @@ def load_data(
         raise FileNotFoundError(f"No files found in {load_dirs} with keywords {keywords} and data types {data_types}.")
     if len(data) == 1:
         data = data[0]
-
     if return_filenames:
         return data, all_filenames
     return data
@@ -216,14 +128,6 @@ def save_data(
     data_types: Optional[Union[str, list[str]]] = "pkl",
     overwrite: bool = False,
 ) -> None:
-    """Save data to specified directories with specified filenames and datatypes.
-    Args:
-        save_dir (str): Directory to save data to.
-        filenames (Union[str, list[str]]): Filename or list of filenames to save data as.
-        data (Union[Any, list[Any]]): Data to save.
-        data_types (Optional[Union[str, list[str]]], optional): Types of data to save. Defaults to None.
-        overwrite (bool, optional): Whether to overwrite existing files. Defaults to False.
-    """
     if isinstance(filenames, str):
         filenames = [filenames]
     if isinstance(data_types, str):
@@ -231,13 +135,9 @@ def save_data(
     if not isinstance(data, list):
         data = [data]
     assert len(filenames) == len(data), "Number of filenames must match number of data items."
-    assert any(data_type in supported_data_types for data_type in data_types), (
-        "data_types must be either 'npy', 'pkl' or 'pt'"
-    )
+    assert any(data_type in supported_data_types for data_type in data_types)
     if len(data_types) > 1:
-        assert len(filenames) == len(data_types), (
-            "Number of filenames must match number of data types when data_types is a list."
-        )
+        assert len(filenames) == len(data_types)
     os.makedirs(save_dir, exist_ok=True)
     for i in range(len(filenames)):
         if len(data_types) == 1:
@@ -246,9 +146,6 @@ def save_data(
             data_type = data_types[i]
         if not filenames[i].endswith("." + data_type):
             filenames[i] = filenames[i] + "." + data_type
-        # assert not filenames[i].endswith("." + data_type + "." + data_type), (
-        #     "File saved with double extension. Please check the filenames."
-        # )
         file_path = os.path.join(save_dir, filenames[i])
         if os.path.exists(file_path):
             if overwrite:
@@ -256,7 +153,6 @@ def save_data(
             else:
                 Warning(f"File {file_path} already exists. Use overwrite=True to replace it.")
                 continue
-
         if file_path.endswith(".npy"):
             np.save(file_path, data[i], allow_pickle=True)
         elif file_path.endswith(".pkl"):
@@ -266,201 +162,188 @@ def save_data(
             torch.save(data[i], file_path)
 
 
+def batch_ec_to_fiper_rollout_converter(
+    batch_data: list[tuple[str, dict]], embedding_helper: EmbeddingHelper, is_calibration: bool = True
+) -> list[dict]:
+    """
+    Converts a batch of Easy-Collector rollout data to FiPer format.
+    """
+    rollouts_ec = [item[1] for item in batch_data]
+
+    # Assumes embedding_helper has a method `get_embedding_batch` for batch processing
+    all_embeddings_batch = embedding_helper.get_embedding_batch(rollouts_ec)
+
+    processed_rollouts = []
+    index = 0
+    for (filename, rollout_ec), all_action_preds in tqdm(zip(batch_data, all_embeddings_batch), total=len(batch_data), desc="Converting rollouts"):
+        rollout_fiper = {}
+        if is_calibration:
+            rollout_type = "calibration"
+            rollout_subtype = "ca"
+            is_success = True
+        else:
+            rollout_type = "test"
+            if index < 4:
+                is_success = True
+                rollout_subtype = "id"
+            else:
+                is_success = False
+                rollout_subtype = "ood"
+        rollout_fiper['metadata'] = {
+            'task': "unknown_task", 'episode': filename, 'num_robots': len(rollout_ec['qaction'].keys()),
+            'rollout_type': rollout_type, 'rollout_subtype': rollout_subtype,
+            'action_prediction_horizon': 1, 'action_execution_horizon': 1, 'action_batch_size': 1,
+            'has_encoder_feat': True, 'has_state_feat': True, 'action_mappings': {}, 'successful': is_success,
+            'num_steps': len(rollout_ec['qaction'][next(iter(rollout_ec['qaction']))]),
+        }
+        rollout_fiper['rollout'] = []
+        for step in range(len(rollout_ec['qaction'][next(iter(rollout_ec['qaction']))])):
+            rgb = rollout_ec['observations']['images'][next(iter(rollout_ec['observations']['images']))][step]
+            action = rollout_ec['qaction'][next(iter(rollout_ec['qaction']))][step]
+            agent_pos = rollout_ec['observations']['qpos'][next(iter(rollout_ec['observations']['qpos']))][step]
+            action_pred = all_action_preds[step]
+            fiper_step = {
+                'rgb': rgb, 'action': action, 'agent_pos': agent_pos, 'action_pred': action_pred,
+                'obs_embedding': action_pred.flatten(), 'state_embedding': action_pred.flatten(),
+                'timestamp': step, 'step': step,
+            }
+            rollout_fiper['rollout'].append(fiper_step)
+        processed_rollouts.append(rollout_fiper)
+        index += 1
+    return processed_rollouts
+
+
 def load_raw_rollouts(
+    embedding_helper: EmbeddingHelper,
     load_dirs: Union[str, list[str]],
     data_types: Union[str, list[str]] = ["npy", "pkl", "hdf5"],
     keywords: Optional[Union[str, list[str]]] = ["episode", "eps", "rollout"],
     searched_filenames: Optional[Union[str, list[str]]] = [],
     with_filename: bool = False,
     raise_error_if_not_found: bool = True,
+    is_calibration: bool = True,
 ) -> list[Dict[str, Any]]:
-    """Load raw rollouts from a specified directory.
-
-    Args:
-        load_dir(s) (str, list): Directory(s) where the rollouts are stored.
-        data_types (str, optional): Type of data to load, either "npy" or "pkl". If None, it will be inferred from the file extension. Defaults to None.
-        keywords (Optional[Union[str, list[str]]], optional): Keywords to filter filenames. If None, all files will be loaded. Defaults to "episode".
-        searched filenames (Optional[Union[str, list[str]]], optional): Specific filenames to load. If None, all files in the directory that contain the keywords and have a supported datatype will be loaded. Defaults to None.
-        with_filename (bool, optional): Whether to include file name in the output. Defaults to False.
-
-    Returns:
-        rollouts (dict[list, dict]): Dict with keys: fileinfo and rollout.
     """
-
-    data = []
-    load_dirs, searched_filenames, data_types, keywords = ensure_list(load_dirs, searched_filenames, data_types, keywords)
-
-    assert any(data_type in supported_data_types for data_type in data_types), (
-        f"data_types must be in {supported_data_types}, but got {data_types}"
+    Load raw rollouts from specified directories. If HDF5 files are found, they
+    are first converted to .pkl files in the same directory, overwriting existing
+    files. Then, all .pkl and .npy files are loaded.
+    """
+    load_dirs, searched_filenames, data_types, keywords = ensure_list(
+        load_dirs, searched_filenames, data_types, keywords
     )
-    not_found = 0
+    assert any(dt in supported_data_types for dt in data_types), f"data_types must be in {supported_data_types}"
+
+    # Stage 1: Convert all HDF5 files to PKL format first.
+    if "hdf5" in data_types:
+        for load_dir in load_dirs:
+            if not os.path.exists(load_dir) or not os.path.isdir(load_dir):
+                continue
+
+            hdf5_filenames = _get_filenames(
+                load_dir, keywords=keywords, data_types=["hdf5"], searched_filenames=searched_filenames
+            )
+
+            if not hdf5_filenames:
+                continue
+
+            hdf5_batch_to_process = []
+
+            for filename in hdf5_filenames:
+                file_path = os.path.join(load_dir, filename)
+                with h5py.File(file_path, "r") as f:
+                    rollout_ec = hdf5_to_dict(f)
+                hdf5_batch_to_process.append((filename, rollout_ec))
+
+            if hdf5_batch_to_process:
+                print(f"Converting {len(hdf5_batch_to_process)} HDF5 files in {load_dir} to PKL format...")
+                processed_rollouts = batch_ec_to_fiper_rollout_converter(hdf5_batch_to_process, embedding_helper, is_calibration=is_calibration)
+
+                new_filenames = [item[0].replace(".hdf5", ".pkl") for item in hdf5_batch_to_process]
+                save_data(load_dir, new_filenames, processed_rollouts, data_types="pkl", overwrite=True)
+                print(f"Finished converting and saving {len(new_filenames)} files.")
+
+    # Stage 2: Load all PKL and NPY files.
+    data = []
+    not_found_dirs = 0
+    load_data_types = [dt for dt in data_types if dt in ["pkl", "npy"]]
+
     for load_dir in load_dirs:
         if not os.path.exists(load_dir) or not os.path.isdir(load_dir):
             print(f"Directory {load_dir} not found or is not a directory. Skipping...")
-            not_found += 1
+            not_found_dirs += 1
             continue
+
         filenames = _get_filenames(
-            load_dir, keywords=keywords, data_types=data_types, searched_filenames=searched_filenames
+            load_dir, keywords=keywords, data_types=load_data_types, searched_filenames=searched_filenames
         )
 
-        for filename in filenames:
+        for filename in tqdm(filenames, desc=f"Loading rollouts from {os.path.basename(load_dir)}"):
             file_path = os.path.join(load_dir, filename)
+            rollout = None
             if filename.endswith(".npy"):
                 rollout = np.load(file_path, allow_pickle=True)
             elif filename.endswith(".pkl"):
                 with open(file_path, "rb") as f:
                     rollout = pickle.load(f)
-                    # print(rollout.keys()) # dict_keys(['metadata', 'rollout'])
-                    # print(rollout["metadata"].keys()) # dict_keys(['metadata', 'task', 'episode', 'num_robots', 'rollout_type', 'rollout_subtype', 'action_prediction_horizon', 'action_execution_horizon', 'action_batch_size', 'has_encoder_feat', 'has_state_feat', 'action_mappings', 'successful', 'num_steps'])
-                    # print(rollout["rollout"][0].keys()) # dict_keys(['rgb', 'action', 'action_pred', 'agent_pos', 'obs_embedding', 'state_embedding', 'timestamp', 'step'])
-                    print(rollout["rollout"][0]["action"].shape)
-                    print(rollout["rollout"][0]["action_pred"].shape)
-                    print(rollout["rollout"][0]["obs_embedding"].shape)
-                    quit()
-            elif filename.endswith(".hdf5"):
-                with h5py.File(file_path, "r") as f:
-                    rollout = hdf5_to_dict(f)
-                    print(rollout.keys())  # dict_keys(['language_instruction', 'observations', 'qaction'])
-                    quit()
-            if with_filename:
-                rollout = {"fileinfo": filename, "rollout": rollout}
-            data.append(rollout)
-    if not_found == len(load_dirs) and raise_error_if_not_found:
+                    # print(rollout.keys())
+                    # print(rollout['metadata']["successful"])
+                    # print(rollout['rollout'][0].keys())
+
+            if rollout is not None:
+                if with_filename:
+                    data.append({"fileinfo": filename, "rollout": rollout})
+                else:
+                    data.append(rollout)
+
+    if not_found_dirs == len(load_dirs) and raise_error_if_not_found:
         raise FileNotFoundError(f"Directories {load_dirs} not found or are not directories.")
     if len(data) == 0 and raise_error_if_not_found:
         raise FileNotFoundError(
-            f"No files found in {load_dirs} with keywords {keywords} or filenames {searched_filenames} and data types {data_types}."
+            f"No files found in {load_dirs} with keywords {keywords} or filenames {searched_filenames} and data types {load_data_types}."
         )
     return data
 
+
 def hdf5_to_dict(h5_obj):
     """
-    HDF5 객체(Group/Dataset)를 재귀적으로 탐색하여 
-    Python Dictionary 및 NumPy Array로 변환합니다.
+    Recursively explore HDF5 objects (Group/Dataset) and
+    convert them to Python Dictionary and NumPy Array.
     """
     data = {}
     for key, item in h5_obj.items():
         if isinstance(item, h5py.Group):
-            # 그룹이면 재귀 호출
             data[key] = hdf5_to_dict(item)
         elif isinstance(item, h5py.Dataset):
-            # 데이터셋이면 값을 읽어옴 (Scalar 또는 Array)
             val = item[()]
-            # 필요하다면 여기서 bytes -> string 디코딩 등을 수행할 수 있음
             data[key] = val
     return data
+
 
 def _get_filenames(
     load_dir: str,
     keywords: Optional[Union[str, list[str]]] = None,
     data_types: Union[str, list[str]] = ["pkl", "npy", "pt", "hdf5"],
-    searched_filenames=None,
+    searched_filenames: Optional[Union[str, list[str]]] = None,
 ) -> list[str]:
-    """Get a list of filenames in the specified directory that contain the keywords.
-
-    Args:
-        load_dir (str): Directory where the files are stored.
-        keywords (Optional[Union[str, list[str]]], optional): Keywords to filter filenames. If None, all files will be loaded. Defaults to None.
-        data_types (Union[str, list[str]], optional): Type of data to search for. If None, it will be inferred from the file extension. Defaults to ["pkl"].
-        searched_filenames (Optional[Union[str, list[str]]], optional): Specific filenames to load. Takes precedence over keywords and data_types.
-
-    Returns:
-        list[str]: List of filtered filenames.
     """
-    all_filenames = sorted(os.listdir(load_dir))
-    keywords = ensure_list(keywords)
-    # assert len(all_filenames) > 0, f"No files found in {load_dir}"
-
-    filenames = []
-    for filename in all_filenames:
-        if searched_filenames is not None:
-            if filename in searched_filenames:
-                filenames.append(filename)
-            continue
-        if any(filename.endswith(dt) for dt in data_types):
-            if keywords is None:
-                filenames.append(filename)
-            else:
-                if any(keyword in filename for keyword in keywords):
-                    filenames.append(filename)
-
-    return sorted(filenames)
-
-
-def _get_file_path(save_load_dir: str, filename: str, mode: str, overwrite=False) -> str:
-    """Get the full file path for saving data.
-
-    Args:
-        save_dir (str): Directory where the file will be saved.
-        filename (str): Name of the file.
-        mode (str): Mode of operation, either "save" or "load".
-        overwrite (bool, optional): Whether to overwrite existing files. Defaults to False.
-
-    Returns:
-        str: Full file path.
+    Filters files in a directory based on a combination of criteria, applying
+    filters for specific filenames, data types, and keywords sequentially.
     """
-    assert mode in ["save", "load"], "mode must be either 'save' or 'load'"
-    if mode == "save":
-        os.makedirs(save_load_dir, exist_ok=True)
-        file_path = os.path.join(save_load_dir, filename)
-        if os.path.exists(file_path):
-            if overwrite:
-                os.remove(file_path)
-            else:
-                Warning(f"File {file_path} already exists. Use overwrite=True to replace it.")
-                return
-    elif mode == "load":
-        if not os.path.exists(save_load_dir):
-            raise FileNotFoundError(f"Directory {save_load_dir} not found")
-        if filename is None:
-            filenames = sorted(
-                [filename for filename in os.listdir(save_load_dir) if filename.endswith("." + data_type)]
-            )
-            if len(filenames) == 0:
-                raise FileNotFoundError(f"No {data_type} files found in {save_load_dir}")
-            file_path = os.path.join(save_load_dir, filenames[-1])
-        else:
-            file_path = os.path.join(save_load_dir, filename)
-            if not os.path.exists(file_path):
-                raise FileNotFoundError(f"File {file_path} not found")
-    return file_path
+    candidate_files = os.listdir(load_dir)
 
+    # Filter by a specific list of filenames if provided
+    if searched_filenames is not None:
+        searched_set = set(ensure_list(searched_filenames))
+        candidate_files = [f for f in candidate_files if f in searched_set]
 
-def save_rollouts_pkl(save_dir: str, filename: str, rollouts: dict, dataset_metadata: dict, overwrite=False):
-    """Save rollouts and metadata to a pickle file.
+    # Filter by data types (file extensions)
+    data_types_list = ensure_list(data_types)
+    if data_types_list:
+        candidate_files = [f for f in candidate_files if any(f.endswith(dt) for dt in data_types_list)]
 
-    Args:
-        save_dir (str): Directory where the pickle file will be saved.
-        filename (str): Name of the pickle file.
-        rollouts (dict): Dictionary of rollouts with metadata.
-        dataset_metadata (dict): Global metadata for the dataset.
-        overwrite (bool, optional): Whether to overwrite existing files. Defaults to False.
-    """
-    file_path = _get_file_path(save_dir, filename, mode="save", overwrite=overwrite)
+    # Filter by keywords
+    keywords_list = ensure_list(keywords)
+    if keywords_list:
+        candidate_files = [f for f in candidate_files if any(kw in f for kw in keywords_list)]
 
-    with open(file_path, "wb") as f:
-        pickle.dump({"rollouts": rollouts, "metadata": dataset_metadata}, f)
-        print(f"Rollouts saved to {file_path}")
-
-
-def load_rollouts_pkl(load_dir: str, filename: Optional[str] = None) -> tuple[dict, dict]:
-    """Load rollouts and metadata from a pickle file.
-
-    Args:
-        load_dir (str): Directory where the pickle file is located.
-        filename (str, optional): Name of the pickle file. If None, the latest file in the directory will be used.
-
-    Returns:
-        tuple: A tuple containing:
-            - metadata (dict): Global metadata.
-            - rollouts (dict): Dictionary of rollouts with metadata.
-    """
-    file_path = _get_file_path(load_dir, filename, mode="load")
-
-    with open(file_path, "rb") as f:
-        data = pickle.load(f)
-
-    return data["metadata"], data["rollouts"]
-
-
-
+    return sorted(candidate_files)

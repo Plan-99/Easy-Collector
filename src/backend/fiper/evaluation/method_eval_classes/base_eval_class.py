@@ -157,6 +157,12 @@ class BaseEvalClass(ABC):
                         cfg=self.cfg,
                     )
 
+        # print(f"Calib Score Mean: {np.mean(np.concatenate(uncertainty_scores))}")
+        # print(f"Calib Score Max: {np.max(np.concatenate(uncertainty_scores))}")
+        # print(f"thresholds: {thresholds}")
+        # print(f"scores_by_threshold: {scores_by_threshold}")
+        # quit()
+
         return thresholds, scores_by_threshold
 
     def _get_metrics(self, thresholds: dict, test_scores: dict) -> tuple[dict, dict]:
@@ -238,6 +244,7 @@ class BaseEvalClass(ABC):
             "id_test_rollouts": self.dataset.get_rollout_subtypes(subset="test", subsubset="id"),
             "ood_test_rollouts": self.dataset.get_rollout_subtypes(subset="test", subsubset="ood"),
         }
+        # print(eval_results["method"])
         self._save_pickle(self.results_dir, eval_results, "eval_results.pkl")
         return eval_results
 

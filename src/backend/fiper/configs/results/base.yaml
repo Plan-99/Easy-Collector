@@ -65,7 +65,7 @@ filter_values:
     - rnd_a
     - similarity
     - rnd_oe_and_entropy
-    # - rnd_oe_or_entropy
+    - rnd_oe_or_entropy
   Quantile: # Float values or "best" for the best value
     # - best
   Window:
@@ -164,7 +164,7 @@ window_impact:
   groups_for_best: ["Method", "HID", "Threshold"] # Which columns to group by when selecting the best value
   drop_after_best: True # Drop the column after selecting the best value
   filter_values:
-    Method: ["rnd_oe", "entropy", "rnd_oe_and_entropy"] # None/empty means all methods
+    Method: ["rnd_oe", "entropy", "rnd_oe_and_entropy", "rnd_oe_or_entropy"] # None/empty means all methods
     Quantile: # None/empty means all
     Window: # None/empty means all windows
     HID: [best] # Only one value, best or an integer
@@ -180,7 +180,7 @@ threshold_impact:
   groups_for_best: ["Method", "HID", "Threshold"] # Which columns to group by when selecting the best value
   drop_after_best: True # Drop the column after selecting the best value
   filter_values:
-    Method: ["rnd_oe", "entropy", "rnd_oe_and_entropy"] # None/empty means all methods
+    Method: ["rnd_oe", "entropy", "rnd_oe_and_entropy", "rnd_oe_or_entropy"] # None/empty means all methods
     Quantile: # None/empty means all
     Window: # None/empty means all windows
     HID: [best] # Only one value, best or an integer

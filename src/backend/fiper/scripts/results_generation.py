@@ -32,12 +32,12 @@ def main(cfg: DictConfig):
     resultsmanager = ResultsManager(base_config_path, base_data_path)
     # Summarize and visualize results as defined in results config. Saves the summary(ies) as csv file(s).
     resultsmanager.create_summary(**kwargs)
-    resultsmanager.extract_warning_frames(**kwargs)
-    resultsmanager.generate_uncertainty_plots(**kwargs)
+    # resultsmanager.extract_warning_frames(**kwargs)
+    # resultsmanager.generate_uncertainty_plots(**kwargs)
     resultsmanager.plot_quantile_impact(**kwargs)
-    resultsmanager.plot_window_impact(**kwargs)
-    resultsmanager.plot_threshold_impact(**kwargs)
-    resultsmanager.plot_rollout_type_stats(**kwargs)
+    # resultsmanager.plot_window_impact(**kwargs)
+    # resultsmanager.plot_threshold_impact(**kwargs)
+    # resultsmanager.plot_rollout_type_stats(**kwargs)
 
 
 if __name__ == "__main__":

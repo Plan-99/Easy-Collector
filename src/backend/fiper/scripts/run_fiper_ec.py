@@ -55,6 +55,8 @@ from backend.fiper.shared_utils.embedding_helper import EmbeddingHelper
 # Add the config directory to the path
 @hydra.main(config_path=str(BASE_CONFIG_PATH), config_name="default.yaml", version_base="1.1")
 def main(cfg: DictConfig):
+    
+    embedding_helper = EmbeddingHelper()
 
     tasks = cfg.get("tasks", [])
     # Methods to be evaluated
@@ -102,16 +104,15 @@ def main(cfg: DictConfig):
                 task,
                 str(BASE_CONFIG_PATH),
                 task_data_path,
+                embedding_helper,
                 required_tensors=required_tensors,
                 optional_tensors=optional_tensors,
                 device=device,
             )
             # Create or load or update the dataset
-            print("aaaaaaaaaaaaaaaaaaaaaa")
             dataset = taskmanager.get_rollout_dataset(
                 load_dataset_if_exists=False,
             )
-            print("bbbbbbbbbbbbbbbbbbbbb")
 
             # Train RND models if required
             if train_rnd:
@@ -120,10 +121,12 @@ def main(cfg: DictConfig):
             else:
                 pass
 
+
             # Initialize the evaluation interface
             evaluationmanager = EvaluationManager(str(BASE_CONFIG_PATH), task_data_path, dataset, device=device, seed=seed)
             # Evaluate the methods including the combined methods
             results = evaluationmanager.evaluate(methods, combine_methods, combined_methods)
+            # print(results["rnd_oe"]["test_scores_by_threshold"])
             # Save the results for the task
             total_results[task] = results
 
@@ -132,16 +135,21 @@ def main(cfg: DictConfig):
     # Create the results manager
     resultsmanager = ResultsManager(str(BASE_CONFIG_PATH), str(BASE_DATA_PATH))
 
+
     # Combine the results from all seeds ()
     total_results = resultsmanager.accumulate_seed_results(all_seed_results)
+    print("kkkkkkkkkkkkkkkkkkkkkkkkkkk")
 
     # Extract the method names from the results (required due to combined methods)
     method_names = [method for method in total_results[task].keys()]
+    print("lllllllllllllllllllllllllll")
     
     # Update the saved results with the new results
     resultsmanager.combine_results(total_results, method_names=method_names)
+    print("mmmmmmmmmmmmmmmmmmmmmmmmmmm")
     # Summarize the results as defined in results config. Saves the summary(ies) as csv file(s).
     resultsmanager.create_summary()
+    print("nnnnnnnnnnnnnnnnnnnnnnnnnnn")
     # # Generate uncertainty plots for the results as defined in results config. Saves the plots as pdf files.
     # resultsmanager.generate_uncertainty_plots()
 

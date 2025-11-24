@@ -471,8 +471,6 @@ class ResultsManager:
         
         for task in results['rnd_oe_and_entropy'][0].keys():
 
-            print(results['rnd_oe_and_entropy'][0][task].keys())
-
             predictions = results['rnd_oe_and_entropy'][0][task]['test_scores_by_threshold']['tvt_cp_band'][0.95]['25/50']
 
             # For each list x in predictions, find the first index i for which x[i] > 1
@@ -872,13 +870,12 @@ class ResultsManager:
 
     def plot_quantile_impact(self, **kwargs):
         """Plot the impact of quantiles (1-delta) on metrics, averaged over tasks, for the best/averaged thresholds."""
-        
+    
         # Update and unpack config
         cfg = self.cfg.copy()
         OmegaConf.set_struct(cfg, False)
         cfg.update(kwargs)
         cfg.update(cfg.quantile_impact)
-        cfg.exclude_all = True
         OmegaConf.set_struct(cfg, True)
 
         if not cfg.create_plots:
@@ -886,19 +883,21 @@ class ResultsManager:
 
         # Load and filter DataFrame
         df = self._load_dataframe()
-        if cfg.exclude_all:
-            df = df[~df["Quantile"].astype(str).str.contains("all", case=False, na=False)]
-
         df = self._filter_dataframe(df=df, cfg=cfg)
         df = self._average_dataframe(df=df, cfg=cfg)
 
         metrics = cfg.metrics_to_plot
         thresholds = cfg.thresholds_to_plot
         methods = cfg.filter_values.Method
-        quantiles_all = sorted(df["Quantile"].unique(), key=lambda q: float(q))
 
-        # Define per-metric y-limits (same as before, adjust if needed)
-        ylims = [(0.4, 0.7), (0, 1), (0, 1.02), (0, 1)]
+        # Define per-metric y-limits dynamically
+        ylims = {}
+        for metric in metrics:
+            metric_min = df[metric].min()
+            metric_max = df[metric].max()
+            padding = (metric_max - metric_min) * 0.1
+            ylims[metric] = (metric_min - padding, metric_max + padding)
+
 
         colors = ['#2ca02c', '#1f77b4', '#d62728']
 
@@ -930,25 +929,30 @@ class ResultsManager:
                             fontsize=20)
                 ax.set_xlabel("Quantile $1-\\delta$", fontsize=20)
                 ax.set_ylabel(metric, fontsize=20)
-                ax.tick_params(axis='x', labelsize=20 - 2)
-                ax.tick_params(axis='y', labelsize=20 - 2)
-                ax.set_ylim(ylims[i])
+                ax.tick_params(axis='x', labelsize=18)
+                ax.tick_params(axis='y', labelsize=18)
+                ax.set_ylim(ylims[metric])
                 ax.grid(True, linestyle="--", alpha=0.7)
 
                 std_col = f"{metric}_std"
                 for k, method in enumerate(methods):
                     method_df = threshold_df[threshold_df["Method"] == method]
-                    if metric not in method_df.columns or std_col not in method_df.columns:
+                    if metric not in method_df.columns:
                         continue
 
                     # Group by quantile and compute mean/std
-                    grouped = method_df.groupby("Quantile")[[metric, std_col]].mean().reset_index()
+                    grouped = method_df.groupby("Quantile").agg({
+                        metric: "mean",
+                        std_col: "mean"  # Assuming std is already calculated per-group
+                    }).reset_index()
                     grouped = grouped.sort_values("Quantile")
                     
+                    yerr = grouped[std_col] if std_col in grouped.columns else None
+
                     ax.errorbar(
                         grouped["Quantile"],
                         grouped[metric],
-                        yerr=grouped[std_col],
+                        yerr=yerr,
                         marker='o',
                         label=cfg.method_name_mapping.get(method, method),
                         color=colors[k % len(colors)],
@@ -956,24 +960,21 @@ class ResultsManager:
                         linewidth=2
                     )
 
-        # Shared legend below center column
-        center_col = len(metrics) // 2
-        axes[-1, center_col].legend(
-            fontsize=20,
-            loc='upper center',
-            bbox_to_anchor=(-0.15, -0.2),
-            ncol=len(methods)
-        )
+        # Shared legend below the plot
+        handles, labels = axes[-1, -1].get_legend_handles_labels()
+        fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, -0.05), ncol=len(methods), fontsize=20)
 
         # Tighter layout
         plt.tight_layout()
-        plt.subplots_adjust(wspace=0.25, hspace=0.35)
+        plt.subplots_adjust(wspace=0.3, hspace=0.4, bottom=0.2)
+
 
         # Save figure
         save_dir = os.path.join(self.results_dir, "quantile_plots")
         os.makedirs(save_dir, exist_ok=True)
-        plot_filename = os.path.join(save_dir, "quantile_impact_all.pdf")
-        plt.savefig(plot_filename, dpi=300, format="pdf")
+        plot_filename = os.path.join(save_dir, "quantile_impact.pdf")
+        print("Saving quantile impact plot to:", plot_filename)
+        plt.savefig(plot_filename, dpi=300, format="pdf", bbox_inches='tight')
         plt.close()
 
     def plot_window_impact(self, **kwargs):

@@ -1,13 +1,13 @@
 defaults:
   - _self_
-  - eval: rnd_a
+  - eval: rnd_oe
   - task: ec_test
   - results: base
 
 # Methods to evaluate for tasks (methods are extended by rnd_models)
-tasks: ["ec_test"]
-rnd_models: ["rnd_a"]
-# rnd_models: ["rnd_oe", "rnd_a"]
+tasks: ["sorting"]
+# rnd_models: ["rnd_a"]
+rnd_models: ["rnd_oe"]
 methods: ["entropy"]
 # methods: ["entropy", "similarity", "tc", "logpzo"]
 
@@ -17,7 +17,7 @@ combined_methods:
 # None at window_sizes/quantiles means all. All combinations of window_sizes and quantiles are evaluated
   1: 
     m1: 
-      name: rnd_a
+      name: rnd_oe
       window_sizes:
       quantiles:
     m2:
@@ -27,7 +27,7 @@ combined_methods:
     operation: "or"
   2:
     m1: 
-      name: rnd_a
+      name: rnd_oe
       window_sizes:
       quantiles:
     m2:

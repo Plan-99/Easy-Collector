@@ -438,14 +438,21 @@ def _get_avg_episode_stats_by_type_alt(scores_by_threshold: list, dataset_stats:
             else:
                 continue
 
-            scores_array = np.concatenate(normalized_scores)
-            avg_episode_stats_by_type[key]["percentiles"] = {
-                10: np.percentile(scores_array, 10),
-                25: np.percentile(scores_array, 25),
-                50: np.percentile(scores_array, 50),  # Median
-                75: np.percentile(scores_array, 75),
-                90: np.percentile(scores_array, 90),
-            }
+            if len(normalized_scores) > 0:
+                scores_array = np.concatenate(normalized_scores)
+                avg_episode_stats_by_type[key]["percentiles"] = {
+                    10: np.percentile(scores_array, 10),
+                    25: np.percentile(scores_array, 25),
+                    50: np.percentile(scores_array, 50),  # Median
+                    75: np.percentile(scores_array, 75),
+                    90: np.percentile(scores_array, 90),
+                }
+            else:
+                # 데이터가 없을 경우 (예: 실패한 에피소드가 하나도 없을 때)
+                # NaN이나 0으로 채우거나, 해당 키를 건너뛰어야 함
+                avg_episode_stats_by_type[key]["percentiles"] = {
+                    10: 0.0, 25: 0.0, 50: 0.0, 75: 0.0, 90: 0.0
+                }
 
     return avg_episode_stats_by_type
 
