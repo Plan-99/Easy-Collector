@@ -94,6 +94,7 @@ class TaskManager:
         raise NotImplementedError(
             "Generating new rollouts with the diffusion policy is not implemented yet. Make sure raw rollouts are available."
         )
+    
 
     def _init_or_update_dataset(self, processed_rollout_dataset: ProcessedRolloutDataset, extend=False):
         """Check if (new) raw rollouts are available, process them, and append them to the dataset or init the dataset with them if all required tensors are given.

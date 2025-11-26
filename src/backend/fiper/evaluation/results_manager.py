@@ -468,20 +468,21 @@ class ResultsManager:
         cfg.filter_values = OmegaConf.to_container(cfg.filter_values, resolve=True)
         # Load the results
         results = self._load_results()
-        
+
         for task in results['rnd_oe_and_entropy'][0].keys():
+            # ["tvt_cp_band", "ct_quantile", "tvt_quantile"]
+            predictions = results['rnd_oe_and_entropy'][0][task]['test_scores_by_threshold']['ct_quantile'][0.95][13]
+            print(predictions)
 
-            predictions = results['rnd_oe_and_entropy'][0][task]['test_scores_by_threshold']['tvt_cp_band'][0.95]['25/50']
-
-            # For each list x in predictions, find the first index i for which x[i] > 1
+            # For each list x in predictions, find all indices i for which x[i] > 0.999
             warning_frames = []
             episode_lengths = []
             for x in predictions:
-                warning_frame = next((i for i, value in enumerate(x) if value > 1), len(x))
-                warning_frames.append(warning_frame)
+                warning_timesteps = [i for i, value in enumerate(x) if value > 0.9]
+                warning_frames.append(warning_timesteps)
                 episode_lengths.append(len(x))
 
-            save_videos_with_warning(task, warning_frames, episode_lengths, self.base_data_path)
+            # save_videos_with_warning(task, warning_frames, episode_lengths, self.base_data_path)
 
             # print("Warning frames:", warning_frames)
             # print("Episode lengths:", episode_lengths)
@@ -684,11 +685,24 @@ class ResultsManager:
         average_columns = [col for col in cfg.average_columns if col in df.columns]
         metric_columns = [col for col in cfg.metric_columns.keys() if col in df.columns]
 
-        # Columns to group by: everything except metrics and columns to average
-        groupby_columns = [col for col in df.columns if col not in metric_columns and col not in average_columns]
+        # Columns to group by: everything except metrics, std columns and columns to be averaged
+        std_columns = [f"{col}_std" for col in metric_columns if f"{col}_std" in df.columns]
+        
+        cols_to_process = metric_columns + std_columns
+        groupby_columns = [col for col in df.columns if col not in cols_to_process and col not in average_columns]
 
         # Aggregation dict for metrics
         agg_dict = {col: "mean" for col in metric_columns}
+        
+        # For std columns, we need to calculate sqrt(sum(std_i^2)) / N
+        def std_agg(x):
+            n = len(x)
+            if n == 0:
+                return 0
+            return np.sqrt(np.sum(x**2)) / n
+
+        for col in std_columns:
+            agg_dict[col] = std_agg
 
         # Group and aggregate
         df_avg = df.groupby(groupby_columns, as_index=False).agg(agg_dict).round(3)
@@ -878,6 +892,8 @@ class ResultsManager:
         cfg.update(cfg.quantile_impact)
         OmegaConf.set_struct(cfg, True)
 
+        print(cfg.create_plots)
+
         if not cfg.create_plots:
             return
 
@@ -885,6 +901,7 @@ class ResultsManager:
         df = self._load_dataframe()
         df = self._filter_dataframe(df=df, cfg=cfg)
         df = self._average_dataframe(df=df, cfg=cfg)
+
 
         metrics = cfg.metrics_to_plot
         thresholds = cfg.thresholds_to_plot
@@ -941,10 +958,17 @@ class ResultsManager:
                         continue
 
                     # Group by quantile and compute mean/std
-                    grouped = method_df.groupby("Quantile").agg({
-                        metric: "mean",
-                        std_col: "mean"  # Assuming std is already calculated per-group
-                    }).reset_index()
+                    def std_agg(x):
+                        n = len(x)
+                        if n == 0:
+                            return 0
+                        return np.sqrt(np.sum(x**2)) / n
+
+                    agg_dict = {metric: "mean"}
+                    if std_col in method_df.columns:
+                        agg_dict[std_col] = std_agg
+                    
+                    grouped = method_df.groupby("Quantile").agg(agg_dict).reset_index()
                     grouped = grouped.sort_values("Quantile")
                     
                     yerr = grouped[std_col] if std_col in grouped.columns else None
@@ -975,7 +999,7 @@ class ResultsManager:
         plot_filename = os.path.join(save_dir, "quantile_impact.pdf")
         print("Saving quantile impact plot to:", plot_filename)
         plt.savefig(plot_filename, dpi=300, format="pdf", bbox_inches='tight')
-        plt.close()
+        # plt.close()
 
     def plot_window_impact(self, **kwargs):
         """Plot the impact of window sizes on metrics, averaged over tasks, for the best/averaged quantiles."""
@@ -1099,7 +1123,7 @@ class ResultsManager:
         os.makedirs(save_dir, exist_ok=True)
         plot_filename = os.path.join(save_dir, "window_impact_all.pdf")
         plt.savefig(plot_filename, dpi=300, format="pdf")
-        plt.close()
+        # plt.close()
 
 
     def plot_threshold_impact(self, **kwargs):

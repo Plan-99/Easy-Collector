@@ -12,4 +12,8 @@ required_actions:
 
 optional_actions: []
 
+# action_batch_handling:
+#   use_action_batch: True
+#   action_batch_style: "var"
+
 

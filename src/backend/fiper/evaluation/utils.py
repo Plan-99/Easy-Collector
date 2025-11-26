@@ -530,8 +530,10 @@ def save_videos_with_warning(task, warning_frames, episode_lengths, base_data_pa
     save_path = f"{base_data_path}/results/videos_with_warnings/{task}/rollouts/test_frames"
     os.makedirs(save_path, exist_ok=True)
 
+    k = 0
+
     # For each episode_XX.pkl in path, load the pickle file. 
-    for k, file in enumerate(sorted(os.listdir(path))):
+    for file in sorted(os.listdir(path)):
         if file.endswith(".pkl"):
             with open(os.path.join(path, file), "rb") as f:
                 data = pkl.load(f)
@@ -542,13 +544,9 @@ def save_videos_with_warning(task, warning_frames, episode_lengths, base_data_pa
             episode_path = os.path.join(save_path, episode_name)
             os.makedirs(episode_path, exist_ok=True)
 
-            if warning_frames[k] < episode_lengths[k]:
-                frame_start_red = warning_frames[k]
-            else:
-                frame_start_red = -1
+            warning_timesteps_for_episode = warning_frames[k]
             
-
-            # If k in frames_start_red, add a small red square to the top-left corner of each frame with i >= frames_start_red[k]
+            # Add a red border to each frame where the index is in warning_timesteps_for_episode
             for i, frame_data in enumerate(data['rollout']):
                 image = frame_data['rgb']   # Shape: (3, 240, 320), dtype: float32, range: [0.0, 1.0]
                 if image.dtype != np.uint8:
@@ -562,10 +560,10 @@ def save_videos_with_warning(task, warning_frames, episode_lengths, base_data_pa
                 # else:
                 #     image = image[:, :, [1, 2, 0]]  # Convert RGB to BGR
 
-                # Red border around the image if i >= frame_start_red
-                relative_border_size = 0.03
-                border_size_x = int(min(image.shape[0], image.shape[1]) * relative_border_size)
-                if frame_start_red >= 0 and i >= frame_start_red:
+                # Red border around the image if i in warning_timesteps_for_episode
+                if i in warning_timesteps_for_episode:
+                    relative_border_size = 0.03
+                    border_size_x = int(min(image.shape[0], image.shape[1]) * relative_border_size)
                     image[0:border_size_x, :, 0] = 255  # Blue channel
                     image[0:border_size_x, :, 1] = 0    # Green channel
                     image[0:border_size_x, :, 2] = 0    # Red channel
@@ -587,3 +585,5 @@ def save_videos_with_warning(task, warning_frames, episode_lengths, base_data_pa
             # In addition, create a single mp4 video for the episode using ffmpeg. Save in .../rollouts/
             video_path = os.path.join(f"{base_data_path}/results/videos_with_warnings/{task}/rollouts/", f"{episode_name}.mp4")
             os.system(f"ffmpeg -y -framerate 10 -i {episode_path}/frame_%04d.jpg -c:v libx264 -pix_fmt yuv420p {video_path}")
+
+            k += 1

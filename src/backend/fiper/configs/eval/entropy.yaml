@@ -4,7 +4,7 @@ defaults:
 # Whether to use the same cell size for all dimensions
 single_cellsize: False
 # The factor by which to multiply the working area to determine the cell size
-cellsize_factor: 0.03
+cellsize_factor: 0.0001
 
 required_tensors:
   - "action_preds"

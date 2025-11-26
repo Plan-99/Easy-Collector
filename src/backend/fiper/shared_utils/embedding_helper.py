@@ -8,7 +8,7 @@ from backend.policies.utils import make_policy, VISION_BACKBONE_MAP, process_ima
 
 class EmbeddingHelper:
     def __init__(self):
-        self.policy = ACTPolicy.from_pretrained("/root/src/backend/checkpoints/3")
+        self.policy = ACTPolicy.from_pretrained("/root/src/backend/checkpoints/9")
         self.sensors = ["sensor_1", "sensor_2"]  # Example sensor IDs
         self.robots = ["robot_4"]  # Example robot IDs
         self.action_batch_size = 10
@@ -25,59 +25,49 @@ class EmbeddingHelper:
 
         """
         action_list = []
-        for i in range(rollout['observations']['qpos'][self.robots[0]].shape[0]):
-            state = {}
-            qpos_list = []
-            for robot in self.robots:
-                qpos_list.append(rollout['observations']['qpos'][robot][i])
-            qpos = np.concatenate(qpos_list)
-            qpos = torch.from_numpy(qpos).float().cuda().unsqueeze(0)
+        embedding_stds = []
 
-            state['observation.state'] = qpos
+        # 1. Save original eval method
+        original_eval_method = self.policy.eval
 
-            for sensor in self.sensors:
-                image = rollout['observations']['images'][sensor][i]
-                # image = fetch_image_with_config(image, {
-                #     'resize': task['sensor_img_size'],
-                # })
-                
-                image = process_image(image, 'resnet18', to_cuda=True)
-                # image = image / 255.0
-                # image = torch.from_numpy(image).float().cuda().unsqueeze(0)
-                # image = rearrange(image, 'b h w c -> b c h w')
-                state[f'observation.images.{sensor}'] = image.unsqueeze(0)
+        # 2. Set policy to eval mode, then enable dropout layers
+        self.policy.eval()
+        # def enable_dropout(m):
+        #     if isinstance(m, torch.nn.Dropout):
+        #         # print(f"Enabling dropout for: {m}")
+        #         m.p = 0.0
+        #         m.train()
+        # self.policy.apply(enable_dropout)
 
-            state['language_instruction'] = ["Move the robot to the target position."]
+        # 3. Monkey-patch eval to prevent it from being called inside predict_action_chunk
+        self.policy.eval = lambda: self.policy
 
+        try:
+            # Loop over timesteps
+            for i in range(rollout['observations']['qpos'][self.robots[0]].shape[0]):
+                state = {}
+                qpos_list = []
+                for robot in self.robots:
+                    qpos_list.append(rollout['observations']['qpos'][robot][i])
+                # qpos = np.concatenate(qpos_list)
+                qpos = np.concatenate(qpos_list)
+                qpos = torch.from_numpy(qpos).float().cuda().unsqueeze(0)
 
-            # --- MONKEY-PATCHING eval() to enable MC-Dropout ---
-            # We suspect predict_action_chunk() is internally calling self.policy.eval(),
-            # which disables dropout. To get uncertainty, we must force dropout to be active.
-            # We do this by temporarily replacing the eval() method with a placeholder.
-            original_eval = self.policy.eval
-            self.policy.eval = lambda: self.policy  # Make eval do nothing
-            
-            action_batch_list = []
+                state['observation.state'] = qpos
+                # state['action'] = rollout['qaction']
 
-            def enable_dropout(m):
-                if type(m) == torch.nn.Dropout:
-                    m.train()
+                for sensor in self.sensors:
+                    image = rollout['observations']['images'][sensor][i]
+                    image = process_image(image, 'resnet18', to_cuda=True)
+                    state[f'observation.images.{sensor}'] = image.unsqueeze(0)
 
-            self.policy.eval()
-            # Dropout 레이어만 train 모드 (활성화)
-            self.policy.apply(enable_dropout)
+                state['language_instruction'] = ["Move the robot to the target position."]
 
-            original_eval = self.policy.eval
-            self.policy.eval = lambda: None
-
-            try:
-                # Set the policy to training mode to activate dropout layers.
                 batched_state = {}
 
                 # Loop to perform multiple forward passes with different dropout masks.
                 for key, value in state.items():
                     if isinstance(value, torch.Tensor):
-                        # (1, ...) -> (Batch_Size, ...)
                         repeats = [1] * value.dim()
                         repeats[0] = self.action_batch_size
                         batched_state[key] = value.repeat(*repeats)
@@ -87,23 +77,19 @@ class EmbeddingHelper:
                         batched_state[key] = value
 
                 with torch.no_grad():
-                    # 한 번의 호출로 32개의 서로 다른 Dropout 결과 획득
                     action_batch = self.policy.predict_action_chunk(batched_state)
 
-            finally:
-                # CRITICAL: Always restore the original eval method and set mode back to eval.
-                self.policy.eval = original_eval
-                self.policy.eval() # 다시 완전한 평가 모드로
+                embedding_std_step = torch.std(action_batch, dim=0).mean().item()
+                embedding_stds.append(embedding_std_step)
+                # print(f"Computed embedding with mean std: {embedding_std_step:.6f}")
+                action_list.append(action_batch.cpu().numpy())
+        finally:
+            # 4. Restore original eval method and call it
+            self.policy.eval = original_eval_method
+            self.policy.eval()
 
-            # For debugging, let's check the standard deviation of the actions.
-            # A non-zero value indicates that dropout is working as expected.
-            action_std = torch.std(action_batch, dim=0).mean().item()
-            # print(f"Action standard deviation: {action_std:.6f}")
-
-            action_list.append(action_batch.cpu().numpy())
-
-
-        return action_list
+        mean_rollout_std = np.mean(embedding_stds) if embedding_stds else 0
+        return action_list, mean_rollout_std
 
     def get_embedding_batch(self, rollouts: list[dict]) -> list[list[np.ndarray]]:
         """
@@ -120,9 +106,15 @@ class EmbeddingHelper:
             list[list[np.ndarray]]: A list of embedding lists, one for each rollout.
         """
         all_embeddings = []
+        all_embedding_stds = []
         for rollout in rollouts:
-            all_embeddings.append(self.get_embedding(rollout))
-        return all_embeddings
+            embedding, embedding_std = self.get_embedding(rollout)
+            # print(rollout.keys())
+            print(f"Computed embedding with mean std: {embedding_std:.6f}")
+
+            all_embeddings.append(embedding)
+            all_embedding_stds.append(embedding_std)
+        return all_embeddings, all_embedding_stds
 
 
 

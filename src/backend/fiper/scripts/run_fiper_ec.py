@@ -114,6 +114,8 @@ def main(cfg: DictConfig):
                 load_dataset_if_exists=False,
             )
 
+            # quit()
+
             # Train RND models if required
             if train_rnd:
                 rndtrainer = RNDTrainer(str(BASE_CONFIG_PATH), task_data_path, dataset, device=device, task_cfg=cfg, seed=seed)

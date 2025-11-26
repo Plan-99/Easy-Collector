@@ -5,7 +5,7 @@ defaults:
   - results: base
 
 # Methods to evaluate for tasks (methods are extended by rnd_models)
-tasks: ["sorting"]
+tasks: ["ec_test"]
 # rnd_models: ["rnd_a"]
 rnd_models: ["rnd_oe"]
 methods: ["entropy"]

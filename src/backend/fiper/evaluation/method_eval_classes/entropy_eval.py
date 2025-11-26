@@ -51,9 +51,11 @@ class ENTROPYEval(BaseEvalClass):
             entropy_values.append(new_value)
 
         entropy = sum(entropy_values) / len(entropy_values)
+        print(f"Calculated entropy: {entropy}")
         return entropy
 
     def _entropy_endpoints(self, endpoints):
+
         """
         endpoints shape (number of endpoints, 3)
         """
@@ -62,6 +64,7 @@ class ENTROPYEval(BaseEvalClass):
         x_min, x_max = endpoints[:, 0].min(), endpoints[:, 0].max()
         y_min, y_max = endpoints[:, 1].min(), endpoints[:, 1].max()
         z_min, z_max = endpoints[:, 2].min(), endpoints[:, 2].max()
+
 
         # Add a small buffer to the limits
         x_buffer = 0.01 * (x_max - x_min)
@@ -78,24 +81,39 @@ class ENTROPYEval(BaseEvalClass):
         x_grid = np.arange(x_min, x_max + cell_size[0], cell_size[0])
         y_grid = np.arange(y_min, y_max + cell_size[1], cell_size[1])
         z_grid = np.arange(z_min, z_max + cell_size[2], cell_size[2])
+        
 
         # Count endpoints in each cell
-        cell_indices_x = np.digitize(endpoints[:, 0], x_grid)
-        cell_indices_y = np.digitize(endpoints[:, 1], y_grid)
-        cell_indices_z = np.digitize(endpoints[:, 2], z_grid)
+        raw_indices_x = np.digitize(endpoints[:, 0], x_grid)
+        raw_indices_y = np.digitize(endpoints[:, 1], y_grid)
+        raw_indices_z = np.digitize(endpoints[:, 2], z_grid)
+        
 
-        # Adjust indices to prevent out-of-bounds error
-        cell_indices_x -= 1
-        cell_indices_y -= 1
-        cell_indices_z -= 1
+        cell_indices_x = raw_indices_x - 1
+        cell_indices_y = raw_indices_y - 1
+        cell_indices_z = raw_indices_z - 1
+        
+
 
         # Initialize counts
         num_cells_x = max(len(x_grid) - 1, 1)
         num_cells_y = max(len(y_grid) - 1, 1)
         num_cells_z = max(len(z_grid) - 1, 1)
+
+        # Clip indices to be within the valid range of the counts array to avoid IndexErrors.
+        cell_indices_x = np.clip(cell_indices_x, 0, num_cells_x - 1)
+        cell_indices_y = np.clip(cell_indices_y, 0, num_cells_y - 1)
+        cell_indices_z = np.clip(cell_indices_z, 0, num_cells_z - 1)
+
         counts = np.zeros((num_cells_x, num_cells_y, num_cells_z), dtype=int)
-        for i in range(len(endpoints)):
-            counts[cell_indices_x[i], cell_indices_y[i], cell_indices_z[i]] += 1
+
+        try:
+            for i in range(len(endpoints)):
+                counts[cell_indices_x[i], cell_indices_y[i], cell_indices_z[i]] += 1
+        except IndexError:
+            # Fallback to 0 entropy if there's an indexing error
+            return 0.0, (num_cells_x * num_cells_y * num_cells_z)
+
 
         # Compute the Shannon entropy with base 2
         counts_vector = counts.flatten()

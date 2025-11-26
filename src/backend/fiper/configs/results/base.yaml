@@ -66,6 +66,7 @@ filter_values:
     - similarity
     - rnd_oe_and_entropy
     - rnd_oe_or_entropy
+    - rnd_a_and_entropy
   Quantile: # Float values or "best" for the best value
     # - best
   Window:
@@ -120,7 +121,7 @@ extract_warning_frames:
 
 # Uncertainty Scores over t (rollout steps) Plots
 uncertainty_plots:
-  create_plots: False 
+  create_plots: True
   exclude_all: True # Exclude cumulative plots
   drop_after_best: False # Drop the column after selecting the best value
   filter_values:
@@ -143,12 +144,12 @@ uncertainty_plots:
 
 
 quantile_impact:
-  create_plots: False 
+  create_plots: True
   exclude_all: True # Exclude cumulative windows
   groups_for_best: ["Method", "HID", "Threshold"] # Which columns to group by when selecting the best value
   drop_after_best: True # Drop the column after selecting the best value
   filter_values:
-    Method: ["rnd_oe", "entropy", "rnd_oe_and_entropy"] # None/empty means all methods
+    Method: ["rnd_oe", "entropy", "rnd_oe_and_entropy", "rnd_a", "rnd_a_and_entropy"] # None/empty means all methods
     Window: ["15"]
     Quantile:  # None/empty means all quantiles 
     HID: [best] # Only one value, best or an integer
@@ -159,12 +160,12 @@ quantile_impact:
 
 
 window_impact:
-  create_plots: False 
+  create_plots: True
   exclude_all: True # Exclude cumulative windows (all)
   groups_for_best: ["Method", "HID", "Threshold"] # Which columns to group by when selecting the best value
   drop_after_best: True # Drop the column after selecting the best value
   filter_values:
-    Method: ["rnd_oe", "entropy", "rnd_oe_and_entropy", "rnd_oe_or_entropy"] # None/empty means all methods
+    Method: ["rnd_oe", "entropy", "rnd_oe_and_entropy", "rnd_oe_or_entropy", "rnd_a", "rnd_a_and_entropy"] # None/empty means all methods
     Quantile: # None/empty means all
     Window: # None/empty means all windows
     HID: [best] # Only one value, best or an integer
@@ -175,12 +176,12 @@ window_impact:
 
 
 threshold_impact:
-  create_plots: False 
+  create_plots: True
   exclude_all: True # Exclude cumulative windows (all)
   groups_for_best: ["Method", "HID", "Threshold"] # Which columns to group by when selecting the best value
   drop_after_best: True # Drop the column after selecting the best value
   filter_values:
-    Method: ["rnd_oe", "entropy", "rnd_oe_and_entropy", "rnd_oe_or_entropy"] # None/empty means all methods
+    Method: ["rnd_oe", "entropy", "rnd_oe_and_entropy", "rnd_oe_or_entropy", "rnd_a", "rnd_a_and_entropy"] # None/empty means all methods
     Quantile: # None/empty means all
     Window: # None/empty means all windows
     HID: [best] # Only one value, best or an integer
@@ -191,7 +192,7 @@ threshold_impact:
 
 
 rollout_type_stats:
-  create_plots: False 
+  create_plots: True
   groups_for_best: ["Method", "HID", "Threshold"] # Which columns to group by when selecting the best value
   filter_values:
     Task: [push_t, sorting, stacking] # [push_t, sorting, stacking, push_chair, pretzel] # None/empty means all tasks
@@ -213,3 +214,5 @@ method_name_mapping:
   logpzo: "logpZO"
   rnd_oe_and_entropy: "FIPER"
   rnd_oe_or_entropy: "RND-OE or ACE"
+  rnd_a_and_entropy: "RND-A and ACE"
+  rnd_a_or_entropy: "RND-A or ACE"

@@ -3,7 +3,7 @@ quantiles: [0.9, 0.91, 0.92, 0.93, 0.94, 0.95, 0.96, 0.97, 0.98, 0.99]
 score_compounding_method: mean # mutiple robots
 history_length: 0 # How many historical inputs a method gets. Note: This includes the current step, so 0 and 1 are the same
 detection_patience: 0 # (num_steps-1) to surpass the threshold before the rollout is considered a failure
-random_seeds: [0] # Number of random seeds to use for evaluation when `deterministic` is False
+random_seeds: [10] # Number of random seeds to use for evaluation when `deterministic` is False
 
 # How to extend time-varying thresholds
 extend_threshold: "last" # "last" or "mean"

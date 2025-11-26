@@ -151,7 +151,8 @@ def checkpoint_test(
                 agent.move_step(target_qpos)
 
 
-            # time.sleep(0.03)  # Simulate processing time
+
+            time.sleep(0.05)  # Simulate processing time
 
             ts = env.record_step()
             timesteps.append(ts)
@@ -166,6 +167,8 @@ def checkpoint_test(
                 'uncertainty': policy.uncertainty,
                 'step_time': end - start,
             })
+
+
 
         except Exception as e:
             import traceback
