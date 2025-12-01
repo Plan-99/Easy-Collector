@@ -99,3 +99,9 @@ npm run dev
 2. model에 추가
 3. 프론트엔트에 추가
 4. api에 추가
+
+
+cd ~/src/backend/database
+orator make:migration --config=config/database
+bash migration.sh
+orator migrate:rollback --config=config/database
