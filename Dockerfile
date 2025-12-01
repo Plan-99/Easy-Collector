@@ -127,6 +127,41 @@ WORKDIR /root
 COPY src /root/src
 RUN cd /root/src/ui && npm install
 
+
+# ===================================================================
+# (추가됨) Custom Python Packages Setup
+# python_pkgs/install.sh 스크립트의 로직을 Docker RUN 명령어로 변환
+# ===================================================================
+
+# python_pkgs 폴더 복사!
+COPY python_pkgs /root/python_pkgs
+
+# 0. pip 및 setuptools 업그레이드
+RUN pip install --upgrade pip setuptools
+
+# 1. Dex Retargeting 설치
+WORKDIR /root/python_pkgs/xr_teleoperate/teleop/robot_control/dex-retargeting
+RUN pip install -e .
+
+# 2. Televuer 설치 및 SSL 인증서 생성 
+WORKDIR /root/python_pkgs/xr_teleoperate/teleop/televuer
+RUN pip install -e . && \
+    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+    -keyout key.pem -out cert.pem \
+    -subj "/C=KR/ST=Seoul/L=Seoul/O=Robot/CN=localhost"
+
+# 3. Unitree SDK 설치
+WORKDIR /root/python_pkgs/unitree_sdk2_python
+RUN pip install -e .
+
+# 4. (추가됨) PyTorch 업그레이드
+RUN pip install --upgrade torch
+
+# 작업 디렉토리 원상 복구
+WORKDIR /root
+
+# ===================================================================
+
 # # --- Entrypoint Setup ---
 # # 위에서 생성한 entrypoint.sh 스크립트를 컨테이너에 복사
 # COPY entrypoint.sh /usr/local/bin/
