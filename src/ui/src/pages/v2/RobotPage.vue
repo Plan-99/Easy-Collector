@@ -251,9 +251,8 @@ function getSupportingRobots() {
         supportingRobots.value = [
             ...response.data.robots,
             {
-                name: 'Custom Robot',
+                name: 'custom',
                 company: null,
-                role: 'custom'
             }
         ]
     }).catch((error) => {
@@ -274,7 +273,7 @@ const robotForm = ref([
     }))) },
     // { label: 'CAN Baudrate', key: 'can_baudrate', type: 'number', value: 1000000, default: 1000000, show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).network_interface === 'can' }, 
     { label: 'CAN Port', key: 'can_port', type: 'text', value: 'can_0', default: 'can_0', show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).network_interface === 'can' },
-    { label: 'Arm Type', key: 'role', type: 'select', value: 'single_arm', default: 'dual_arm', 
+    { label: 'Role', key: 'role', type: 'select', value: 'single_arm', default: 'dual_arm', 
         options: [
             { label: 'Single Arm', value: 'single_arm' },
             { label: 'Dual Arm', value: 'dual_arm' },
@@ -299,10 +298,6 @@ const robotForm = ref([
         ],
         show: (form) => form.find((e) => e.key === 'type').value === 'custom' 
     },
-    { label: 'Joint Names', key: 'joint_names', type: 'custom', value: [], default: [], show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
-    { label: 'Joint Lower Bounds', key: 'joint_lower_bounds', type: 'custom', value: [], default: [], show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
-    { label: 'Joint Upper Bounds', key: 'joint_upper_bounds', type: 'custom', value: [], default: [], show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
-    // { label: 'Gripper Range (e.g., 0,1)', key: 'gripper_range', type: 'number[]', value: [0, 1], default: [0, 1], show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
 ]);
 const watchingRobot = ref(null);
 
