@@ -471,8 +471,7 @@ class ResultsManager:
 
         for task in results['rnd_oe_and_entropy'][0].keys():
             # ["tvt_cp_band", "ct_quantile", "tvt_quantile"]
-            predictions = results['rnd_oe_and_entropy'][0][task]['test_scores_by_threshold']['ct_quantile'][0.95][13]
-            print(predictions)
+            predictions = results['rnd_oe_and_entropy'][0][task]['test_scores_by_threshold']['tvt_cp_band'][0.95][7]
 
             # For each list x in predictions, find all indices i for which x[i] > 0.999
             warning_frames = []
@@ -482,7 +481,7 @@ class ResultsManager:
                 warning_frames.append(warning_timesteps)
                 episode_lengths.append(len(x))
 
-            # save_videos_with_warning(task, warning_frames, episode_lengths, self.base_data_path)
+            save_videos_with_warning(task, warning_frames, episode_lengths, self.base_data_path)
 
             # print("Warning frames:", warning_frames)
             # print("Episode lengths:", episode_lengths)

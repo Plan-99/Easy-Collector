@@ -64,6 +64,7 @@ class ACTPolicy(PreTrainedPolicy):
         config.validate_features()
         self.config = config
 
+
         self.normalize_inputs = Normalize(config.input_features, config.normalization_mapping, dataset_stats)
         self.normalize_targets = Normalize(
             config.output_features, config.normalization_mapping, dataset_stats
@@ -135,7 +136,7 @@ class ACTPolicy(PreTrainedPolicy):
         return self._action_queue.popleft()
 
     @torch.no_grad()
-    def predict_action_chunk(self, batch: dict[str, Tensor]) -> Tensor:
+    def predict_action_chunk(self, batch: dict[str, Tensor], is_sampling_z=False) -> Tensor:
         """Predict a chunk of actions given environment observations."""
         self.eval()
 
@@ -144,7 +145,7 @@ class ACTPolicy(PreTrainedPolicy):
             batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
             batch[OBS_IMAGES] = [batch[key] for key in self.config.image_features]
 
-        actions = self.model(batch)[0]
+        actions = self.model(batch, is_sampling_z=is_sampling_z)[0]
         actions = self.unnormalize_outputs({ACTION: actions})[ACTION]
         return actions
 
@@ -451,7 +452,7 @@ class ACT(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def forward(self, batch: dict[str, Tensor]) -> tuple[Tensor, tuple[Tensor, Tensor] | tuple[None, None]]:
+    def forward(self, batch: dict[str, Tensor], is_sampling_z: bool = False) -> tuple[Tensor, tuple[Tensor, Tensor] | tuple[None, None]]:
         """A forward pass through the Action Chunking Transformer (with optional VAE encoder).
 
         `batch` should have the following structure:
@@ -534,14 +535,18 @@ class ACT(nn.Module):
             # When not using the VAE encoder, we set the latent to be all zeros.
             mu = log_sigma_x2 = None
             # # TODO(rcadene, alexander-soare): remove call to `.to` to speedup forward ; precompute and use buffer
-            # latent_sample = torch.zeros([batch_size, self.config.latent_dim], dtype=torch.float32).to(
-            #     batch["observation.state"].device
-            # )
-            latent_sample = torch.randn(
-                (batch_size, self.config.latent_dim), 
-                dtype=torch.float32, 
-                device=batch["observation.state"].device
-            )
+
+            if is_sampling_z:
+                latent_sample = torch.randn(
+                    (batch_size, self.config.latent_dim), 
+                    dtype=torch.float32, 
+                    device=batch["observation.state"].device
+                )
+            else:
+                latent_sample = torch.zeros([batch_size, self.config.latent_dim], dtype=torch.float32).to(
+                    batch["observation.state"].device
+                )
+            
             # print(latent_sample)
 
         # Prepare transformer encoder inputs.

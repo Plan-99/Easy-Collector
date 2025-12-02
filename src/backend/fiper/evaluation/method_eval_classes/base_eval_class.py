@@ -32,6 +32,7 @@ class BaseEvalClass(ABC):
         device: str,
         task_data_path: Union[str, Path],
         dataset: ProcessedRolloutDataset,
+        is_inference: bool = False,
         **kwargs,
     ):
         """
@@ -54,8 +55,11 @@ class BaseEvalClass(ABC):
         self.required_actions = list(cfg.get("required_actions", []))
         self.optional_actions = list(cfg.get("optional_actions", []))
         self.normalize_tensors = dict(cfg.get("normalize_tensors", {}))
+        self.uncertainty_scores_by_window_size_calibration = None
+        self.thresholds = None
         # Create the results directory
         self.results_dir = os.path.join(task_data_path, "results", method_name)
+        self.is_inference = is_inference
         os.makedirs(self.results_dir, exist_ok=True)
         # Load the model (must be implemented in the subclass, not all methods require a model)
         self.load_model()
@@ -157,25 +161,25 @@ class BaseEvalClass(ABC):
                         cfg=self.cfg,
                     )
 
-        # print(f"Calib Score Mean: {np.mean(np.concatenate(uncertainty_scores))}")
-        # print(f"Calib Score Max: {np.max(np.concatenate(uncertainty_scores))}")
-        # print(f"thresholds: {thresholds}")
-        # print(f"scores_by_threshold: {scores_by_threshold}")
-        # quit()
+
 
         return thresholds, scores_by_threshold
 
     def _get_metrics(self, thresholds: dict, test_scores: dict) -> tuple[dict, dict]:
         """Evaluate the test results using the constant and time-varying tresholds in the calibration results."""
         # Obtain some dataset statistics
-        dataset_stats = {
-            "max_episode_length": max(self.dataset.data["metadata"]["episode_lengths"]),
-            "id_rollouts": self.dataset.get_rollout_subtypes(subset="test", subsubset="id"),
-            "ood_rollouts": self.dataset.get_rollout_subtypes(subset="test", subsubset="ood"),
-            "successful_rollouts": self.dataset.get_rollout_types(
-                subset=["test", "successful"], reduce_mask_to=["test"]
-            ),
-        }
+
+        if self.dataset is not None:
+            dataset_stats = {
+                "max_episode_length": max(self.dataset.data["metadata"]["episode_lengths"]),
+                "id_rollouts": self.dataset.get_rollout_subtypes(subset="test", subsubset="id"),
+                "ood_rollouts": self.dataset.get_rollout_subtypes(subset="test", subsubset="ood"),
+                "successful_rollouts": self.dataset.get_rollout_types(
+                    subset=["test", "successful"], reduce_mask_to=["test"]
+                ),
+            }
+        else:
+            dataset_stats = None
         scores_by_threshold_test = {}
         metrics = {}
         for threshold_style in thresholds.keys():
@@ -197,11 +201,18 @@ class BaseEvalClass(ABC):
                         thresholds[threshold_style][quantile][window_size],
                         cfg=self.cfg,
                     )
+
+                    if dataset_stats is not None:
                     # Calculate the metrics using the normalized scores and the successful rollouts
-                    metrics[threshold_style][quantile][window_size] = calculate_metrics(
-                        scores_by_threshold_test[threshold_style][quantile][window_size],
-                        dataset_stats, self.cfg.detection_patience,
-                    )
+                        metrics[threshold_style][quantile][window_size] = calculate_metrics(
+                            scores_by_threshold_test[threshold_style][quantile][window_size],
+                            dataset_stats, self.cfg.detection_patience,
+                        )
+                    else:
+                        metrics[threshold_style][quantile][window_size] = None
+
+        # for scores in scores_by_threshold_test['ct_quantile'][0.95][7]:
+        #     print(scores[:7])
 
         return metrics, scores_by_threshold_test
 
@@ -211,42 +222,76 @@ class BaseEvalClass(ABC):
         # Full freedom to use the dataset class
         self._execute_preprocessing()
 
-        # Process the calibration rollouts
-        uncertainty_scores_by_window_size_calibration, avg_inference_time_calibration = self._process_rollouts(
+        # # Process the calibration rollouts
+        # uncertainty_scores_by_window_size_calibration, avg_inference_time_calibration = self._process_rollouts(
+        #     subset="calibration"
+        # )
+        # # Thresholds are dicts with structure: thresholds[threshold_style][quantile][window_size] = threshold, where threshold is a float or a list of floats (for time-varying thresholds)
+        # thresholds, scores_by_threshold_calibration = self._get_thresholds(
+        #     uncertainty_scores_by_window_size_calibration
+        # )
+
+        # # Process the test rollouts
+        # uncertainty_scores_by_window_size_test, avg_inference_time_test = self._process_rollouts(subset="test")
+
+
+        # # Calculate the metrics for the test rollouts
+        # metrics, scores_by_threshold_test = self._get_metrics(thresholds, uncertainty_scores_by_window_size_test)
+
+        # eval_results = {
+        #     "method": self.method_name,
+        #     "quantiles": self.cfg.quantiles,
+        #     "window_sizes": self.cfg.window_sizes,
+        #     "calibration_uncertainty_scores": uncertainty_scores_by_window_size_calibration,
+        #     "calibration_thresholds": thresholds,
+        #     "calibration_scores_by_threshold": scores_by_threshold_calibration,
+        #     "test_uncertainty_scores": uncertainty_scores_by_window_size_test,
+        #     "test_metrics": metrics,
+        #     "test_scores_by_threshold": scores_by_threshold_test,
+        #     "avg_inference_time": np.mean([avg_inference_time_test, avg_inference_time_calibration]),
+        #     "cfg": self.cfg,
+        #     "max_episode_length": max(self.dataset.data["metadata"]["episode_lengths"]),
+        #     "successful_test_rollouts": self.dataset.get_rollout_types(
+        #         subset=["test", "successful"], reduce_mask_to=["test"]
+        #     ),
+        #     "id_test_rollouts": self.dataset.get_rollout_subtypes(subset="test", subsubset="id"),
+        #     "ood_test_rollouts": self.dataset.get_rollout_subtypes(subset="test", subsubset="ood"),
+        # }
+        # # print(eval_results["method"])
+        # self._save_pickle(self.results_dir, eval_results, "eval_results.pkl")
+        eval_results = True
+        return eval_results
+    
+
+    def save_calibration_results(self):
+        """Saves the calibration results for later use during inference."""
+        self._execute_preprocessing()
+        self.uncertainty_scores_by_window_size_calibration, _ = self._process_rollouts(
             subset="calibration"
         )
-        # Thresholds are dicts with structure: thresholds[threshold_style][quantile][window_size] = threshold, where threshold is a float or a list of floats (for time-varying thresholds)
-        thresholds, scores_by_threshold_calibration = self._get_thresholds(
-            uncertainty_scores_by_window_size_calibration
+        self.thresholds, _ = self._get_thresholds(
+            self.uncertainty_scores_by_window_size_calibration
         )
-        # Process the test rollouts
-        uncertainty_scores_by_window_size_test, avg_inference_time_test = self._process_rollouts(subset="test")
+        # Save the thresholds
+        self._save_pickle(self.results_dir, self.thresholds, "calibration_thresholds.pkl")
+    
 
-        # Calculate the metrics for the test rollouts
-        metrics, scores_by_threshold_test = self._get_metrics(thresholds, uncertainty_scores_by_window_size_test)
+    def prepare_for_inference(self):
+        """Loads the calibration results for later use during inference."""
+        # Load the thresholds
+        self.thresholds = self._load_pickle(self.results_dir, "calibration_thresholds.pkl")
 
-        eval_results = {
-            "method": self.method_name,
-            "quantiles": self.cfg.quantiles,
-            "window_sizes": self.cfg.window_sizes,
-            "calibration_uncertainty_scores": uncertainty_scores_by_window_size_calibration,
-            "calibration_thresholds": thresholds,
-            "calibration_scores_by_threshold": scores_by_threshold_calibration,
-            "test_uncertainty_scores": uncertainty_scores_by_window_size_test,
-            "test_metrics": metrics,
-            "test_scores_by_threshold": scores_by_threshold_test,
-            "avg_inference_time": np.mean([avg_inference_time_test, avg_inference_time_calibration]),
-            "cfg": self.cfg,
-            "max_episode_length": max(self.dataset.data["metadata"]["episode_lengths"]),
-            "successful_test_rollouts": self.dataset.get_rollout_types(
-                subset=["test", "successful"], reduce_mask_to=["test"]
-            ),
-            "id_test_rollouts": self.dataset.get_rollout_subtypes(subset="test", subsubset="id"),
-            "ood_test_rollouts": self.dataset.get_rollout_subtypes(subset="test", subsubset="ood"),
-        }
-        # print(eval_results["method"])
-        self._save_pickle(self.results_dir, eval_results, "eval_results.pkl")
-        return eval_results
+
+    def infer(self, rollout_dict: dict) -> float:
+        """
+        Infer the uncertainty score for a given rollout tensor dictionary.
+        """
+        self.uncertainty_scores_by_window_size_test, avg_inference_time_test = self._process_rollouts_with_dict(rollout_dict=rollout_dict)
+        _, scores_by_threshold_test = self._get_metrics(self.thresholds, self.uncertainty_scores_by_window_size_test)
+
+        return scores_by_threshold_test['ct_quantile'][0.95][7][0]
+    
+
 
     def _process_one_rollout(self, rollout_dict: dict) -> tuple[list[float], float]:
         """
@@ -261,7 +306,7 @@ class BaseEvalClass(ABC):
         """
         # rollout_dict contains the success labels and the tensors for the episode
         rollout_length = rollout_dict[self.required_tensors[0]].shape[0]
-        num_robots = self.dataset.data["metadata"].get("num_robots", 1)
+        num_robots = 1
         inference_times = []
         uncertainty_scores_one_rollout = []
         for i in range(rollout_length):
@@ -308,6 +353,17 @@ class BaseEvalClass(ABC):
         for window_size in self.cfg.window_sizes:
             uncertainty_scores_by_window_size[window_size] = []
 
+        # rollout_dicts =self.dataset.iterate_episodes(
+        #     subset=subset,
+        #     required_tensors=self.required_tensors,
+        #     optional_tensors=self.optional_tensors,
+        #     required_actions=self.required_actions,
+        #     optional_actions=self.optional_actions,
+        #     with_success_labels=True,
+        #     normalize_tensors=self.normalize_tensors,
+        #     history=self.cfg.history_length,
+        # )
+
         for rollout_dict in self.dataset.iterate_episodes(
             subset=subset,
             required_tensors=self.required_tensors,
@@ -318,8 +374,12 @@ class BaseEvalClass(ABC):
             normalize_tensors=self.normalize_tensors,
             history=self.cfg.history_length,
         ):
+            # rollout_dict.keys() = ['action_preds', 'successful']
+            # print(rollout_dict['action_preds']) 
+            # print(rollout_dict['action_preds'].shape) # torch.Size([120, 10, 25, 7])
             # Process the rollout
             uncertainty_scores_one_rollout, inference_time = self._process_one_rollout(rollout_dict)
+
 
             inference_times.append(inference_time)
             for window_size in self.cfg.window_sizes:
@@ -329,6 +389,38 @@ class BaseEvalClass(ABC):
                     "uncertainty_scores": uncertainty_scores,
                 }
                 uncertainty_scores_by_window_size[window_size].append(episode_info)
+
+        # Calculate the average inference time
+        avg_inference_time = np.mean(inference_times)
+        return uncertainty_scores_by_window_size, avg_inference_time
+
+    def _process_rollouts_with_dict(self, rollout_dict) -> tuple[dict, float]:
+        """Processes the rollouts in the dataset of the given subset and returns the uncertainty scores for each window size and the average inference time.
+
+        Returns:
+            (uncertainty_scores_by_window_size, avg_inference_time):
+                - uncertainty_scores_by_window_size: A dictionary containing the uncertainty scores for each window size and sucess labels.
+                - avg_inference_times: Average inference time during rollout procession.
+        """
+
+
+        inference_times = []
+        uncertainty_scores_by_window_size = {}
+        for window_size in self.cfg.window_sizes:
+            uncertainty_scores_by_window_size[window_size] = []
+
+        # Process the rollout
+        uncertainty_scores_one_rollout, inference_time = self._process_one_rollout(rollout_dict)
+
+        inference_times.append(inference_time)
+        for window_size in self.cfg.window_sizes:
+            uncertainty_scores = self._apply_window_size(uncertainty_scores_one_rollout, window_size)
+            episode_info = {
+                "successful": rollout_dict["successful"],
+                "uncertainty_scores": uncertainty_scores,
+            }
+            uncertainty_scores_by_window_size[window_size].append(episode_info)
+
         # Calculate the average inference time
         avg_inference_time = np.mean(inference_times)
         return uncertainty_scores_by_window_size, avg_inference_time

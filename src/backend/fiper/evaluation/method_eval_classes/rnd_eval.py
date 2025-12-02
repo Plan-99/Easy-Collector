@@ -2,6 +2,7 @@ from .base_eval_class import BaseEvalClass
 import os
 from rnd import RNDBase
 from hydra.utils import get_class
+import torch
 
 
 class RNDEval(BaseEvalClass):
@@ -30,7 +31,12 @@ class RNDEval(BaseEvalClass):
     def calculate_uncertainty_score(self, rollout_tensor_dict: dict, **kwargs):
         """Calculate the uncertainty score for a single step."""
         for key in rollout_tensor_dict.keys():
-            rollout_tensor_dict[key] = rollout_tensor_dict[key].unsqueeze(0).to(self.device)
+            if key != 'obs_embeddings':
+                continue
+            if type(rollout_tensor_dict[key]) != torch.Tensor:
+                rollout_tensor_dict[key] = torch.from_numpy(rollout_tensor_dict[key]).unsqueeze(0).to(self.device)
+            else:
+                rollout_tensor_dict[key] = rollout_tensor_dict[key].unsqueeze(0).to(self.device)
 
         uncertainty_scores = (
             self.model(**self.model.datasets_to_model_inputs(datasets=rollout_tensor_dict)).detach().cpu()

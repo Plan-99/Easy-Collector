@@ -7,12 +7,17 @@ from backend.fiper.shared_utils.data_management import load_data, save_data
 from backend.fiper.shared_utils.utility_functions import ensure_list
 from typing import Union, Optional, Dict, Any
 from omegaconf import DictConfig
+from backend.fiper.shared_utils.embedding_helper import EmbeddingHelper
+import h5py
+from tqdm import tqdm
 
 
 class ProcessedRolloutDataset(Dataset):
     def __init__(
         self,
         task_data_path,
+        ori_data_path,
+        embedding_helper,
         base_config_path,
         required_tensors: list = ["action_preds", "rgb_images", "obs_embeddings"],
         **kwargs,
@@ -46,6 +51,8 @@ class ProcessedRolloutDataset(Dataset):
         """
         self.data = {}
         self.task_data_path = task_data_path
+        self.ori_data_path = ori_data_path
+        self.embedding_helper = embedding_helper
         self.save_dir = os.path.join(self.task_data_path, "processed_rollouts")
         self.base_config_path = base_config_path
         self.dataset_loaded = False
@@ -77,6 +84,106 @@ class ProcessedRolloutDataset(Dataset):
         """Returns the available tensors in the dataset."""
         self._assert_metadata()
         return self.data["metadata"]["available_tensors"]
+    
+    def prepare_fiper_dataset_from_ec_dataset(self):
+        from backend.fiper.shared_utils.data_management import _get_filenames, save_data
+
+        load_dir = self.ori_data_path
+
+        hdf5_filenames = _get_filenames(load_dir, keywords=["episode"], data_types=["hdf5"])
+
+        hdf5_batch_to_process = []
+        for filename in hdf5_filenames:
+            file_path = os.path.join(load_dir, filename)
+            with h5py.File(file_path, "r") as f:
+                rollout_ec = self.hdf5_to_dict(f)
+            hdf5_batch_to_process.append((filename, rollout_ec))
+
+        if hdf5_batch_to_process:
+            print(f"Converting {len(hdf5_batch_to_process)} HDF5 files in {load_dir} to PKL format...")
+            
+            processed_rollouts = self.batch_ec_to_fiper_rollout_converter(
+                hdf5_batch_to_process, self.embedding_helper
+            )
+            
+            new_filenames = [item[0].replace(".hdf5", ".pkl") for item in hdf5_batch_to_process]
+
+            save_data_path = os.path.join(self.task_data_path, "rollouts", "calibration")
+
+            save_data(save_data_path, new_filenames, processed_rollouts, data_types="pkl", overwrite=True)
+            print(f"Finished converting and saving {len(new_filenames)} files in {load_dir}.")
+
+
+    def batch_ec_to_fiper_rollout_converter(
+        self, batch_data: list[tuple[str, dict]], embedding_helper: EmbeddingHelper
+    ) -> list[dict]:
+        """
+        Converts a batch of Easy-Collector rollout data to FiPer format.
+        """
+        rollouts_ec = [item[1] for item in batch_data]
+
+        # print(rollouts_ec[0].keys())
+        # print(rollouts_ec[0]['observations'].keys())
+        # print(rollouts_ec[0]['qaction'].keys())
+        # print(rollouts_ec[0]['observations']['images'].keys())
+        # print(rollouts_ec[0]['observations']['qpos'].keys())
+        # print(rollouts_ec[0]['observations']['qpos'].keys())
+
+        # Assumes embedding_helper has a method `get_embedding_batch` for batch processing
+        all_embeddings_batch, all_embedding_std = embedding_helper.get_embedding_batch(rollouts_ec)
+
+        print(all_embedding_std)
+
+        
+
+        processed_rollouts = []
+        index = 0
+        for (filename, rollout_ec), all_action_preds in tqdm(zip(batch_data, all_embeddings_batch), total=len(batch_data), desc="Converting rollouts"):
+            rollout_fiper = {}
+            rollout_type = "calibration"
+            rollout_subtype = "ca"
+            is_success = True
+            rollout_fiper['metadata'] = {
+                'task': "unknown_task", 'episode': filename, 'num_robots': len(rollout_ec['qaction'].keys()),
+                'rollout_type': rollout_type, 'rollout_subtype': rollout_subtype,
+                'action_prediction_horizon': 1, 'action_execution_horizon': 1, 'action_batch_size': 1,
+                'has_encoder_feat': True, 'has_state_feat': True, 'action_mappings': {}, 'successful': is_success,
+                'num_steps': len(rollout_ec['qaction'][next(iter(rollout_ec['qaction']))]),
+            }
+            rollout_fiper['rollout'] = []
+            for step in range(len(rollout_ec['qaction'][next(iter(rollout_ec['qaction']))])):
+                # print(f"all_action_preds[step]: {np.mean(all_action_preds[step])}")
+                # rgb = rollout_ec['observations']['images'][next(iter(rollout_ec['observations']['images']))][step]
+                rgb = [0, 0, 0]  # Placeholder for missing image data
+                action = rollout_ec['qaction'][next(iter(rollout_ec['qaction']))][step]
+                agent_pos = rollout_ec['observations']['qpos'][next(iter(rollout_ec['observations']['qpos']))][step]
+                action_pred = all_action_preds[step]
+                fiper_step = {
+                    'rgb': rgb, 'action': action, 'agent_pos': agent_pos, 'action_pred': action_pred,
+                    'obs_embedding': action_pred[0].flatten(), 'state_embedding': action_pred[0].flatten(),
+                    'timestamp': step, 'step': step,
+                }
+                rollout_fiper['rollout'].append(fiper_step)
+            processed_rollouts.append(rollout_fiper)
+            index += 1
+        return processed_rollouts
+    
+
+    def hdf5_to_dict(self, h5_obj):
+        """
+        Recursively explore HDF5 objects (Group/Dataset) and
+        convert them to Python Dictionary and NumPy Array.
+        """
+        data = {}
+        for key, item in h5_obj.items():
+            if isinstance(item, h5py.Group):
+                data[key] = self.hdf5_to_dict(item)
+            elif isinstance(item, h5py.Dataset):
+                val = item[()]
+                data[key] = val
+        return data
+
+
 
     def compare_old_and_new_rollouts(self, filenames: list, rollout_type: str):
         """

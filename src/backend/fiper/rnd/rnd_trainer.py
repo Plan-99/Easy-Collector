@@ -223,7 +223,7 @@ class RNDTrainer:
                 "rgb_image_shape": rgb_image_shape,
                 # Determines the action prediction handling
                 "action_batch_handling": cfg.action_batch_handling,
-                "action_execution_horizon": self.task_cfg.task.action_space.action_execution_horizon,
+                "action_execution_horizon": self.task_cfg.action_space.action_execution_horizon,
                 "normalize_tensors": cfg.normalize_tensors,
             },
             # Used to identify the model
@@ -264,10 +264,10 @@ class RNDTrainer:
         # Load the model
         model, model_cfg = self._init_rnd_model(model_name, cfg, **kwargs)
         model_exists = model._check_for_existance(save_dir, model_cfg["hparams"])
-        if model_exists:
-            # If the model already exists and we are in deterministic mode, skip training
-            print(f"RND Model {model_name} already exists. Skipping training.")
-            return
+        # if model_exists:
+        #     # If the model already exists and we are in deterministic mode, skip training
+        #     print(f"RND Model {model_name} already exists. Skipping training.")
+        #     return
         set_seed(cfg.hparams.model.seed)
         dataset_dict = self._get_datasets_for_model(model_cfg["model_type"], cfg, **kwargs)
         optimizer, scheduler = self._get_optimizers(model, cfg)

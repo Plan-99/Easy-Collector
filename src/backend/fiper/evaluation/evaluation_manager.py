@@ -14,6 +14,7 @@ class EvaluationManager:
         config_path: str,
         task_data_path: str,
         dataset: ProcessedRolloutDataset,
+        is_inference: bool = False,
         device: str = None,
         seed: int = None,
         **kwargs,
@@ -38,16 +39,19 @@ class EvaluationManager:
         self.base_config_path = config_path
         self.task_data_path = task_data_path
         self.base_cfg = self._load_config()
-        if not isinstance(dataset, ProcessedRolloutDataset):
-            raise ValueError("dataset must be of type ProcessedRolloutDataset.")
+        # if not isinstance(dataset, ProcessedRolloutDataset):
+        #     raise ValueError("dataset must be of type ProcessedRolloutDataset.")
         self.dataset = dataset
         self.kwargs = kwargs
         self.seed = seed
+        self.is_inference = is_inference
 
         if device is not None and device in ["cpu", "cuda:0"]:
             self.device = device if torch.cuda.is_available() else "cpu"
         else:
             self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+        self.methodEvalClassList = []
 
     def evaluate(self, methods, combine_methods: bool = False, combined_methods: dict = None) -> dict:
         """
@@ -72,17 +76,54 @@ class EvaluationManager:
                 cfg.hparams.model.seed = self.seed
 
             # Get the method-specific evaluation class
-            methodEvalClass: BaseEvalClass = self._get_method_eval_class(method, cfg)
+            methodEvalClass: BaseEvalClass = self._get_method_eval_class(method, self.is_inference, cfg)
 
             # Evaluate the method and store the results
-            total_results[method] = methodEvalClass.evaluate()
+            print(f"Evaluating method: {method}")
+            result = methodEvalClass.evaluate()
 
-        # Combine methods if specified
-        if combine_methods:
-            for key in combined_methods:
-                total_results = self._combine_two_methods(combined_methods[key], total_results)
+        # # Combine methods if specified
+        # if combine_methods:
+        #     for key in combined_methods:
+        #         total_results = self._combine_two_methods(combined_methods[key], total_results)
 
-        return total_results
+        return result
+    
+
+    def save_thresholds(self, method: str):
+
+        cfg = self._load_config(method_name=method)
+        if self.seed is not None and "seed" in cfg.hparams.model:
+            cfg.hparams.model.seed = self.seed
+
+        self.methodEvalClass: BaseEvalClass = self._get_method_eval_class(method, is_inference=self.is_inference, cfg=cfg)
+        self.methodEvalClass.save_calibration_results()
+
+
+    def prepare_for_inference(self, methods: str):
+        """Prepare the method-specific evaluation class for inference.
+
+        Args:
+            method (str): The method to prepare for inference.
+        """
+        # Load the configuration for the method
+        for method in methods:
+            cfg = self._load_config(method_name=method)
+            if self.seed is not None and "seed" in cfg.hparams.model:
+                cfg.hparams.model.seed = self.seed
+
+            self.methodEvalClassList.append(self._get_method_eval_class(method, self.is_inference, cfg))
+
+        for methodEvalClass in self.methodEvalClassList:
+            methodEvalClass.prepare_for_inference()
+
+    def infer(self, rollout_dict: dict) -> dict:
+
+        result = []
+        for methodEvalClass in self.methodEvalClassList:
+            result.append(methodEvalClass.infer(rollout_dict))
+
+        return result
 
     def _combine_two_methods(self, combination_config, total_results):
         """Logically combine two failure prediction methods based on the given combination configuration."""
@@ -209,7 +250,7 @@ class EvaluationManager:
         total_results[method_keyword]["window_sizes"] = comb_window_sizes
         return total_results
 
-    def _get_method_eval_class(self, method_name: str, cfg):
+    def _get_method_eval_class(self, method_name: str, is_inference: bool, cfg):
         """Get the method-specific evaluation class. The classes are subclasses from the base evaluation class and only implement the model-specific functions."""
         # Get the class name from the method name (normalized version use the same class as the non-normalized version)
         class_name = method_name
@@ -229,6 +270,7 @@ class EvaluationManager:
             device=self.device,
             task_data_path=self.task_data_path,
             dataset=self.dataset,
+            is_inference=is_inference,
             **self.kwargs,
         )
         return class_obj

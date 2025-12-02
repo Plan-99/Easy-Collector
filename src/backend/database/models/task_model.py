@@ -26,8 +26,11 @@ class Task(Model, SoftDeletes):
         'sensor_img_size': 'json',
         'settings': 'json',
     }
-    
-    
+
+    __appends__ = [
+        'joint_dim'
+    ]
+
     __timestamps__ = True
 
 
@@ -43,3 +46,11 @@ class Task(Model, SoftDeletes):
                 home_pose[str(id)] = self.settings['robots'][str(id)].get('home_pose', [0.0] * len(robot.joint_names))
                 print(home_pose, self.id)
         return home_pose
+    
+    @accessor
+    def joint_dim(self):
+        joint_dim = 0
+        for id in self.robot_ids:
+            robot = Robot.find(id)
+            joint_dim += robot.joint_dim
+        return joint_dim

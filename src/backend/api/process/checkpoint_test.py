@@ -34,7 +34,7 @@ def checkpoint_test(
     try:
         if checkpoint['is_base_model']:
             if policy_obj['type'] == 'PI0':
-                ckpt_dir = "lerobot/pi0"
+                ckpt_dir = "lerobot/pi0_base"
         else:
             ckpt_dir = os.path.join("/root/src/backend/checkpoints", str(checkpoint['id']))
 
@@ -159,15 +159,16 @@ def checkpoint_test(
             
             if task_control['stop']:
                 return
-                            
+            
             end = time.time()
-            print(f"Uncertainty: {policy.uncertainty}")
-            print(f"Step Time: {end - start}")
-            socketio_instance.emit('checkpoint_test_step', {
-                'uncertainty': policy.uncertainty,
-                'step_time': end - start,
-            })
+            
 
+            # print(f"Uncertainty: {policy.uncertainty}")
+            # print(f"Step Time: {end - start}")
+            # socketio_instance.emit('checkpoint_test_step', {
+            #     'uncertainty': policy.uncertainty,
+            #     'step_time': end - start,
+            # })
 
 
         except Exception as e:

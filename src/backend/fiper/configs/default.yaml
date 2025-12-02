@@ -18,23 +18,23 @@ combined_methods:
   1: 
     m1: 
       name: rnd_oe
-      window_sizes:
-      quantiles:
+      window_sizes: [7]
+      quantiles: [0.95]
     m2:
       name: entropy
-      window_sizes:
-      quantiles:
-    operation: "or"
-  2:
-    m1: 
-      name: rnd_oe
-      window_sizes:
-      quantiles:
-    m2:
-      name: entropy
-      window_sizes:
-      quantiles:
+      window_sizes: [7]
+      quantiles: [0.95]
     operation: "and"
+  # 2:
+  #   m1: 
+  #     name: rnd_oe
+  #     window_sizes:
+  #     quantiles:
+  #   m2:
+  #     name: entropy
+  #     window_sizes:
+  #     quantiles:
+  #   operation: "and"
 
 # Whether to train the rnd models
 train_rnd: True
