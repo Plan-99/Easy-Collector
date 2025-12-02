@@ -65,14 +65,15 @@ def check_create_successed(id):
 @checkpoint_bp.route('/checkpoint/<id>/:start_test', methods=['POST'])
 def start_test(id):
     data = request.json
+    checkpoint = CheckpointModel.find(id)
     agents = [current_app.agents[agent_id] for agent_id in data.get('robot_ids', [])]
     current_app.pm.start_function(
         func=checkpoint_test,
         node=current_app.node,
-        checkpoint=data.get('checkpoint'),
+        checkpoint=checkpoint,
         task=data.get('task'),
         policy_obj=data.get('policy'),
-        robots=agents,
+        agents=agents,
         sensors=data.get('sensors'),
         max_timesteps=data.get('timesteps', 100),
         socketio_instance=current_app.pm.socketio,

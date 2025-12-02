@@ -131,7 +131,7 @@ def test_vla(
                     target_qpos = action[start_action_id:start_action_id + agent.joint_len]
                     print(f"To:{target_qpos} / Now:{qpos_list}")
                     start_action_id += agent.joint_len
-                    agent.move_step(target_qpos)
+                    agent.move_joint_step(target_qpos)
                     
                     
                 socketio_instance.emit('test_vla_progress', {

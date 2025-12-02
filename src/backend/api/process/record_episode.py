@@ -8,6 +8,7 @@ from .leader_teleoperation import Leader
 from ...utils.image_parser import fetch_image_with_config
 import time
 import h5py
+from ...database.models.teleoperator_model import Teleoperator as TeleoperatorModel
 
 def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
     max_idx = 1000
@@ -18,10 +19,7 @@ def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
             return i
     raise Exception(f"Error getting auto index, or more than {max_idx} episodes")
 
-def record_episode(node, dataset_id, robots, sensors, task, language_instruction, socketio_instance, task_control, tele_type='leader', iter=100000):
-    agents = []
-    for robot in robots:
-        agents.append(Agent(node, robot))
+def record_episode(node, dataset_id, agents, assembly_id, sensors, task, language_instruction, socketio_instance, task_control, tele_type='leader', iter=100000):
     env = Env(node, agents=agents, sensors=sensors)
     dataset_dir = f"{DATASET_DIR}/{dataset_id}"
 
@@ -52,7 +50,7 @@ def record_episode(node, dataset_id, robots, sensors, task, language_instruction
             'type': 'stdout '
         })
         if home_pose is not None and tele_type != 'externel':
-            for agent in env.agents:
+            for agent in agents:
                 agent.move_to(home_pose[str(agent.id)])
             time.sleep(3)
 
@@ -62,22 +60,23 @@ def record_episode(node, dataset_id, robots, sensors, task, language_instruction
         time.sleep(1)
 
         if tele_type == 'leader':
-            leaders = []
-            for agent in env.agents:
-                leader = Leader(agent, socketio_instance, agent.leader_robot_preset, log_emit_id='record_episode', port=agent.leader_robot_preset['port_name'])
-                socketio_instance.start_background_task(
-                    target=leader.sync_leader_robot,
-                )
-                leaders.append(leader)
+            teleop = TeleoperatorModel.where('type', 'leader').where('assembly_id', assembly_id).first()
 
-            while not all([leader.is_synced for leader in leaders]):
-                time.sleep(0.1)
+            if teleop is None:
+                socketio_instance.emit('log_record_episode', {
+                    'log': f'[ERROR]: No leader robot preset for assembly {assembly_id}',
+                    'type': 'stderr'
+                })
+                tele_control['stop'] = True
+                return
+            
+            leader = Leader(agents, socketio_instance, teleop.settings, log_emit_id='record_episode')
 
-            for leader in leaders:
-                socketio_instance.start_background_task(
-                    target=leader.position_pub,
-                    task_control=tele_control
-                )
+            leader.sync_leader_robot()
+            socketio_instance.start_background_task(
+                target=leader.position_pub,
+                task_control=tele_control
+            )
 
         # # saving dataset
         if not os.path.isdir(dataset_dir):
@@ -86,7 +85,7 @@ def record_episode(node, dataset_id, robots, sensors, task, language_instruction
         if os.path.isfile(dataset_path):
             print(f'Dataset already exist at \n{dataset_path}\nHint: set overwrite to True.')
 
-        for agent in env.agents:
+        for agent in agents:
             if agent.joint_states is None:
                 socketio_instance.emit('log_record_episode', {
                     'log': f'[ERROR]: No joint states from robot {agent.id}',
@@ -133,7 +132,7 @@ def record_episode(node, dataset_id, robots, sensors, task, language_instruction
         })
 
         data_dict = {}
-        for agent in env.agents:
+        for agent in agents:
             data_dict[f'/observations/qpos/robot_{agent.id}'] = []
             data_dict[f'/qaction/robot_{agent.id}'] = []
         for sensor in sensors:
@@ -147,7 +146,7 @@ def record_episode(node, dataset_id, robots, sensors, task, language_instruction
         while timesteps:
             ts = timesteps.pop(0)
 
-            for agent in env.agents:
+            for agent in agents:
                 data_dict[f'/observations/qpos/robot_{agent.id}'].append(ts.observation['robot_states'][agent.id]['qpos'])
                 data_dict[f'/qaction/robot_{agent.id}'].append(ts.observation['robot_states'][agent.id]['qaction'])
                 # print(np.array(ts.observation['robot_states'][agent.id]['qaction']).shape, np.array(ts.observation['robot_states'][agent.id]['qpos']).shape, agent.id)

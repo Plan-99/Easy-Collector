@@ -37,6 +37,12 @@ export default {
   trainCreateFormTitle: 'Create New Training Session',
   trainEditFormTitle: 'Edit Training Session',
 
+  assembleIntroTitle: 'Assemble, Build Your Ideal Robot',
+  assembleIntroBody: "Combine different robot parts to create your ideal robot configuration.",
+  assembleIntroBody2: "With Easy Trainer, assembling your robot is a breeze, allowing you to experiment with various setups to find the perfect fit for your tasks.",
+  assembleCreateFormTitle: 'Create New Assembly',
+  assembleEditFormTitle: 'Edit Assembly',
+
   checkpointEditFormTitle: 'Edit Checkpoint',
 
   sensorSetting: 'Sensor Settings',

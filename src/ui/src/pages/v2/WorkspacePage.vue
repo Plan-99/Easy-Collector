@@ -124,13 +124,28 @@
 
                         <q-expansion-item
                             icon="adb"
-                            :label="`${$t('robotSetting')} (${robots.filter(e => selectedWorkspace.robot_ids.includes(e.id)).length})`"
+                            :label="`${$t('robotSetting')}`"
                         >
                             <q-card class="bg-dark border-rounded">
                             <q-card-section>
+                                <q-select
+                                    dense
+                                    outlined
+                                    dark
+                                    bg-color="dark"
+                                    v-model="selectedWorkspace.assembly_id"
+                                    :options="assemblies"
+                                    label="Robot Assembly"
+                                    style="width: 100%"
+                                    map-options
+                                    emit-value
+                                    option-label="name"
+                                    option-value="id"
+                                    @update:model-value="updateWorkspace({ assembly_id: selectedWorkspace.assembly_id })"
+                                ></q-select>
                                 <div
                                     class="q-pa-sm q-px-md q-my-sm border-rounded row"
-                                    v-for="robot in robots.filter(e => selectedWorkspace.robot_ids.includes(e.id))" 
+                                    v-for="robot in robots" 
                                     :key="robot.id"
                                     :class="robot.status === 'on' ? 'bg-green-10' : 'bg-grey-8'"
                                 >
@@ -149,13 +164,6 @@
                                     </div>
                                     <q-inner-loading :showing="robot.status === 'loading'"></q-inner-loading>
                                 </div>
-                                <q-btn outline
-                                    class="full-width q-mb-sm"
-                                    rounded
-                                    color="primary"
-                                    icon="add"
-                                    @click="openRobotForm"
-                                ></q-btn>
                             </q-card-section>
                             </q-card>
                         </q-expansion-item>
@@ -362,7 +370,7 @@
                 v-if="!selectedEpisode.name"
                 class="col"
                 :workspace="selectedWorkspace"
-                :robots="robots.filter(e => selectedWorkspace.robot_ids.includes(e.id))"
+                :robots="robots"
                 :sensors="sensors.filter(e => selectedWorkspace.sensor_ids.includes(e.id))"
                 v-model:selected-dataset-id="selectedDatasetId"
                 v-model:selected-checkpoint-id="selectedCheckpointId"
@@ -423,13 +431,13 @@
             @submit="updateWorkspace"
             :ok-button-label="$t('save')"
         ></form-dialog>
-        <form-dialog
+        <!-- <form-dialog
             v-model="showRobotForm"
             :title="$t('workspaceRobotFormTitle')"
             :form="robotForm"
             @submit="updateWorkspace"
-            :ok-button-label="$t('save')"
-        ></form-dialog>
+            :ok-button-label="$t('save')" -->
+        <!-- ></form-dialog> -->
         <form-dialog
             v-model="showDatasetForm"
             :title="$t(datasetForm.id ? 'datasetEditFormTitle' : 'datasetAddFormTitle')"
@@ -547,7 +555,25 @@ const selectedWorkspace = computed(() => {
 });
 
 const sensors = ref([]);
-const robots = ref([]);
+const robots = computed(() => {
+    if (!selectedWorkspace.value) {
+        return [];
+    }
+    const assembly = assemblies.value.find(a => a.id === selectedWorkspace.value.assembly_id);
+    if (assembly) {
+        console.log('assembly', assembly);
+        const robotList = [];
+        ['left_arm', 'right_arm', 'left_tool', 'right_tool', 'mobile_base'].forEach(part => {
+            if (!assembly[part]) return;
+            assembly[part].handler = useRobot(assembly[part], () => {
+                assembly[part].handler.subscribeRobot(() => {});
+            });
+            robotList.push(assembly[part]);
+        });
+        return [...new Map(robotList.map(item => [item.id, item])).values()];
+    }
+    return [];
+});
 
 function listSensors() {
     return api.get('/sensors').then((response) => {
@@ -560,16 +586,25 @@ function listSensors() {
     });
 }
 
-function listRobots() {
-    return api.get('/robots').then((response) => {
-        robots.value = response.data.robots || [];
-        robots.value.forEach(robot => {
-            robot.handler = useRobot(robot, () => {
-                robot.handler.subscribeRobot(() => {});
-            });
-        });
+// function listRobots() {
+//     return api.get('/robots').then((response) => {
+//         robots.value = response.data.robots || [];
+//         robots.value.forEach(robot => {
+//             robot.handler = useRobot(robot, () => {
+//                 robot.handler.subscribeRobot(() => {});
+//             });
+//         });
+//     }).catch((error) => {
+//         console.error('Error fetching robots:', error);
+//     });
+// }
+
+const assemblies = ref([]);
+function listAssemblies() {
+    return api.get('/assemblies').then((response) => {
+        assemblies.value = response.data.assemblies || [];
     }).catch((error) => {
-        console.error('Error fetching robots:', error);
+        console.error('Error fetching assemblies:', error);
     });
 }
 
@@ -619,20 +654,21 @@ watch(selectedWorkspaceId, (newVal) => {
 
 });
 
-const showRobotForm = ref(false);
-const robotForm = ref([
-    { key: 'id', value: null },
-    { key: 'robot_ids', label: 'Robots', type: 'multiselect_list', options: computed(() => robots.value.map(r => ({ label: r.name, value: r.id }))), value: [] }
-])
+// const showRobotForm = ref(false);
+// const robotForm = ref([
+//     { key: 'id', value: null },
+//     { key: 'robot_ids', label: 'Robots', type: 'multiselect_list', options: computed(() => robots.value.map(r => ({ label: r.name, value: r.id }))), value: [] }
+// ])
 
-function openRobotForm() {
-    if (selectedWorkspace.value) {
-        robotForm.value.find(e => e.key === 'robot_ids').value = selectedWorkspace.value.robot_ids;
-    }
-    showRobotForm.value = true;
-}
+// function openRobotForm() {
+//     if (selectedWorkspace.value) {
+//         robotForm.value.find(e => e.key === 'robot_ids').value = selectedWorkspace.value.robot_ids;
+//     }
+//     showRobotForm.value = true;
+// }
 
 function toggleRobot(robot) {
+    robot.process_id = `robot_${robot.id}`;
     if (robot.status === 'on') {
         robot.handler.stopRobot()
     } else {
@@ -839,7 +875,8 @@ const openCheckpointInfoDialog = (checkpoint) => {
 onMounted(() => {
     listWorkspaces();
     listSensors();
-    listRobots();
+    // listRobots();
+    listAssemblies();
     socket.on('augmentation_complete', (data) => {
         Notify.create({
             color: 'positive',

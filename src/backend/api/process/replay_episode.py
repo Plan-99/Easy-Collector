@@ -37,6 +37,6 @@ def replay_episode(node, task, filename, socketio_instance, task_control):
             for agent in env.agents:
                 target_qpos = qpos[agent.id * agent.joint_len:(agent.id + 1) * agent.joint_len]
                 start_action_id += agent.joint_len
-                agent.move_step(target_qpos)
+                agent.move_joint_step(target_qpos)
 
             time.sleep(0.1)

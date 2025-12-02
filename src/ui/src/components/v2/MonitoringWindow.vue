@@ -261,7 +261,8 @@ function startDataCollection() {
         task: props.workspace,
         robots: props.robots,
         sensors: props.sensors,
-        tele_type: teleType.value
+        tele_type: teleType.value,
+        assembly_id: props.workspace.assembly_id,
     }).catch((error) => {
         console.error('Error starting data collection:', error);
         Notify.create({

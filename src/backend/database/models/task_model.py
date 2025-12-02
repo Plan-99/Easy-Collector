@@ -15,6 +15,7 @@ class Task(Model, SoftDeletes):
         'episode_len',
         'sensor_img_size',
         'settings',
+        'assembly_id',
     ]
 
     __casts__ = {

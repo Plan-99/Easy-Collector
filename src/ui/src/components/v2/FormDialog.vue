@@ -1,6 +1,6 @@
 <template>
     <q-dialog v-model="isOpen" persistent transition-show="slide-up" transition-hide="slide-down">
-        <q-card style="min-width: 600px;" class="border-rounded border-white">
+        <q-card :style="`min-width: ${minWidth};`" class="border-rounded border-white">
             <q-card-section class="bg-dark text-white row">
                 <div class="text-h6">{{ props.title }}</div>
                 <q-space></q-space>
@@ -10,6 +10,7 @@
             <q-separator />
 
             <q-card-section class="bg-secondary q-px-xl q-py-lg">
+                <slot></slot>
                 <div v-for="(data, index) in form.filter((d) => d.show === undefined || d.show(form))" :key="index"
                 >
                     <div class="text-white row">
@@ -59,7 +60,7 @@
                         map-options
                         emit-value
                         multiple
-                        :max-values="(isFunction(data.maxValues) ? data.maxValues() : data.maxValues) || null"
+                        :max-values="data.maxValues || 'no-limit'"
                         :options="data.options || []"
                         class="q-mb-md q-mt-xs"
                         v-else-if="data.type === 'multiselect'"
@@ -97,7 +98,6 @@
     </q-dialog>
 </template>
 <script setup>
-import { isFunction } from 'chart.js/helpers';
 import { ref, watch } from 'vue';
 const props = defineProps({
     modelValue: {
@@ -119,6 +119,10 @@ const props = defineProps({
     cancelButtonLabel: {
         type: String,
         default: 'Cancel'
+    },
+    minWidth: {
+        type: String,
+        default: '600px'
     }
 });
 const emit = defineEmits(['update:modelValue', 'submit']);

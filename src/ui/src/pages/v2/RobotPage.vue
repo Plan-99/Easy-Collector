@@ -20,12 +20,6 @@
                                         <q-icon name="edit" size="xs" />
                                     </q-item-section>
                                 </q-item>
-                                <q-item clickable v-ripple @click="openTeleSetting(robot)">
-                                    <q-item-section>Teleoperation Setting</q-item-section>
-                                    <q-item-section side>
-                                        <q-icon name="gamepad" size="xs" />
-                                    </q-item-section>
-                                </q-item>
                                 <q-item clickable v-ripple class="text-negative" @click="deleteRobot(robot)">
                                     <q-item-section>Hide Robot</q-item-section>
                                     <q-item-section side>
@@ -232,10 +226,9 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref, watch } from 'vue';
+import { onMounted, onUnmounted, ref, watch, computed } from 'vue';
 
 import { useSocket } from 'src/composables/useSocket';
-import { useROS } from 'src/composables/useROS';
 import { useLeaderTeleoperation } from 'src/composables/useLeaderTeleoperation';
 import { api } from 'src/boot/axios';
 import ProcessConsole from 'src/components/v2/ProcessConsole.vue';
@@ -247,20 +240,40 @@ import FormDialog from 'src/components/v2/FormDialog.vue';
 import RobotPendant from 'src/components/v2/RobotPendant.vue';
 
 const { socket } = useSocket();
-const { connectROS } = useROS();
 const { leaderTeleStarted, startLeaderTele, stopLeaderTele } = useLeaderTeleoperation();
 
 const robots = ref([]);
 
+const supportingRobots = ref([])
+
+function getSupportingRobots() {
+    return api.get('/robots:supporting').then((response) => {
+        supportingRobots.value = [
+            ...response.data.robots,
+            {
+                name: 'Custom Robot',
+                company: null,
+                role: 'custom'
+            }
+        ]
+    }).catch((error) => {
+        console.error('Error fetching supporting robots:', error);
+    });
+}
+
+function getFormRobotInfo(form) {
+    return supportingRobots.value.find(r => r.name === form.find((e) => e.key === 'type').value);
+}
+
 const robotForm = ref([
     { key: 'id', value: null },
     { label: 'Robot Name', key: 'name', type: 'text', value: '', default: '' },
-    { label: 'Robot Type', key: 'type', type: 'select', value: '', default: '', options: [
-        { label: 'UR5e', value: 'ur5e' },
-        { label: 'PIPER', value: 'piper' },
-        { label: 'Custom Robot', value: 'custom'}
-    ]},
-    { label: 'CAN Port', key: 'can_port', type: 'text', value: 'can_0', default: 'can_0', show: (form) => form.find((e) => e.key === 'type').value === 'piper' },
+    { label: 'Robot Type', key: 'type', type: 'select', value: '', default: '', options: computed(() => supportingRobots.value.map((robot) => ({
+        label: robot.name + (robot.company ? ` (${robot.company})` : ''),
+        value: robot.name
+    }))) },
+    // { label: 'CAN Baudrate', key: 'can_baudrate', type: 'number', value: 1000000, default: 1000000, show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).network_interface === 'can' }, 
+    { label: 'CAN Port', key: 'can_port', type: 'text', value: 'can_0', default: 'can_0', show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).network_interface === 'can' },
     { label: 'Arm Type', key: 'role', type: 'select', value: 'single_arm', default: 'dual_arm', 
         options: [
             { label: 'Single Arm', value: 'single_arm' },
@@ -268,11 +281,6 @@ const robotForm = ref([
             { label: 'Tool', value: 'tool' },
         ],
         show: (form) => form.find((e) => e.key === 'type').value === 'custom' 
-    },
-    { label: 'Tools', key: 'tools', type: 'multiselect', value: [], default: [], 
-        options: robots.value.filter((e) => e.type === 'tool').map((tool) => ({ label: tool.name, value: tool.id })),
-        show: (form) => form.find((e) => e.key === 'role').value !== 'tool',
-        max_values: (form) => form.find((e) => e.key === 'role').value === 'dual_arm' ? 2 : 1,
     },
     { label: 'Joint Names', key: 'joint_names', type: 'custom', value: [], default: [] , show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
     { label: 'Joint Lower Bounds', key: 'joint_lower_bounds', type: 'custom', value: [], default: [] , show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
@@ -302,7 +310,7 @@ function listRobots() {
     return api.get('/robots').then((response) => {
         robots.value = response.data.robots || [];
         robots.value.forEach(robot => {
-            robot.image = '/images/' + robot.type + '.png'; // Default image if not provided
+            robot.image = '/images/' + robot.company + '.png'; // Default image if not provided
             robot.loading = false;
             robot.handler = useRobot(robot, () => {
                 watchRobot(robot);
@@ -408,27 +416,6 @@ const showRobotForm = ref(false)
 const showTeleSetting = ref(false)
 const teleSettingRobot = ref(null)
 
-function openTeleSetting(robot) {
-    if (robot.status === 'off') {
-        Notify.create({
-            color: 'negative',
-            message: 'Turn on the robot first.'
-        })
-        return;
-    }
-    showTeleSetting.value = true;
-    teleSettingRobot.value = robot;
-    canControl.value = false; // Reset control state
-}
-
-function closeTeleSetting(leaderSettingForm) {
-    if (leaderSettingForm) {
-        robots.value.find((e) => e.id === teleSettingRobot.value.id).leader_robot_preset = leaderSettingForm;
-    }
-    showTeleSetting.value = false;
-    teleSettingRobot.value = null;
-    canControl.value = true; // Reset control state
-}
 
 const homeposeForm = ref([]);
 const showHomeposeSettingDialog = ref(false);
@@ -473,12 +460,10 @@ watch(watchingRobot, (newVal, oldVal) => {
 
 function initialize() {
     listRobots()
+    getSupportingRobots()
 }
 
 onMounted(() => {
-    
-    connectROS()
-    
     socket.on('start_process', (data) => {
         if (data.id === 'leader_teleoperation') {
             leaderTeleStarted.value = true;

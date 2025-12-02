@@ -132,11 +132,14 @@ def read_hdf5_add_config(id, file_name):
 @dataset_bp.route('/dataset/<id>/:start_collection', methods=['POST'])
 def start_collection(id):
     data = request.json
+    agents = [current_app.agents[robot['id']] for robot in data.get('robots', [])]
+
     current_app.pm.start_function(
         func=record_episode,
         node=current_app.node,
         dataset_id=id,
-        robots=data.get('robots'),
+        agents=agents,
+        assembly_id=data.get('assembly_id'),
         sensors=data.get('sensors'),
         task=data.get('task'),
         language_instruction=data.get('language_instruction'),

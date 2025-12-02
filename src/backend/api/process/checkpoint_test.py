@@ -85,12 +85,12 @@ def checkpoint_test(
     home_pose = task['home_pose']
 
     if home_pose is not None:
-        for agent in env.agents:
+        for agent in agents:
             agent.move_to(home_pose[str(agent.id)])
 
     time.sleep(3)
         
-    socketio_instance.emit('log_checkpoint_test', {
+    socketio_instance.emit('log_record_episode', {
         'log': 'Robot moved to homepose',
         'type': 'stdout '
     })
@@ -144,11 +144,11 @@ def checkpoint_test(
             # Prepare the action for the environment
             action = action.squeeze(0).to("cpu").numpy()
             start_action_id = 0
-            for agent in env.agents:
+            for agent in agents:
                 target_qpos = action[start_action_id:start_action_id + agent.joint_len]
                 # print(f"To:{target_qpos} / Now:{qpos_list}")
                 start_action_id += agent.joint_len
-                agent.move_step(target_qpos)
+                agent.move_joint_step(target_qpos)
 
 
             # time.sleep(0.03)  # Simulate processing time
@@ -170,7 +170,7 @@ def checkpoint_test(
         except Exception as e:
             import traceback
             error_string = traceback.format_exc()
-            socketio_instance.emit('log_checkpoint_test', {
+            socketio_instance.emit('log_record_episode', {
                 'log': f'Error in Checkpoint Test: {error_string}',
                 'type': 'stdout '
             })

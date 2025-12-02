@@ -18,6 +18,8 @@ from .routes.dataset import dataset_bp
 from .routes.policy import policy_bp
 from .routes.checkpoint import checkpoint_bp
 from .routes.vla import vla_bp
+from .routes.teleoperator import teleoperator_bp
+from .routes.assembly import assembly_bp
 
 import rclpy
 from rclpy.node import Node
@@ -57,6 +59,8 @@ app.register_blueprint(dataset_bp, url_prefix='/api')
 app.register_blueprint(policy_bp, url_prefix='/api')
 app.register_blueprint(checkpoint_bp, url_prefix='/api')
 app.register_blueprint(vla_bp, url_prefix='/api')
+app.register_blueprint(teleoperator_bp, url_prefix='/api')
+app.register_blueprint(assembly_bp, url_prefix='/api')
 
 socketio.on_namespace(SensorNamespace('/sensor', pm))
 socketio.on_namespace(RobotNamespace('/robot', pm))
@@ -178,7 +182,7 @@ def handle_offer_event(sid, data):
 @socketio.on('move_robot_joint')
 def handle_move_robot_joint_event(data):
     agent = app.agents[data['robot']['id']]
-    agent.move_step(data['goal_pos'])
+    agent.move_joint_step(data['goal_pos'])
 
 @socketio.on('move_robot_ee')
 def handle_move_robot_ee_event(data):

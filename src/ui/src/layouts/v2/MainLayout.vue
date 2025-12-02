@@ -41,7 +41,7 @@
 
 <script setup>
 import { ref } from 'vue'
-import EssentialLink from 'components/v2/EssentialLink.vue'
+import EssentialLink from 'components/v2/EssentialLink.vue' // 경로 주의 (components/v2/... 라면 그에 맞게 수정)
 
 const linksList = [
   {
@@ -52,7 +52,19 @@ const linksList = [
   {
     title: 'Robots',
     icon: 'adb',
-    link: '/robots'
+    // link: '/robots', // 상위 메뉴는 링크를 제거하거나 '#'으로 둡니다.
+    children: [
+      {
+        title: 'Management',
+        icon: 'file_upload', // 적절한 아이콘 예시
+        link: '/robots/management'
+      },
+      {
+        title: 'Assemble',
+        icon: 'build', // 적절한 아이콘 예시
+        link: '/robots/assemble'
+      }
+    ]
   },
   {
     title: 'Workspace',
@@ -64,16 +76,6 @@ const linksList = [
     icon: 'school',
     link: '/train'
   }
-  // {
-  //   title: 'VLA',
-  //   icon: 'psychology',
-  //   link: '/vla/execute'
-  // }
-  // {
-  //   title: 'Datasets',
-  //   icon: 'folder_open',
-  //   link: '/datasets'
-  // },
 ]
 
 const leftDrawerOpen = ref(false)

@@ -25,6 +25,7 @@
           icon="close"
           style="z-index: 1000"
           @click="model = null; $emit('close')"
+          v-if="!props.noClose"
         ></q-btn>
       </div>
 
@@ -54,6 +55,10 @@ const props = defineProps({
   tabValue: {
     type: String,
     default: null,
+  },
+  noClose: {
+    type: Boolean,
+    default: false,
   },
 });
 // 1. 선택된 탭을 위한 v-model (기존과 동일)

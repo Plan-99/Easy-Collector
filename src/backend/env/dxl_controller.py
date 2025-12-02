@@ -5,7 +5,7 @@ import time
 
 
 class DxlController:
-    def __init__(self, serial_port, dxl_ids, gripper_dxl_ids=[]):
+    def __init__(self, serial_port, dxl_ids, gripper_dxl_ids=[], baudrate=57600):
         self.portHandler = dxl.PortHandler(serial_port)  # 다이나믹셀 포트
         self.packetHandler = dxl.PacketHandler(2.0)         # 프로토콜 2.0 사용
         self.port_lock = threading.Lock()
@@ -16,7 +16,7 @@ class DxlController:
         if not self.portHandler.openPort():
             print("Failed to open the port")
             return
-        if not self.portHandler.setBaudRate(57600):
+        if not self.portHandler.setBaudRate(baudrate):
             print("Failed to set baudrate")
             return
         
@@ -31,8 +31,12 @@ class DxlController:
             if add_param_result != True:
                 print(f"[ID:{dxl_id}] GroupSyncRead addParam failed")
 
+        self.closed = False
+        self.controlled = False
+
     def enable_torque(self):
         torque_enable_address = 64  # MX, X 시리즈 기준
+        self.controlled = True
         for index, dxl_id in enumerate(self.dxl_ids):
             print(f"Enabling torque for DXL ID: {dxl_id}")
             print(f"Gripper DXL IDs: {self.gripper_dxl_ids}")
@@ -58,6 +62,8 @@ class DxlController:
             elif dxl_error != 0:
                 print(f"Torque Remove Error: {self.packetHandler.getRxPacketError(dxl_error)}")
                 return
+        self.controlled = False
+        
             
             
     def read_dynamixel(self, dxl_id):
@@ -75,39 +81,47 @@ class DxlController:
         return position
     
     def read_all_dynamixel(self):
-        """ GroupSyncRead를 사용해 모든 다이나믹셀 위치를 한 번에 읽어옵니다. """
-        with self.port_lock:
-            positions = []
-            
-            # 1. 단 한 번의 통신으로 모든 데이터를 요청하고 받음
-            dxl_comm_result = self.syncRead.txRxPacket()
-            if dxl_comm_result != COMM_SUCCESS:
-                print(f"SyncRead txRxPacket error: {self.packetHandler.getTxRxResult(dxl_comm_result)}")
-                # 통신 실패 시, 오류를 알리거나 비어 있는 리스트 반환
-                return [0] * len(self.dxl_ids) # 임시로 0 리스트 반환
+            """ GroupSyncRead를 사용해 모든 다이나믹셀 위치를 한 번에 읽어옵니다. """
+            with self.port_lock:
+                positions = []
+                
+                dxl_comm_result = self.syncRead.txRxPacket()
+                if dxl_comm_result != COMM_SUCCESS:
+                    print(f"SyncRead txRxPacket error: {self.packetHandler.getTxRxResult(dxl_comm_result)}")
+                    return [0] * len(self.dxl_ids)
 
-            # 2. 수신된 데이터에서 각 ID의 값을 *로컬*에서 추출
-            for dxl_id in self.dxl_ids:
-                # 개별 모터에서 데이터를 잘 수신했는지 확인
-                if self.syncRead.isAvailable(dxl_id, self.ADDR_PRESENT_POSITION, self.LEN_PRESENT_POSITION):
-                    position = self.syncRead.getData(dxl_id, self.ADDR_PRESENT_POSITION, self.LEN_PRESENT_POSITION)
-                    positions.append(position)
-                else:
-                    print(f"[ID:{dxl_id}] SyncRead data not available")
-                    positions.append(0) # 오류 발생 시 0 또는 이전 값으로 대체
-                            
-            return positions
+                for dxl_id in self.dxl_ids:
+                    if self.syncRead.isAvailable(dxl_id, self.ADDR_PRESENT_POSITION, self.LEN_PRESENT_POSITION):
+                        position = self.syncRead.getData(dxl_id, self.ADDR_PRESENT_POSITION, self.LEN_PRESENT_POSITION)
+                        # 32비트 부호있는 정수 처리 (음수값 보정)
+                        if position > 2147483647:
+                            position -= 4294967296
+                        positions.append({
+                            'id': dxl_id,
+                            'position': position
+                        })
+                    else:
+                        print(f"[ID:{dxl_id}] SyncRead data not available")
+                        positions.append({
+                            'id': dxl_id,
+                            'position': 0
+                        })
+                                
+                return positions
+
+    def close(self):
+        self.portHandler.closePort()
     
 
-    def move_controller(self, goal_position):
+    def move_controller(self, goal_joint_dicts):
         goal_position_address = 116  # Goal Position address (X 시리즈)
         velocity_address = 112       # Profile Velocity address
 
         success = True
 
+
         self.enable_torque()
 
-        # 1. 속도 설정 (각 모터 동일한 속도)
         for dxl_id in self.dxl_ids:
             if dxl_id in self.gripper_dxl_ids:
                 continue  # 그리퍼 모터는 건너뜀
@@ -120,16 +134,30 @@ class DxlController:
 
         # 2. GroupSyncWrite 객체 생성
         groupSyncWrite = dxl.GroupSyncWrite(self.portHandler, self.packetHandler, goal_position_address, 4)
-
-        current_positions = self.read_all_dynamixel()
         
-        # 3. 목표 위치 패킷 구성
-        for index, dxl_id in enumerate(self.dxl_ids):
+        # # 3. 목표 위치 패킷 구성
+        # for index, dxl_id in enumerate(self.dxl_ids):
+        #     if dxl_id in self.gripper_dxl_ids:
+        #         continue  # 그리퍼 모터는 건너뜀
+        #     print(current_positions, index, dxl_id)
+        #     original_goal = goal_position[index]
+        #     current_pos = current_positions[index]
+        #     new_goal = calculate_shortest_path_goal(current_pos, original_goal)
+
+        #     param_goal_position = [
+        #         new_goal & 0xFF,
+        #         (new_goal >> 8) & 0xFF,
+        #         (new_goal >> 16) & 0xFF,
+        #         (new_goal >> 24) & 0xFF
+        #     ]
+        #     groupSyncWrite.addParam(dxl_id, bytearray(param_goal_position))
+
+        for goal_joint_dict in goal_joint_dicts:
+            dxl_id = goal_joint_dict['dxl_id']
             if dxl_id in self.gripper_dxl_ids:
                 continue  # 그리퍼 모터는 건너뜀
-            print(current_positions, index, dxl_id)
-            original_goal = goal_position[index]
-            current_pos = current_positions[index]
+            original_goal = goal_joint_dict['dxl_goal_position']
+            current_pos = self.read_dynamixel(dxl_id)
             new_goal = calculate_shortest_path_goal(current_pos, original_goal)
 
             param_goal_position = [
@@ -151,8 +179,9 @@ class DxlController:
         # 5. 모든 모터가 도달할 때까지 대기
         reached = [False] * len(self.dxl_ids)
 
-        while not all(reached):
-            for i, dxl_id in enumerate(self.dxl_ids):
+        while not all(reached) and not self.closed:
+            for i, goal_joint_dict in enumerate(goal_joint_dicts):
+                dxl_id = goal_joint_dict['dxl_id']
                 if dxl_id in self.gripper_dxl_ids:
                     reached[i] = True
                     
@@ -160,9 +189,10 @@ class DxlController:
                     continue
 
                 position = self.read_dynamixel(dxl_id)
+                goal_position = goal_joint_dict['dxl_goal_position']
 
-                print(f"[ID:{dxl_id}] GoalPos:{goal_position[i]}  PresPos:{position}")
-                if abs(goal_position[i] - position) < 40 or abs(goal_position[i] - position + 4096) < 40 or abs(goal_position[i] - position - 4096) < 40:
+                print(f"[ID:{dxl_id}] GoalPos:{goal_position}  PresPos:{position}")
+                if abs(goal_position - position) < 40 or abs(goal_position - position + 4096) < 40 or abs(goal_position - position - 4096) < 40:
                     print(f"[ID:{dxl_id}] Reached goal position.")
                     reached[i] = True
 

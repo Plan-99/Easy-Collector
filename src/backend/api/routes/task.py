@@ -132,6 +132,7 @@ def update_task(id):
     data = request.json
     task = TaskModel.find(id)
     task.name = data.get('name', task.name)
+    task.assembly_id = data.get('assembly_id', task.assembly_id)
     task.robot_ids = data.get('robot_ids', task.robot_ids)
     task.sensor_ids = data.get('sensor_ids', task.sensor_ids)
     task.home_pose = data.get('home_pose', task.home_pose)

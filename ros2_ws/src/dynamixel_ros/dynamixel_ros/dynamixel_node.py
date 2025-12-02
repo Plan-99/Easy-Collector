@@ -5,7 +5,8 @@ import rclpy
 from rclpy.node import Node
 from dynamixel_sdk import *
 # 1. 생성한 커스텀 메시지 import (경로는 동일)
-from dynamixel_ros.msg import DynamixelData
+from custom_interfaces.msg import DynamixelData
+import serial.tools.list_ports
 
 class DynamixelNode(Node):
     def __init__(self):
@@ -18,9 +19,12 @@ class DynamixelNode(Node):
         
         # 파라미터 선언 및 할당
         self.declare_parameter('baudrate', 57600)
-        self.declare_parameter('device_port', '/dev/ttyUSB0')
+        # self.declare_parameter('device_port', '/dev/ttyUSB0')
         self.BAUDRATE = self.get_parameter('baudrate').get_parameter_value().integer_value
-        self.PORTNAME = self.get_parameter('device_port').get_parameter_value().string_value
+        # self.PORTNAME = self.get_parameter('device_port').get_parameter_value().string_value
+
+        ports = serial.tools.list_ports.comports()
+        self.available_port = [port.device for port in ports]
         
         self.PROTOCOL_VERSIONS = [2.0, 1.0]
 
@@ -50,6 +54,7 @@ class DynamixelNode(Node):
             return False
         self.get_logger().info(f"Port {self.PORTNAME} opened successfully at {self.BAUDRATE}bps.")
         return True
+    
 
     def scan(self):
         self.get_logger().info("Scanning for Dynamixels...")

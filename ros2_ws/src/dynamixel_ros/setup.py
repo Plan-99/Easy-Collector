@@ -12,7 +12,11 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py'))
+        (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
+
+        # [수정] 아래 두 줄을 추가하여 메시지 파일을 설치합니다.
+        (os.path.join('share', package_name, 'msg'), glob('msg/*.msg')), # msg 파일 설치
+        (os.path.join('lib', package_name), glob('dynamixel_ros/*.py')) # 메시지 모듈이 설치되도록 유도
     ],
     install_requires=['setuptools'],
     zip_safe=True,

@@ -1,23 +1,23 @@
 from orator import Model, accessor, SoftDeletes
 from orator.orm import has_one
-import json
 from .leader_robot_preset_model import LeaderRobotPreset
+from ...configs.global_configs import SUPPORT_ROBOTS
 
 
-ROBOT_CONFIGS = {
-    'ur5e': {},
-    'piper': {}
-}
+# ROBOT_CONFIGS = {
+#     'ur5e': {},
+#     'piper': {}
+# }
 
 
-class RobotObserver:
-    def creating(self, robot):
-        if not getattr(robot, 'settings', None):
-            robot_type = robot.type
-            if robot_type in ROBOT_CONFIGS:
-                robot.settings = ROBOT_CONFIGS[robot_type]
-            else:
-                robot.settings = {}
+# class RobotObserver:
+#     def creating(self, robot):
+#         if not getattr(robot, 'settings', None):
+#             robot_type = robot.type
+#             if robot_type in ROBOT_CONFIGS:
+#                 robot.settings = ROBOT_CONFIGS[robot_type]
+#             else:
+#                 robot.settings = {}
 
 
 class Robot(Model, SoftDeletes):
@@ -50,17 +50,27 @@ class Robot(Model, SoftDeletes):
         'move_action',
         'yml_path',
         'can_port',
+        'role',
+        'company',
+        'tool_inner',
     ]
 
-    role_map = {
-        'single_arm': ['piper', 'ur5er'],
-        'dual_arm': [],
-        'tool': [],
-    }
+    def get_robot_type_info(self):
+        return next(
+            (robot for robot in SUPPORT_ROBOTS if robot.get('name') == self.type), 
+            None
+        )
+    
 
     @has_one
     def leader_robot_preset(self):
         return LeaderRobotPreset
+    
+    @accessor
+    def company(self):
+        if self.type != 'custom':
+            return self.get_robot_type_info().get('company', '')
+        return 'custom'
     
     @accessor
     def tools(self):
@@ -72,139 +82,89 @@ class Robot(Model, SoftDeletes):
 
     @accessor
     def joint_dim(self):
-        type = self.get_raw_attribute('type')
-        if type == 'piper':
-            return 7
-        if type == 'ur5e':
-            return 6
-        if type == 'robotiq_2f_gripper':
-            return 2
-
+        if self.type != 'custom':
+            return self.get_robot_type_info().get('joint_dim', 6)
         return self.settings['joint_names'].__len__()
     
     @accessor
     def joint_names(self):
-        type = self.get_raw_attribute('type')
-        if type == 'piper':
-            if self.settings.get('tool_id') == '':
-                return ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"]
-            else:
-                return ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
-        if type == 'ur5e':
-            return ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
-        if type == 'robotiq_2f_gripper':
-            return ["gripper_joint"]
+        if self.type != 'custom':
+            return self.get_robot_type_info().get('joint_names', [])
 
         return self.settings['joint_names']
     
     @accessor
     def read_topic(self):
-        type = self.get_raw_attribute('type')
-        if type == 'piper':
-            return f'/ec_robot_{self.id}/joint_states_single'
-        if type == 'ur5e':
-            return f'/ec_robot_{self.id}/joint_states'
+        if self.type != 'custom':
+            return f'/ec_robot_{self.id}' + self.get_robot_type_info().get('read_topic', '')
 
         return self.settings['read_topic']
     
     @accessor
     def read_topic_msg(self):
-        type = self.get_raw_attribute('type')
-        if type == 'piper':
-            return 'sensor_msgs/JointState'
-        if type == 'ur5e':
-            return 'sensor_msgs/JointState'
-        
+        if self.type != 'custom':
+            return self.get_robot_type_info().get('read_topic_msg', '')
         return self.settings['read_topic_msg']
     
     @accessor
     def write_topic(self):
-        type = self.get_raw_attribute('type')
-        if type == 'piper':
-            return f'/ec_robot_{self.id}/joint_states'
-        if type == 'ur5e':
-            return f'/ec_robot_{self.id}/joint_states'
+        if self.type != 'custom':
+            return f'/ec_robot_{self.id}' + self.get_robot_type_info().get('write_topic', '')
 
         return self.settings['write_topic']
     
     @accessor
     def write_topic_msg(self):
-        type = self.get_raw_attribute('type')
-        if type == 'piper':
-            return 'sensor_msgs/JointState'
-        if type == 'ur5e':
-            return 'sensor_msgs/JointState'
+        if self.type != 'custom':
+            return self.get_robot_type_info().get('write_topic_msg', '')
         
         return self.settings['write_topic_msg']
     
     @accessor
     def move_action(self):
-        type = self.get_raw_attribute('type')
-        if type == 'piper':
-            return ''
-        if type == 'ur5e':
-            return 'move_to_joint_position'
-
         return ''
     
     @accessor
     def yml_path(self):
-        type = self.get_raw_attribute('type')
-        if type == 'piper':
-            return 'piper.yml'
-        if type == 'ur5e':
-            return 'ur5e.yml'
         return ''
     
     @accessor
     def joint_upper_bounds(self):
-        type = self.get_raw_attribute('type')
-        if type == 'piper':
-            return [2.618, 2.618, 0, 1.745, 1.22, 2.094, 0.087]
-        if type == 'ur5e': 
-            return [2.618, 2.618, 2.618, 1.745, 1.22, 2.094, 0]
-
+        if self.type != 'custom':
+            return self.get_robot_type_info().get('joint_upper_bounds', [])
         return self.settings['joint_upper_bounds']
     
     @accessor
     def joint_lower_bounds(self):
-        type = self.get_raw_attribute('type')
-        if type == 'piper':
-            return [-2.618, 0, -2.618, -1.745, -1.22, -2.094, 0]
-        if type == 'ur5e':
-            return [-2.618, -2.618, -2.618, -1.745, -1.22, -2.094, 0]
-
+        if self.type != 'custom':
+            return self.get_robot_type_info().get('joint_lower_bounds', [])
         return self.settings['joint_lower_bounds']
     
     @accessor
     def gripper_range(self):
-        type = self.get_raw_attribute('type')
-        if type == 'piper':
-            return [0, 0.087]
-        if type == 'ur5e':
-            return [0, 0.08]
-
         return self.settings['gripper_range'] if 'gripper_range' in self.settings else [0, 1]
     
     @accessor
     def can_port(self):
-        type = self.get_raw_attribute('type')
-        if type == 'piper':
-            return self.settings.get('can_port', 'can_0')
+        if self.type != 'custom':
+            network_interface = self.get_robot_type_info().get('network_interface', None)
+            if network_interface == 'can':
+                return self.settings.get('can_port', 'can_0')
         return None
     
     @accessor
     def role(self):
-        type = self.get_raw_attribute('type')
-        if type == 'custom':
-            return self.get_raw_attribute('role')
-        
-        for role, types in self.role_map.items():
-            if type in types:
-                return role
+        if self.type != 'custom':
+            return self.get_robot_type_info().get('role', 'single_arm')
             
-        return 'unknown'
+        return 'custom'
     
-    @staticmethod
-    def boot():
-        Robot.observe(RobotObserver())
+    @accessor
+    def tool_inner(self):
+        if self.type != 'custom':
+            return self.get_robot_type_info().get('tool_inner', False)
+        return self.settings.get('tool_inner', False)
+    
+    # @staticmethod
+    # def boot():
+    #     Robot.observe(RobotObserver())

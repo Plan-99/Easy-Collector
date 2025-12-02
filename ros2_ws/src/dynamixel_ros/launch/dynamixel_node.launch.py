@@ -20,7 +20,7 @@ def generate_launch_description():
         package='dynamixel_ros',
         # ROS 1의 'type'은 ROS 2에서 'executable'에 해당합니다.
         # setup.py의 entry_points에 등록된 실행 파일 이름을 사용합니다.
-        executable='dynamixel_node.py',
+        executable='dynamixel_node',
         name='dynamixel_node',
         output='screen',
         # <env> 태그는 env 딕셔너리로 변환됩니다.

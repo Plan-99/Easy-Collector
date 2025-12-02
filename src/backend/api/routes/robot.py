@@ -5,6 +5,7 @@ import time
 import os
 from ...env.agent import Agent
 from ..process.subscribe_robot import subscribe_robot_topic
+from ...configs.global_configs import SUPPORT_ROBOTS
 
 # 1. Blueprint 생성
 # 이 블루프린트는 카메라와 관련된 'HTTP' 라우트를 관리합니다.
@@ -36,6 +37,13 @@ def get_robots():
     return {
         'status': 'success',
         'robots': robots
+    }, 200
+
+@robot_bp.route('/robots:supporting', methods=['GET'])
+def get_supporting_robots():
+    return {
+        'status': 'success',
+        'robots': SUPPORT_ROBOTS
     }, 200
 
 @robot_bp.route('/robot/<id>', methods=['GET'])
@@ -116,13 +124,13 @@ def create_robot():
     name = request.json.get('name')
     type = request.json.get('type')
     homepose = request.json.get('homepose', [])
-    role = request.json.get('role', '')
+    role = ''
 
     settings = {}
 
     if type == 'custom':
+        role = request.json.get('role', '')
         settings = {
-            'tool_id': request.json.get('tool_id', ''),
             'read_topic': request.json.get('read_topic', ''),
             'read_topic_msg': request.json.get('read_topic_msg', ''),
             'write_topic': request.json.get('write_topic', ''),
@@ -132,11 +140,9 @@ def create_robot():
             'joint_upper_bounds': request.json.get('joint_upper_bounds', []),
             'gripper_range': request.json.get('gripper_range', [0, 1]),
         }
-    if type == 'piper':
-        settings = {
-            'tool_id': request.json.get('tool_id', ''),
-            'can_port': request.json.get('can_port', 'can_0'),
-        }
+
+    settings['can_port'] = request.json.get('can_port', 'can_0'),
+
     RobotModel.create(
         name=name,
         type=type,
@@ -160,9 +166,12 @@ def update_robot(id):
     if 'homepose' in request.json:
         robot.homepose = request.json.get('homepose')
 
+    if 'role' in request.json:
+        robot.role = request.json.get('role')
+
+    settings = robot.settings if robot.settings else {}
     if type == 'custom':
-        robot.settings = {
-            'tool_id': request.json.get('tool_id', ''),
+        settings = {
             'read_topic': request.json.get('read_topic', ''),
             'read_topic_msg': request.json.get('read_topic_msg', ''),
             'write_topic': request.json.get('write_topic', ''),
@@ -172,12 +181,11 @@ def update_robot(id):
             'joint_upper_bounds': request.json.get('joint_upper_bounds', []),
         }
 
-    if type == 'piper':
-        robot.settings = {
-            'tool_id': request.json.get('tool_id', ''),
-            'can_port': request.json.get('can_port', 'can_0'),
-        }
 
+    if 'can_port' in request.json:
+        settings['can_port'] = request.json.get('can_port', 'can_0')
+
+    robot.settings = settings
     robot.save()
     return {'status': 'success', 'message': 'Robot Updated'}, 200
 
