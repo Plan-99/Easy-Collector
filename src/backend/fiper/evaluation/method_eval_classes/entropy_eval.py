@@ -2,18 +2,28 @@ from .base_eval_class import BaseEvalClass
 import numpy as np
 from scipy.stats import entropy
 import torch
+import pickle
 
 
 class ENTROPYEval(BaseEvalClass):
     def __init__(self, cfg, method_name, device, task_data_path, dataset, **kwargs):
         self.cellsize_factor = kwargs.get("cellsize_factor", None)
+        self.task_data_path = task_data_path
         if self.cellsize_factor is None:
             self.cellsize_factor = cfg.get("cellsize_factor", 0.01)
 
         super().__init__(cfg, method_name, device, task_data_path, dataset, **kwargs)
 
+        if self.is_inference:
+            # Load precomputed cell size
+            self.load_cell_size_pkl(task_data_path + f"/results/entropy/entropy_cell_size.pkl")
+
     def _execute_preprocessing(self):
         # Extract the action predictions from the dataset for the calibration subset and only the position action
+
+        if self.is_inference:
+            return
+
         action_preds: torch.Tensor = self.dataset.get_subset(
             subset="calibration",
             required_tensors=self.required_tensors,
@@ -38,7 +48,20 @@ class ENTROPYEval(BaseEvalClass):
 
         self.cell_size = np.array(ranges) * self.cellsize_factor
 
+        self.save_cell_size_pkl(self.task_data_path + f"/results/entropy/entropy_cell_size.pkl")
+
+    def save_cell_size_pkl(self, save_path):
+        
+        with open(save_path, "wb") as f:
+            pickle.dump(self.cell_size, f)
+
+    def load_cell_size_pkl(self, load_path):
+        with open(load_path, "rb") as f:
+            self.cell_size = pickle.load(f)
+    
+
     def calculate_uncertainty_score(self, rollout_tensor_dict, **kwargs):
+
         action_preds: torch.Tensor = rollout_tensor_dict["action_preds"]
 
         action_preds = np.array(action_preds)
@@ -51,7 +74,6 @@ class ENTROPYEval(BaseEvalClass):
             entropy_values.append(new_value)
 
         entropy = sum(entropy_values) / len(entropy_values)
-        print(f"Calculated entropy: {entropy}")
         return entropy
 
     def _entropy_endpoints(self, endpoints):
@@ -99,6 +121,11 @@ class ENTROPYEval(BaseEvalClass):
         num_cells_x = max(len(x_grid) - 1, 1)
         num_cells_y = max(len(y_grid) - 1, 1)
         num_cells_z = max(len(z_grid) - 1, 1)
+
+        MAX_CELLS_PER_DIM = 200
+        num_cells_x = min(num_cells_x, MAX_CELLS_PER_DIM)
+        num_cells_y = min(num_cells_y, MAX_CELLS_PER_DIM)
+        num_cells_z = min(num_cells_z, MAX_CELLS_PER_DIM)
 
         # Clip indices to be within the valid range of the counts array to avoid IndexErrors.
         cell_indices_x = np.clip(cell_indices_x, 0, num_cells_x - 1)

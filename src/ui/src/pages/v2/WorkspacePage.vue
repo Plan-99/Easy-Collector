@@ -3,6 +3,22 @@
         <div class="border-rounded bg-secondary q-pa-lg q-mb-lg row">
             <q-img src="images/robot1.png" style="width: 100px" class="q-mr-xl"></q-img>
             <div>
+                <div class="float-right">
+                    <q-toggle
+                        class="text-white"
+                        label="Failure Detector"
+                        :model-value="processStore.isRunning('failure_detection')"
+                        @update:model-value="toggleFailureDetection()"
+                        dense
+                    ></q-toggle>
+                    <div class="row q-mt-sm" v-if="processStore.isRunning('failure_detection')">
+                        <div class="text-white">Uncertainty Score:</div>
+                        <div
+                            class="q-ml-sm"
+                            :class="isFailureDetected ? 'text-red text-bold' : 'text-green text-bold'"
+                        >{{ uncertaintyScore }}</div>
+                    </div>
+                </div>
                 <div class="row">
                     <div class="text-h5 text-primary text-bold q-mb-lg">{{ $t('workspaceIntroTitle') }}</div>
                     <q-select
@@ -370,6 +386,7 @@
                 :datasets="datasets"
                 :checkpoints="checkpoints"
                 :status="status"
+                :class="isFailureDetected ? 'border-red' : 'border-white'"
             />
             <div v-else-if="selectedEpisode.name && selectedDatasetId" class="col bg-secondary border-rounded border-white column q-px-sm">
                 <div class="col-6 row flex felx-center">
@@ -475,7 +492,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, watch } from 'vue';
+import { ref, onMounted, computed, watch, onUnmounted } from 'vue';
 import { api } from 'src/boot/axios';
 import FormDialog from 'src/components/v2/FormDialog.vue';
 import { useSensor } from '../../composables/useSensor';
@@ -765,6 +782,7 @@ function deleteWorkspace(workspace) {
     });
 }
 
+
 const status = computed(() => {
     if (processStore.isRunning('checkpoint_test')) {
         return 'testing';
@@ -785,14 +803,33 @@ const selectedCheckpoint = computed(() => {
 });
 const checkpoints = ref([]);
 function listCheckpoints() {
-    return api.get('/checkpoints', {
+    const myCheckpointsReq = api.get('/checkpoints', {
         params: {
             where: `task_id,=,${selectedWorkspaceId.value}|status,=,finished`,
             order: 'created_at DESC'
         }
-    }).then(response => {
-        checkpoints.value = response.data.checkpoints;
     });
+
+    // 2. 베이스 모델 조회
+    const baseModelsReq = api.get('/checkpoints', {
+        params: {
+            where: `is_base_model,=,1`,
+            order: 'created_at DESC'
+        }
+    });
+
+    // 3. 두 요청을 동시에 실행하고 결과 합치기
+    return Promise.all([myCheckpointsReq, baseModelsReq])
+        .then(([myRes, baseRes]) => {
+            const myData = myRes.data.checkpoints || [];
+            const baseData = baseRes.data.checkpoints || [];
+            
+            // 두 배열을 합침 (중복 제거가 필요하다면 id로 필터링 추가)
+            checkpoints.value = [...baseData, ...myData];
+            
+            // 합친 후 다시 날짜순 정렬 (필요 시)
+            // checkpoints.value.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        });
 }
 
 const showCheckpointForm = ref(false);
@@ -831,11 +868,48 @@ function saveCheckpoint(form) {
     })
 }
 
+function toggleFailureDetection() {
+    const checkpoint = checkpoints.value.at(-1);
+    const isRunning = processStore.isRunning('failure_detection');
+    const action = isRunning ? 'stop' : 'start';
+    const url = `/checkpoint/${checkpoint.id}/:${action}_failure_detection`;
+
+    api.post(url, {
+        robots: robots.value.filter(r => selectedWorkspace.value.robot_ids.includes(r.id)),
+        sensors: sensors.value.filter(s => selectedWorkspace.value.sensor_ids.includes(s.id)),
+        task: selectedWorkspace.value
+    }).then(() => {
+        Notify.create({
+            color: 'positive',
+            message: `Failure detection ${action}ed.`
+        });
+    }).catch((error) => {
+        console.error(`Error ${action}ing failure detection:`, error);
+        Notify.create({
+            color: 'negative',
+            message: `Error ${action}ing failure detection.`
+        });
+    });
+}
+
+const isFailureDetected = ref(false);
+const uncertaintyScore = ref(0);
+
 const showCheckpointInfo = ref(false);
 const openCheckpointInfoDialog = (checkpoint) => {
     selectedCheckpointId.value = checkpoint.id;
     showCheckpointInfo.value = true;
-};  
+}; 
+
+
+
+onUnmounted(() => {
+    if (processStore.isRunning('failure_detection') && selectedCheckpointId.value) {
+        api.post(`/checkpoint/${selectedCheckpointId.value}/:stop_failure_detection`)
+          .catch(err => console.error('Failed to stop failure detection on unmount:', err));
+    }
+});
+
 onMounted(() => {
     listWorkspaces();
     listSensors();
@@ -860,6 +934,17 @@ onMounted(() => {
         selectedDataset.value?.episodes.push({
             name: data.name,
         });
+    });
+
+    socket.on('failure_detection_result', (data) => {
+        console.log(data);
+        if (data.failure_detected) {
+            isFailureDetected.value = true;
+        }
+        else {
+            isFailureDetected.value = false;
+        }
+        uncertaintyScore.value = Math.round(data.uncertainty_score * 100) / 100;
     });
 });
 </script>

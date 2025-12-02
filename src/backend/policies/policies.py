@@ -109,7 +109,7 @@ class WrapperModel(nn.Module):
 #         loss.backward()
 
 #         print(loss)
-#         quit()
+
 #         weights = torch.mean(self.gradients, dim=[2, 3], keepdim=True)
 #         cam = torch.sum(weights * self.activations, dim=1)
 #         cam = F.relu(cam)

@@ -3,6 +3,8 @@ from ...database.models.task_model import Task as TaskModel
 import json
 from ...database.models.checkpoint_model import Checkpoint as CheckpointModel
 
+from ..process.failure_detection import failure_detection
+
 import os
 import shutil
 
@@ -109,6 +111,7 @@ def cancel_training():
     current_app.pm.process_queue['train_task'] = [proc for proc in current_app.pm.process_queue['train_task'] if proc['checkpoint_id'] != checkpoint_id]
     
     return {'status': 'success', 'message': 'Training cancelled'}, 200
+    
 
     
 @task_bp.route('/task', methods=['POST'])

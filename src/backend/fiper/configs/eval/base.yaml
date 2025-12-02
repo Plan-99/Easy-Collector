@@ -1,5 +1,5 @@
-window_sizes: [1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 20, 25, 30, 35, 40, 45, 50]  # Faster computation: [1, 2, 4, 7, 11, 16, 22, 29, 37, 48]
-quantiles: [0.9, 0.91, 0.92, 0.93, 0.94, 0.95, 0.96, 0.97, 0.98, 0.99] 
+window_sizes: [7]  # Faster computation: [1, 2, 4, 7, 11, 16, 22, 29, 37, 48]
+quantiles: [0.95] 
 score_compounding_method: mean # mutiple robots
 history_length: 0 # How many historical inputs a method gets. Note: This includes the current step, so 0 and 1 are the same
 detection_patience: 0 # (num_steps-1) to surpass the threshold before the rollout is considered a failure
@@ -59,6 +59,4 @@ hparams:
     optional_actions: ${eval.optional_actions}
     normalize_tensors: ${eval.normalize_tensors}
     history_length: ${eval.history_length}
-
-
 

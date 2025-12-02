@@ -7,8 +7,8 @@ from backend.policies.utils import make_policy, VISION_BACKBONE_MAP, process_ima
 
 
 class EmbeddingHelper:
-    def __init__(self):
-        self.policy = ACTPolicy.from_pretrained("/root/src/backend/checkpoints/9")
+    def __init__(self, checkpoint_id):
+        self.policy = ACTPolicy.from_pretrained(f"/root/src/backend/checkpoints/{checkpoint_id}")
         self.sensors = ["sensor_1", "sensor_2"]  # Example sensor IDs
         self.robots = ["robot_4"]  # Example robot IDs
         self.action_batch_size = 10
@@ -30,18 +30,16 @@ class EmbeddingHelper:
         # 1. Save original eval method
         original_eval_method = self.policy.eval
 
-        # 2. Set policy to eval mode, then enable dropout layers
+        # 2. Set policy to eval mode, then enable dropout layers for MC-Dropout
         self.policy.eval()
         # def enable_dropout(m):
         #     if isinstance(m, torch.nn.Dropout):
-        #         # print(f"Enabling dropout for: {m}")
-        #         m.p = 0.0
         #         m.train()
         # self.policy.apply(enable_dropout)
 
         # 3. Monkey-patch eval to prevent it from being called inside predict_action_chunk
         self.policy.eval = lambda: self.policy
-
+        
         try:
             # Loop over timesteps
             for i in range(rollout['observations']['qpos'][self.robots[0]].shape[0]):
@@ -50,7 +48,10 @@ class EmbeddingHelper:
                 for robot in self.robots:
                     qpos_list.append(rollout['observations']['qpos'][robot][i])
                 # qpos = np.concatenate(qpos_list)
-                qpos = np.concatenate(qpos_list)
+                if len(qpos_list) > 1:
+                    qpos = np.concatenate(qpos_list)
+                else:
+                    qpos = qpos_list[0]
                 qpos = torch.from_numpy(qpos).float().cuda().unsqueeze(0)
 
                 state['observation.state'] = qpos
@@ -77,7 +78,13 @@ class EmbeddingHelper:
                         batched_state[key] = value
 
                 with torch.no_grad():
-                    action_batch = self.policy.predict_action_chunk(batched_state)
+                    # print(batched_state['observation.state'][0])
+                    # print(batched_state['observation.images.sensor_1'].shape)
+                    # print(batched_state['observation.images.sensor_1'][0][0][:5])
+                    action_batch = self.policy.predict_action_chunk(batched_state, is_sampling_z=True) # (10, 25, 7)
+                    # print(action_batch.shape)
+                    # print(action_batch[:, 0, 0])
+                    # quit()
 
                 embedding_std_step = torch.std(action_batch, dim=0).mean().item()
                 embedding_stds.append(embedding_std_step)
@@ -110,7 +117,7 @@ class EmbeddingHelper:
         for rollout in rollouts:
             embedding, embedding_std = self.get_embedding(rollout)
             # print(rollout.keys())
-            print(f"Computed embedding with mean std: {embedding_std:.6f}")
+            # print(f"Computed embedding with mean std: {embedding_std:.6f}")
 
             all_embeddings.append(embedding)
             all_embedding_stds.append(embedding_std)

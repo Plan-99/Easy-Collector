@@ -4,6 +4,7 @@ import os
 import shutil
 
 from ..process.checkpoint_test import checkpoint_test
+from ..process.failure_detection import failure_detection
 
 
 checkpoint_bp = Blueprint('checkpoint_bp', __name__)
@@ -88,6 +89,33 @@ def stop_test(id):
     )
     return {'status': 'success', 'message': 'Checkpoint test stopped'}, 200
 
+
+@checkpoint_bp.route('/checkpoint/<id>/:start_failure_detection', methods=['POST'])
+def start_failure_detection(id):
+    data = request.json
+    task = data.get('task')
+    robots = data.get('robots')
+    sensors = data.get('sensors')
+    checkpoint = CheckpointModel.find(id)
+    if checkpoint:
+        current_app.pm.start_function(
+            func=failure_detection,
+            node=current_app.node,
+            checkpoint=checkpoint,
+            robots=robots,
+            sensors=sensors,
+            task_obj=task,
+            name=f"failure_detection",
+            socketio_instance=current_app.pm.socketio,
+    )
+    return {'status': 'success', 'message': 'Failure detection started'}, 200
+
+@checkpoint_bp.route('/checkpoint/<id>/:stop_failure_detection', methods=['POST'])
+def stop_failure_detection(id):
+    current_app.pm.stop_function(
+        name=f"failure_detection",
+    )
+    return {'status': 'success', 'message': 'Failure detection stopped'}, 200
 
 
 @checkpoint_bp.route('/checkpoint/<id>', methods=['PUT'])

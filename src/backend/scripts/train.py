@@ -35,6 +35,8 @@ from ..lerobot.datasets.utils import dataset_to_policy_features
 from ..lerobot.configs.types import FeatureType
 from safetensors.torch import load_file
 
+from .train_fiper import train_fiper
+
 
 def train(
     train_dataloader,
@@ -247,12 +249,18 @@ def main(args):
             checkpoint,
             load_model=load_model,
         )
+
+        train_fiper(checkpoint, task, chunk_size)
         
         Checkpoint.find(args.checkpoint_id).update({
             'status': 'finished',
             'best_epoch': best_epoch,
             'loss': min_val_loss,
         })
+
+        
+
+        print("Training process completed successfully.")
         
     except Exception as e:
         Checkpoint.find(args.checkpoint_id).delete()

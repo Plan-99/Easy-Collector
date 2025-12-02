@@ -162,60 +162,60 @@ def save_data(
             torch.save(data[i], file_path)
 
 
-def batch_ec_to_fiper_rollout_converter(
-    batch_data: list[tuple[str, dict]], embedding_helper: EmbeddingHelper, is_calibration: bool = True
-) -> list[dict]:
-    """
-    Converts a batch of Easy-Collector rollout data to FiPer format.
-    """
-    rollouts_ec = [item[1] for item in batch_data]
+# def batch_ec_to_fiper_rollout_converter(
+#     batch_data: list[tuple[str, dict]], embedding_helper: EmbeddingHelper, is_calibration: bool = True
+# ) -> list[dict]:
+#     """
+#     Converts a batch of Easy-Collector rollout data to FiPer format.
+#     """
+#     rollouts_ec = [item[1] for item in batch_data]
 
-    # Assumes embedding_helper has a method `get_embedding_batch` for batch processing
-    all_embeddings_batch, all_embedding_std = embedding_helper.get_embedding_batch(rollouts_ec)
+#     # Assumes embedding_helper has a method `get_embedding_batch` for batch processing
+#     all_embeddings_batch, all_embedding_std = embedding_helper.get_embedding_batch(rollouts_ec)
 
-    processed_rollouts = []
-    index = 0
-    for (filename, rollout_ec), all_action_preds in tqdm(zip(batch_data, all_embeddings_batch), total=len(batch_data), desc="Converting rollouts"):
-        print(f"Processing file: {filename}")
-        print(f"is_calibration: {is_calibration}")
-        print(f"Mean embedding stds: {all_embedding_std[index]:.6f}")
-        rollout_fiper = {}
-        if is_calibration:
-            rollout_type = "calibration"
-            rollout_subtype = "ca"
-            is_success = True
-        else:
-            rollout_type = "test"
-            if index < 2 or index > 11:
-                is_success = True
-                rollout_subtype = "id"
-            else:
-                is_success = False
-                rollout_subtype = "ood"
-        rollout_fiper['metadata'] = {
-            'task': "unknown_task", 'episode': filename, 'num_robots': len(rollout_ec['qaction'].keys()),
-            'rollout_type': rollout_type, 'rollout_subtype': rollout_subtype,
-            'action_prediction_horizon': 1, 'action_execution_horizon': 1, 'action_batch_size': 1,
-            'has_encoder_feat': True, 'has_state_feat': True, 'action_mappings': {}, 'successful': is_success,
-            'num_steps': len(rollout_ec['qaction'][next(iter(rollout_ec['qaction']))]),
-        }
-        rollout_fiper['rollout'] = []
-        for step in range(len(rollout_ec['qaction'][next(iter(rollout_ec['qaction']))])):
-            # print(f"all_action_preds[step]: {np.mean(all_action_preds[step])}")
-            # rgb = rollout_ec['observations']['images'][next(iter(rollout_ec['observations']['images']))][step]
-            rgb = rollout_ec['observations']['images']['sensor_2'][step]
-            action = rollout_ec['qaction'][next(iter(rollout_ec['qaction']))][step]
-            agent_pos = rollout_ec['observations']['qpos'][next(iter(rollout_ec['observations']['qpos']))][step]
-            action_pred = all_action_preds[step]
-            fiper_step = {
-                'rgb': rgb, 'action': action, 'agent_pos': agent_pos, 'action_pred': action_pred,
-                'obs_embedding': action_pred[0].flatten(), 'state_embedding': action_pred[0].flatten(),
-                'timestamp': step, 'step': step,
-            }
-            rollout_fiper['rollout'].append(fiper_step)
-        processed_rollouts.append(rollout_fiper)
-        index += 1
-    return processed_rollouts
+#     processed_rollouts = []
+#     index = 0
+#     for (filename, rollout_ec), all_action_preds in tqdm(zip(batch_data, all_embeddings_batch), total=len(batch_data), desc="Converting rollouts"):
+#         print(f"Processing file: {filename}")
+#         print(f"is_calibration: {is_calibration}")
+#         print(f"Mean embedding stds: {all_embedding_std[index]:.6f}")
+#         rollout_fiper = {}
+#         if is_calibration:
+#             rollout_type = "calibration"
+#             rollout_subtype = "ca"
+#             is_success = True
+#         else:
+#             rollout_type = "test"
+#             if index < 2 or index > 11:
+#                 is_success = True
+#                 rollout_subtype = "id"
+#             else:
+#                 is_success = False
+#                 rollout_subtype = "ood"
+#         rollout_fiper['metadata'] = {
+#             'task': "unknown_task", 'episode': filename, 'num_robots': len(rollout_ec['qaction'].keys()),
+#             'rollout_type': rollout_type, 'rollout_subtype': rollout_subtype,
+#             'action_prediction_horizon': 1, 'action_execution_horizon': 1, 'action_batch_size': 1,
+#             'has_encoder_feat': True, 'has_state_feat': True, 'action_mappings': {}, 'successful': is_success,
+#             'num_steps': len(rollout_ec['qaction'][next(iter(rollout_ec['qaction']))]),
+#         }
+#         rollout_fiper['rollout'] = []
+#         for step in range(len(rollout_ec['qaction'][next(iter(rollout_ec['qaction']))])):
+#             # print(f"all_action_preds[step]: {np.mean(all_action_preds[step])}")
+#             # rgb = rollout_ec['observations']['images'][next(iter(rollout_ec['observations']['images']))][step]
+#             rgb = rollout_ec['observations']['images']['sensor_2'][step]
+#             action = rollout_ec['qaction'][next(iter(rollout_ec['qaction']))][step]
+#             agent_pos = rollout_ec['observations']['qpos'][next(iter(rollout_ec['observations']['qpos']))][step]
+#             action_pred = all_action_preds[step]
+#             fiper_step = {
+#                 'rgb': rgb, 'action': action, 'agent_pos': agent_pos, 'action_pred': action_pred,
+#                 'obs_embedding': action_pred[0].flatten(), 'state_embedding': action_pred[0].flatten(),
+#                 'timestamp': step, 'step': step,
+#             }
+#             rollout_fiper['rollout'].append(fiper_step)
+#         processed_rollouts.append(rollout_fiper)
+#         index += 1
+#     return processed_rollouts
 
 
 def load_raw_rollouts(
@@ -239,34 +239,34 @@ def load_raw_rollouts(
     assert any(dt in supported_data_types for dt in data_types), f"data_types must be in {supported_data_types}"
 
     # Stage 1: Convert all HDF5 files to PKL format first.
-    if "hdf5" in data_types:
-        for load_dir in load_dirs:
-            if not os.path.exists(load_dir) or not os.path.isdir(load_dir):
-                continue
+    # if "hdf5" in data_types:
+    #     for load_dir in load_dirs:
+    #         if not os.path.exists(load_dir) or not os.path.isdir(load_dir):
+    #             continue
 
-            hdf5_filenames = _get_filenames(
-                load_dir, keywords=keywords, data_types=["hdf5"], searched_filenames=searched_filenames
-            )
+    #         hdf5_filenames = _get_filenames(
+    #             load_dir, keywords=keywords, data_types=["hdf5"], searched_filenames=searched_filenames
+    #         )
 
-            if not hdf5_filenames:
-                continue
+    #         if not hdf5_filenames:
+    #             continue
 
-            hdf5_batch_to_process = []
+    #         hdf5_batch_to_process = []
 
-            for filename in hdf5_filenames:
-                file_path = os.path.join(load_dir, filename)
-                with h5py.File(file_path, "r") as f:
-                    rollout_ec = hdf5_to_dict(f)
-                hdf5_batch_to_process.append((filename, rollout_ec))
+    #         for filename in hdf5_filenames:
+    #             file_path = os.path.join(load_dir, filename)
+    #             with h5py.File(file_path, "r") as f:
+    #                 rollout_ec = hdf5_to_dict(f)
+    #             hdf5_batch_to_process.append((filename, rollout_ec))
 
-            if hdf5_batch_to_process:
-                print(f"Converting {len(hdf5_batch_to_process)} HDF5 files in {load_dir} to PKL format...")
+            # if hdf5_batch_to_process:
+            #     print(f"Converting {len(hdf5_batch_to_process)} HDF5 files in {load_dir} to PKL format...")
                 
-                processed_rollouts = batch_ec_to_fiper_rollout_converter(hdf5_batch_to_process, embedding_helper, is_calibration=is_calibration)
+            #     processed_rollouts = batch_ec_to_fiper_rollout_converter(hdf5_batch_to_process, embedding_helper, is_calibration=is_calibration)
 
-                new_filenames = [item[0].replace(".hdf5", ".pkl") for item in hdf5_batch_to_process]
-                save_data(load_dir, new_filenames, processed_rollouts, data_types="pkl", overwrite=True)
-                print(f"Finished converting and saving {len(new_filenames)} files.")
+            #     new_filenames = [item[0].replace(".hdf5", ".pkl") for item in hdf5_batch_to_process]
+            #     save_data(load_dir, new_filenames, processed_rollouts, data_types="pkl", overwrite=True)
+            #     print(f"Finished converting and saving {len(new_filenames)} files.")
 
     # Stage 2: Load all PKL and NPY files.
     data = []
@@ -294,8 +294,7 @@ def load_raw_rollouts(
                     # print(rollout.keys())
                     # print(rollout['metadata']["successful"])
                     # print(rollout['rollout'][0].keys())
-                    # print(rollout['rollout'][0]['action_pred'].shape)
-                    # quit()
+
 
             if rollout is not None:
                 if with_filename:

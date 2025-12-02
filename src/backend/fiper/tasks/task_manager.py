@@ -10,12 +10,12 @@ from backend.fiper.shared_utils.utility_functions import ensure_list, list_to_te
 from backend.fiper.datasets.rollout_datasets import ProcessedRolloutDataset
 import torch
 import re
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from backend.fiper.shared_utils.embedding_helper import EmbeddingHelper
 
 
 class TaskManager:
-    def __init__(self, cfg: DictConfig, task: str, base_config_path: str, task_data_path: str, embedding_helper: EmbeddingHelper, **kwargs):
+    def __init__(self, task_cfg: DictConfig, eval_cfg: DictConfig, task: str, base_config_path: str, task_data_path: str, ori_data_path: str, embedding_helper: EmbeddingHelper, **kwargs):
         """
         Manages task-specific data processing and rollouts.
 
@@ -25,28 +25,31 @@ class TaskManager:
         - Interface with task-specific environments.
 
         Args:
-            cfg (DictConfig): Configuration for the task.
+            task_cfg (DictConfig): Configuration for the task.
+            eval_cfg (DictConfig): Configuration for evaluation.
             task (str): Name of the task.
             base_config_path (str): Path to the configuration folder.
             task_data_path (str): Path to the task-specific data.
+            ori_data_path (str): Path to the original data.
+            embedding_helper (EmbeddingHelper): Helper for embeddings.
             kwargs: Additional arguments for processing rollouts.
                 - required_tensors (list): List of required tensors to be included in the dataset.
                 - optional_tensors (list): List of optional tensors to be included in the dataset.
                 - device (str): Device to use for processing (e.g., "cpu", "cuda").
-                - normalize_tensors (dict): Dictionary specifying which tensors to normalize and their normalization parameters.
         """
         self.task = task
         self.base_config_path = base_config_path
         self.task_data_path = task_data_path
+        self.ori_data_path = ori_data_path
         # Task-specific config
-        self.cfg = load_config("task", task, return_only_subdict=True, as_dict=True)
+        self.cfg = task_cfg
         self.calibration_rollout_dir = os.path.join(self.task_data_path, "rollouts", "calibration")
-        self.test_rollout_dir = os.path.join(self.task_data_path, "rollouts", "test")
+        # self.test_rollout_dir = os.path.join(self.task_data_path, "rollouts", "test")
         self.required_tensors = kwargs.get("required_tensors", [])
         self.optional_tensors = list(kwargs.get("optional_tensors", []))
         # self.optional_tensors = list(set(kwargs.get("optional_tensors", [])+ ["states"]))
         self.device = kwargs.get("device", "cpu")
-        self.normalize_tensors = cfg.eval.get("normalize_tensors", {})
+        self.normalize_tensors = eval_cfg.get("normalize_tensors", {})
 
         self.embedding_helper = embedding_helper
 
@@ -68,9 +71,10 @@ class TaskManager:
             rollout_dataset (ProcessedRolloutDataset): A custom dataset with loaded and normalized data inlcuding global metadata.
         """
         # Initialize the dataset
-        print("ccccccccccccc")
         processed_rollout_dataset = ProcessedRolloutDataset(
             task_data_path=self.task_data_path,
+            ori_data_path=self.ori_data_path,
+            embedding_helper=self.embedding_helper,
             base_config_path=self.base_config_path,
             required_tensors=self.required_tensors,
             optional_tensors=self.optional_tensors,
@@ -85,6 +89,8 @@ class TaskManager:
                     
                     processed_rollout_dataset = self._init_or_update_dataset(processed_rollout_dataset, extend=True)
                 return processed_rollout_dataset
+            
+        processed_rollout_dataset.prepare_fiper_dataset_from_ec_dataset()
 
         # Check if the row rollouts already exist
         processed_rollout_dataset = self._init_or_update_dataset(processed_rollout_dataset, extend=False)
@@ -108,11 +114,10 @@ class TaskManager:
         """
         # Check the filenames in the rollout directory
         calibration_filenames = _get_filenames(self.calibration_rollout_dir, keywords=["episode", "eps", "rollout"])
-        test_filenames = _get_filenames(self.test_rollout_dir, keywords=["episode", "eps", "rollout"])
 
-        if len(calibration_filenames) < 5 or len(test_filenames) < 5:
+        if len(calibration_filenames) < 5:
             print(
-                f"Only {len(calibration_filenames)} calibration rollouts and {len(test_filenames)} test rollouts found in the rollout directory. "
+                f"Only {len(calibration_filenames)} calibration rollouts found in the rollout directory. "
             )
 
         # Obtain the filenames of the new rollouts
@@ -120,10 +125,10 @@ class TaskManager:
             calibration_filenames = processed_rollout_dataset.compare_old_and_new_rollouts(
                 calibration_filenames, "calibration"
             )
-            test_filenames = processed_rollout_dataset.compare_old_and_new_rollouts(test_filenames, "test")
+            # test_filenames = processed_rollout_dataset.compare_old_and_new_rollouts(test_filenames, "test")
 
         # Obtain metadata, and processed rollouts
-        new_data_dict = self._load_and_convert_raw_rollouts(calibration_filenames, test_filenames)
+        new_data_dict = self._load_and_convert_raw_rollouts(calibration_filenames)
         if new_data_dict:
             if extend:
                 # Append the new data to the existing dataset
@@ -139,7 +144,6 @@ class TaskManager:
     def _load_and_convert_raw_rollouts(
         self,
         calibration_rollout_filenames: Optional[list] = [],
-        test_rollout_filenames: Optional[list] = [],
     ) -> dict:
         """Load and convert raw calibration and test rollouts with the specified filenames
 
@@ -159,27 +163,19 @@ class TaskManager:
             raise_error_if_not_found=False,
             is_calibration=True,
         )
-        test_rollouts = load_raw_rollouts(
-            embedding_helper=self.embedding_helper,
-            load_dirs=self.test_rollout_dir,
-            searched_filenames=test_rollout_filenames,
-            raise_error_if_not_found=False,
-            is_calibration=False,
-        )
-        if len(calibration_rollouts) == 0 and len(test_rollouts) == 0:
+        if len(calibration_rollouts) == 0:
             return {}
 
         # Obtain calibration and test rollout labels
-        num_rollouts = len(calibration_rollouts) + len(test_rollouts)
+        num_rollouts = len(calibration_rollouts)
         calibration_rollout_labels = np.zeros(num_rollouts, dtype=bool)
         calibration_rollout_labels[: len(calibration_rollouts)] = np.ones(len(calibration_rollouts), dtype=bool)
-        test_rollout_labels = ~calibration_rollout_labels
 
-        rollouts = calibration_rollouts + test_rollouts
+        rollouts = calibration_rollouts
         kwargs = {
             "calibration_rollout_labels": calibration_rollout_labels,
-            "test_rollout_labels": test_rollout_labels,
-            "test_rollout_filenames": test_rollout_filenames,
+            "test_rollout_labels": "",
+            "test_rollout_filenames": [],
             "calibration_rollout_filenames": calibration_rollout_filenames,
         }
 
@@ -201,7 +197,7 @@ class TaskManager:
         Returns:
             data_dict: A dictionary containing the converted rollouts with metadata.
         """
-        global_metadata = self.cfg.get("metadata", {})
+        global_metadata = OmegaConf.to_container(self.cfg.get("metadata", {}), resolve=True)
         required_metadata_keys = [
             "num_robots", "num_steps", "num_rollouts", "episode_start_indices", 
             "episode_end_indices", "successful_rollout_labels", "calibration_rollout_labels", 
