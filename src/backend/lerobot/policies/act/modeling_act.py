@@ -118,7 +118,7 @@ class ACTPolicy(PreTrainedPolicy):
         """
         self.eval()  # keeping the policy in eval mode as it could be set to train mode while queue is consumed
 
-        if self.config.temporal_ensemble_coeff is not None:
+        if self.config.temporal_ensemble_coeff is not None:  # dummy batch to satisfy the interface
             actions = self.predict_action_chunk(batch)
             action, action_std = self.temporal_ensembler.update(actions)
             self.uncertainty = action_std.mean().item()
@@ -533,10 +533,16 @@ class ACT(nn.Module):
         else:
             # When not using the VAE encoder, we set the latent to be all zeros.
             mu = log_sigma_x2 = None
-            # TODO(rcadene, alexander-soare): remove call to `.to` to speedup forward ; precompute and use buffer
-            latent_sample = torch.zeros([batch_size, self.config.latent_dim], dtype=torch.float32).to(
-                batch["observation.state"].device
+            # # TODO(rcadene, alexander-soare): remove call to `.to` to speedup forward ; precompute and use buffer
+            # latent_sample = torch.zeros([batch_size, self.config.latent_dim], dtype=torch.float32).to(
+            #     batch["observation.state"].device
+            # )
+            latent_sample = torch.randn(
+                (batch_size, self.config.latent_dim), 
+                dtype=torch.float32, 
+                device=batch["observation.state"].device
             )
+            # print(latent_sample)
 
         # Prepare transformer encoder inputs.
         encoder_in_tokens = [self.encoder_latent_input_proj(latent_sample)]

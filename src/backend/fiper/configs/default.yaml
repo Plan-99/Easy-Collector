@@ -1,0 +1,45 @@
+defaults:
+  - _self_
+  - eval: rnd_oe
+  - task: ec_test
+  - results: base
+
+# Methods to evaluate for tasks (methods are extended by rnd_models)
+tasks: ["ec_test"]
+# rnd_models: ["rnd_a"]
+rnd_models: ["rnd_oe"]
+methods: ["entropy"]
+# methods: ["entropy", "similarity", "tc", "logpzo"]
+
+# Whether to logically combine the methods and how
+combine_methods: True
+combined_methods:
+# None at window_sizes/quantiles means all. All combinations of window_sizes and quantiles are evaluated
+  1: 
+    m1: 
+      name: rnd_oe
+      window_sizes:
+      quantiles:
+    m2:
+      name: entropy
+      window_sizes:
+      quantiles:
+    operation: "or"
+  2:
+    m1: 
+      name: rnd_oe
+      window_sizes:
+      quantiles:
+    m2:
+      name: entropy
+      window_sizes:
+      quantiles:
+    operation: "and"
+
+# Whether to train the rnd models
+train_rnd: True
+
+# For input verification
+available_tasks: ["push_t", "pretzel", "push_chair", "sorting", "stacking", "ec_test"]
+implemented_methods: ["rnd_oe", "rnd_a", "entropy", "tc", "similarity", "logpzo"]
+available_rnd_models: ["rnd_oe", "rnd_a"]

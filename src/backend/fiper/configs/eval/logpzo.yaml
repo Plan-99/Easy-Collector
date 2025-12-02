@@ -1,0 +1,16 @@
+defaults:
+  - base
+
+num_epochs: 1000
+batch_size: 256
+learning_rate: 0.0001
+
+required_tensors:
+  - "obs_embeddings"
+
+
+hparams:
+  model:
+    batch_size: ${eval.batch_size}
+    learning_rate: ${eval.learning_rate}
+    num_epochs: ${eval.num_epochs}

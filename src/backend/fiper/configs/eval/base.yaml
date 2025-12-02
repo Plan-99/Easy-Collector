@@ -1,0 +1,64 @@
+window_sizes: [1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 20, 25, 30, 35, 40, 45, 50]  # Faster computation: [1, 2, 4, 7, 11, 16, 22, 29, 37, 48]
+quantiles: [0.9, 0.91, 0.92, 0.93, 0.94, 0.95, 0.96, 0.97, 0.98, 0.99] 
+score_compounding_method: mean # mutiple robots
+history_length: 0 # How many historical inputs a method gets. Note: This includes the current step, so 0 and 1 are the same
+detection_patience: 0 # (num_steps-1) to surpass the threshold before the rollout is considered a failure
+random_seeds: [10] # Number of random seeds to use for evaluation when `deterministic` is False
+
+# How to extend time-varying thresholds
+extend_threshold: "last" # "last" or "mean"
+# How to handle zero thresholds
+handle_zero_thresholds: 
+  style: "add_small_score" #
+
+# Which treshold styles to use for the evaluation
+thresholds:
+  tvt_quantile: True
+  tvt_cp_band: True
+  ct_quantile: True
+
+# For selective loading of tensors (overwritten by the method-specific config)
+required_tensors:
+  - "obs_embeddings"
+  - "action_preds"
+  
+optional_tensors: []
+
+required_actions:
+  - "position"
+
+optional_actions:
+  - "rotation"
+
+# Base Normalization parameters
+normalize_tensors: 
+  obs_embeddings: False
+  rgb_images: True
+  actions: False
+  action_preds: False
+  states: False
+  mode: "gaussian" # "gaussian" or "limits"
+  range_eps: 1e-5
+  limits: [-1, 1]
+  fit_offset: True
+
+
+
+# Model Hyperparameters to identify model during results evaluation 
+hparams:
+  # Evaluation hyperparameters
+  eval:
+    extend_threshold: ${eval.extend_threshold}
+    handle_zero_thresholds: ${eval.handle_zero_thresholds}
+    detection_patience: ${eval.detection_patience}
+  # Model hyperparameters (extended by the method-specific config)
+  model:
+    required_tensors: ${eval.required_tensors}
+    optional_tensors: ${eval.optional_tensors}
+    required_actions: ${eval.required_actions}
+    optional_actions: ${eval.optional_actions}
+    normalize_tensors: ${eval.normalize_tensors}
+    history_length: ${eval.history_length}
+
+
+

@@ -1,0 +1,21 @@
+defaults:
+  - base
+
+history_length: 2 # Number of steps to include in the history
+
+required_tensors:
+  - "action_preds"
+
+required_actions:
+  - "position"
+optional_actions: []
+  
+error_function:
+  name: "mmd_rbf"  
+  mmd_rbf:
+    description: "MMD using RBF kernel"
+    gamma: "median"
+
+hparams:
+  model:
+    error_function: ${eval.error_function}

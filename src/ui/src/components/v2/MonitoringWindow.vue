@@ -285,6 +285,7 @@ function startInference() {
         policy: checkpoint.value.policy,
         robot_ids: props.robots.map(r => r.id),
         sensors: props.sensors,
+        checkpoint: checkpoint.value,
     }).catch((error) => {
         console.error('Error starting test:', error);
         Notify.create({

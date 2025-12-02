@@ -1,0 +1,15 @@
+defaults:
+  - base
+
+type: 'pca_kmeans'   # 'closest' or 'mean'
+principal_components: 10
+n_clusters: 64
+
+required_tensors:
+  - "obs_embeddings"
+
+hparams:
+  model:
+    principal_components: ${eval.principal_components}
+    n_clusters: ${eval.n_clusters}
+    type: ${eval.type}

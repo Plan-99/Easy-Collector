@@ -32,12 +32,12 @@ def checkpoint_test(
     ):
     
     try:
-        if checkpoint.is_base_model:
+        if checkpoint['is_base_model']:
             if policy_obj['type'] == 'PI0':
                 ckpt_dir = "lerobot/pi0"
         else:
-            ckpt_dir = os.path.join("/root/src/backend/checkpoints", str(checkpoint.id))
-            
+            ckpt_dir = os.path.join("/root/src/backend/checkpoints", str(checkpoint['id']))
+
         # policy = make_policy(ckpt_dir, seed, 0, 0, policy_obj, task, robots[0], sensors, gripper)
         if policy_obj['type'] == 'ACT':
             policy = ACTPolicy.from_pretrained(ckpt_dir)
@@ -124,7 +124,7 @@ def checkpoint_test(
 
 
             # Prepare input features dynamically if base model
-            if checkpoint.is_base_model:
+            if checkpoint['is_base_model']:
                 state['language_instruction'] = [task['name']]
                 info = dict()
                 for key, val in state.items():
@@ -151,7 +151,8 @@ def checkpoint_test(
                 agent.move_joint_step(target_qpos)
 
 
-            # time.sleep(0.03)  # Simulate processing time
+
+            time.sleep(0.05)  # Simulate processing time
 
             ts = env.record_step()
             timesteps.append(ts)
@@ -166,6 +167,8 @@ def checkpoint_test(
                 'uncertainty': policy.uncertainty,
                 'step_time': end - start,
             })
+
+
 
         except Exception as e:
             import traceback
