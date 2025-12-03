@@ -25,7 +25,7 @@ declare -A POST_INSTALL_COMMANDS
 # [Value]는 해당 디렉터리에서 실행할 셸 명령어 문자열입니다.
 
 # 예시 1: televuer 경로에서 openssl 명령어 실행
-POST_INSTALL_COMMANDS["xr_teleoperate/teleop/televuer"]="openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout key.pem -out cert.pem"
+POST_INSTALL_COMMANDS["xr_teleoperate/teleop/televuer"]="openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout key.pem -out cert.pem -subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost'"
 
 # 예시 2: 다른 경로에서 다른 명령어 실행 (예: build)
 # POST_INSTALL_COMMANDS["pkg_one"]="npm run build"

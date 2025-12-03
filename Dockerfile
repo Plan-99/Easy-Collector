@@ -42,7 +42,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ethtool can-uti
 
 # ROS 2 Humble (Desktop-Full) 및 관련 패키지 설치
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ros-humble-desktop-full \
+    ros-humble-ros-base \
     ros-humble-realsense2-camera \
     ros-humble-realsense2-description \
     ros-humble-ruckig \
@@ -66,7 +66,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-colcon-common-extensions \
     python3-pykdl \
     build-essential \
+    cmake \
     && apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*
+
+
+# 추가 Rainbow Robotics ROS 2 패키지 설치
+RUN apt-get update && apt install -y \
+    ros-humble-ament-cmake \
+    ros-humble-joint-state-publisher \
+    ros-humble-moveit \
+    ros-humble-pluginlib \
+    ros-humble-robot-state-publisher \
+    ros-humble-urdf-launch \
+    ros-humble-xacro
 
 # ROS 2 환경 설정
 RUN echo "source /opt/ros/humble/setup.bash" >> /etc/bash.bashrc
@@ -122,10 +134,11 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # --- ROS2 Workspace & UI Setup ---
-WORKDIR /root
 # src 디렉토리 전체를 복사하여 ui와 backend를 모두 포함하도록 수정
 COPY src /root/src
-RUN cd /root/src/ui && npm install
+
+WORKDIR /root/src/ui
+RUN npm install
 
 
 # ===================================================================
@@ -136,26 +149,19 @@ RUN cd /root/src/ui && npm install
 # python_pkgs 폴더 복사!
 COPY python_pkgs /root/python_pkgs
 
-# 0. pip 및 setuptools 업그레이드
-RUN pip install --upgrade pip setuptools
-
-# 1. Dex Retargeting 설치
-WORKDIR /root/python_pkgs/xr_teleoperate/teleop/robot_control/dex-retargeting
-RUN pip install -e .
-
-# 2. Televuer 설치 및 SSL 인증서 생성 
-WORKDIR /root/python_pkgs/xr_teleoperate/teleop/televuer
-RUN pip install -e . && \
-    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-    -keyout key.pem -out cert.pem \
-    -subj "/C=KR/ST=Seoul/L=Seoul/O=Robot/CN=localhost"
-
-# 3. Unitree SDK 설치
-WORKDIR /root/python_pkgs/unitree_sdk2_python
-RUN pip install -e .
+WORKDIR /root/python_pkgs
+RUN bash install.sh
 
 # 4. (추가됨) PyTorch 업그레이드
 RUN pip install --upgrade torch
+
+COPY cmake_pkgs /root/cmake_pkgs
+
+WORKDIR /root/cmake_pkgs
+RUN bash install.sh
+
+WORKDIR /root/ros2_ws
+RUN colcon build
 
 # 작업 디렉토리 원상 복구
 WORKDIR /root

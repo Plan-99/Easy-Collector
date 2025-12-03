@@ -1,19 +1,22 @@
 from sensor_msgs.msg import JointState
+from std_msgs.msg import Float64MultiArray
 from geometry_msgs.msg import Pose
+
+from rosidl_runtime_py.utilities import get_message
 
 import rclpy
 from rclpy.node import Node
 import threading
 from collections import deque
 import time
-from ..ik_solver.pinocchio_solver.piper_arm_ik import Piper_ArmIK
+from ..ik_solver.pinocchio_solver.common_arm_ik import Common_ArmIK
 import numpy as np
+
+from ..configs.global_configs import get_robot_by_name
 
 class Agent:
     def __init__(self, node: Node, robot):
         self.id = robot['id']
-        self.tools = robot['tools'] if 'tools' in robot else []
-        self.tool_agents = [Agent(node, tool) for tool in self.tools]
         self.leader_robot_preset = robot.get('leader_robot_preset', None)    
         self.js_mutex = threading.Lock()
         self.joint_states = None
@@ -25,20 +28,27 @@ class Agent:
         self.joint_names = robot['joint_names']
         self.joint_upper_bounds = robot['joint_upper_bounds']
         self.joint_lower_bounds = robot['joint_lower_bounds']
+
+        self.read_topic_msg = robot['read_topic_msg']
+        self.write_topic_msg = robot['write_topic_msg']
         
-        if len(self.tools) == 0:
-            self.gripper_range = [self.joint_lower_bounds[-1], self.joint_upper_bounds[-1]]
-        # else:
-        #     self.gripper_range = [tool['joint_lower_bounds'][0], tool['joint_upper_bounds'][0]]
-             
+        self.tool_inner = robot.get('tool_inner', False)
+
         self.ik_solver = None
-        if robot['type'] == 'piper':
-            self.ik_solver = Piper_ArmIK()
+        robot_info = get_robot_by_name(self.robot_type)
+        if 'ik_setting' in robot_info:
+            urdf_path = robot_info['urdf_path']
+            urdf_package_dir = robot_info['urdf_package_dir']
+            ik_setting = robot_info['ik_setting']
+            self.ik_solver = Common_ArmIK(urdf_path=urdf_path, urdf_package_dir=urdf_package_dir, **ik_setting)
 
-        node.create_subscription(JointState, robot['read_topic'], self.joint_state_cb, 10)
-        node.create_subscription(JointState, robot['write_topic'], self.joint_action_cb, 10)
+        read_topic_msg_cls = get_message(robot['read_topic_msg'])
+        node.create_subscription(read_topic_msg_cls, robot['read_topic'], self.joint_state_cb, 10)
 
-        self.move_robot_pub = node.create_publisher(JointState, robot['write_topic'], 10)
+        write_topic_msg_cls = get_message(robot['write_topic_msg'])
+        node.create_subscription(write_topic_msg_cls, robot['write_topic'], self.joint_action_cb, 10)
+
+        self.move_robot_pub = node.create_publisher(write_topic_msg_cls, robot['write_topic'], 10)
 
         self.ee_pos_cmd = None
             
@@ -58,12 +68,22 @@ class Agent:
             self.ee_pos_cmd = None
 
         action = [float(a) for a in action]
-        js = JointState()
-        js.name = self.joint_names
-        js.position = action
-        js.velocity = [0.0] * self.joint_len
-        js.velocity[-1] = 100
-        self.move_robot_pub.publish(js)
+
+        if self.write_topic_msg == 'std_msgs/Float64MultiArray':
+            fa = Float64MultiArray()
+            fa.data = action
+            self.move_robot_pub.publish(fa)
+            return
+        elif self.write_topic_msg == 'sensor_msgs/JointState':
+            js = JointState()
+            js.name = self.joint_names
+            js.position = action
+            js.velocity = [0.0] * self.joint_len
+            js.velocity[-1] = 100
+            self.move_robot_pub.publish(js)
+        else:
+            print("Unsupported write topic message type for move_joint_step.")
+            return
 
 
     # def move_step(self, action):
@@ -78,16 +98,15 @@ class Agent:
     def move_ee_step(self, target_ee_pos):
         self.ee_pos_cmd = target_ee_pos
         if self.ik_solver is not None:
-            current_joint_positions = self.get_joint_states()
-
-            if len(self.tools) == 0:
-                sol_q, sol_tauff = self.ik_solver.solve_ik(target_ee_pos, current_joint_positions[:-1])
-                if sol_q is not None:
-                    sol_q = np.append(sol_q, current_joint_positions[-1])  # Keep gripper joint unchanged
-            else:
-                sol_q, sol_tauff = self.ik_solver.solve_ik(target_ee_pos, current_joint_positions)
-                
-            self.move_joint_step(sol_q, from_ee=True)
+            current_positions = self.get_joint_states()
+            current_joint_positions, tool_position = self.get_joint_and_tool_pos(current_positions)
+            
+            sol_q, sol_tauff = self.ik_solver.solve_ik(target_ee_pos, current_joint_positions)
+            
+            if sol_q is not None:
+                if tool_position is not None:
+                    sol_q = np.append(sol_q, tool_position)  # Keep gripper joint unchanged
+                self.move_joint_step(sol_q, from_ee=True)
 
         else:
             print("IK solver not initialized for this robot type.")
@@ -114,42 +133,59 @@ class Agent:
             if self.joint_states is None:
                 return None
             joint_positions = []
-            for i, joint_name in enumerate(self.joint_names):
-                topic_index = self.joint_states.name.index(joint_name)
-                joint_positions.append(self.joint_states.position[topic_index])
+            if self.read_topic_msg == 'sensor_msgs/JointState':
+                for i, joint_name in enumerate(self.joint_names):
+                    topic_index = self.joint_states.name.index(joint_name)
+                    joint_positions.append(self.joint_states.position[topic_index])
+            else:
+                for i in range(self.joint_len):
+                    joint_positions.append(self.joint_states.data[i])
         return joint_positions
     
     def get_joint_actions(self):
         if self.joint_actions is None:
             return None
         joint_actions = []
-        for i, joint_name in enumerate(self.joint_names):
-            topic_index = self.joint_actions.name.index(joint_name)
-            joint_actions.append(self.joint_actions.position[topic_index])
+        if self.write_topic_msg == 'sensor_msgs/JointState':
+            for i, joint_name in enumerate(self.joint_names):
+                topic_index = self.joint_actions.name.index(joint_name)
+                joint_actions.append(self.joint_actions.position[topic_index])
+        elif self.write_topic_msg == 'std_msgs/Float64MultiArray':
+            joint_actions = list(self.joint_actions.data)
         return joint_actions
 
     def get_ee_position(self):
-        joint_positions = self.get_joint_states()
+        positions = self.get_joint_states()
+        joint_positions, _ = self.get_joint_and_tool_pos(positions)
         if joint_positions is None:
             return None
         if self.ik_solver is not None:
-            ee_pos_dict = self.ik_solver.get_ee_position(joint_positions[:-1])
+            ee_pos_dict = self.ik_solver.get_ee_position(joint_positions)
             return ee_pos_dict
         else:
             return None
         
     def get_ee_target(self):
+        actions = self.get_joint_actions()
+        joint_actions, _ = self.get_joint_and_tool_pos(actions)
         if self.ee_pos_cmd is not None:
             return self.ee_pos_cmd
         else:
-            joint_actions = self.get_joint_actions()
             if joint_actions is None:
                 return None
             if self.ik_solver is not None:
-                ee_pos_dict = self.ik_solver.get_ee_position(joint_actions[:-1])
+                ee_pos_dict = self.ik_solver.get_ee_position(joint_actions)
                 return ee_pos_dict
             else:
                 return None
+            
+    def get_joint_and_tool_pos(self, joint_positions):
+        if joint_positions is None:
+            return None, None
+        if self.tool_inner:
+            return joint_positions[:-1], joint_positions[-1]
+        else:
+            return joint_positions, None
 
     def move_to(self, target_pos, step_size=0.1):
         self.move_joint_step(target_pos)

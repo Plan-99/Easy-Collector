@@ -53,6 +53,7 @@ class Robot(Model, SoftDeletes):
         'role',
         'company',
         'tool_inner',
+        'ip_address',
     ]
 
     def get_robot_type_info(self):
@@ -150,6 +151,14 @@ class Robot(Model, SoftDeletes):
             network_interface = self.get_robot_type_info().get('network_interface', None)
             if network_interface == 'can':
                 return self.settings.get('can_port', 'can_0')
+        return None
+    
+    @accessor
+    def ip_address(self):
+        if self.type != 'custom':
+            network_interface = self.get_robot_type_info().get('network_interface', None)
+            if network_interface == 'ip':
+                return self.settings.get('ip_address', '')
         return None
     
     @accessor

@@ -11,23 +11,23 @@
         <div class="row q-col-gutter-md">
             <div class="col-6 col-sm-4 col-md-3 col-lg-2" v-for="robot in robots" :key="robot.id">
                 <q-card class="q-pa-md bg-secondary border-rounded border-white text-white" :class="watchingRobot && watchingRobot.status === 'on' && robot.id === watchingRobot.id ? 'border-primary' : ''">
+                    <q-menu context-menu>
+                        <q-list bordered separator>
+                            <q-item clickable v-ripple v-close-popup @click="openEditRobotForm(robot)">
+                                <q-item-section>Edit Robot</q-item-section>
+                                <q-item-section side>
+                                    <q-icon name="edit" size="xs" />
+                                </q-item-section>
+                            </q-item>
+                            <q-item clickable v-ripple class="text-negative" @click="deleteRobot(robot)">
+                                <q-item-section>Hide Robot</q-item-section>
+                                <q-item-section side>
+                                    <q-icon color="negative" name="visibility" size="xs" />
+                                </q-item-section>
+                            </q-item>
+                        </q-list>
+                    </q-menu>
                     <q-img :src="robot.image" @click="watchRobot(robot)" class="cursor-pointer bg-white" ratio="1.5" fit="contain">
-                        <q-menu context-menu>
-                            <q-list bordered separator>
-                                <q-item clickable v-ripple v-close-popup @click="openEditRobotForm(robot)">
-                                    <q-item-section>Edit Robot</q-item-section>
-                                    <q-item-section side>
-                                        <q-icon name="edit" size="xs" />
-                                    </q-item-section>
-                                </q-item>
-                                <q-item clickable v-ripple class="text-negative" @click="deleteRobot(robot)">
-                                    <q-item-section>Hide Robot</q-item-section>
-                                    <q-item-section side>
-                                        <q-icon color="negative" name="visibility" size="xs" />
-                                    </q-item-section>
-                                </q-item>
-                            </q-list>
-                        </q-menu>
                     </q-img>
 
                     <q-card-section class="q-pa-none q-mt-sm">
@@ -273,6 +273,7 @@ const robotForm = ref([
     }))) },
     // { label: 'CAN Baudrate', key: 'can_baudrate', type: 'number', value: 1000000, default: 1000000, show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).network_interface === 'can' }, 
     { label: 'CAN Port', key: 'can_port', type: 'text', value: 'can_0', default: 'can_0', show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).network_interface === 'can' },
+    { label: 'IP Address', key: 'ip_address', type: 'text', value: '', default: '', show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).network_interface === 'ip' },
     { label: 'Role', key: 'role', type: 'select', value: 'single_arm', default: 'dual_arm', 
         options: [
             { label: 'Single Arm', value: 'single_arm' },
@@ -306,6 +307,8 @@ function listRobots() {
         robots.value = response.data.robots || [];
         robots.value.forEach(robot => {
             robot.image = '/images/' + robot.company + '.png'; // Default image if not provided
+            console.log(robot.image)
+
             robot.loading = false;
             robot.handler = useRobot(robot, () => {
                 watchRobot(robot);

@@ -39,8 +39,33 @@ class ProcessManager:
             log_emit_id = 'log_' + name
 
         command_full = ' '.join(command)
+
+        # 1. 현재 파일(process_manager.py)의 폴더 경로: /root/src/backend/api
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        # 2. 프로젝트 루트 찾기 (두 단계 위로 올라가야 함)
+        #    /root/src/backend/api  ->  /root/src/backend  ->  /root/src
+        project_root = os.path.dirname(os.path.dirname(current_dir))
+
+        # --- [디버깅 확인] ---
+        # 이 로그가 출력될 때 '/root/src' 가 나오면 성공입니다.
+        print(f"Calculated Project Root: {project_root}") 
+        # ------------------
+
+        current_env = os.environ.copy()
+        current_env["PYTHONPATH"] = project_root + os.pathsep + current_env.get("PYTHONPATH", "")
+        current_env["LIBGL_ALWAYS_SOFTWARE"] = "1"
+
         try:
-            popen_args = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "text": True, "bufsize": 1}
+            popen_args = {
+                "stdout": subprocess.PIPE, 
+                "stderr": subprocess.PIPE, 
+                "text": True, 
+                "bufsize": 1,
+                "env": current_env,   # <--- 환경 변수 전달 (PYTHONPATH 포함됨)
+                "cwd": project_root   # <--- 실행 위치 고정
+            }
+
             if os.name != 'nt':
                 popen_args["preexec_fn"] = os.setsid
                 final_command = ['stdbuf', '-oL'] + command

@@ -1,6 +1,6 @@
 DATASET_DIR = '/root/src/backend/datasets'
 
-from ..ik_solver.pinocchio_solver.piper_arm_ik import Piper_ArmIK
+import numpy as np
 
 SUPPORT_ROBOTS = [
     {
@@ -17,6 +17,14 @@ SUPPORT_ROBOTS = [
         'write_topic_msg': 'sensor_msgs/JointState',
         'tool_inner': True,
         'network_interface': 'can',
+        'urdf_path': '/ros2_ws/src/piper_ros/src/piper_description/urdf/piper_description.urdf',
+        'urdf_package_dir': '/ros2_ws/src/piper_ros/src/piper_description/',
+        'ik_setting': {
+            'joints_to_lock': [
+                'joint6_to_gripper_base', 'joint7', 'joint8'
+            ],
+            'ee_definitions': [('ee', 'joint7', None)],
+        },
     },
     {
         'name': 'piper(no gripper)',
@@ -32,11 +40,27 @@ SUPPORT_ROBOTS = [
         'write_topic_msg': 'sensor_msgs/JointState',
         'tool_inner': False,
         'network_interface': 'can',
+        'urdf_path': '/ros2_ws/src/piper_ros/src/piper_description/urdf/piper_no_gripper_description.urdf',
+        'urdf_package_dir': '/ros2_ws/src/piper_ros/src/piper_description/',
+        'ik_setting': {
+            'joints_to_lock': [],
+            'ee_definitions': [('ee', 'joint6', np.array([0.20, 0, 0]).T)],
+        },
     },
     {
-        'name': 'rb3-730',
+        'name': 'rb3_730es_u',
         'role': 'single_arm',
         'company': 'Rainbow Robotics',
+        'joint_dim': 6,
+        'joint_names': ["base", "shoulder", "elbow", "wrist1", "wrist2", "wrist3"],
+        'joint_lower_bounds': [-3.14, -3.14, -3.14, -3.14, -3.14, -3.14],
+        'joint_upper_bounds': [3.14, 3.14, 3.14, 3.14, 3.14, 3.14],
+        'read_topic': '/rbpodo/joint_states',
+        'read_topic_msg': 'sensor_msgs/JointState',
+        'write_topic': '/position_controllers/commands',
+        'write_topic_msg': 'std_msgs/Float64MultiArray',
+        'tool_inner': False,
+        'network_interface': 'ip',
     },
     {
         'name': 'ur3',
@@ -74,3 +98,6 @@ SUPPORT_ROBOTS = [
         'company': 'Robotiq',
     },
 ]
+
+def get_robot_by_name(name):
+    return next((robot for robot in SUPPORT_ROBOTS if robot.get('name') == name), None)

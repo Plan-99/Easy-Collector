@@ -41,9 +41,14 @@ def get_robots():
 
 @robot_bp.route('/robots:supporting', methods=['GET'])
 def get_supporting_robots():
+    support_robot_json = []
+    for robot in SUPPORT_ROBOTS:
+        robot_copy = robot.copy()
+        robot_copy.pop('ik_setting', None)
+        support_robot_json.append(robot_copy)
     return {
         'status': 'success',
-        'robots': SUPPORT_ROBOTS
+        'robots': support_robot_json
     }, 200
 
 @robot_bp.route('/robot/<id>', methods=['GET'])
@@ -66,10 +71,11 @@ def start_robot():
     process_id = data.get('process_id')
     id = data.get('id')
     type = data.get('type')
+    company = data.get('company', '')
     settings = data.get('settings', {})
 
     command = ''
-    if type == 'piper':
+    if company == 'Piper':
         script_path = os.path.expanduser('~/ros2_ws/src/piper_ros/can_activate_main.sh')
         current_app.pm.start_process(
             name='can_config',
@@ -77,8 +83,16 @@ def start_robot():
             log_emit_id = 'log_' +  process_id
         )
         time.sleep(1)
-        command = ['ros2', 'launch', 'piper', 'start_single_piper.launch.py', f'namespace:=ec_robot_{id}', f'can_port:={settings.get("can_port", "can_0")}', 'auto_enable:=true', 'rviz_ctrl_flag:=false', 'gripper_exist:=true', 'gripper_val_mutiple:=1']
 
+        gripper_exist = 'true' if type == 'piper' else 'false'
+        command = ['ros2', 'launch', 'piper', 'start_single_piper.launch.py', 
+                   f'namespace:=ec_robot_{id}', 
+                   f'can_port:={settings.get("can_port", "can_0")}', 
+                   'auto_enable:=true', 'rviz_ctrl_flag:=false', 
+                   f'gripper_exist:={gripper_exist}']
+
+    if company == 'Rainbow Robotics':
+        command = ['ros2', 'launch', 'rbpodo_bringup', 'rbpodo.launch.py', f'namespace:=ec_robot_{id}', f'robot_ip:={settings.get("ip", "10.1.1.1")}', 'use_fake_hardware:=true']
 
     print(f"Attempting to start robot")
 
@@ -141,7 +155,11 @@ def create_robot():
             'gripper_range': request.json.get('gripper_range', [0, 1]),
         }
 
-    settings['can_port'] = request.json.get('can_port', 'can_0'),
+    if 'can_port' in request.json:
+        settings['can_port'] = request.json.get('can_port')
+
+    if 'ip_address' in request.json:
+        settings['ip_address'] = request.json.get('ip_address')
 
     RobotModel.create(
         name=name,
@@ -184,6 +202,9 @@ def update_robot(id):
 
     if 'can_port' in request.json:
         settings['can_port'] = request.json.get('can_port', 'can_0')
+
+    if 'ip_address' in request.json:
+        settings['ip_address'] = request.json.get('ip_address', '')
 
     robot.settings = settings
     robot.save()

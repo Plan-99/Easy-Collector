@@ -10,7 +10,6 @@ parent_of_cwd = os.path.dirname(cwd)  # 예: /root
 class Piper_ArmIK(IK_Solver):
     def __init__(self):
 
-
         urdf_path = parent_of_cwd + '/ros2_ws/src/piper_ros/src/piper_description/urdf/piper_description.urdf'
         package_dir = parent_of_cwd + '/ros2_ws/src/piper_ros/src/piper_description/'
         # urdf_path = '../../assets/g1/g1_body23.urdf'
@@ -19,14 +18,6 @@ class Piper_ArmIK(IK_Solver):
         # 1. 잠글 관절들 정의
         abs_urdf_path = os.path.abspath(urdf_path)
         abs_package_dir = os.path.abspath(package_dir) if package_dir else "None"
-
-        print(f"Attempting to load URDF...")
-        print(f"  [Debug] urdf_path (raw): {urdf_path}")
-        print(f"  [Debug] urdf_path (absolute): {abs_urdf_path}")
-        print(f"  [Debug] package_dir (raw): {package_dir}")
-        print(f"  [Debug] package_dir (absolute): {abs_package_dir}")
-
-
         
         joints_to_lock = [
             'joint6_to_gripper_base', 'joint7', 'joint8'
