@@ -40,11 +40,11 @@ class Robot(Model, SoftDeletes):
         'tools',
         'joint_upper_bounds',
         'joint_lower_bounds',
-        'gripper_range',
         'joint_dim',
         'joint_names',
         'read_topic',
         'read_topic_msg',
+        'write_type',
         'write_topic',
         'write_topic_msg',
         'move_action',
@@ -54,6 +54,9 @@ class Robot(Model, SoftDeletes):
         'company',
         'tool_inner',
         'ip_address',
+        'port',
+        'changer_address',
+        'ik_available',
     ]
 
     def get_robot_type_info(self):
@@ -108,6 +111,13 @@ class Robot(Model, SoftDeletes):
         return self.settings['read_topic_msg']
     
     @accessor
+    def write_type(self):
+        if self.type != 'custom':
+            return self.get_robot_type_info().get('write_type', 'topic')
+        return self.settings.get('write_type', 'topic')
+    
+
+    @accessor
     def write_topic(self):
         if self.type != 'custom':
             return f'/ec_robot_{self.id}' + self.get_robot_type_info().get('write_topic', '')
@@ -141,24 +151,37 @@ class Robot(Model, SoftDeletes):
             return self.get_robot_type_info().get('joint_lower_bounds', [])
         return self.settings['joint_lower_bounds']
     
-    @accessor
-    def gripper_range(self):
-        return self.settings['gripper_range'] if 'gripper_range' in self.settings else [0, 1]
-    
+
     @accessor
     def can_port(self):
         if self.type != 'custom':
-            network_interface = self.get_robot_type_info().get('network_interface', None)
-            if network_interface == 'can':
+            custom_fields = self.get_robot_type_info().get('custom_fields', [])
+            if 'can_port' in custom_fields:
                 return self.settings.get('can_port', 'can_0')
         return None
     
     @accessor
     def ip_address(self):
         if self.type != 'custom':
-            network_interface = self.get_robot_type_info().get('network_interface', None)
-            if network_interface == 'ip':
+            custom_fields = self.get_robot_type_info().get('custom_fields', [])
+            if 'ip_address' in custom_fields:
                 return self.settings.get('ip_address', '')
+        return None
+    
+    @accessor
+    def port(self):
+        if self.type != 'custom':
+            custom_fields = self.get_robot_type_info().get('custom_fields', [])
+            if 'port' in custom_fields:
+                return self.settings.get('port', '')
+        return None
+    
+    @accessor
+    def changer_address(self):
+        if self.type != 'custom':
+            custom_fields = self.get_robot_type_info().get('custom_fields', [])
+            if 'changer_address' in custom_fields:
+                return self.settings.get('changer_address', '')
         return None
     
     @accessor
@@ -173,6 +196,13 @@ class Robot(Model, SoftDeletes):
         if self.type != 'custom':
             return self.get_robot_type_info().get('tool_inner', False)
         return self.settings.get('tool_inner', False)
+    
+    @accessor
+    def ik_available(self):
+        if self.type != 'custom':
+            robot_info = self.get_robot_type_info()
+            return 'ik_setting' in robot_info
+        return self.settings.get('ik_available', False)
     
     # @staticmethod
     # def boot():

@@ -47,6 +47,7 @@ matplotlib
 pandas
 zarr
 logging_mp
+pymodbus== 3.9.2
 
 # # diffusion policy
 # dill

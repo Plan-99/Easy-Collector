@@ -88,7 +88,7 @@
                         <process-console 
                             :process="robot.process_id" 
                             :key="robot.id"
-                            style="height: 100%"
+                            style="height: 100%; min-height: 300px;"
                         />
                     </div>
                     <div class="col">
@@ -271,9 +271,13 @@ const robotForm = ref([
         label: robot.name + (robot.company ? ` (${robot.company})` : ''),
         value: robot.name
     }))) },
-    // { label: 'CAN Baudrate', key: 'can_baudrate', type: 'number', value: 1000000, default: 1000000, show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).network_interface === 'can' }, 
-    { label: 'CAN Port', key: 'can_port', type: 'text', value: 'can_0', default: 'can_0', show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).network_interface === 'can' },
-    { label: 'IP Address', key: 'ip_address', type: 'text', value: '', default: '', show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).network_interface === 'ip' },
+    // Custom fields based on robot type
+    { label: 'CAN Port', key: 'can_port', type: 'text', value: 'can_0', default: 'can_0', show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('can_port') },
+    { label: 'IP Address', key: 'ip_address', type: 'text', value: '10.0.2.27', default: '10.0.2.27', show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('ip_address') },
+    { label: 'Port', key: 'port', type: 'number', value: 502, default: 502, show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('port') },
+    { label: 'Changer Address', key: 'changer_address', type: 'number', value: 5, default: 5, show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('changer_address') },
+
+    // Fields for custom robot
     { label: 'Role', key: 'role', type: 'select', value: 'single_arm', default: 'dual_arm', 
         options: [
             { label: 'Single Arm', value: 'single_arm' },

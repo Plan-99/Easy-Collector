@@ -17,6 +17,10 @@ class Assembly(Model, SoftDeletes):
 
     __timestamps__ = True
 
+    __appends__ = [
+        'robots'
+    ]
+
     @has_many
     def teleoperators(self):
         return TeleoperatorModel
@@ -41,3 +45,20 @@ class Assembly(Model, SoftDeletes):
     def mobile_base(self):
         return RobotModel
     
+    @accessor
+    def robots(self):
+        robots = []
+        # 중복된 로봇은 한 번만 추가
+        robot_ids = set([
+            self.left_arm_id,
+            self.right_arm_id,
+            self.left_tool_id,
+            self.right_tool_id,
+            self.moblie_base_id,
+        ])
+        for robot_id in robot_ids:
+            if robot_id is not None:
+                robot = RobotModel.find(robot_id).to_dict()
+                if robot:
+                    robots.append(robot)
+        return robots

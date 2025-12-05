@@ -43,6 +43,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ethtool can-uti
 # ROS 2 Humble (Desktop-Full) 및 관련 패키지 설치
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-ros-base \
+    ros-humble-image-transport-plugins \
     ros-humble-realsense2-camera \
     ros-humble-realsense2-description \
     ros-humble-ruckig \

@@ -448,13 +448,6 @@
             @submit="updateWorkspace"
             :ok-button-label="$t('save')"
         ></form-dialog>
-        <!-- <form-dialog
-            v-model="showRobotForm"
-            :title="$t('workspaceRobotFormTitle')"
-            :form="robotForm"
-            @submit="updateWorkspace"
-            :ok-button-label="$t('save')" -->
-        <!-- ></form-dialog> -->
         <form-dialog
             v-model="showDatasetForm"
             :title="$t(datasetForm.id ? 'datasetEditFormTitle' : 'datasetAddFormTitle')"
@@ -576,20 +569,12 @@ const robots = computed(() => {
     if (!selectedWorkspace.value) {
         return [];
     }
-    const assembly = assemblies.value.find(a => a.id === selectedWorkspace.value.assembly_id);
-    if (assembly) {
-        console.log('assembly', assembly);
-        const robotList = [];
-        ['left_arm', 'right_arm', 'left_tool', 'right_tool', 'mobile_base'].forEach(part => {
-            if (!assembly[part]) return;
-            assembly[part].handler = useRobot(assembly[part], () => {
-                assembly[part].handler.subscribeRobot(() => {});
-            });
-            robotList.push(assembly[part]);
+    return selectedWorkspace.value.assembly.robots.map((robot) => {
+        robot.handler = useRobot(robot, () => {
+            robot.handler.subscribeRobot(() => {});
         });
-        return [...new Map(robotList.map(item => [item.id, item])).values()];
-    }
-    return [];
+        return robot;
+    })
 });
 
 function listSensors() {
@@ -602,19 +587,6 @@ function listSensors() {
         console.error('Error fetching sensors:', error);
     });
 }
-
-// function listRobots() {
-//     return api.get('/robots').then((response) => {
-//         robots.value = response.data.robots || [];
-//         robots.value.forEach(robot => {
-//             robot.handler = useRobot(robot, () => {
-//                 robot.handler.subscribeRobot(() => {});
-//             });
-//         });
-//     }).catch((error) => {
-//         console.error('Error fetching robots:', error);
-//     });
-// }
 
 const assemblies = ref([]);
 function listAssemblies() {
@@ -670,19 +642,6 @@ watch(selectedWorkspaceId, (newVal) => {
     listCheckpoints();
 
 });
-
-// const showRobotForm = ref(false);
-// const robotForm = ref([
-//     { key: 'id', value: null },
-//     { key: 'robot_ids', label: 'Robots', type: 'multiselect_list', options: computed(() => robots.value.map(r => ({ label: r.name, value: r.id }))), value: [] }
-// ])
-
-// function openRobotForm() {
-//     if (selectedWorkspace.value) {
-//         robotForm.value.find(e => e.key === 'robot_ids').value = selectedWorkspace.value.robot_ids;
-//     }
-//     showRobotForm.value = true;
-// }
 
 function toggleRobot(robot) {
     robot.process_id = `robot_${robot.id}`;

@@ -1,8 +1,6 @@
-from sensor_msgs.msg import JointState
-from std_msgs.msg import Float64MultiArray
 from geometry_msgs.msg import Pose
 
-from rosidl_runtime_py.utilities import get_message
+from rosidl_runtime_py.utilities import get_message, get_service
 
 import rclpy
 from rclpy.node import Node
@@ -45,10 +43,18 @@ class Agent:
         read_topic_msg_cls = get_message(robot['read_topic_msg'])
         node.create_subscription(read_topic_msg_cls, robot['read_topic'], self.joint_state_cb, 10)
 
-        write_topic_msg_cls = get_message(robot['write_topic_msg'])
-        node.create_subscription(write_topic_msg_cls, robot['write_topic'], self.joint_action_cb, 10)
 
-        self.move_robot_pub = node.create_publisher(write_topic_msg_cls, robot['write_topic'], 10)
+        self.write_type = robot.get('write_type', 'topic')  
+        if self.write_type == 'topic':
+            self.write_topic_msg_cls = get_message(robot['write_topic_msg'])
+            node.create_subscription(self.write_topic_msg_cls, robot['write_topic'], self.joint_action_cb, 10)
+            self.move_robot_pub = node.create_publisher(self.write_topic_msg_cls, robot['write_topic'], 10)
+
+        elif self.write_type == 'service':
+            self.write_service_srv_cls = get_service(robot['write_topic_msg'])
+            self.move_robot_client = node.create_client(self.write_service_srv_cls, robot['write_topic'])
+            if not self.move_robot_client.wait_for_service(timeout_sec=5.0):
+                print(f'Service {robot["write_topic"]} not available. Please check the connection.')
 
         self.ee_pos_cmd = None
             
@@ -69,23 +75,38 @@ class Agent:
 
         action = [float(a) for a in action]
 
+        if self.write_type == 'topic':
+            self.move_joint_step_by_topic(action)
+        elif self.write_type == 'service':
+            self.move_joint_step_by_service(action)
+        
+    def move_joint_step_by_topic(self, action):
+        msg = self.write_topic_msg_cls()
         if self.write_topic_msg == 'std_msgs/Float64MultiArray':
-            fa = Float64MultiArray()
-            fa.data = action
-            self.move_robot_pub.publish(fa)
-            return
+            msg.data = action
+            self.move_robot_pub.publish(msg)
         elif self.write_topic_msg == 'sensor_msgs/JointState':
-            js = JointState()
-            js.name = self.joint_names
-            js.position = action
-            js.velocity = [0.0] * self.joint_len
-            js.velocity[-1] = 100
-            self.move_robot_pub.publish(js)
+            msg.name = self.joint_names
+            msg.position = action
+            msg.velocity = [0.0] * self.joint_len
+            msg.velocity[-1] = 100
+            self.move_robot_pub.publish(msg)
         else:
-            print("Unsupported write topic message type for move_joint_step.")
+            print("Unsupported write topic message type for move_joint_step_by_topic.")
             return
+        
+    def move_joint_step_by_service(self, action):
+        req = self.write_service_srv_cls.Request()
+        if self.write_topic_msg == 'onrobot_rg_msgs/SetCommand':
+            # 서비스가 준비되었는지 확인 (Blocking 하지 않음)
+            if not self.move_robot_client.service_is_ready():
+                print("Service is not ready, skipping command.")
+                return
 
-
+            req.command = int(action[0])
+            
+            self.move_robot_client.call_async(req)
+            
     # def move_step(self, action):
     #     action = [float(a) for a in action]
     #     js = JointState()

@@ -94,6 +94,14 @@ def start_robot():
     if company == 'Rainbow Robotics':
         command = ['ros2', 'launch', 'rbpodo_bringup', 'rbpodo.launch.py', f'namespace:=ec_robot_{id}', f'robot_ip:={settings.get("ip", "10.1.1.1")}', 'use_fake_hardware:=true']
 
+    if company == 'OnRobot':
+        command = ['ros2', 'launch', 'onrobot_rg_control', 'bringup.launch.py',
+                   f'namespace:=ec_robot_{id}',
+                   f'gripper:={type}',
+                   f'ip:={settings.get("ip_address", "10.0.2.27")}',
+                   f'port:={settings.get("port", 502)}',
+                   f'changer_addr:={settings.get("changer_address", 5)}'
+        ]
     print(f"Attempting to start robot")
 
     process = current_app.pm.start_process(
@@ -152,14 +160,13 @@ def create_robot():
             'joint_names': request.json.get('joint_names', []),
             'joint_lower_bounds': request.json.get('joint_lower_bounds', []),
             'joint_upper_bounds': request.json.get('joint_upper_bounds', []),
-            'gripper_range': request.json.get('gripper_range', [0, 1]),
         }
 
-    if 'can_port' in request.json:
-        settings['can_port'] = request.json.get('can_port')
+    custom_fields = ['can_port', 'ip_address', 'port', 'changer_address']
+    for field in custom_fields:
+        if field in request.json:
+            settings[field] = request.json.get(field)
 
-    if 'ip_address' in request.json:
-        settings['ip_address'] = request.json.get('ip_address')
 
     RobotModel.create(
         name=name,

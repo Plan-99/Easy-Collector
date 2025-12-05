@@ -2,6 +2,7 @@ from flask import Blueprint, request, current_app, Response
 from ...database.models.task_model import Task as TaskModel
 import json
 from ...database.models.checkpoint_model import Checkpoint as CheckpointModel
+from ...database.models.assembly_model import Assembly as AssemblyModel
 
 from ..process.failure_detection import failure_detection
 
@@ -12,7 +13,7 @@ task_bp = Blueprint('task', __name__)
 
 @task_bp.route('/tasks', methods=['GET'])
 def get_tasks():
-    tasks = TaskModel.all()
+    tasks = TaskModel.with_('assembly').get()
     tasks = [task.to_dict() for task in tasks]
     return {
         'status': 'success',
@@ -136,10 +137,8 @@ def update_task(id):
     task = TaskModel.find(id)
     task.name = data.get('name', task.name)
     task.assembly_id = data.get('assembly_id', task.assembly_id)
-    task.robot_ids = data.get('robot_ids', task.robot_ids)
     task.sensor_ids = data.get('sensor_ids', task.sensor_ids)
     task.home_pose = data.get('home_pose', task.home_pose)
-    task.end_pose = data.get('end_pose', task.end_pose)
     task.image = data.get('image', task.image)
     task.episode_len = data.get('episode_len', task.episode_len)
     task.sensor_img_size = data.get('sensor_img_size', task.sensor_img_size)

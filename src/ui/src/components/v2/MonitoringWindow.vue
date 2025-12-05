@@ -1,5 +1,5 @@
 <template>
-    <div class="bg-secondary border-rounded border-white column q-px-sm">
+    <div class="bg-secondary border-rounded border-white column q-px-sm" style="max-height: 700px;">
         <div class="col-6 row flex felx-center">
             <div v-for="sensor in sensors" :key="sensor.id" class="col q-py-sm q-px-xs relative-position">
                 <web-rtc-video
@@ -21,7 +21,7 @@
                 <q-chip color="blue-10" text-color="white" class="absolute-top-left" style="top: 20px; left: 15px">{{ sensor.name }} sensor</q-chip>
             </div>
         </div>
-        <div class="col-5 row">
+        <div class="col-5 row q-gutter-x-sm">
             <div v-for="robot in robots" :key="robot.id" class="col column q-pa-md relative-position border-rounded border-white text-white cursor-pointer"
                     :class="{
                         'border-primary': focused.id === robot.id && focused.device_type === 'robot',
