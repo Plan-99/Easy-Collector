@@ -40,7 +40,13 @@ class ProcessManager:
 
         command_full = ' '.join(command)
         try:
-            popen_args = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "text": True, "bufsize": 1}
+            popen_args = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "text": True, "bufsize": 1, "cwd": '/root/src'}
+
+            # --- [추가] 현재 실행 위치 확인 코드 ---
+            current_wd = os.getcwd()
+            print(f"[DEBUG] Command '{command[0]}' will run in: {current_wd}")
+            # ------------------------------------
+
             if os.name != 'nt':
                 popen_args["preexec_fn"] = os.setsid
                 final_command = ['stdbuf', '-oL'] + command

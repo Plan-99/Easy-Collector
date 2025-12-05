@@ -33,7 +33,7 @@
 
           <div class="row q-col-gutter-x-md">
             <div class="col-6">
-              <process-console process="train_task" />
+              <process-console process="train_task" style="height: 400px;" />
             </div>
             <div class="col-6">
               <Line class="bg-dark" :data="data" :options="options" />

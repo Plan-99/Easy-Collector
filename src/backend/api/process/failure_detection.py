@@ -5,6 +5,9 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 import torch
 from collections import deque
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import Float64
 
 from ...utils.image_parser import fetch_image_with_config
 
@@ -30,140 +33,153 @@ import numpy as np
 
 
 def failure_detection(node, checkpoint, robots, sensors, task_obj, task_control, socketio_instance):
-    with hydra.initialize(config_path="../../fiper/configs", version_base="1.1", job_name="train_fiper"):
-        cfg = hydra.compose(config_name=str(task_obj['id']))
+    if not rclpy.ok():
+        rclpy.init(args=None)
+    ros_node = rclpy.create_node(f'failure_detector_{checkpoint.id}')
+    publisher = ros_node.create_publisher(Float64, '/failure_detection/uncertainty_score', 10)
 
-        embedding_helper = EmbeddingHelper(checkpoint.id)
+    try:
+        with hydra.initialize(config_path="../../fiper/configs", version_base="1.1", job_name="train_fiper"):
+            cfg = hydra.compose(config_name=str(task_obj['id']))
 
-        tasks = cfg.get("tasks", [])
-        # Methods to be evaluated
-        rnd_models = cfg.get("rnd_models", [])
-        methods = cfg.get("methods", [])
-        methods.extend(rnd_models)
+            embedding_helper = EmbeddingHelper(checkpoint.id)
 
-        window_size = 7
-        action_embedding_window = deque(maxlen=window_size)
-        obs_embedding_window = deque(maxlen=window_size)
+            tasks = cfg.get("tasks", [])
+            # Methods to be evaluated
+            rnd_models = cfg.get("rnd_models", [])
+            methods = cfg.get("methods", [])
+            methods.extend(rnd_models)
 
-
-        # Logical combination of methods
-        combine_methods = cfg.get("combine_methods", False)
-        combined_methods = cfg.get("combined_methods", {})
-        combined_methods = OmegaConf.to_container(combined_methods, resolve=True)
-        cfg.combined_methods = combined_methods
-
-        train_rnd = cfg.get("train_rnd", True)
-        # Check if the pipeline inputs are valid
-        check_inputs(
-            cfg,
-            tasks,
-            methods,
-            combined_methods,
-            combine_methods,
-            str(BASE_CONFIG_PATH),
-        )
-        # Check which tensors are required for the methods
-        required_tensors, optional_tensors = get_required_tensors(methods, str(BASE_CONFIG_PATH))
-        
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-
-        # Get the random seeds for evaluation
-        seed_list = cfg.eval.get("random_seeds", [0])  #
-        all_seed_results = []
-        seed = seed_list[0]
-        set_seed(seed)
-        task = tasks[0]
-        # Load the complete config with only the task overridden
-        task_cfg = load_config("task", task, return_only_subdict=False)
-
-        task_data_path = os.path.join(BASE_DATA_PATH, task)
-
-        dataset = None
-        is_inference = True
-
-        evaluationmanager = EvaluationManager(str(BASE_CONFIG_PATH), task_data_path, dataset, is_inference=is_inference, device=device, seed=seed)
-
-        print(f"Starting failure detection for checkpoint {checkpoint.id}")
-        
-        evaluationmanager.prepare_for_inference(methods)
-        socketio_instance.emit('failure_detection_progress', {'status': 'prepared_for_inference'}, room=node)
+            window_size = 7
+            action_embedding_window = deque(maxlen=window_size)
+            obs_embedding_window = deque(maxlen=window_size)
 
 
-        #----------------------------------------------------------------------------------------------
+            # Logical combination of methods
+            combine_methods = cfg.get("combine_methods", False)
+            combined_methods = cfg.get("combined_methods", {})
+            combined_methods = OmegaConf.to_container(combined_methods, resolve=True)
+            cfg.combined_methods = combined_methods
+
+            train_rnd = cfg.get("train_rnd", True)
+            # Check if the pipeline inputs are valid
+            check_inputs(
+                cfg,
+                tasks,
+                methods,
+                combined_methods,
+                combine_methods,
+                str(BASE_CONFIG_PATH),
+            )
+            # Check which tensors are required for the methods
+            required_tensors, optional_tensors = get_required_tensors(methods, str(BASE_CONFIG_PATH))
+            
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+
+            # Get the random seeds for evaluation
+            seed_list = cfg.eval.get("random_seeds", [0])  #
+            all_seed_results = []
+            seed = seed_list[0]
+            set_seed(seed)
+            task = tasks[0]
+            # Load the complete config with only the task overridden
+            task_cfg = load_config("task", task, return_only_subdict=False)
+
+            task_data_path = os.path.join(BASE_DATA_PATH, task)
+
+            dataset = None
+            is_inference = True
+
+            evaluationmanager = EvaluationManager(str(BASE_CONFIG_PATH), task_data_path, dataset, is_inference=is_inference, device=device, seed=seed)
+
+            print(f"Starting failure detection for checkpoint {checkpoint.id}")
+            
+            evaluationmanager.prepare_for_inference(methods)
+            socketio_instance.emit('failure_detection_progress', {'status': 'prepared_for_inference'}, room=node)
 
 
-        agents = []
-        for robot in robots:
-            agents.append(Agent(node, robot))
-        env = Env(node, agents=agents, sensors=sensors)
+            #----------------------------------------------------------------------------------------------
 
 
-        while not task_control['stop']:
-            rollout_list = []
-            # Here you would gather new rollout data for evaluation
-            # For demonstration, we will assume rollout_dict is obtained
-
-            rollout_dict = {
-                'observations': {
-                    'qpos': {},
-                    'images': {}
-                },
-                'qaction': {}
-            }
-
-            ts = env.record_step()
-            for agent in env.agents:
-                rollout_dict['observations']['qpos'][f"robot_{agent.id}"] = np.array([ts.observation['robot_states'][agent.id]['qpos']])
-                rollout_dict['qaction'][f"robot_{agent.id}"] = None
-
-            for sensor in env.sensors:
-                image = np.array(ts.observation['images'][f"sensor_{sensor['id']}"])
+            agents = []
+            for robot in robots:
+                agents.append(Agent(node, robot))
+            env = Env(node, agents=agents, sensors=sensors)
 
 
-                if image is not None:
+            while not task_control['stop']:
+                rollout_list = []
+                # Here you would gather new rollout data for evaluation
+                # For demonstration, we will assume rollout_dict is obtained
 
-                    image = fetch_image_with_config(image, {
-                        'resize': task_obj['sensor_img_size'],
-                    })
-
-                    rollout_dict['observations']['images'][f"sensor_{sensor['id']}"] = np.array([image])
-                else:
-                    print("error")
-            # Perform inference
-
-            rollout_list.append(rollout_dict)
-            all_embeddings_batch, all_embedding_std = embedding_helper.get_embedding_batch(rollout_list)
-
-            action_embedding_window.append(all_embeddings_batch[0][0])
-            obs_embedding_window.append(all_embeddings_batch[0][0][0].flatten())
-
-            if len(action_embedding_window) == window_size:
-                # The window is full, we can perform inference.
-                stacked_action_per_step = [np.stack(t, axis=0) for t in action_embedding_window]
-                action_preds = np.stack(stacked_action_per_step, axis=0)
-
-                stacked_obs_per_step = [np.stack(t, axis=0) for t in obs_embedding_window]
-                obs_embeddings = np.stack(stacked_obs_per_step, axis=0)
-
-                infer_input = {
-                    'action_preds': action_preds,
-                    'obs_embeddings': obs_embeddings,
-                    'successful': True,
+                rollout_dict = {
+                    'observations': {
+                        'qpos': {},
+                        'images': {}
+                    },
+                    'qaction': {}
                 }
 
-                uncertainty_score_results = evaluationmanager.infer(infer_input)
-                for i, uncertainty_scores in enumerate(uncertainty_score_results):
-                    print(f"Uncertainty Scores {i}: {uncertainty_scores}")
+                ts = env.record_step()
+                for agent in env.agents:
+                    rollout_dict['observations']['qpos'][f"robot_{agent.id}"] = np.array([ts.observation['robot_states'][agent.id]['qpos']])
+                    rollout_dict['qaction'][f"robot_{agent.id}"] = None
 
-                uncertainty_score = uncertainty_score_results[0][window_size-1] + 1 * uncertainty_score_results[1][window_size-1]
+                for sensor in env.sensors:
+                    image = np.array(ts.observation['images'][f"sensor_{sensor['id']}"])
 
-                print(f"Combined Uncertainty Score: {uncertainty_score}")
-                
 
-                socketio_instance.emit('failure_detection_result', {
-                    'uncertainty_score': float(uncertainty_score),
-                    'failure_detected': bool(uncertainty_score > 1.2)
-                })
+                    if image is not None:
+
+                        image = fetch_image_with_config(image, {
+                            'resize': task_obj['sensor_img_size'],
+                        })
+
+                        rollout_dict['observations']['images'][f"sensor_{sensor['id']}"] = np.array([image])
+                    else:
+                        print("error")
+                # Perform inference
+
+                rollout_list.append(rollout_dict)
+                all_embeddings_batch, all_embedding_std = embedding_helper.get_embedding_batch(rollout_list)
+
+                action_embedding_window.append(all_embeddings_batch[0][0])
+                obs_embedding_window.append(all_embeddings_batch[0][0][0].flatten())
+
+                if len(action_embedding_window) == window_size:
+                    # The window is full, we can perform inference.
+                    stacked_action_per_step = [np.stack(t, axis=0) for t in action_embedding_window]
+                    action_preds = np.stack(stacked_action_per_step, axis=0)
+
+                    stacked_obs_per_step = [np.stack(t, axis=0) for t in obs_embedding_window]
+                    obs_embeddings = np.stack(stacked_obs_per_step, axis=0)
+
+                    infer_input = {
+                        'action_preds': action_preds,
+                        'obs_embeddings': obs_embeddings,
+                        'successful': True,
+                    }
+
+                    uncertainty_score_results = evaluationmanager.infer(infer_input)
+                    # for i, uncertainty_scores in enumerate(uncertainty_score_results):
+                        # print(f"Uncertainty Scores {i}: {uncertainty_scores}")
+
+                    uncertainty_score = 1.5 * uncertainty_score_results[0][window_size-1] + 0.8 * uncertainty_score_results[1][window_size-1]
+
+                    # print(f"Combined Uncertainty Score: {uncertainty_score}")
+                    
+                    msg = Float64()
+                    msg.data = float(uncertainty_score)
+                    if rclpy.ok():
+                        publisher.publish(msg)
+
+                    socketio_instance.emit('failure_detection_result', {
+                        'uncertainty_score': float(uncertainty_score),
+                        'failure_detected': bool(uncertainty_score > 1.2)
+                    })
+    finally:
+        ros_node.destroy_node()
+        rclpy.shutdown()
     return
     
 
