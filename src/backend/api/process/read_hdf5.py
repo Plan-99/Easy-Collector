@@ -40,7 +40,10 @@ def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=
                 qpos_data[name] = f[f"observations/qpos/{name}"][:]
                 qaction_data[name] = f[f"qaction/{name}"][:]
 
-            language_instruction = f["language_instruction"][()].decode('utf-8')
+            if "language_instruction" in f:
+                language_instruction = f["language_instruction"][()].decode('utf-8')
+            else:
+                language_instruction = ""
 
 
             # 타임스텝별로 데이터 전송

@@ -53,6 +53,7 @@ class Robot(Model, SoftDeletes):
         'role',
         'company',
         'tool_inner',
+        'tool_index',
         'ip_address',
         'port',
         'changer_address',
@@ -189,13 +190,19 @@ class Robot(Model, SoftDeletes):
         if self.type != 'custom':
             return self.get_robot_type_info().get('role', 'single_arm')
             
-        return 'custom'
+        return self.settings.get('role', '')
     
     @accessor
     def tool_inner(self):
         if self.type != 'custom':
             return self.get_robot_type_info().get('tool_inner', False)
         return self.settings.get('tool_inner', False)
+    
+    @accessor
+    def tool_index(self):
+        if self.type != 'custom':
+            return self.get_robot_type_info().get('tool_index', [])
+        return self.settings.get('tool_index', [])
     
     @accessor
     def ik_available(self):

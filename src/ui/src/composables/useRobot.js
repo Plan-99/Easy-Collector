@@ -37,7 +37,7 @@ export function useRobot(robot, robotOnCallback=() => {}) {
   function stopRobot() {
     robot.status = 'loading'
     return api.post('/robot:stop', robot).then(() => {
-      robot.status = 'off';
+      checkRobotTopic(1)
     }).catch((error) => {
       console.error('Error stopping robot:', error);
       robot.status = 'on';
@@ -66,6 +66,7 @@ export function useRobot(robot, robotOnCallback=() => {}) {
     //   robot.jointSub.unsubscribe();
     //   robot.jointSub = null;
     // }
+    api.post(`/robot/${robot.id}/:unsubscribe_robot`);
     socket.off(`robot_status_${robot.id}`);
   }
 
@@ -113,6 +114,7 @@ export function useRobot(robot, robotOnCallback=() => {}) {
         if (isPublished) {
           robot.status = 'on';
           robotOnCallback();
+          api.post(`/robot/${robot.id}/:subscribe_robot`);
           clearInterval(robotTopicChecker);
         }
       })
@@ -126,6 +128,7 @@ export function useRobot(robot, robotOnCallback=() => {}) {
           stopRobot();
         }
         robot.status = 'off';
+        api.post(`/robot/${robot.id}/:unsubscribe_robot`);
       }
     }, 1000);
   }

@@ -17,7 +17,8 @@ SUPPORT_ROBOTS = [
         'write_topic': '/joint_states',
         'write_topic_msg': 'sensor_msgs/JointState',
         'tool_inner': True,
-        'network_interface': 'can',
+        'tool_index': [6],
+        'custom_fields': ['can_port'],
         'urdf_path': '/ros2_ws/src/piper_ros/src/piper_description/urdf/piper_description.urdf',
         'urdf_package_dir': '/ros2_ws/src/piper_ros/src/piper_description/',
         'ik_setting': {
@@ -41,6 +42,7 @@ SUPPORT_ROBOTS = [
         'write_topic': '/joint_states',
         'write_topic_msg': 'sensor_msgs/JointState',
         'tool_inner': False,
+        'tool_index': [],
         'custom_fields': ['can_port'],
         'urdf_path': '/ros2_ws/src/piper_ros/src/piper_description/urdf/piper_no_gripper_description.urdf',
         'urdf_package_dir': '/ros2_ws/src/piper_ros/src/piper_description/',
@@ -63,6 +65,7 @@ SUPPORT_ROBOTS = [
         'write_topic': '/position_controllers/commands',
         'write_topic_msg': 'std_msgs/Float64MultiArray',
         'tool_inner': False,
+        'tool_index': [],
         'custom_fields': ['ip_address'],
     },
     {
@@ -104,6 +107,7 @@ SUPPORT_ROBOTS = [
         'write_topic': '/onronot/sendCommand',
         'write_topic_msg': 'onrobot_rg_msgs/SetCommand',
         'tool_inner': False,
+        'tool_index': [],
         'custom_fields': ['ip_address', 'port', 'changer_address'],
     },
     {

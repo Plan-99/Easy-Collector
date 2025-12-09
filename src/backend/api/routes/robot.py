@@ -109,17 +109,9 @@ def start_robot():
         command=command,
     )
 
-    agent = Agent(current_app.node, data)
+    # agent = Agent(current_app.node, data)
 
-    current_app.agents[id] = agent
-
-    current_app.pm.start_function(
-        name='subscribe_robot_' + str(id),
-        node=current_app.node,
-        func=subscribe_robot_topic,
-        socketio_instance=current_app.pm.socketio,
-        agent=agent,
-    )
+    # current_app.agents[id] = agent
 
     if process:
         return {
@@ -153,13 +145,17 @@ def create_robot():
     if type == 'custom':
         role = request.json.get('role', '')
         settings = {
+            'role': request.json.get('role', ''),
             'read_topic': request.json.get('read_topic', ''),
             'read_topic_msg': request.json.get('read_topic_msg', ''),
+            'write_type': request.json.get('write_type', ''),
             'write_topic': request.json.get('write_topic', ''),
             'write_topic_msg': request.json.get('write_topic_msg', ''),
             'joint_names': request.json.get('joint_names', []),
             'joint_lower_bounds': request.json.get('joint_lower_bounds', []),
             'joint_upper_bounds': request.json.get('joint_upper_bounds', []),
+            'tool_index': request.json.get('tool_index', []),
+            'tool_inner': len(request.json.get('tool_index', [])) > 0,
         }
 
     custom_fields = ['can_port', 'ip_address', 'port', 'changer_address']
@@ -197,13 +193,17 @@ def update_robot(id):
     settings = robot.settings if robot.settings else {}
     if type == 'custom':
         settings = {
+            'role': request.json.get('role', ''),
             'read_topic': request.json.get('read_topic', ''),
             'read_topic_msg': request.json.get('read_topic_msg', ''),
+            'write_type': request.json.get('write_type', ''),
             'write_topic': request.json.get('write_topic', ''),
             'write_topic_msg': request.json.get('write_topic_msg', ''),
             'joint_names': request.json.get('joint_names', []),
             'joint_lower_bounds': request.json.get('joint_lower_bounds', []),
             'joint_upper_bounds': request.json.get('joint_upper_bounds', []),
+            'tool_index': request.json.get('tool_index', []),
+            'tool_inner': len(request.json.get('tool_index', [])) > 0,
         }
 
 
@@ -245,3 +245,28 @@ def move_robot(id):
     agent.move_to(goal_pos, step_size)
     time.sleep(3)
     return {'status': 'success', 'message': 'Robot moved'}, 200
+
+
+@robot_bp.route('/robot/<id>/:subscribe_robot', methods=['POST'])
+def subscribe_robot(id):
+
+    robot = RobotModel.find(id).to_dict()
+    agent = Agent(current_app.node, robot)
+
+    current_app.agents[int(id)] = agent
+
+    current_app.pm.start_function(
+        name='subscribe_robot_' + str(id),
+        node=current_app.node,
+        func=subscribe_robot_topic,
+        socketio_instance=current_app.pm.socketio,
+        agent=agent,
+    )
+    return {'status': 'success', 'message': 'Subscribed to robot topic'}, 200
+
+
+@robot_bp.route('/robot/<id>/:unsubscribe_robot', methods=['POST'])
+def unsubscribe_robot(id):
+    current_app.pm.stop_function('subscribe_robot_' + str(id))
+    current_app.agents.pop(int(id), None)
+    return {'status': 'success', 'message': 'Unsubscribed from robot topic'}, 200

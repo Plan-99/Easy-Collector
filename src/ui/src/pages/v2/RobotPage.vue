@@ -87,7 +87,6 @@
                     <div class="col-6">
                         <process-console 
                             :process="robot.process_id" 
-                            :key="robot.id"
                             style="height: 100%; min-height: 300px;"
                         />
                     </div>
@@ -129,20 +128,34 @@
         >
             <template v-slot:joint_names>
                 <div class="row q-mb-md q-col-gutter-sm">
-                    <q-input
-                        outlined
-                        dense
-                        dark
-                        bg-color="dark"
-                        v-model="robotForm.find((e) => e.key === 'joint_names').value[i]"
+                    <div
                         class="col-3"
                         v-for="(joint, i) in robotForm.find((e) => e.key === 'joint_names').value"
                         :key="i"
                     >
-                        <template v-slot:append>
-                            <q-icon size="xs" name="close" @click="removeJoint(i)" class="cursor-pointer" />
-                        </template>
-                    </q-input>
+                        <q-input
+                            outlined
+                            dense
+                            dark
+                            bg-color="dark"
+                            v-model="robotForm.find((e) => e.key === 'joint_names').value[i]"
+                        >
+                            <template v-slot:append>
+                                <q-icon size="xs" name="close" @click="removeJoint(i)" class="cursor-pointer" />
+                            </template>
+                        </q-input>
+                        <q-checkbox
+                            v-model="robotForm.find((e) => e.key === 'tool_index').value"
+                            :val="i"
+                            dense
+                            class="q-ml-sm text-white"
+                            size="xs"
+                            dark
+                            label="Tool Joint"
+                            v-if="robotForm.find((e) => e.key === 'role').value !== 'tool'"
+                        ></q-checkbox>
+                    </div>
+                    
                     <div class="col-3">
                         <q-btn
                             dense
@@ -152,6 +165,7 @@
                             class="full-width full-height"
                             @click="addJoint"
                         ></q-btn>
+
                     </div>
                 </div>
             </template>
@@ -212,7 +226,8 @@
                                 dark
                                 bg-color="dark"
                                 outlined
-                            />
+                            >
+                            </q-input>
                         </div>
                     </div>
                 </q-card-section>
@@ -276,7 +291,7 @@ const robotForm = ref([
     { label: 'IP Address', key: 'ip_address', type: 'text', value: '10.0.2.27', default: '10.0.2.27', show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('ip_address') },
     { label: 'Port', key: 'port', type: 'number', value: 502, default: 502, show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('port') },
     { label: 'Changer Address', key: 'changer_address', type: 'number', value: 5, default: 5, show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('changer_address') },
-
+    // { label: 'tool_inner', key: 'tool_inner', type: 'custom', value: computed(() => robotForm.value.find((e) => e.key === 'tool_index').length > 0), default: false, show: () => false },
     // Fields for custom robot
     { label: 'Role', key: 'role', type: 'select', value: 'single_arm', default: 'dual_arm', 
         options: [
@@ -287,12 +302,20 @@ const robotForm = ref([
         show: (form) => form.find((e) => e.key === 'type').value === 'custom' 
     },
     { label: 'Joint Names', key: 'joint_names', type: 'custom', value: [], default: [] , show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
+    { label: '', key: 'tool_index', type: 'custom', value: [], default: [], show: () => (form) => form.find((e) => e.key === 'type').value === 'custom' },
     { label: 'Joint Lower Bounds', key: 'joint_lower_bounds', type: 'custom', value: [], default: [] , show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
     { label: 'Joint Upper Bounds', key: 'joint_upper_bounds', type: 'custom', value: [], default: [] , show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
     { label: 'Read Topic', key: 'read_topic', type: 'text', value: '', default: '', show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
     { label: 'Read Topic Message Type', key: 'read_topic_msg', type: 'select', value: '', default: 'sensor_msgs/JointState', 
         options: [
             { label: 'sensor_msgs/JointState', value: 'sensor_msgs/JointState' },
+        ],
+        show: (form) => form.find((e) => e.key === 'type').value === 'custom' 
+    },
+    { label: 'Write Type', key: 'write_type', type: 'select', value: '', default: 'topic', 
+        options: [
+            { label: 'Topic', value: 'topic' },
+            { label: 'Service', value: 'service' },
         ],
         show: (form) => form.find((e) => e.key === 'type').value === 'custom' 
     },
@@ -315,7 +338,6 @@ function listRobots() {
 
             robot.loading = false;
             robot.handler = useRobot(robot, () => {
-                watchRobot(robot);
             });
             robot.joint_pos = []
             robot.joint_names.forEach((joint, i) => {

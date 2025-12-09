@@ -34,7 +34,7 @@ class Agent:
 
         self.ik_solver = None
         robot_info = get_robot_by_name(self.robot_type)
-        if 'ik_setting' in robot_info:
+        if robot_info is not None and 'ik_setting' in robot_info:
             urdf_path = robot_info['urdf_path']
             urdf_package_dir = robot_info['urdf_package_dir']
             ik_setting = robot_info['ik_setting']

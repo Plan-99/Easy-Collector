@@ -60,7 +60,7 @@
                     dark
                     bg-color="dark"
                     label="Select Dataset for Data Collection"
-                    style="width: 400px"
+                    style="width: 200px"
                     :options="datasets"
                     option-label="name"
                     option-value="id"
