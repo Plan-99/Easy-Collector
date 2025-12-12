@@ -11,7 +11,7 @@ class CreateAssembliesTable(Migration):
             table.integer('right_arm_id').unsigned().nullable()
             table.integer('left_tool_id').unsigned().nullable()
             table.integer('right_tool_id').unsigned().nullable()
-            table.integer('moblie_base_id').unsigned().nullable()
+            table.integer('mobile_base_id').unsigned().nullable()
             table.boolean('hide').default(False)
             table.timestamps()
             table.soft_deletes()

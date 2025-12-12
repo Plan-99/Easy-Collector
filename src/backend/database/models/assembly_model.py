@@ -12,7 +12,7 @@ class Assembly(Model, SoftDeletes):
         'right_arm_id',
         'left_tool_id',
         'right_tool_id',
-        'moblie_base_id',
+        'mobile_base_id',
     ]
 
     __timestamps__ = True
@@ -41,7 +41,7 @@ class Assembly(Model, SoftDeletes):
     def right_tool(self):
         return RobotModel
     
-    @belongs_to('moblie_base_id')
+    @belongs_to('mobile_base_id')
     def mobile_base(self):
         return RobotModel
     
@@ -54,7 +54,7 @@ class Assembly(Model, SoftDeletes):
             self.right_arm_id,
             self.left_tool_id,
             self.right_tool_id,
-            self.moblie_base_id,
+            self.mobile_base_id,
         ])
         for robot_id in robot_ids:
             if robot_id is not None:

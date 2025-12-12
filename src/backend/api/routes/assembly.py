@@ -28,7 +28,6 @@ def create_assembly():
     assembly = AssemblyModel.create(**data)
     return {
         'status': 'success',
-        'assembly': assembly.to_dict()
     }, 201
 
 
