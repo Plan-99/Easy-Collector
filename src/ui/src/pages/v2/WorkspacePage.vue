@@ -396,7 +396,16 @@
                 :status="status"
                 :class="isFailureDetected ? 'border-red' : 'border-white'"
             />
-            <div v-else-if="selectedEpisode.name && selectedDatasetId" class="col bg-secondary border-rounded border-white column q-px-sm">
+            <div v-else-if="selectedEpisode.name && selectedDatasetId" class="relative-position col bg-secondary border-rounded border-white column q-px-sm">
+                <q-btn
+                    icon="close"
+                    round
+                    flat
+                    class="absolute-top-right q-mt-sm q-mr-sm"
+                    color="white"
+                    style="background-color: #00000099;"
+                    @click="deselectEpisode"
+                ></q-btn>
                 <div class="col-6 row flex felx-center">
                     <hdf5-viewer
                         :path="`${selectedDatasetId}/${selectedEpisode.name}`"
@@ -419,16 +428,7 @@
                     class="col q-pa-sm bg-dark border-rounded text-white row"
                 >
                     <div>
-                        <div class="text-h6">Episode: {{ selectedEpisode.name }} </div>
-                        <div class="text-caption">Dataset: {{ selectedDataset?.name }} </div>
-                    </div>
-                    <div>
-                        <q-btn
-                            icon="close"
-                            round
-                            flat
-                            @click="deselectEpisode"
-                        ></q-btn>
+                        <div class="text-h6">{{ selectedDataset?.name }} / {{ selectedEpisode.name }} </div>
                     </div>
                 </div>
             </div>

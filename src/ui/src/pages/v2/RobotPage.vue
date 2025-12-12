@@ -57,10 +57,10 @@
                 </q-card>
             </div>
             <div class="col" v-if="!robots.length">
-                <q-card class="full-height" flat bordered>
+                <q-card class="full-height border-rounded border-white bg-dark text-white" flat bordered>
                     <q-card-section class="text-center">
-                        <div class="text-h6">No Robots Found</div>
-                        <div class="text-subtitle2">Click the button below to add a new robot.</div>
+                        <div class="text-h6">{{ $t('noRobotTitle') }}</div>
+                        <div class="text-subtitle2">{{ $t('noRobotBody') }}</div>
                     </q-card-section>
                 </q-card>
             </div>

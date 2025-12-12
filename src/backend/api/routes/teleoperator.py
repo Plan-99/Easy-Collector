@@ -2,7 +2,7 @@ from flask import Blueprint, request, current_app, Response
 import json
 from ...database.models.teleoperator_model import Teleoperator as TeleoperatorModel
 from ...database.models.assembly_model import Assembly as AssemblyModel
-from ...api.process.subscribe_dynamixel import subscribe_dynamixel
+from ...api.process.subscribe_dynamixel import subscribe_dynamixel, scan_ids_on_port, get_available_ports
 from ...api.process.leader_teleoperation import Leader
 
 
@@ -19,6 +19,23 @@ def get_teleoperators():
         'teleoperators': teleoperators
     }, 200
 
+@teleoperator_bp.route('teleoperator:dxl_check', methods=['GET'])
+def dxl_check():
+    ports = get_available_ports()
+    res = {}
+    for port in ports:
+        # 해당 포트의 다이나믹셀 ID 스캔
+        connected_ids = scan_ids_on_port(port)
+        res[port] = connected_ids
+
+    status = 'success'
+    if len(res) == 0:
+        status = 'error'
+
+    return {
+        'status': status,
+        'data': res
+    }, 200
 
 @teleoperator_bp.route('/teleoperator:dxl_read', methods=['POST'])
 def dxl_read():

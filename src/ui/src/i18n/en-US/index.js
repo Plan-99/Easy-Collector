@@ -13,6 +13,8 @@ export default {
   sensorName: 'Sensor Name',
   sensorType: 'Sensor Type',
   serialNUmber: 'Serial Number',
+  noSensorTitle: 'No Sensors Added Yet',
+  noSensorBody: "Click the add button to add a new sensor.",
 
   robotIntroTitle: 'Robot, Control Your Body',
   robotIntroBody: "Now that the robot can see and feel, it's time to give it the ability to move and interact with its environment.",
@@ -21,6 +23,8 @@ export default {
   robotEditFormTitle: 'Edit Robot',
   robotName: 'Robot Name',
   robotType: 'Robot Type',
+  noRobotTitle: 'No Robots Added Yet',
+  noRobotBody: "Click the add button to add a new robot.",
 
   workspaceIntroTitle: 'Workspace, Your Robot\'s Playground',
   workspaceIntroBody: "Define the environment where your robot will operate. This is where all the action happens!",
@@ -42,6 +46,8 @@ export default {
   assembleIntroBody2: "With Easy Trainer, assembling your robot is a breeze, allowing you to experiment with various setups to find the perfect fit for your tasks.",
   assembleCreateFormTitle: 'Create New Assembly',
   assembleEditFormTitle: 'Edit Assembly',
+  noAssemblyTitle: 'No Assemblies Created Yet',
+  noAssemblyBody: "Click the add button to create a new assembly.",
 
   checkpointEditFormTitle: 'Edit Checkpoint',
 

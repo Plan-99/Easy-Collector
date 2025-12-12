@@ -71,7 +71,7 @@ def subscribe_dynamixel(socketio_instance, task_control, baudrate=57600):
                 controllers.append(ctrl)
             except Exception as e:
                 socketio_instance.emit('log_start_leader_robot', {
-                    'log': f'Error creating controller for {port}: {str(e)}',
+                    'log': f'[ERROR] Error creating controller for {port}: {str(e)}',
                     'type': 'stderr'
                 })
         else:

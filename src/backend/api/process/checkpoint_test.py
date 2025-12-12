@@ -39,7 +39,7 @@ def checkpoint_test(
     max_timesteps,
     ):
 
-    oti_rl = True
+    oti_rl = False
     move_reward = 1.0
     
     # --- 1. 초기 설정 ---

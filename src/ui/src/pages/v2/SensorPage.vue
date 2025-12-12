@@ -56,8 +56,8 @@
             <div class="col" v-if="!sensors.length">
                 <q-card class="full-height border-rounded border-white bg-dark text-white" flat bordered>
                     <q-card-section class="text-center">
-                        <div class="text-h6">No Sensors Found</div>
-                        <div class="text-subtitle2">Click the button below to add a new sensor.</div>
+                        <div class="text-h6">{{ $t('noSensorTitle') }}</div>
+                        <div class="text-subtitle2">{{ $t('noSensorBody') }}</div>
                     </q-card-section>
                 </q-card>
             </div>
