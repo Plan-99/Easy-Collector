@@ -123,6 +123,7 @@ def checkpoint_test(
 
     except Exception as e:
         import traceback
+        print(f"Error in Initialization: {e}")
         error_string = traceback.format_exc()
         socketio_instance.emit('log_checkpoint_test', { 'log': f'Error in Initialization: {error_string}'})
         if oti_rl and 'uncertainty_subscriber' in locals() and rclpy.ok():
@@ -356,3 +357,4 @@ def checkpoint_test(
         torch.cuda.empty_cache()
 
     return
+

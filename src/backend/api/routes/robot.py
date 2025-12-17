@@ -130,6 +130,7 @@ def stop_robot():
     current_app.pm.stop_process(process_id)
     current_app.pm.stop_process('leader_teleoperation')
     current_app.pm.stop_function('subscribe_robot_' + str(robot_id))
+    current_app.agents.pop(int(robot_id), None)
     return {'status': 'success', 'message': 'Robot process stopped'}, 200
 
 
@@ -268,5 +269,4 @@ def subscribe_robot(id):
 @robot_bp.route('/robot/<id>/:unsubscribe_robot', methods=['POST'])
 def unsubscribe_robot(id):
     current_app.pm.stop_function('subscribe_robot_' + str(id))
-    current_app.agents.pop(int(id), None)
     return {'status': 'success', 'message': 'Unsubscribed from robot topic'}, 200

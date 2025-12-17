@@ -3,7 +3,7 @@
         <div class="border-rounded bg-secondary q-pa-lg q-mb-lg row">
             <q-img src="images/robot1.png" style="width: 100px" class="q-mr-xl"></q-img>
             <div>
-                <div class="float-right">
+                <!-- <div class="float-right">
                     <q-toggle
                         class="text-white"
                         label="Failure Detector"
@@ -18,7 +18,7 @@
                             :class="isFailureDetected ? 'text-red text-bold' : 'text-green text-bold'"
                         >{{ uncertaintyScore }}</div>
                     </div>
-                </div>
+                </div> -->
                 <div class="row">
                     <div class="text-h5 text-primary text-bold q-mb-lg">{{ $t('workspaceIntroTitle') }}</div>
                     <q-select
@@ -205,7 +205,7 @@
                             </q-card>
                         </q-expansion-item>
                     </q-list>
-                    <div v-if="focused.id" class="q-pa-md text-white h6">
+                    <div v-if="focused.id" class="q-mt-md text-white h6">
                         <div>{{ $t(`${focused.device_type} Config`) }} <span class="text-primary">{{ focused.name }}</span></div>
                         <div
                             class="q-pa-sm q-px-md q-mt-sm border-rounded row border-white"
@@ -396,7 +396,7 @@
                 :status="status"
                 :class="isFailureDetected ? 'border-red' : 'border-white'"
             />
-            <div v-else-if="selectedEpisode.name && selectedDatasetId" class="relative-position col bg-secondary border-rounded border-white column q-px-sm">
+            <div v-else-if="selectedEpisode.name && selectedDatasetId" class="relative-position col bg-secondary border-rounded border-white q-px-sm">
                 <q-btn
                     icon="close"
                     round
@@ -406,16 +406,15 @@
                     style="background-color: #00000099;"
                     @click="deselectEpisode"
                 ></q-btn>
-                <div class="col-6 row flex felx-center">
+                <div class="row flex felx-center">
                     <hdf5-viewer
                         :path="`${selectedDatasetId}/${selectedEpisode.name}`"
                         style="width: 100%; height: 100%;"
                         image-class="border-rounded border-white"
-                        class="q-gutter-x-sm"
                         @update:robot-states="selectedEpisode.robotStates = $event"
                     ></hdf5-viewer>
                 </div>
-                <div class="col-5 row q-pa-xs" v-if="selectedEpisode.robotStates">
+                <div class="flex flex-center col-5 row" v-if="selectedEpisode.robotStates">
                     <div v-for="(val, robotId) in selectedEpisode.robotStates" :key="robotId" class="col column q-pa-md relative-position border-rounded border-white text-white cursor-pointer">
                         <div v-for="(j, i) in val.qpos.length" :key="i" class="col flex flex-center q-gutter-x-md">
                             <div class="border-rounded border-white q-px-md q-py-xs text-center">[{{ j }}] {{ val.qpos[i]?.toFixed(4) }}</div>
@@ -567,6 +566,9 @@ const selectedWorkspace = computed(() => {
 const sensors = ref([]);
 const robots = computed(() => {
     if (!selectedWorkspace.value) {
+        return [];
+    }
+    if (!selectedWorkspace.value.assembly) {
         return [];
     }
     return selectedWorkspace.value.assembly.robots.map((robot) => {
@@ -863,29 +865,29 @@ function saveCheckpoint(form) {
     })
 }
 
-function toggleFailureDetection() {
-    const checkpoint = checkpoints.value.at(-1);
-    const isRunning = processStore.isRunning('failure_detection');
-    const action = isRunning ? 'stop' : 'start';
-    const url = `/checkpoint/${checkpoint.id}/:${action}_failure_detection`;
+// function toggleFailureDetection() {
+//     const checkpoint = checkpoints.value.at(-1);
+//     const isRunning = processStore.isRunning('failure_detection');
+//     const action = isRunning ? 'stop' : 'start';
+//     const url = `/checkpoint/${checkpoint.id}/:${action}_failure_detection`;
 
-    api.post(url, {
-        robots: robots.value.filter(r => selectedWorkspace.value.robot_ids.includes(r.id)),
-        sensors: sensors.value.filter(s => selectedWorkspace.value.sensor_ids.includes(s.id)),
-        task: selectedWorkspace.value
-    }).then(() => {
-        Notify.create({
-            color: 'positive',
-            message: `Failure detection ${action}ed.`
-        });
-    }).catch((error) => {
-        console.error(`Error ${action}ing failure detection:`, error);
-        Notify.create({
-            color: 'negative',
-            message: `Error ${action}ing failure detection.`
-        });
-    });
-}
+//     api.post(url, {
+//         robots: robots.value.filter(r => selectedWorkspace.value.robot_ids.includes(r.id)),
+//         sensors: sensors.value.filter(s => selectedWorkspace.value.sensor_ids.includes(s.id)),
+//         task: selectedWorkspace.value
+//     }).then(() => {
+//         Notify.create({
+//             color: 'positive',
+//             message: `Failure detection ${action}ed.`
+//         });
+//     }).catch((error) => {
+//         console.error(`Error ${action}ing failure detection:`, error);
+//         Notify.create({
+//             color: 'negative',
+//             message: `Error ${action}ing failure detection.`
+//         });
+//     });
+// }
 
 const isFailureDetected = ref(false);
 const uncertaintyScore = ref(0);

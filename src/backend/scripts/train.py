@@ -250,7 +250,7 @@ def main(args):
             load_model=load_model,
         )
 
-        train_fiper(checkpoint, task, chunk_size)
+        # train_fiper(checkpoint, task, chunk_size)
         
         Checkpoint.find(args.checkpoint_id).update({
             'status': 'finished',

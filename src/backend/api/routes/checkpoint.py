@@ -66,7 +66,7 @@ def check_create_successed(id):
 @checkpoint_bp.route('/checkpoint/<id>/:start_test', methods=['POST'])
 def start_test(id):
     data = request.json
-    checkpoint = CheckpointModel.find(id)
+    checkpoint = CheckpointModel.find(id).to_dict()
     agents = [current_app.agents[agent_id] for agent_id in data.get('robot_ids', [])]
     current_app.pm.start_function(
         func=checkpoint_test,

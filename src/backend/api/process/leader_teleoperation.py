@@ -247,14 +247,13 @@ class Leader():
                     gripper_range = gripper_joint['gripper_dxl_range']
 
                     if gripper_range[0] < gripper_range[1]:
-                        should_pause[dxl_contoller_index] = dxl_pos < gripper_range[0] - 300
+                        should_pause[dxl_contoller_index] = dxl_pos < gripper_range[0] - 200
                         should_resume[dxl_contoller_index] = dxl_pos > gripper_range[0] - 100
                     else:
-                        should_pause[dxl_contoller_index] = dxl_pos > gripper_range[0] + 300
+                        should_pause[dxl_contoller_index] = dxl_pos > gripper_range[0] + 200
                         should_resume[dxl_contoller_index] = dxl_pos < gripper_range[0] + 100
 
                 dxl_contoller_index += 1
-
 
             if not self.is_paused and all(should_pause):
                 self.is_paused = True
@@ -306,5 +305,5 @@ class Leader():
             # #--------------------------------------------
 
         for dxl_controller in self.dxl_controllers.values():
-            dxl_controller.remove_torque()
+            # dxl_controller.remove_torque()
             dxl_controller.portHandler.closePort()
