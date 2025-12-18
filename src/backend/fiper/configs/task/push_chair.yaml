@@ -1,0 +1,36 @@
+defaults:
+  - base
+
+name: push_chair
+description: "Push a chair to a target position"
+type: realworld
+environment:
+  name: "PushChairEnv-v0"
+  ts: 0.2
+  max_episode_steps: 100
+  fail_on_error: false
+  fail_after_steps: false
+observation_space:
+  observation_type: "rgb"
+  rgb:
+    format: "(H, W, C)"
+    shape: (64, 64, 3)
+  observation_dim: 3
+
+action_space:
+  action_type: "continuous"
+  actions:
+    dim: 3
+    action_bounds:
+      low: -1.0
+      high: 1.0
+    action_mapping:
+      position: [0, 1, 2]
+      rotation: 
+      velocity: 
+  action_pred:
+    format: "(batch_size, prediction_horizon, action_dim)"
+    action_prediction_horizon: 16
+    batch_size: 256
+    shape: (${task.action_space.action_pred.batch_size}, ${task.action_space.action_pred.action_prediction_horizon}, ${task.action_space.actions.dim})
+  action_execution_horizon: 4

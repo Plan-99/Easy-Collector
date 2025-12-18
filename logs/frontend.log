@@ -1,0 +1,431 @@
+
+ .d88888b.
+d88P" "Y88b
+888     888
+888     888 888  888  8888b.  .d8888b   8888b.  888d888
+888     888 888  888     "88b 88K          "88b 888P"
+888 Y8b 888 888  888 .d888888 "Y8888b. .d888888 888
+Y88b.Y8b88P Y88b 888 888  888      X88 888  888 888
+ "Y888888"   "Y88888 "Y888888  88888P' "Y888888 888
+       Y8b
+
+ App • Using quasar.config.js in "esm" format
+/usr/local/bin/start_services.sh: line 108: ./node_modules/.bin/quasar: No such file or directory
+/usr/local/bin/start_services.sh: line 108: ./node_modules/.bin/quasar: No such file or directory
+/usr/local/bin/start_services.sh: line 108: ./node_modules/.bin/quasar: No such file or directory
+
+ .d88888b.
+d88P" "Y88b
+888     888
+888     888 888  888  8888b.  .d8888b   8888b.  888d888
+888     888 888  888     "88b 88K          "88b 888P"
+888 Y8b 888 888  888 .d888888 "Y8888b. .d888888 888
+Y88b.Y8b88P Y88b 888 888  888      X88 888  888 888
+ "Y888888"   "Y88888 "Y888888  88888P' "Y888888 888
+       Y8b
+
+ App • Using quasar.config.js in "esm" format
+ App •  TIP  • 🚀  You are using the --port parameter. It is recommended to use a different devServer port for each Quasar mode to avoid browser cache issues
+
+ » Reported at............ 12/6/2025 1:26:56 AM
+ » App dir................ /root/src/ui
+ » App URL................ http://localhost:5173/
+                           http://172.30.1.95:5173/
+ » Dev mode............... spa
+ » Pkg quasar............. v2.18.6
+ » Pkg @quasar/app-vite... v2.4.0
+ » Browser target......... es2022|firefox115|chrome115|safari14
+
+[ESLint] Found 0 error and 0 warning
+
+ .d88888b.
+d88P" "Y88b
+888     888
+888     888 888  888  8888b.  .d8888b   8888b.  888d888
+888     888 888  888     "88b 88K          "88b 888P"
+888 Y8b 888 888  888 .d888888 "Y8888b. .d888888 888
+Y88b.Y8b88P Y88b 888 888  888      X88 888  888 888
+ "Y888888"   "Y88888 "Y888888  88888P' "Y888888 888
+       Y8b
+
+ App • Using quasar.config.js in "esm" format
+ App •  TIP  • 🚀  You are using the --port parameter. It is recommended to use a different devServer port for each Quasar mode to avoid browser cache issues
+
+ » Reported at............ 12/6/2025 1:52:55 AM
+ » App dir................ /root/src/ui
+ » App URL................ http://localhost:5173/
+                           http://172.30.1.95:5173/
+ » Dev mode............... spa
+ » Pkg quasar............. v2.18.6
+ » Pkg @quasar/app-vite... v2.4.0
+ » Browser target......... es2022|firefox115|chrome115|safari14
+
+[ESLint] Found 0 error and 0 warning
+
+ .d88888b.
+d88P" "Y88b
+888     888
+888     888 888  888  8888b.  .d8888b   8888b.  888d888
+888     888 888  888     "88b 88K          "88b 888P"
+888 Y8b 888 888  888 .d888888 "Y8888b. .d888888 888
+Y88b.Y8b88P Y88b 888 888  888      X88 888  888 888
+ "Y888888"   "Y88888 "Y888888  88888P' "Y888888 888
+       Y8b
+
+ App • Using quasar.config.js in "esm" format
+ App •  TIP  • 🚀  You are using the --port parameter. It is recommended to use a different devServer port for each Quasar mode to avoid browser cache issues
+
+ » Reported at............ 12/6/2025 1:56:18 AM
+ » App dir................ /root/src/ui
+ » App URL................ http://localhost:5173/
+                           http://172.30.1.95:5173/
+ » Dev mode............... spa
+ » Pkg quasar............. v2.18.6
+ » Pkg @quasar/app-vite... v2.4.0
+ » Browser target......... es2022|firefox115|chrome115|safari14
+
+✘ [ERROR] The build was canceled
+
+
+ .d88888b.
+d88P" "Y88b
+888     888
+888     888 888  888  8888b.  .d8888b   8888b.  888d888
+888     888 888  888     "88b 88K          "88b 888P"
+888 Y8b 888 888  888 .d888888 "Y8888b. .d888888 888
+Y88b.Y8b88P Y88b 888 888  888      X88 888  888 888
+ "Y888888"   "Y88888 "Y888888  88888P' "Y888888 888
+       Y8b
+
+ App • Using quasar.config.js in "esm" format
+ App •  TIP  • 🚀  You are using the --port parameter. It is recommended to use a different devServer port for each Quasar mode to avoid browser cache issues
+
+ » Reported at............ 12/6/2025 2:03:23 AM
+ » App dir................ /root/src/ui
+ » App URL................ http://localhost:5173/
+                           http://172.30.1.95:5173/
+ » Dev mode............... spa
+ » Pkg quasar............. v2.18.6
+ » Pkg @quasar/app-vite... v2.4.0
+ » Browser target......... es2022|firefox115|chrome115|safari14
+
+[ESLint] Found 0 error and 0 warning
+
+ .d88888b.
+d88P" "Y88b
+888     888
+888     888 888  888  8888b.  .d8888b   8888b.  888d888
+888     888 888  888     "88b 88K          "88b 888P"
+888 Y8b 888 888  888 .d888888 "Y8888b. .d888888 888
+Y88b.Y8b88P Y88b 888 888  888      X88 888  888 888
+ "Y888888"   "Y88888 "Y888888  88888P' "Y888888 888
+       Y8b
+
+ App • Using quasar.config.js in "esm" format
+ App •  TIP  • 🚀  You are using the --port parameter. It is recommended to use a different devServer port for each Quasar mode to avoid browser cache issues
+
+ » Reported at............ 12/6/2025 2:48:00 AM
+ » App dir................ /root/src/ui
+ » App URL................ http://localhost:5173/
+                           http://172.30.1.95:5173/
+ » Dev mode............... spa
+ » Pkg quasar............. v2.18.6
+ » Pkg @quasar/app-vite... v2.4.0
+ » Browser target......... es2022|firefox115|chrome115|safari14
+
+[ESLint] Found 0 error and 0 warning
+[1m[33m[@vue/compiler-sfc][0m[33m `defineProps` is a compiler macro and no longer needs to be imported.[0m
+
+[1m[33m[@vue/compiler-sfc][0m[33m `defineModel` is a compiler macro and no longer needs to be imported.[0m
+
+[1m[33m[@vue/compiler-sfc][0m[33m `defineEmits` is a compiler macro and no longer needs to be imported.[0m
+
+[ESLint] Found 0 error and 0 warning
+
+ .d88888b.
+d88P" "Y88b
+888     888
+888     888 888  888  8888b.  .d8888b   8888b.  888d888
+888     888 888  888     "88b 88K          "88b 888P"
+888 Y8b 888 888  888 .d888888 "Y8888b. .d888888 888
+Y88b.Y8b88P Y88b 888 888  888      X88 888  888 888
+ "Y888888"   "Y88888 "Y888888  88888P' "Y888888 888
+       Y8b
+
+ App • Using quasar.config.js in "esm" format
+ App •  TIP  • 🚀  You are using the --port parameter. It is recommended to use a different devServer port for each Quasar mode to avoid browser cache issues
+
+ » Reported at............ 12/6/2025 2:59:39 AM
+ » App dir................ /root/src/ui
+ » App URL................ http://localhost:5173/
+                           http://172.30.1.95:5173/
+ » Dev mode............... spa
+ » Pkg quasar............. v2.18.6
+ » Pkg @quasar/app-vite... v2.4.0
+ » Browser target......... es2022|firefox115|chrome115|safari14
+
+[ESLint] Found 0 error and 0 warning
+[1m[33m[@vue/compiler-sfc][0m[33m `defineProps` is a compiler macro and no longer needs to be imported.[0m
+
+[1m[33m[@vue/compiler-sfc][0m[33m `defineModel` is a compiler macro and no longer needs to be imported.[0m
+
+
+ .d88888b.
+d88P" "Y88b
+888     888
+888     888 888  888  8888b.  .d8888b   8888b.  888d888
+888     888 888  888     "88b 88K          "88b 888P"
+888 Y8b 888 888  888 .d888888 "Y8888b. .d888888 888
+Y88b.Y8b88P Y88b 888 888  888      X88 888  888 888
+ "Y888888"   "Y88888 "Y888888  88888P' "Y888888 888
+       Y8b
+
+ App • Using quasar.config.js in "esm" format
+ App •  TIP  • 🚀  You are using the --port parameter. It is recommended to use a different devServer port for each Quasar mode to avoid browser cache issues
+
+ » Reported at............ 12/6/2025 3:01:39 AM
+ » App dir................ /root/src/ui
+ » App URL................ http://localhost:5173/
+                           http://172.30.1.95:5173/
+ » Dev mode............... spa
+ » Pkg quasar............. v2.18.6
+ » Pkg @quasar/app-vite... v2.4.0
+ » Browser target......... es2022|firefox115|chrome115|safari14
+
+[ESLint] Found 0 error and 0 warning
+[1m[33m[@vue/compiler-sfc][0m[33m `defineProps` is a compiler macro and no longer needs to be imported.[0m
+
+[1m[33m[@vue/compiler-sfc][0m[33m `defineModel` is a compiler macro and no longer needs to be imported.[0m
+
+[1m[33m[@vue/compiler-sfc][0m[33m `defineEmits` is a compiler macro and no longer needs to be imported.[0m
+
+
+ .d88888b.
+d88P" "Y88b
+888     888
+888     888 888  888  8888b.  .d8888b   8888b.  888d888
+888     888 888  888     "88b 88K          "88b 888P"
+888 Y8b 888 888  888 .d888888 "Y8888b. .d888888 888
+Y88b.Y8b88P Y88b 888 888  888      X88 888  888 888
+ "Y888888"   "Y88888 "Y888888  88888P' "Y888888 888
+       Y8b
+
+ App • Using quasar.config.js in "esm" format
+ App •  TIP  • 🚀  You are using the --port parameter. It is recommended to use a different devServer port for each Quasar mode to avoid browser cache issues
+
+ » Reported at............ 12/6/2025 3:02:48 AM
+ » App dir................ /root/src/ui
+ » App URL................ http://localhost:5173/
+                           http://172.30.1.95:5173/
+ » Dev mode............... spa
+ » Pkg quasar............. v2.18.6
+ » Pkg @quasar/app-vite... v2.4.0
+ » Browser target......... es2022|firefox115|chrome115|safari14
+
+[ESLint] Found 0 error and 0 warning
+[1m[33m[@vue/compiler-sfc][0m[33m `defineEmits` is a compiler macro and no longer needs to be imported.[0m
+
+[1m[33m[@vue/compiler-sfc][0m[33m `defineProps` is a compiler macro and no longer needs to be imported.[0m
+
+
+ .d88888b.
+d88P" "Y88b
+888     888
+888     888 888  888  8888b.  .d8888b   8888b.  888d888
+888     888 888  888     "88b 88K          "88b 888P"
+888 Y8b 888 888  888 .d888888 "Y8888b. .d888888 888
+Y88b.Y8b88P Y88b 888 888  888      X88 888  888 888
+ "Y888888"   "Y88888 "Y888888  88888P' "Y888888 888
+       Y8b
+
+ App • Using quasar.config.js in "esm" format
+ App •  TIP  • 🚀  You are using the --port parameter. It is recommended to use a different devServer port for each Quasar mode to avoid browser cache issues
+
+ » Reported at............ 12/6/2025 3:03:18 AM
+ » App dir................ /root/src/ui
+ » App URL................ http://localhost:5173/
+                           http://172.30.1.95:5173/
+ » Dev mode............... spa
+ » Pkg quasar............. v2.18.6
+ » Pkg @quasar/app-vite... v2.4.0
+ » Browser target......... es2022|firefox115|chrome115|safari14
+
+[ESLint] Found 0 error and 0 warning
+[1m[33m[@vue/compiler-sfc][0m[33m `defineEmits` is a compiler macro and no longer needs to be imported.[0m
+
+[1m[33m[@vue/compiler-sfc][0m[33m `defineProps` is a compiler macro and no longer needs to be imported.[0m
+
+[1m[33m[@vue/compiler-sfc][0m[33m `defineModel` is a compiler macro and no longer needs to be imported.[0m
+
+
+ .d88888b.
+d88P" "Y88b
+888     888
+888     888 888  888  8888b.  .d8888b   8888b.  888d888
+888     888 888  888     "88b 88K          "88b 888P"
+888 Y8b 888 888  888 .d888888 "Y8888b. .d888888 888
+Y88b.Y8b88P Y88b 888 888  888      X88 888  888 888
+ "Y888888"   "Y88888 "Y888888  88888P' "Y888888 888
+       Y8b
+
+ App • Using quasar.config.js in "esm" format
+ App •  TIP  • 🚀  You are using the --port parameter. It is recommended to use a different devServer port for each Quasar mode to avoid browser cache issues
+
+ » Reported at............ 12/6/2025 3:22:15 AM
+ » App dir................ /root/src/ui
+ » App URL................ http://localhost:5173/
+                           http://172.30.1.95:5173/
+ » Dev mode............... spa
+ » Pkg quasar............. v2.18.6
+ » Pkg @quasar/app-vite... v2.4.0
+ » Browser target......... es2022|firefox115|chrome115|safari14
+
+[ESLint] Found 0 error and 0 warning
+[1m[33m[@vue/compiler-sfc][0m[33m `defineProps` is a compiler macro and no longer needs to be imported.[0m
+
+[1m[33m[@vue/compiler-sfc][0m[33m `defineModel` is a compiler macro and no longer needs to be imported.[0m
+
+
+ .d88888b.
+d88P" "Y88b
+888     888
+888     888 888  888  8888b.  .d8888b   8888b.  888d888
+888     888 888  888     "88b 88K          "88b 888P"
+888 Y8b 888 888  888 .d888888 "Y8888b. .d888888 888
+Y88b.Y8b88P Y88b 888 888  888      X88 888  888 888
+ "Y888888"   "Y88888 "Y888888  88888P' "Y888888 888
+       Y8b
+
+ App • Using quasar.config.js in "esm" format
+ App •  TIP  • 🚀  You are using the --port parameter. It is recommended to use a different devServer port for each Quasar mode to avoid browser cache issues
+
+ » Reported at............ 12/6/2025 3:22:57 AM
+ » App dir................ /root/src/ui
+ » App URL................ http://localhost:5173/
+                           http://172.30.1.95:5173/
+ » Dev mode............... spa
+ » Pkg quasar............. v2.18.6
+ » Pkg @quasar/app-vite... v2.4.0
+ » Browser target......... es2022|firefox115|chrome115|safari14
+
+[ESLint] Found 0 error and 0 warning
+[1m[33m[@vue/compiler-sfc][0m[33m `defineProps` is a compiler macro and no longer needs to be imported.[0m
+
+[1m[33m[@vue/compiler-sfc][0m[33m `defineModel` is a compiler macro and no longer needs to be imported.[0m
+
+[1m[33m[@vue/compiler-sfc][0m[33m `defineEmits` is a compiler macro and no longer needs to be imported.[0m
+
+
+ .d88888b.
+d88P" "Y88b
+888     888
+888     888 888  888  8888b.  .d8888b   8888b.  888d888
+888     888 888  888     "88b 88K          "88b 888P"
+888 Y8b 888 888  888 .d888888 "Y8888b. .d888888 888
+Y88b.Y8b88P Y88b 888 888  888      X88 888  888 888
+ "Y888888"   "Y88888 "Y888888  88888P' "Y888888 888
+       Y8b
+
+ App • Using quasar.config.js in "esm" format
+ App •  TIP  • 🚀  You are using the --port parameter. It is recommended to use a different devServer port for each Quasar mode to avoid browser cache issues
+
+ » Reported at............ 12/6/2025 3:24:48 AM
+ » App dir................ /root/src/ui
+ » App URL................ http://localhost:5173/
+                           http://172.30.1.95:5173/
+ » Dev mode............... spa
+ » Pkg quasar............. v2.18.6
+ » Pkg @quasar/app-vite... v2.4.0
+ » Browser target......... es2022|firefox115|chrome115|safari14
+
+[1m[33m[@vue/compiler-sfc][0m[33m `defineProps` is a compiler macro and no longer needs to be imported.[0m
+
+[1m[33m[@vue/compiler-sfc][0m[33m `defineEmits` is a compiler macro and no longer needs to be imported.[0m
+
+[1m[33m[@vue/compiler-sfc][0m[33m `defineModel` is a compiler macro and no longer needs to be imported.[0m
+
+[ESLint] Found 0 error and 0 warning
+
+ .d88888b.
+d88P" "Y88b
+888     888
+888     888 888  888  8888b.  .d8888b   8888b.  888d888
+888     888 888  888     "88b 88K          "88b 888P"
+888 Y8b 888 888  888 .d888888 "Y8888b. .d888888 888
+Y88b.Y8b88P Y88b 888 888  888      X88 888  888 888
+ "Y888888"   "Y88888 "Y888888  88888P' "Y888888 888
+       Y8b
+
+ App • Using quasar.config.js in "esm" format
+ App •  TIP  • 🚀  You are using the --port parameter. It is recommended to use a different devServer port for each Quasar mode to avoid browser cache issues
+
+ » Reported at............ 12/6/2025 3:35:40 AM
+ » App dir................ /root/src/ui
+ » App URL................ http://localhost:5173/
+                           http://172.30.1.95:5173/
+ » Dev mode............... spa
+ » Pkg quasar............. v2.18.6
+ » Pkg @quasar/app-vite... v2.4.0
+ » Browser target......... es2022|firefox115|chrome115|safari14
+
+[ESLint] Found 0 error and 0 warning
+[1m[33m[@vue/compiler-sfc][0m[33m `defineProps` is a compiler macro and no longer needs to be imported.[0m
+
+[1m[33m[@vue/compiler-sfc][0m[33m `defineModel` is a compiler macro and no longer needs to be imported.[0m
+
+
+ .d88888b.
+d88P" "Y88b
+888     888
+888     888 888  888  8888b.  .d8888b   8888b.  888d888
+888     888 888  888     "88b 88K          "88b 888P"
+888 Y8b 888 888  888 .d888888 "Y8888b. .d888888 888
+Y88b.Y8b88P Y88b 888 888  888      X88 888  888 888
+ "Y888888"   "Y88888 "Y888888  88888P' "Y888888 888
+       Y8b
+
+ App • Using quasar.config.js in "esm" format
+ App •  TIP  • 🚀  You are using the --port parameter. It is recommended to use a different devServer port for each Quasar mode to avoid browser cache issues
+
+ » Reported at............ 12/6/2025 3:36:41 AM
+ » App dir................ /root/src/ui
+ » App URL................ http://localhost:5173/
+                           http://172.30.1.95:5173/
+ » Dev mode............... spa
+ » Pkg quasar............. v2.18.6
+ » Pkg @quasar/app-vite... v2.4.0
+ » Browser target......... es2022|firefox115|chrome115|safari14
+
+[ESLint] Found 0 error and 0 warning
+[1m[33m[@vue/compiler-sfc][0m[33m `defineProps` is a compiler macro and no longer needs to be imported.[0m
+
+[1m[33m[@vue/compiler-sfc][0m[33m `defineModel` is a compiler macro and no longer needs to be imported.[0m
+
+
+ .d88888b.
+d88P" "Y88b
+888     888
+888     888 888  888  8888b.  .d8888b   8888b.  888d888
+888     888 888  888     "88b 88K          "88b 888P"
+888 Y8b 888 888  888 .d888888 "Y8888b. .d888888 888
+Y88b.Y8b88P Y88b 888 888  888      X88 888  888 888
+ "Y888888"   "Y88888 "Y888888  88888P' "Y888888 888
+       Y8b
+
+ App • Using quasar.config.js in "esm" format
+ App •  TIP  • 🚀  You are using the --port parameter. It is recommended to use a different devServer port for each Quasar mode to avoid browser cache issues
+
+ » Reported at............ 12/6/2025 3:37:04 AM
+ » App dir................ /root/src/ui
+ » App URL................ http://localhost:5173/
+                           http://172.30.1.95:5173/
+ » Dev mode............... spa
+ » Pkg quasar............. v2.18.6
+ » Pkg @quasar/app-vite... v2.4.0
+ » Browser target......... es2022|firefox115|chrome115|safari14
+
+[ESLint] Found 0 error and 0 warning
+[1m[33m[@vue/compiler-sfc][0m[33m `defineProps` is a compiler macro and no longer needs to be imported.[0m
+
+[1m[33m[@vue/compiler-sfc][0m[33m `defineModel` is a compiler macro and no longer needs to be imported.[0m
+

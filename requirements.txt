@@ -1,0 +1,57 @@
+matplotlib
+omegaconf
+tqdm
+einops
+IPython
+scikit-image
+opencv-python
+rospkg
+dm-env
+h5py
+Pillow
+pynput
+curobo
+flask[async]
+flask-cors
+flask-socketio
+eventlet
+aiortc
+aiohttp
+aiohttp-cors
+hypercorn
+dynamixel_sdk
+piper_sdk
+pyusb
+python-can
+datasets
+jsonlines
+draccus
+safetensors
+termcolor
+gymnasium
+diffusers
+transformers
+rerun-sdk==0.20.1
+meshcat==0.3.2
+sshkeyboard==2.3.1
+numpy==1.26.4
+casadi
+scipy
+hydra-core
+scikit-learn
+matplotlib
+pandas
+zarr
+logging_mp
+pymodbus== 3.9.2
+
+
+# # diffusion policy
+# dill
+# hydra-core
+
+# # openpi
+# jax
+# jax-lib
+# s3fs
+--extra-index-url https://download.pytorch.org/whl/cu118

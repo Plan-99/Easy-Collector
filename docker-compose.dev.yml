@@ -1,0 +1,6 @@
+version: "3.9"
+
+services:
+  service:
+    environment:
+      - EC_DEBUG=1

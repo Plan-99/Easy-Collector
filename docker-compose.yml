@@ -1,0 +1,53 @@
+version: "3.9"
+
+services:
+  service:
+    build: .
+    image: easy-collector:latest
+    container_name: easy_collector_service
+    privileged: true
+    network_mode: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - DISPLAY=${DISPLAY}
+      - ROS_DOMAIN_ID=30
+      - XAUTHORITY=${XAUTHORITY}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+      # NPM: regional mirror and retry knobs (override in env if needed)
+      - NPM_CONFIG_REGISTRY=${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
+      - NPM_CONFIG_FETCH_RETRIES=${NPM_CONFIG_FETCH_RETRIES:-5}
+      - NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=${NPM_CONFIG_FETCH_RETRY_MINTIMEOUT:-20000}
+      - NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=${NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT:-120000}
+      - EC_NO_SIDE_PROCESSES=${EC_NO_SIDE_PROCESSES:-0}
+      - EC_DEBUG=${EC_DEBUG:-0}
+      - EC_NO_FRONTEND=${EC_NO_FRONTEND:-0}
+      - EC_SKIP_TORCHVISION_COMPAT=${EC_SKIP_TORCHVISION_COMPAT:-0}
+      - EC_NODE_MAX_OLD_SPACE_SIZE=${EC_NODE_MAX_OLD_SPACE_SIZE:-384}
+      - EC_MINIMAL_API=${EC_MINIMAL_API:-0}
+      - EC_NO_ROS=${EC_NO_ROS:-0}
+    volumes:
+      - /dev:/dev
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ./src:/root/src
+      - ./ros2_ws:/root/ros2_ws
+      - ./python_pkgs:/root/python_pkgs
+      - ./requirements.txt:/root/requirements.txt
+      # Persist service logs on host even if UI is not running
+      - ./logs:/root/easytrainer/logs
+      # Keep launcher script editable without rebuilds
+      - ./start_services.sh:/usr/local/bin/start_services.sh:ro
+      # Cache node_modules to avoid reinstall on restarts
+      - ui_node_modules:/root/src/ui/node_modules
+    working_dir: /root
+    # Run via bash to avoid needing executable bit on bind-mounted script
+    command: bash -lc "bash /usr/local/bin/start_services.sh"
+
+volumes:
+  ui_node_modules:

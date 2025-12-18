@@ -1,0 +1,7 @@
+data/
+paper_figs/
+*__pycache__/
+.vscode/
+outputs/
+
+*.tex

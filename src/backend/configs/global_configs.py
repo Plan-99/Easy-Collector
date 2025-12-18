@@ -1,0 +1,121 @@
+DATASET_DIR = '/root/src/backend/datasets'
+
+import numpy as np
+
+SUPPORT_ROBOTS = [
+    {
+        'name': 'piper',
+        'role': 'single_arm',
+        'company': 'Piper',
+        'joint_dim': 7,
+        'joint_names': ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"],
+        'joint_lower_bounds': [-2.618, 0, -2.618, -1.745, -1.22, -2.094, 0],
+        'joint_upper_bounds': [2.618, 2.618, 0, 1.745, 1.22, 2.094, 0.087],
+        'read_topic': '/joint_states_single',
+        'read_topic_msg': 'sensor_msgs/JointState',
+        'write_type': 'topic',
+        'write_topic': '/joint_states',
+        'write_topic_msg': 'sensor_msgs/JointState',
+        'tool_inner': True,
+        'tool_index': [6],
+        'custom_fields': ['can_port'],
+        'urdf_path': '/ros2_ws/src/piper_ros/src/piper_description/urdf/piper_description.urdf',
+        'urdf_package_dir': '/ros2_ws/src/piper_ros/src/piper_description/',
+        'ik_setting': {
+            'joints_to_lock': [
+                'joint6_to_gripper_base', 'joint7', 'joint8'
+            ],
+            'ee_definitions': [('ee', 'joint7', None)],
+        },
+    },
+    {
+        'name': 'piper(no gripper)',
+        'role': 'single_arm',
+        'company': 'Piper',
+        'joint_dim': 6,
+        'joint_names': ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
+        'joint_lower_bounds': [-2.618, 0, -2.618, -1.745, -1.22, -2.094],
+        'joint_upper_bounds': [2.618, 2.618, 0, 1.745, 1.22, 2.094],
+        'read_topic': '/joint_states_single',
+        'read_topic_msg': 'sensor_msgs/JointState',
+        'write_type': 'topic',
+        'write_topic': '/joint_states',
+        'write_topic_msg': 'sensor_msgs/JointState',
+        'tool_inner': False,
+        'tool_index': [],
+        'custom_fields': ['can_port'],
+        'urdf_path': '/ros2_ws/src/piper_ros/src/piper_description/urdf/piper_no_gripper_description.urdf',
+        'urdf_package_dir': '/ros2_ws/src/piper_ros/src/piper_description/',
+        'ik_setting': {
+            'joints_to_lock': [],
+            'ee_definitions': [('ee', 'joint6', np.array([0.20, 0, 0]).T)],
+        },
+    },
+    {
+        'name': 'rb3_730es_u',
+        'role': 'single_arm',
+        'company': 'Rainbow Robotics',
+        'joint_dim': 6,
+        'joint_names': ["base", "shoulder", "elbow", "wrist1", "wrist2", "wrist3"],
+        'joint_lower_bounds': [-3.14, -3.14, -3.14, -3.14, -3.14, -3.14],
+        'joint_upper_bounds': [3.14, 3.14, 3.14, 3.14, 3.14, 3.14],
+        'read_topic': '/rbpodo/joint_states',
+        'read_topic_msg': 'sensor_msgs/JointState',
+        'write_type': 'topic',
+        'write_topic': '/position_controllers/commands',
+        'write_topic_msg': 'std_msgs/Float64MultiArray',
+        'tool_inner': False,
+        'tool_index': [],
+        'custom_fields': ['ip_address'],
+    },
+    {
+        'name': 'ur3',
+        'role': 'single_arm',
+        'company': 'Universal Robots',
+    },
+    {
+        'name': 'ur5',
+        'role': 'single_arm',
+        'company': 'Universal Robots',
+    },
+    {
+        'name': 'ur10',
+        'role': 'single_arm',
+        'company': 'Universal Robots',
+    },
+    {
+        'name': 'ur5e',
+        'role': 'single_arm',
+        'company': 'Universal Robots',
+    },
+    {
+        'name': 'h1',
+        'role': 'dual_arm',
+        'company': 'Unitree',
+    },
+    {
+        'name': 'rg2',
+        'role': 'tool',
+        'company': 'OnRobot',
+        'joint_dim': 1,
+        'joint_names': ['finger_joint'],
+        'joint_lower_bounds': [0],
+        'joint_upper_bounds': [1100],
+        'read_topic': '/joint_states',
+        'read_topic_msg': 'sensor_msgs/JointState',
+        'write_type': 'service',
+        'write_topic': '/onronot/sendCommand',
+        'write_topic_msg': 'onrobot_rg_msgs/SetCommand',
+        'tool_inner': False,
+        'tool_index': [],
+        'custom_fields': ['ip_address', 'port', 'changer_address'],
+    },
+    {
+        'name': 'robotiq_2f_85',
+        'role': 'tool',
+        'company': 'Robotiq',
+    },
+]
+
+def get_robot_by_name(name):
+    return next((robot for robot in SUPPORT_ROBOTS if robot.get('name') == name), None)

@@ -1,0 +1,1 @@
+orator migrate:rollback --config config/database.py
