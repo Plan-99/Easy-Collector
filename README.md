@@ -2,19 +2,19 @@
 
 develop/release
 
-버전 : 2.3.2까지 업데이트 완료
-
 현재 기능
 
-1. 인스톨러로 초기 설치 → 컨테이너, ROS 2, 프런트엔드 의존성이 모두 포함된 환경을 그대로 재사용
-2. Ubuntu 배포용 `.deb` 자동 생성 → 현재 프로젝트 버전 그대로 설치 가능
-3. 런처에서 원본 프로젝트 경로 지정 후 “빠른 동기화(⇆)”로 `src/backend`, `src/ui`, compose 파일을 바로 적용
-4. 로컬 앱처럼 실행하면 켜지고 종료하면 꺼짐, 종료 시 `docker compose down --remove-orphans`로 컨테이너만 정리하고 볼륨은 유지
+1. V2.3.2 까지 업데이트 완료
+2. 인스톨러로 초기 설치 → 컨테이너, ROS 2, 프런트엔드 의존성이 모두 포함된 환경을 그대로 재사용
+3. Ubuntu 배포용 `.deb` 자동 생성 → 현재 프로젝트 버전 그대로 설치 가능
+4. 런처에서 원본 프로젝트 경로 지정 후 “빠른 동기화(⇆)”로 `src/backend`, `src/ui`, compose 파일을 바로 적용
+5. 로컬 앱처럼 실행하면 켜지고 종료하면 꺼짐, 종료 시 `docker compose down --remove-orphans`로 컨테이너만 정리하고 볼륨은 유지
 
 추가 예정 기능
 
-1. 코드 업데이트 기능 → 전체 재설치 대신 필요한 코드 또는 암호화된 코드만 교체하여 적용
-2. 다양한 OS 배포 기능 (Windows/macOS)
+1. 코드 정리
+2. 코드 업데이트 기능 → 전체 재설치 대신 필요한 코드 또는 암호화된 코드만 교체하여 적용
+3. 다양한 OS 배포 기능 (Windows/macOS)
 
 ---
 
@@ -89,6 +89,6 @@ develop/release
 
 - 설치/제거
   - 설치: `sudo apt install ./release/파일명.deb` -> 오류 발생. 클릭해서 설치로 대체. (아직 원인을 알 수 없음)
-  - 제거: `bash scripts/clean_easytrainer.sh`  (sudo 사용, 모든 Docker/설치 흔적까지 완전 삭제)
+  - 제거: `bash scripts/clean_easytrainer.sh`  (sudo 사용, 모든 Docker/설치 흔적까지 완전 삭제) *주의 : DB 데이터까지 삭제 됨
 
 ---
