@@ -1,6 +1,6 @@
 <template>
     <div class="bg-secondary border-rounded border-white column q-px-sm" style="max-height: 700px;">
-        <div class="col-6 row flex felx-center">
+        <div class="col-6 row flex felx-center" v-if="sensors.length > 0">
             <div v-for="sensor in sensors" :key="sensor.id" class="col q-py-sm q-px-xs relative-position">
                 <web-rtc-video
                     :process-id="`sensor_${sensor.id}`"
@@ -21,13 +21,16 @@
                 <q-chip color="blue-10" text-color="white" class="absolute-top-left" style="top: 20px; left: 15px">{{ sensor.name }} sensor</q-chip>
             </div>
         </div>
-        <div class="col-5 row q-gutter-x-sm">
+        <div v-else class="col-6 q-py-sm">
+            <div class="text-white border-rounded border-white bg-dark full-height flex flex-center">No sensors available. Please add sensors to the workspace.</div>
+        </div>
+        <div class="col-5 row q-gutter-x-sm" v-if="robots.length > 0">
             <div v-for="robot in robots" :key="robot.id" class="col column q-pa-md relative-position border-rounded border-white text-white cursor-pointer"
                     :class="{
                         'border-primary': focused.id === robot.id && focused.device_type === 'robot',
                         'bg-dark': robot.status === 'off',
                     }"
-                    @click="focusSensorRobot(robot, 'robot')"    
+                    @click="focusSensorRobot(robot, 'robot')"
                 >
                 <div v-for="(j, i) in robot.joint_names" :key="i" class="col flex flex-center q-gutter-x-md">
                     <div class="border-rounded border-white q-px-md q-py-xs text-center">{{ j }} {{ robot.jointState ? robot.jointState[i]?.toFixed(4) : 'Unreadable' }}</div>
@@ -46,7 +49,9 @@
                 ></q-btn>
                 <q-chip color="green-10" text-color="white" class="absolute-top-left" style="top: 20px; left: 15px">{{ robot.name }} body</q-chip>
             </div>
-
+        </div>
+        <div v-else class="col-5 border-rounded border-white bg-dark flex flex-center">
+            <div class="text-white">No robots available. Please add robots to the workspace.</div>
         </div>
         <div class="flex flex-center col" v-if="!isRobotSensorAllOn">
             <div class="text-yellow">Start all sensors and robots to view live data streams.</div>

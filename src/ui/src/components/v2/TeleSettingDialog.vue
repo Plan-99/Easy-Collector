@@ -31,7 +31,7 @@
                             <process-console 
                                 process="start_leader_robot"
                                 class="q-mt-md border-white"
-                                style="height: 700px;"
+                                style="height: 800px;"
                             />
                         </div>
                         <div class="col">
