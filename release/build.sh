@@ -65,6 +65,7 @@ print(site.getusersitepackages())
 PY
 )
 DST_SITE="$VENV_DIR/lib/python${PY_VER}/site-packages"
+mkdir -p "$DST_SITE"
 if [ ! -d "$HOST_SITE/PySide6" ] || [ ! -d "$HOST_SITE/shiboken6" ]; then
   echo "[deb][ERROR] Host Python is missing PySide6/shiboken6. Install them first (e.g. python3 -m pip install --user PySide6) and retry." >&2
   exit 1
@@ -72,12 +73,13 @@ fi
 for pkg in PySide6 shiboken6; do
   rsync -a "$HOST_SITE/$pkg" "$DST_SITE/"
 done
-for pattern in pyside6- pyside6_addons- pyside6_essentials- shiboken6-; do
-  src=$(ls -1d "$HOST_SITE"/${pattern}*.dist-info 2>/dev/null | head -n1 || true)
+DIST_PACKAGES=(PySide6 shiboken6 PySide6_Addons PySide6_Essentials)
+for name in "${DIST_PACKAGES[@]}"; do
+  src=$(find "$HOST_SITE" -maxdepth 1 -type d -iname "${name}*.dist-info" | head -n1 || true)
   if [ -n "$src" ] && [ -d "$src" ]; then
     rsync -a "$src" "$DST_SITE/"
   else
-    echo "[deb][WARN] dist-info for pattern ${pattern}*.dist-info not found; continuing."
+    echo "[deb][WARN] dist-info for ${name} not found under $HOST_SITE; continuing."
   fi
 done
 echo "[deb] Embedded venv ready at $VENV_DIR (copied from host PySide6)"
