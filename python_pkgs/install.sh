@@ -4,7 +4,9 @@
 # --- 스크립트 설정 ---
 set -e
 
-pip install --upgrade pip setuptools
+# NOTE: setuptools 업그레이드는 ROS2 Humble의 ament/colcon (setup.py develop, script_dir 등)과
+#       충돌해서 빌드가 깨질 수 있습니다. pip만 업그레이드합니다.
+pip install --upgrade pip
 
 # --- 1. 스크립트 기준 경로 ---
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )

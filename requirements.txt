@@ -1,9 +1,7 @@
 matplotlib
 omegaconf
-torch
-tdqm
+tqdm
 einops
-torchvision
 IPython
 scikit-image
 opencv-python
@@ -24,7 +22,6 @@ hypercorn
 dynamixel_sdk
 piper_sdk
 pyusb
-orator
 python-can
 datasets
 jsonlines
@@ -40,7 +37,6 @@ sshkeyboard==2.3.1
 numpy==1.26.4
 casadi
 scipy
-tqdm
 hydra-core
 scikit-learn
 matplotlib
@@ -57,3 +53,4 @@ pymodbus== 3.9.2
 # jax
 # jax-lib
 # s3fs
+--extra-index-url https://download.pytorch.org/whl/cu118

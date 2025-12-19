@@ -93,6 +93,13 @@ pm.start_process(
     ['ros2', 'launch', 'rosbridge_server', 'rosbridge_websocket_launch.xml', 'port:=9090']
 )
 
+@app.route('/api/healthz', methods=['GET'])
+def healthz():
+    return {
+        'status': 'ok',
+        'ros_ok': bool(rclpy.ok()),
+    }, 200
+
 @app.route('/api/processes', methods=['GET'])
 def list_processes():
     processes = pm.list_processes()
@@ -202,7 +209,13 @@ def main():
         executor_thread = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
         executor_thread.start()
         # 이 함수는 서버가 종료(예: Ctrl+C)될 때까지 여기서 멈춥니다.
-        socketio.run(app, host='0.0.0.0', port=5000, debug=False)
+        socketio.run(
+            app,
+            host='0.0.0.0',
+            port=5000,
+            debug=False,
+            allow_unsafe_werkzeug=True,
+        )
 
     finally:
         import subprocess

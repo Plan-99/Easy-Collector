@@ -46,8 +46,11 @@ export default {
   assembleIntroBody2: "With Easy Trainer, assembling your robot is a breeze, allowing you to experiment with various setups to find the perfect fit for your tasks.",
   assembleCreateFormTitle: 'Create New Assembly',
   assembleEditFormTitle: 'Edit Assembly',
+<<<<<<< HEAD
   noAssemblyTitle: 'No Assemblies Created Yet',
   noAssemblyBody: "Click the add button to create a new assembly.",
+=======
+>>>>>>> develop/release
 
   checkpointEditFormTitle: 'Edit Checkpoint',
 
