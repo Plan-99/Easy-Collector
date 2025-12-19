@@ -91,6 +91,17 @@ RSYNC_EXCLUDES=(
   'release'
   '.vscode'
   '.idea'
+  'data'
+  'dataset'
+  'datasets'
+  'training_data'
+  'train_data'
+  'checkpoints'
+  'weights'
+  'models'
+  'runs'
+  'outputs'
+  'artifacts'
   'node_modules'
   'src/ui/node_modules'
   'src/ui/.quasar'
@@ -113,6 +124,17 @@ for pat in "${RSYNC_EXCLUDES[@]}"; do
   RSYNC_EXCLUDE_ARGS+=("--exclude" "$pat")
 done
 rsync -a "${RSYNC_EXCLUDE_ARGS[@]}" "$ROOT_DIR/" "$STAGE${PAYLOAD_DIR}/"
+
+# Guard against dpkg-ar 10GB member limit by detecting oversized payload early
+MAX_PAYLOAD_BYTES=${MAX_PAYLOAD_BYTES:-9000000000} # ~9GB safety margin
+PAYLOAD_SIZE=$(du -sb "$STAGE${PAYLOAD_DIR}" | awk '{print $1}')
+if [ "${SKIP_PAYLOAD_SIZE_CHECK:-0}" != "1" ] && [ "$PAYLOAD_SIZE" -ge "$MAX_PAYLOAD_BYTES" ]; then
+  echo "[deb][ERROR] Payload size $PAYLOAD_SIZE bytes exceeds safety limit $MAX_PAYLOAD_BYTES (ar member limit ~10GB)."
+  echo "[deb][ERROR] Remove or exclude large files (datasets/checkpoints/build artifacts) or raise MAX_PAYLOAD_BYTES, then retry."
+  echo "[deb][INFO] Top 15 largest files in payload:"
+  find "$STAGE${PAYLOAD_DIR}" -type f -printf '%s\t%p\n' | sort -rn | head -n 15 | numfmt --to=iec --field=1 || true
+  exit 1
+fi
 
 # Launcher wrapper
 cat > "$STAGE/usr/bin/easytrainer-launcher" <<'EOF'
@@ -244,7 +266,14 @@ EOF
 chmod 0755 "$STAGE/DEBIAN/postinst"
 
 # Use faster compression to reduce build time (override with DPKG_COMP_OPTS)
-DPKG_COMP_OPTS=${DPKG_COMP_OPTS:--Zgzip -z1}
+# Default: try zstd (multithread), fall back to gzip if unavailable/overridden.
+if [ -z "${DPKG_COMP_OPTS:-}" ]; then
+  if dpkg-deb --help 2>&1 | grep -q -- "--uniform-compression" && dpkg-deb --help 2>&1 | grep -qi zstd; then
+    DPKG_COMP_OPTS="--threads=0 --uniform-compression -Zzstd -z3"
+  else
+    DPKG_COMP_OPTS="--uniform-compression -Zgzip -z1"
+  fi
+fi
 echo "[deb] Using dpkg-deb compression options: $DPKG_COMP_OPTS"
 dpkg-deb --build --root-owner-group $DPKG_COMP_OPTS "$STAGE" "$DEB_NAME"
 echo "[deb] Built: $DEB_NAME"
