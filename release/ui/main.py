@@ -24,6 +24,11 @@ if not _force_external:
     if _safe_flags not in _chromium_flags:
         os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (f"{_chromium_flags} " if _chromium_flags else "") + _safe_flags
 
+# Ensure QtWebEngine dictionary path is writable to avoid base::dir_app_dictionaries warnings
+dict_dir = Path(os.environ.get("QTWEBENGINE_DICTIONARIES_PATH", str(Path.home() / ".local" / "share" / "EasyTrainer" / "qtwebengine_dictionaries")))
+dict_dir.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("QTWEBENGINE_DICTIONARIES_PATH", str(dict_dir))
+
 # Frontend URL (override with EASYCOLLECTOR_FRONTEND_URL if needed)
 FRONTEND_URL = os.environ.get("EASYCOLLECTOR_FRONTEND_URL", "http://localhost:5173/")
 
@@ -40,9 +45,11 @@ try:
     )
     try:
         from PySide6.QtWebEngineWidgets import QWebEngineView  # optional
+        from PySide6.QtWebEngineCore import QWebEngineProfile
         HAS_WEBENGINE = not _force_external
     except Exception:
         QWebEngineView = None  # type: ignore
+        QWebEngineProfile = None  # type: ignore
         HAS_WEBENGINE = False
     from PySide6.QtGui import QDesktopServices, QIcon, QPixmap, QFont
 except Exception:
@@ -55,9 +62,11 @@ except Exception:
     )
     try:
         from PyQt6.QtWebEngineWidgets import QWebEngineView  # optional
+        from PyQt6.QtWebEngineCore import QWebEngineProfile
         HAS_WEBENGINE = not _force_external
     except Exception:
         QWebEngineView = None  # type: ignore
+        QWebEngineProfile = None  # type: ignore
         HAS_WEBENGINE = False
     from PyQt6.QtGui import QDesktopServices, QIcon, QPixmap, QFont
 
@@ -133,6 +142,43 @@ def _app_icon_path() -> str | None:
         pass
     return None
 
+
+def _window_icon() -> QIcon | None:
+    """Load the app icon and downscale to safe sizes to avoid oversized XCB transfers."""
+    ip = _app_icon_path()
+    if not ip:
+        return None
+    try:
+        pm = QPixmap(ip)
+        if pm.isNull():
+            return None
+        icon = QIcon()
+        for size in (16, 24, 32, 48, 64, 128, 256):
+            icon.addPixmap(pm.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        return icon
+    except Exception:
+        return None
+
+
+def _configure_webengine_profile():
+    """Disable spellcheck (to avoid dictionary path overrides) and apply custom paths."""
+    if not HAS_WEBENGINE or QWebEngineProfile is None:
+        return
+    try:
+        profile = QWebEngineProfile.defaultProfile()
+    except Exception:
+        return
+    try:
+        profile.setSpellCheckEnabled(False)
+    except Exception:
+        pass
+    dict_path = os.environ.get("QTWEBENGINE_DICTIONARIES_PATH")
+    if dict_path and hasattr(profile, "setSpellCheckPath"):
+        try:
+            profile.setSpellCheckPath(dict_path)
+        except Exception:
+            pass
+
 def docker_compose_available() -> bool:
     """Detect docker compose capability (prefer v2 plugin)."""
     # Prefer docker CLI with compose plugin (v2)
@@ -176,9 +222,9 @@ class MainWindow(QMainWindow):
         self.install_variant = "gpu"
         self.setWindowTitle("Easy Trainer (GPU)")
         try:
-            ip = _app_icon_path()
-            if ip:
-                self.setWindowIcon(QIcon(ip))
+            icon = _window_icon()
+            if icon:
+                self.setWindowIcon(icon)
         except Exception:
             pass
         self.resize(1000, 700)
@@ -215,6 +261,7 @@ class MainWindow(QMainWindow):
                 self.web_view.urlChanged.connect(lambda *_: self._update_nav_buttons())
             except Exception:
                 pass
+            _configure_webengine_profile()
         else:
             self.web_view = None
         self.web_container = QWidget(self)
@@ -2092,9 +2139,9 @@ def main():
     )
     # App-wide icon
     try:
-        ip = _app_icon_path()
-        if ip:
-            app.setWindowIcon(QIcon(ip))
+        icon = _window_icon()
+        if icon:
+            app.setWindowIcon(icon)
     except Exception:
         pass
     if not docker_compose_available():
