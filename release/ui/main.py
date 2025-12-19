@@ -232,6 +232,7 @@ class MainWindow(QMainWindow):
         self.process: QProcess | None = None
         self._preload_dialog: ServiceSplash | None = None
         self._ready_check_timer: QTimer | None = None
+        self._ready_timeout_timer: QTimer | None = None
         self._main_visible = False
         self._fullscreen_pref = False
         self._closing = False
@@ -556,9 +557,13 @@ class MainWindow(QMainWindow):
         status_row.addWidget(lbl_status_left)
         status_row.addStretch(1)
         status_row.addWidget(lbl_status_right)
-        progress_detail = QLabel("0.00% | 경과 00:00 | 남음 --:--")
-        progress_detail.setAlignment(Qt.AlignRight)
-        v3.addLayout(status_row); v3.addWidget(log, 1); v3.addWidget(bar); v3.addWidget(progress_detail)
+        progress_row = QHBoxLayout(); progress_row.setContentsMargins(0,0,0,0); progress_row.setSpacing(6)
+        lbl_elapsed = QLabel("Elapsed 00:00")
+        lbl_remaining = QLabel("Remaining --:--")
+        progress_row.addWidget(lbl_elapsed)
+        progress_row.addStretch(1)
+        progress_row.addWidget(lbl_remaining)
+        v3.addLayout(status_row); v3.addWidget(log, 1); v3.addWidget(bar); v3.addLayout(progress_row)
         page_install.setLayout(v3)
 
         page_done = QWidget(); v4 = QVBoxLayout()
@@ -679,6 +684,9 @@ class MainWindow(QMainWindow):
             "tracking": False,
             "complete": False,
         }
+        progress_timer = QTimer(dlg)
+        progress_timer.setInterval(1000)
+        progress_timer.timeout.connect(lambda: _update_progress_display())
 
         def _format_duration(seconds: float | None) -> str:
             if seconds is None or seconds < 0:
@@ -734,7 +742,8 @@ class MainWindow(QMainWindow):
                 if elapsed is not None:
                     remaining = elapsed * max(0.0, 100.0 - pct) / max(pct, 0.01)
                 remain_str = _format_duration(remaining)
-            progress_detail.setText(f"{pct:05.2f}% | 경과 {elapsed_str} | 남음 {remain_str}")
+            lbl_elapsed.setText(f"Elapsed {elapsed_str}")
+            lbl_remaining.setText(f"Remaining {remain_str}")
 
         def _increment_progress(lines: int):
             if lines <= 0 or not progress_state["tracking"] or progress_state["complete"]:
@@ -747,6 +756,10 @@ class MainWindow(QMainWindow):
             progress_state["complete"] = True
             progress_state["lines"] = progress_state["target"]
             _update_progress_display(force_complete=True)
+            try:
+                progress_timer.stop()
+            except Exception:
+                pass
 
         _update_progress_display()
 
@@ -756,6 +769,10 @@ class MainWindow(QMainWindow):
                 _advance_stage(6)
                 run_post_install_steps()
             else:
+                try:
+                    progress_timer.stop()
+                except Exception:
+                    pass
                 _update_progress_display()
                 QMessageBox.critical(dlg, "오류", f"설치 실패 (code={code})")
 
@@ -858,6 +875,10 @@ class MainWindow(QMainWindow):
                 "complete": False,
             })
             _update_progress_display()
+            try:
+                progress_timer.start()
+            except Exception:
+                pass
             current_stage["idx"] = 1
             try:
                 lbl_status_right.setText(f"{stage_messages[0]} (1/7)")
@@ -1632,6 +1653,7 @@ class MainWindow(QMainWindow):
 
     def _hide_preload_dialog(self, ready: bool = False):
         self._stop_ready_timer()
+        self._stop_ready_timeout()
         if self._preload_dialog:
             self._preload_dialog.hide()
         if ready:
@@ -1642,10 +1664,41 @@ class MainWindow(QMainWindow):
             self._ready_check_timer.stop()
             self._ready_check_timer = None
 
+    def _stop_ready_timeout(self):
+        if self._ready_timeout_timer:
+            try:
+                self._ready_timeout_timer.stop()
+            except Exception:
+                pass
+            self._ready_timeout_timer = None
+
+    def _resolve_ready_timeout_ms(self) -> int:
+        # Allow multiple env keys; treat small numbers as seconds for convenience
+        keys = [
+            "EASYTRAINER_READY_TIMEOUT_MS",
+            "EASYCOLLECTOR_READY_TIMEOUT_MS",
+            "READY_TIMEOUT_MS",
+            "timeout_ms",
+        ]
+        for k in keys:
+            val = os.environ.get(k)
+            if not val:
+                continue
+            try:
+                num = float(val.strip())
+                if num <= 0:
+                    continue
+                # if <= 300, assume seconds
+                return int(num * 1000) if num <= 300 else int(num)
+            except Exception:
+                continue
+        return 45000  # default 45s
+
     def _wait_for_services_ready(self, on_ready=None):
         if on_ready is None:
             on_ready = self.load_ui
         self._stop_ready_timer()
+        self._stop_ready_timeout()
         self._show_preload_dialog("서비스 준비중...")
 
         def poll():
@@ -1655,6 +1708,7 @@ class MainWindow(QMainWindow):
             self._set_preload_detail(detail)
             if backend_ok and frontend_ok:
                 self._stop_ready_timer()
+                self._stop_ready_timeout()
                 self._hide_preload_dialog(ready=True)
                 try:
                     on_ready()
@@ -1667,6 +1721,14 @@ class MainWindow(QMainWindow):
         poll()
         if self._ready_check_timer is not None:
             self._ready_check_timer.start()
+
+        # Fail fast if services never become healthy
+        timeout_ms = self._resolve_ready_timeout_ms()
+        self._ready_timeout_timer = QTimer(self)
+        self._ready_timeout_timer.setSingleShot(True)
+        self._ready_timeout_timer.setInterval(timeout_ms)
+        self._ready_timeout_timer.timeout.connect(self._on_ready_timeout)
+        self._ready_timeout_timer.start()
 
     def _check_backend_ready(self) -> bool:
         try:
@@ -1688,6 +1750,140 @@ class MainWindow(QMainWindow):
                 return True
         except Exception:
             return False
+
+    def _collect_docker_logs(self, container: str, tail: int = 200) -> str:
+        try:
+            result = subprocess.run(
+                ["docker", "logs", f"--tail={tail}", container],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                return result.stdout.strip() or "[docker logs] 로그가 비어 있습니다."
+            return f"[docker logs] 실패 (code={result.returncode}): {result.stderr.strip()}"
+        except Exception as e:
+            return f"[docker logs] 실행 실패: {e}"
+
+    def _show_docker_logs_dialog(self, title: str, log_text: str):
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        dlg.resize(700, 500)
+        viewer = QPlainTextEdit(dlg)
+        viewer.setReadOnly(True)
+        self._apply_log_font(viewer)
+        viewer.setPlainText(log_text)
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(viewer)
+        dlg.show()
+        dlg.raise_()
+        self._register_log_window(dlg)
+
+    def _show_docker_logs_follow(self, title: str, container: str, tail: int = 200, initial_text: str = "", on_close=None):
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        dlg.resize(800, 520)
+        viewer = QPlainTextEdit(dlg)
+        viewer.setReadOnly(True)
+        self._apply_log_font(viewer)
+        if initial_text:
+            viewer.setPlainText(initial_text.strip() + "\n")
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(viewer)
+
+        proc = QProcess(dlg)
+        proc.setProgram("docker")
+        proc.setArguments(["logs", "-f", f"--tail={tail}", container])
+        proc.setProcessChannelMode(QProcess.MergedChannels)
+
+        def _append():
+            try:
+                data = proc.readAll()
+                text = bytes(data).decode(errors="ignore")
+                if text:
+                    viewer.moveCursor(viewer.textCursor().End)  # type: ignore
+                    viewer.insertPlainText(text)
+                    viewer.moveCursor(viewer.textCursor().End)  # type: ignore
+            except Exception:
+                pass
+
+        proc.readyRead.connect(_append)
+
+        def _on_finish(*_):
+            try:
+                viewer.append("\n[docker logs] 종료되었습니다.")
+            except Exception:
+                pass
+
+        proc.finished.connect(_on_finish)
+
+        stop_triggered = {"done": False}
+
+        def _stop_services():
+            if stop_triggered["done"]:
+                return
+            stop_triggered["done"] = True
+            self.append_log("[STOP] 로그 창 종료로 서비스 중지 중 ...")
+            # Try synchronous compose down first
+            try:
+                subprocess.run(
+                    ["docker", "compose", "down", "--remove-orphans"],
+                    cwd=str(self.project_root),
+                    check=False,
+                    timeout=20,
+                    capture_output=True,
+                    text=True,
+                )
+            except Exception:
+                pass
+            # Ensure container is gone even if compose down failed/wasn't running
+            try:
+                subprocess.run(
+                    ["docker", "rm", "-f", "easy_collector_service"],
+                    check=False,
+                    timeout=10,
+                    capture_output=True,
+                    text=True,
+                )
+            except Exception:
+                pass
+
+        def _cleanup(*_):
+            try:
+                proc.terminate()
+                proc.waitForFinished(2000)
+                proc.kill()
+            except Exception:
+                pass
+            _stop_services()
+            if on_close and not stop_triggered.get("closed"):
+                stop_triggered["closed"] = True
+                try:
+                    on_close()
+                except Exception:
+                    pass
+
+        dlg.finished.connect(_cleanup)
+        dlg.destroyed.connect(_cleanup)
+        proc.start()
+
+        dlg.show()
+        dlg.raise_()
+        self._register_log_window(dlg)
+
+    def _on_ready_timeout(self):
+        self._stop_ready_timer()
+        self._stop_ready_timeout()
+        self._hide_preload_dialog()
+        self.append_log("[ERROR] 서비스가 제시간에 준비되지 않아 중지되었습니다.")
+        logs = self._collect_docker_logs("easy_collector_service", tail=200)
+        self._show_docker_logs_follow(
+            "서비스 시작 실패",
+            container="easy_collector_service",
+            tail=200,
+            initial_text=logs,
+            on_close=lambda: QApplication.quit(),
+        )
 
     def load_ui(self):
         url = QUrl(FRONTEND_URL)

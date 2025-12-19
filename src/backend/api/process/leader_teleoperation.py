@@ -305,9 +305,5 @@ class Leader():
             # #--------------------------------------------
 
         for dxl_controller in self.dxl_controllers.values():
-<<<<<<< HEAD
-            # dxl_controller.remove_torque()
-=======
             dxl_controller.remove_torque()
->>>>>>> develop/release
             dxl_controller.portHandler.closePort()

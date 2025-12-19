@@ -76,7 +76,7 @@ develop/release
   - 빌드: `docker compose build`
   - 실행: `docker compose up -d service`
   - 중지/정리: `docker compose down --remove-orphans` (완전 초기화 시 `--volumes` 추가)
-  - 로그: `docker compose logs -f service`
+  - 로그: `docker logs -f easy_collector_service`
 
 ---
 

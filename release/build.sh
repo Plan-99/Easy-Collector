@@ -91,17 +91,7 @@ RSYNC_EXCLUDES=(
   'release'
   '.vscode'
   '.idea'
-  'data'
-  'dataset'
   'datasets'
-  'training_data'
-  'train_data'
-  'checkpoints'
-  'weights'
-  'models'
-  'runs'
-  'outputs'
-  'artifacts'
   'node_modules'
   'src/ui/node_modules'
   'src/ui/.quasar'
@@ -234,31 +224,46 @@ cat > "$STAGE/DEBIAN/postinst" <<'EOF'
 #!/bin/sh
 set -e
 
+umask 022
+
 if command -v update-desktop-database >/dev/null 2>&1; then
   update-desktop-database || true
 fi
 
-TARGET_USER=""
+# Resolve target user (fallback to root if unknown)
 if [ -n "$SUDO_USER" ]; then
   TARGET_USER="$SUDO_USER"
 else
   TARGET_USER="$(logname 2>/dev/null || true)"
 fi
+if [ -z "$TARGET_USER" ] || ! id "$TARGET_USER" >/dev/null 2>&1; then
+  TARGET_USER="root"
+fi
+TARGET_GROUP="$(id -gn "$TARGET_USER" 2>/dev/null || echo "$TARGET_USER")"
 
-if [ -n "$TARGET_USER" ] && id "$TARGET_USER" >/dev/null 2>&1; then
+# Add user to docker group (best-effort)
+if id "$TARGET_USER" >/dev/null 2>&1; then
   if ! id -nG "$TARGET_USER" | grep -qw docker; then
     adduser "$TARGET_USER" docker || true
     echo "User $TARGET_USER added to docker group. Please log out/in to apply."
   fi
-  # Copy project into /opt if missing and make it writable by the target user
-  DEST="/opt/easytrainer/project"
-  SRC="/usr/share/easytrainer-project"
-  if [ ! -d "$DEST" ]; then
-    mkdir -p "$DEST"
-    cp -a "$SRC"/. "$DEST"/
-    chown -R "$TARGET_USER":"$TARGET_USER" "$DEST"
-    echo "Project placed at $DEST"
-  fi
+fi
+
+# Copy project payload into /opt and make it writable by the target user
+DEST="/opt/easytrainer/project"
+SRC="/usr/share/easytrainer-project"
+
+# Ensure destination exists with correct ownership/permissions
+install -d -m 755 /opt/easytrainer
+install -d -m 775 -o "$TARGET_USER" -g "$TARGET_GROUP" "$DEST"
+
+if [ -d "$SRC" ]; then
+  cp -a "$SRC"/. "$DEST"/ || true
+  chown -R "$TARGET_USER":"$TARGET_GROUP" "$DEST" || true
+  chmod -R u+rwX "$DEST" || true
+  echo "Project placed at $DEST (owner: $TARGET_USER)"
+else
+  echo "Warning: payload not found at $SRC; skipping copy" >&2
 fi
 
 exit 0

@@ -59,7 +59,64 @@ if [[ "${LOW_MEM:-0}" == "1" ]]; then
   : "${EC_NODE_MAX_OLD_SPACE_SIZE:=256}"; export EC_NODE_MAX_OLD_SPACE_SIZE
 fi
 
+# Persistent Python vendor path and pip cache (mounted volume on host)
+PY_VENDOR_DIR=${PY_VENDOR_DIR:-/root/python_pkgs/vendor}
+PIP_CACHE_DIR=${PIP_CACHE_DIR:-/root/python_pkgs/.cache/pip}
+mkdir -p "$PY_VENDOR_DIR" "$PIP_CACHE_DIR"
+
 env_summary
+
+# Resolve a developer source path (env > UI config) and sync into /root/src before start
+resolve_sync_source() {
+  local src="${EC_SOURCE_PROJECT_ROOT:-${EASYTRAINER_DEV_SRC_ROOT:-}}"
+  # Fall back to UI config if env not set
+  if [[ -z "$src" ]]; then
+    local cfg="/root/EasyTrainer/config.json"
+    if [[ -f "$cfg" ]]; then
+      src=$(python3 - <<'PY'
+import json, sys
+cfg = sys.argv[1]
+try:
+    with open(cfg, encoding='utf-8') as f:
+        data = json.load(f)
+    src = (data.get('dev_src_root') or '').strip()
+    if src:
+        print(src)
+except Exception:
+    pass
+PY
+      "$cfg")
+    fi
+  fi
+  echo "$src"
+}
+
+sync_project_root() {
+  local src
+  src="$(resolve_sync_source)"
+  local dest="/root/src"
+  if [[ -z "$src" ]]; then
+    echo "[SYNC] No dev source configured (env or UI config); skipping sync"
+    return
+  fi
+  if [[ ! -d "$src" ]]; then
+    echo "[SYNC][WARN] Dev source path not found: $src"
+    return
+  fi
+  if [[ "$src" == "$dest" ]]; then
+    echo "[SYNC] Source and destination are the same ($src); skipping sync"
+    return
+  fi
+  echo "[SYNC] Syncing project from $src -> $dest"
+  mkdir -p "$dest"
+  rsync -a --delete \
+    --exclude '.git' \
+    --exclude 'node_modules' \
+    --exclude 'logs' \
+    "$src"/ "$dest"/ || echo "[SYNC][WARN] rsync encountered errors"
+}
+
+sync_project_root
 
 # Ensure ROS 2 environment is available for rclpy and ros2 CLI.
 # Temporarily disable nounset because ROS setup scripts reference unset vars.
@@ -171,15 +228,14 @@ PY
 
 # Ensure torchvision/torch compatibility (avoid AttributeError: torch.library.register_fake)
 ensure_torchvision_compat() {
-  # Decide desired torchvision based on torch capability and compare with current
-  # Use process substitution to safely capture Python output into variables
-  read -r desired current < <(python3 - <<'PY'
+  # Decide desired torchvision based on torch version/capabilities
+  read -r desired current torch_ver < <(python3 - <<'PY'
 import sys
 try:
     import torch
-    has_rf = hasattr(getattr(torch, 'library', object()), 'register_fake')
+    torch_ver = getattr(torch, '__version__', '')
 except Exception:
-    has_rf = False
+    torch_ver = ''
 current = ''
 try:
     import importlib.metadata as m
@@ -190,13 +246,26 @@ except Exception:
         current = getattr(torchvision, '__version__', '')
     except Exception:
         current = ''
-desired = '0.15.2' if not has_rf else ''
-print((desired or ''), (current or ''))
+
+desired = ''
+try:
+    nums = [int(x) for x in torch_ver.split('+')[0].split('.')[:2]]
+    major, minor = nums[0], nums[1]
+    if major > 2 or (major == 2 and minor >= 3):
+        desired = '0.18.0'
+    else:
+        desired = '0.15.2'
+except Exception:
+    desired = '0.18.0'
+
+print(desired or '', current or '', torch_ver or '')
 PY
 )
   if [[ -n "${desired:-}" && "${current:-}" != "$desired" ]]; then
-    echo "[SETUP] Installing torchvision==$desired to match torch (current: ${current:-none})..."
-    python3 -m pip install --no-deps --no-input "torchvision==$desired" && hash -r || true
+    echo "[SETUP] Installing torchvision==$desired to match torch ${torch_ver:-unknown} (current: ${current:-none})..."
+    python3 -m pip install --no-deps --no-input --prefer-binary \
+      --cache-dir "${PIP_CACHE_DIR}" \
+      "torchvision==$desired" && hash -r || true
   fi
 }
 
