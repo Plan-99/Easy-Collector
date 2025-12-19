@@ -45,6 +45,15 @@ if ! python3 -c 'import ensurepip' 2>/dev/null; then
   echo "Install it and retry: sudo apt-get update && sudo apt-get install -y python3-venv"
   exit 1
 fi
+PY_VER=$(python3 - <<'PY'
+import sys
+print(f"{sys.version_info.major}.{sys.version_info.minor}")
+PY
+)
+PY_MAJOR=${PY_VER%%.*}
+PY_MINOR=${PY_VER#*.}
+PY_NEXT_MINOR=$((PY_MINOR + 1))
+echo "[deb] Using host Python $PY_VER"
 echo "[deb] Creating embedded venv with Qt..."
 VENV_DIR="$STAGE${INSTALL_ROOT}/venv"
 python3 -m venv "$VENV_DIR"
@@ -55,7 +64,7 @@ import site
 print(site.getusersitepackages())
 PY
 )
-DST_SITE="$VENV_DIR/lib/python3.10/site-packages"
+DST_SITE="$VENV_DIR/lib/python${PY_VER}/site-packages"
 if [ ! -d "$HOST_SITE/PySide6" ] || [ ! -d "$HOST_SITE/shiboken6" ]; then
   echo "[deb][ERROR] Host Python is missing PySide6/shiboken6. Install them first (e.g. python3 -m pip install --user PySide6) and retry." >&2
   exit 1
@@ -180,7 +189,7 @@ chmod 0644 "$STAGE/usr/share/applications/EasyTrainer.desktop"
 # Control file
 # Runtime GUI libs needed by Qt (ensure auto-install by apt)
 RUNTIME_LIBS="libxcb-cursor0, libxkbcommon-x11-0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-render-util0, libxcb-xinerama0, libegl1, libgl1-mesa-dri, libopengl0, libnss3, libasound2"
-DEPENDS_LINE="Depends: python3 (>= 3.10), xdg-utils, ${RUNTIME_LIBS}"
+DEPENDS_LINE="Depends: python3 (>= ${PY_VER}), python3 (<< ${PY_MAJOR}.${PY_NEXT_MINOR}), xdg-utils, ${RUNTIME_LIBS}"
 
 cat > "$STAGE/DEBIAN/control" <<EOF
 Package: ${PKG}
