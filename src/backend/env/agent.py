@@ -22,6 +22,7 @@ class Agent:
         self.ee_pos = None
         self.ee_target = None
         self.robot_type = robot['type']
+        self.role = robot['role']
         self.joint_len = len(robot['joint_names'])
         self.joint_names = robot['joint_names']
         self.joint_upper_bounds = robot['joint_upper_bounds']
@@ -131,6 +132,15 @@ class Agent:
 
         else:
             print("IK solver not initialized for this robot type.")
+
+    def move_ee_delta_step(self, delta):
+        current_ee_pos = self.get_ee_position()
+        if current_ee_pos is not None:
+            for key, pos in current_ee_pos.items():
+                current_ee_pos[key] += delta[key]
+            self.move_ee_step(current_ee_pos)
+        else:
+            print("Current end-effector position is not available.")
 
         
     def joint_state_cb(self, msg):

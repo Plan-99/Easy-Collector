@@ -129,7 +129,7 @@ class ProcessManager:
             return
 
         # 1. 작업을 제어할 '중지 플래그'를 생성합니다.
-        task_control = {'stop': False}
+        task_control = {'stop': False, 'read': False}
         self.tasks[name] = task_control
         self.processes[name] = 'function'  # 프로세스 딕셔너리에 추가
         
@@ -182,6 +182,15 @@ class ProcessManager:
         if task_control:
             print(f"'{name}' Function stopping.")
             task_control['stop'] = True
+
+    
+    def change_task_control(self, name, key, value):
+        task_control = self.tasks.get(name)
+        if task_control is None:
+            print(f"[ERROR] Task '{name}' not found.")
+            return
+        task_control[key] = value
+        print(f"Task '{name}' control '{key}' changed to {value}.")
 
         
         

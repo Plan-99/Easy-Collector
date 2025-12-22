@@ -1,5 +1,4 @@
 <template>
-    <q-dialog persistent>
         <q-card style="min-width: 80%" dark class="bg-dark border-rounded border-white">
             <q-card-section class="q-pt-none">
                 <q-card-section class="row">
@@ -17,7 +16,7 @@
                     narrow-indicator
                 >
                     <q-tab name="leader" label="Leader Robot" />
-                    <q-tab name="keyboard" label="Keyboard" />
+                    <q-tab name="vr" label="VR" />
                 </q-tabs>
                 <q-tab-panels v-model="teleSettingTab" animated>
                     <q-tab-panel name="leader" class="row q-col-gutter-x-md bg-secondary">
@@ -247,13 +246,59 @@
                         </div>
                     </q-tab-panel>
 
-                    <q-tab-panel name="keyboard">
-                        <div class="text-h6">Keyboard Teleoperation will be supported soon.</div>
+                    <q-tab-panel name="vr" class="row q-col-gutter-x-md bg-secondary">
+                        <div class="col">
+                            <process-console 
+                                process="xr_teleoperation"
+                                class="border-white"
+                                style="height: 600px;"
+                            />
+                        </div>
+                        <div class="col q-gutter-y-md column">
+                            <div>
+                                <q-btn
+                                    class="full-width"
+                                    outline
+                                    color="primary"
+                                    @click="startXrTele"
+                                    dense
+                                    v-if="!processStore.isRunning('xr_teleoperation')"
+                                >Connect to VR</q-btn>
+                                <q-btn
+                                    class="full-width"
+                                    outline
+                                    color="orange-8"
+                                    @click="stopXrTele"
+                                    dense
+                                    v-else
+                                >Unconnect</q-btn>
+                            </div>
+                            <div>Open browser in VR and link to <span class="text-primary">'https://[your IP]:8012?ws=wss://[your IP]:8012'</span></div>
+                            <q-img src="/images/xr_teleop_guide1.png" alt="VR Connection" />
+                            <q-btn
+                                class="full-width"
+                                outline
+                                color="primary"
+                                @click="readXrTele"
+                                dense
+                            >Start Teleoperation</q-btn>
+                        </div>
+                        <!-- <q-btn
+                            class="full-width full-height"
+                            outline
+                            color="primary"
+                            @click="startXrTeleoperation"
+                        >Start</q-btn>
+                        <q-btn
+                            class="full-width full-height q-ml-md"
+                            outline
+                            color="primary"
+                            @click="readXrTeleoperation"
+                        >Read</q-btn> -->
                     </q-tab-panel>
                 </q-tab-panels>
             </q-card-section>
         </q-card>
-    </q-dialog>
 </template>
 
 <script setup>
@@ -431,6 +476,20 @@ function removeDxlFromJointMap(jointIndex) {
     joint.origin = 0;
 }
 
+function startXrTele() {
+    api.post('/teleoperator:xr_start', {
+        assembly_id: props.assembly.id,
+    });
+}
+
+function readXrTele() {
+    api.post('/teleoperator:xr_read');
+}
+
+function stopXrTele() {
+    api.post('/teleoperator:xr_stop');
+}
+
 onMounted(() => {
     connectROS();
 
@@ -491,6 +550,7 @@ onMounted(() => {
 onUnmounted(() => {
     stopLeaderRobot();
     stopLeaderTele();
+    stopXrTele();
     socket.off('leader_robot_started');
     socket.off('leader_robot_stopped');
     socket.off('dynamixel_data');

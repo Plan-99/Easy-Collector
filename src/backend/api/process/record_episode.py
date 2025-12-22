@@ -19,9 +19,24 @@ def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
             return i
     raise Exception(f"Error getting auto index, or more than {max_idx} episodes")
 
-def record_episode(node, dataset_id, agents, assembly_id, sensors, task, language_instruction, socketio_instance, task_control, tele_type='leader', iter=100000):
+def record_episode(node, dataset_id, agents, assembly_id, sensors, task, language_instruction, socketio_instance, task_control, tele_type='leader', iter=100000, xr=None):
     env = Env(node, agents=agents, sensors=sensors)
     dataset_dir = f"{DATASET_DIR}/{dataset_id}"
+
+            
+    if tele_type == 'xr' and xr is not None:
+        socketio_instance.emit('log_record_episode', {
+            'log': f'Starting XR Teleoperation for Data Collection',
+            'type': 'stdout'
+        })
+
+        tele_control['read'] = False
+        socketio_instance.start_background_task(
+            target=xr.run,
+            task_control=tele_control
+        )
+        time.sleep(10)
+        tele_control['read'] = True
 
     for i in range(iter):
 

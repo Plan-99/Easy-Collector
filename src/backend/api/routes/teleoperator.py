@@ -4,6 +4,7 @@ from ...database.models.teleoperator_model import Teleoperator as TeleoperatorMo
 from ...database.models.assembly_model import Assembly as AssemblyModel
 from ...api.process.subscribe_dynamixel import subscribe_dynamixel, scan_ids_on_port, get_available_ports
 from ...api.process.leader_teleoperation import Leader
+from ...api.process.xr_teleoperation import XRTeloperator
 
 
 # 1. Blueprint 생성
@@ -109,3 +110,63 @@ def start_leader_teleoperation():
     )
 
     return {'status': 'success', 'message': 'Leader teleoperation started'}, 200
+
+@teleoperator_bp.route('/leader_robot:tele_stop', methods=['POST'])
+def stop_leader_teleoperation():    
+    current_app.pm.stop_function(name='leader_teleoperation')
+    return {'status': 'success', 'message': 'Leader teleoperation stopped'}, 200 
+
+
+@teleoperator_bp.route('/teleoperator:xr_start', methods=['POST'])
+def start_xr_teleoperation():
+    data = request.json
+    log_emit_id = data.get('log_emit_id', 'log_xr_teleoperation')
+    assembly_id = data.get('assembly_id')
+
+    assembly = AssemblyModel.find(assembly_id).to_dict()
+
+    # left_tool_agent = current_app.agents.get(assembly.get('left_tool_id'))
+    # right_tool_agent = current_app.agents.get(assembly.get('right_tool_id'))
+
+
+    try:
+        left_arm_agent = current_app.agents.get(assembly.get('left_arm_id'))
+        right_arm_agent = current_app.agents.get(assembly.get('right_arm_id'))
+        if assembly['id'] in current_app.teleops:
+            xr = current_app.teleops[assembly['id']]
+        else:
+            xr = XRTeloperator(left_arm_agent=left_arm_agent, right_arm_agent=right_arm_agent)
+            current_app.teleops[assembly['id']] = xr
+            # agents = [current_app.agents[robot_id] for robot_id in robot_ids]
+    except KeyError as e:
+        current_app.pm.socketio.emit(log_emit_id, {
+            'log': f'[ERROR]: Robot is not running now.',
+            'type': 'stderr'
+        })
+        return {'status': 'error', 'message': f'Robot with ID {str(e)} not found.'}, 404
+
+    # XR 텔레오퍼레이터 시작 로직 추가 예정
+    current_app.pm.start_function(
+        name='xr_teleoperation',
+        func=xr.run,
+        socketio_instance=current_app.pm.socketio,
+        log_emit_id=log_emit_id,
+    )
+    
+    return {'status': 'success', 'message': 'XR teleoperation started'}, 200
+
+
+@teleoperator_bp.route('/teleoperator:xr_read', methods=['POST'])
+def read_xr_teleoperation():
+    current_app.pm.change_task_control(
+        name='xr_teleoperation',
+        key='read',
+        value=True
+    )
+    return {'status': 'success', 'message': 'XR teleoperation read started'}, 200
+
+
+@teleoperator_bp.route('/teleoperator:xr_stop', methods=['POST'])
+def stop_xr_teleoperation():    
+    current_app.pm.stop_function(name='xr_teleoperation')
+    return {'status': 'success', 'message': 'XR teleoperation stopped'}, 200

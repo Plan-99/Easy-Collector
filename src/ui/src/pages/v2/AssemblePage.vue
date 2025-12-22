@@ -63,12 +63,12 @@
             </template>
         </bottom-terminal>
 
-        <tele-setting-dialog
-            v-if="teleopSettingAssembly"
-            v-model="showTeleopSetting" 
-            :assembly="teleopSettingAssembly"
-            @hide="showTeleopSetting = false"
-        />
+        <q-dialog v-model="showTeleopSetting" persistent>
+            <tele-setting-dialog
+                v-if="teleopSettingAssembly"
+                :assembly="teleopSettingAssembly"
+            />
+        </q-dialog>
     </q-page>
 </template>
 <script setup>

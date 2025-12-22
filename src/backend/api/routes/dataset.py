@@ -134,6 +134,17 @@ def start_collection(id):
     data = request.json
     agents = [current_app.agents[robot['id']] for robot in data.get('robots', [])]
 
+    xr = None
+    if data.get('tele_type') == 'xr':
+        if id in current_app.teleops:
+            xr = current_app.teleops[id]
+        else:
+            from ..process.xr_teleoperation import XRTeloperator
+            left_arm_agent = current_app.agents.get(data.get('left_arm_id'))
+            right_arm_agent = current_app.agents.get(data.get('right_arm_id'))
+            xr = XRTeloperator(left_arm_agent=left_arm_agent, right_arm_agent=right_arm_agent)
+            current_app.teleops[id] = xr
+
     current_app.pm.start_function(
         func=record_episode,
         node=current_app.node,
@@ -147,6 +158,7 @@ def start_collection(id):
         socketio_instance=current_app.pm.socketio,
         iter=data.get('iter', 100000),
         name=f"record_episode",
+        xr=xr,
     )
 
     return {'status': 'success', 'message': 'Data collection started'}, 200

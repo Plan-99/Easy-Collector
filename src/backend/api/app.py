@@ -93,6 +93,13 @@ pm.start_process(
     ['ros2', 'launch', 'rosbridge_server', 'rosbridge_websocket_launch.xml', 'port:=9090']
 )
 
+@app.route('/api/healthz', methods=['GET'])
+def healthz():
+    return {
+        'status': 'ok',
+        'ros_ok': bool(rclpy.ok())
+    }, 200
+
 @app.route('/api/processes', methods=['GET'])
 def list_processes():
     processes = pm.list_processes()
@@ -194,6 +201,7 @@ def main():
     app.node = node  # Flask 앱에 ROS 노드 할당
     app.pm = pm  # Flask 앱에 프로세스 관리 객체 할당
     app.agents = {}  # Flask 앱에 에이전트 딕셔너리 할당
+    app.teleops = {}
     
     try:
         # 3. 메인 스레드에서 웹 서버 실행

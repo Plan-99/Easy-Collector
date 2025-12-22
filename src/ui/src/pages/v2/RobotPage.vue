@@ -202,12 +202,6 @@
                 </div>
             </template>
         </form-dialog>
-        <tele-setting-dialog
-            v-if="showTeleSetting"
-            v-model="showTeleSetting" 
-            :robot="teleSettingRobot"
-            @hide="closeTeleSetting"
-        />
         <q-dialog v-model="showHomeposeSettingDialog" persistent>
             <q-card style="min-width: 400px;" dark>
                 <q-card-section>
@@ -247,7 +241,6 @@ import { useSocket } from 'src/composables/useSocket';
 import { useLeaderTeleoperation } from 'src/composables/useLeaderTeleoperation';
 import { api } from 'src/boot/axios';
 import ProcessConsole from 'src/components/v2/ProcessConsole.vue';
-import TeleSettingDialog from 'src/components/v2/TeleSettingDialog.vue';
 import { Notify } from 'quasar';
 import BottomTerminal from 'src/components/v2/BottomTerminal.vue';
 import { useRobot } from 'src/composables/useRobot';
@@ -436,10 +429,6 @@ function watchRobot(robot) {
 
 const canControl = ref(false)
 const showRobotForm = ref(false)
-
-const showTeleSetting = ref(false)
-const teleSettingRobot = ref(null)
-
 
 const homeposeForm = ref([]);
 const showHomeposeSettingDialog = ref(false);

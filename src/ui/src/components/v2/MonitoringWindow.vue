@@ -73,10 +73,10 @@
                     emit-value
                 ></q-select>
                 <q-space></q-space>
-                <div class="q-mr-md">Teleoparation Type: </div>
+                <div class="q-mr-md">Teleoperation Type: </div>
                 <div class="q-gutter-sm q-mr-xl">
                     <q-radio dark v-model="teleType" val="leader" :label="$t('leaderTele')" />
-                    <q-radio dark v-model="teleType" val="keyboard" :label="$t('keyboardTele')" />
+                    <q-radio dark v-model="teleType" val="xr" label="VR" />
                     <q-radio dark v-model="teleType" val="externel" :label="$t('externalTele')" />
                 </div>
                 <q-btn

@@ -56,31 +56,3 @@ def save_leader_robot():
 
     
     return {'status': 'success', 'message': 'Leader robot preset saved'}, 200
-
-
-@leader_robot_bp.route('/leader_robot:tele_start', methods=['POST'])
-def start_leader_teleoperation():
-    data = request.json
-    log_emit_id = data.get('log_emit_id', 'leader_teleoperation')
-    robot = data.get('robot')
-    preset = data.get('preset')
-    tool = data.get('tool', None)
-
-    current_app.pm.stop_process(name='start_leader_robot')
-    agent = current_app.agents[robot['id']]
-    
-    leader = Leader(agent, current_app.pm.socketio, preset, log_emit_id=log_emit_id, port=preset['port_name'])
-    leader.sync_leader_robot()
-    current_app.pm.start_function(
-        name='leader_teleoperation',
-        func=leader.position_pub,
-    )
-
-    return {'status': 'success', 'message': 'Leader teleoperation started'}, 200
-
-
-
-@leader_robot_bp.route('/leader_robot:tele_stop', methods=['POST'])
-def stop_leader_teleoperation():    
-    current_app.pm.stop_function(name='leader_teleoperation')
-    return {'status': 'success', 'message': 'Leader teleoperation stopped'}, 200 
