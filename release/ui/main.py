@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import json
+import shlex
 import shutil
 import subprocess
 import time
@@ -24,10 +25,17 @@ if not _force_external:
     if _safe_flags not in _chromium_flags:
         os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (f"{_chromium_flags} " if _chromium_flags else "") + _safe_flags
 
+# Single source of truth for data/log locations (defaults to /opt/easytrainer)
+DATA_ROOT = Path(os.environ.get("EASYTRAINER_DATA_DIR", "/opt/easytrainer")).expanduser()
+
 # Ensure QtWebEngine dictionary path is writable to avoid base::dir_app_dictionaries warnings
-dict_dir = Path(os.environ.get("QTWEBENGINE_DICTIONARIES_PATH", str(Path.home() / ".local" / "share" / "EasyTrainer" / "qtwebengine_dictionaries")))
-dict_dir.mkdir(parents=True, exist_ok=True)
-os.environ.setdefault("QTWEBENGINE_DICTIONARIES_PATH", str(dict_dir))
+dict_dir_env = os.environ.get("QTWEBENGINE_DICTIONARIES_PATH")
+dict_dir = Path(dict_dir_env) if dict_dir_env else DATA_ROOT / "qtwebengine_dictionaries"
+try:
+    dict_dir.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("QTWEBENGINE_DICTIONARIES_PATH", str(dict_dir))
+except Exception:
+    pass
 
 # Frontend URL (override with EASYCOLLECTOR_FRONTEND_URL if needed)
 FRONTEND_URL = os.environ.get("EASYCOLLECTOR_FRONTEND_URL", "http://localhost:5173/")
@@ -71,18 +79,20 @@ except Exception:
     from PyQt6.QtGui import QDesktopServices, QIcon, QPixmap, QFont
 
 
-APP_HOME = Path.home() / "EasyTrainer"
+APP_HOME = DATA_ROOT
 MARKER_FILE = APP_HOME / ".installed"
 CONFIG_FILE = APP_HOME / "config.json"
-DEFAULT_PROJECT_PATH = Path("/opt/easytrainer/project")
-# Prefer hidden XDG data dir for user-level storage (avoid cluttering HOME)
-XDG_DATA_HOME = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share")))
-HOME_FALLBACK_PATH = XDG_DATA_HOME / "EasyTrainer" / "project"
+LEGACY_CONFIG_LOCATIONS = [
+    Path.home() / "EasyTrainer" / "config.json",
+    Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))) / "EasyTrainer" / "config.json",
+]
+DEFAULT_PROJECT_PATH = DATA_ROOT / "project"
 SYSTEM_PAYLOAD_DIR = Path("/usr/share/easytrainer-project")
 REPO_ROOT_CANDIDATE = Path(__file__).resolve().parents[2]
 
-# UI log persistence (per-user)
-UI_LOG_DIR = APP_HOME / "logs"
+# Unified log persistence (force /tmp to avoid host permission issues)
+SERVICE_LOG_DIR = Path(os.environ.get("EASYTRAINER_LOG_DIR", "/tmp/easytrainer/logs"))
+UI_LOG_DIR = SERVICE_LOG_DIR
 UI_LOG_FILE = UI_LOG_DIR / "ui.log"
 
 
@@ -199,8 +209,23 @@ def get_compose_cmd():
         return dc_bin, []
     return None, None
 
+def _maybe_migrate_legacy_config():
+    if CONFIG_FILE.exists():
+        return
+    for legacy in LEGACY_CONFIG_LOCATIONS:
+        if legacy == CONFIG_FILE:
+            continue
+        try:
+            if legacy.exists():
+                CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(legacy, CONFIG_FILE)
+                break
+        except Exception:
+            continue
+
 
 def load_config() -> dict:
+    _maybe_migrate_legacy_config()
     if CONFIG_FILE.exists():
         try:
             return json.loads(CONFIG_FILE.read_text() or '{}')
@@ -341,7 +366,10 @@ class MainWindow(QMainWindow):
         self._update_nav_buttons()
 
         # state init
-        APP_HOME.mkdir(parents=True, exist_ok=True)
+        try:
+            APP_HOME.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
         try:
             UI_LOG_DIR.mkdir(parents=True, exist_ok=True)
             # Start a new session section in the UI log file
@@ -356,24 +384,27 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-        # Resolve project root: env > config > default under /opt (writable), else HOME
+        # Resolve project root: env > config > default under data root (no HOME fallback)
         cfg = load_config()
         self.install_variant = cfg.get("install_variant", "gpu")
         self._update_window_title()
         env_root = os.environ.get("EASYCOLLECTOR_PROJECT_ROOT", "").strip()
+        cfg_root = cfg.get("project_root")
         if env_root:
             self.project_root = Path(env_root).expanduser()
-        elif cfg.get("project_root"):
-            self.project_root = Path(cfg.get("project_root", "")).expanduser()
+        elif cfg_root:
+            candidate = Path(cfg_root).expanduser()
+            if self._is_home_scoped(candidate):
+                candidate = DEFAULT_PROJECT_PATH
+                cfg["project_root"] = str(candidate)
+                save_config(cfg)
+            self.project_root = candidate
         else:
-            opt_parent = DEFAULT_PROJECT_PATH.parent
-            can_write_opt = (opt_parent.exists() and os.access(opt_parent, os.W_OK)) or \
-                            (DEFAULT_PROJECT_PATH.exists() and os.access(DEFAULT_PROJECT_PATH, os.W_OK))
-            self.project_root = DEFAULT_PROJECT_PATH if can_write_opt else HOME_FALLBACK_PATH
+            self.project_root = DEFAULT_PROJECT_PATH
             cfg["project_root"] = str(self.project_root)
             save_config(cfg)
 
-        # Ensure project exists; if not, copy from system payload or repo; fallback to HOME when needed
+        # Ensure project exists; if not, copy from system payload or repo
         self._ensure_project_present()
         # Unify compose service name to 'service' inside project compose files
         self._unify_compose_service()
@@ -558,8 +589,8 @@ class MainWindow(QMainWindow):
         status_row.addStretch(1)
         status_row.addWidget(lbl_status_right)
         progress_row = QHBoxLayout(); progress_row.setContentsMargins(0,0,0,0); progress_row.setSpacing(6)
-        lbl_elapsed = QLabel("Elapsed 00:00")
-        lbl_remaining = QLabel("Remaining --:--")
+        lbl_elapsed = QLabel("경과 00:00")
+        lbl_remaining = QLabel("잔여 --:--")
         progress_row.addWidget(lbl_elapsed)
         progress_row.addStretch(1)
         progress_row.addWidget(lbl_remaining)
@@ -742,8 +773,8 @@ class MainWindow(QMainWindow):
                 if elapsed is not None:
                     remaining = elapsed * max(0.0, 100.0 - pct) / max(pct, 0.01)
                 remain_str = _format_duration(remaining)
-            lbl_elapsed.setText(f"Elapsed {elapsed_str}")
-            lbl_remaining.setText(f"Remaining {remain_str}")
+            lbl_elapsed.setText(f"경과 {elapsed_str}")
+            lbl_remaining.setText(f"잔여 {remain_str}")
 
         def _increment_progress(lines: int):
             if lines <= 0 or not progress_state["tracking"] or progress_state["complete"]:
@@ -1135,6 +1166,16 @@ class MainWindow(QMainWindow):
         except Exception:
             return False
 
+    def _is_home_scoped(self, path: Path | None) -> bool:
+        if not path:
+            return False
+        try:
+            resolved = path.expanduser().resolve()
+            home = Path.home().resolve()
+            return resolved == home or home in resolved.parents
+        except Exception:
+            return False
+
     def _is_valid_dev_src(self, path: Path | None) -> bool:
         try:
             return bool(path) and path.is_dir() and (path / "src" / "backend").exists() and (path / "src" / "ui").exists()
@@ -1342,23 +1383,22 @@ class MainWindow(QMainWindow):
             pass
 
     def _ensure_project_present(self):
-        """Ensure a valid project exists. If /opt not writable, fallback to HOME.
+        """Ensure a valid project exists under the shared data root.
         Copy from system payload or repo root, and merge if destination exists.
         """
         try:
             if self._is_valid_project_root(self.project_root):
                 return
 
-            # Ensure parent exists; fallback to HOME on permission error
+            # Ensure parent exists; warn on permission error (no HOME fallback)
             try:
                 self.project_root.parent.mkdir(parents=True, exist_ok=True)
             except PermissionError:
-                self.project_root = HOME_FALLBACK_PATH
-                self.project_root.parent.mkdir(parents=True, exist_ok=True)
-                cfg = load_config()
-                cfg["project_root"] = str(self.project_root)
-                save_config(cfg)
-                self.update_project_label()
+                self.append_log("[WARN] 프로젝트 경로에 쓸 수 없습니다. EASYTRAINER_DATA_DIR를 쓰기 가능한 위치로 설정하거나 권한을 조정하세요.")
+                return
+            except Exception as e:
+                self.append_log(f"[WARN] 프로젝트 경로를 준비하지 못했습니다: {e}")
+                return
 
             # Pick source: prefer packaged payload; only use repo when explicitly allowed
             src = None
@@ -1995,8 +2035,10 @@ class MainWindow(QMainWindow):
 
     def open_logs_window(self):
         svc = "service"
-        tail_backend = ["exec", "-T", svc, "bash", "-lc", "tail -n 200 -F /root/easytrainer/logs/backend.log"]
-        tail_frontend = ["exec", "-T", svc, "bash", "-lc", "tail -n 200 -F /root/easytrainer/logs/frontend.log"]
+        backend_log = shlex.quote(str(SERVICE_LOG_DIR / "backend.log"))
+        frontend_log = shlex.quote(str(SERVICE_LOG_DIR / "frontend.log"))
+        tail_backend = ["exec", "-T", svc, "bash", "-lc", f"tail -n 200 -F {backend_log}"]
+        tail_frontend = ["exec", "-T", svc, "bash", "-lc", f"tail -n 200 -F {frontend_log}"]
         backend = self._create_log_dialog("Backend Logs", tail_backend)
         frontend = self._create_log_dialog("Frontend Logs", tail_frontend)
         ui_log = self._create_ui_log_dialog("Launcher Logs", UI_LOG_FILE)

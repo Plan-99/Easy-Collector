@@ -1,7 +1,4 @@
 # -*- coding: utf-8 -*-
-import eventlet
-eventlet.monkey_patch()  # eventlet를 사용하기 위해 필요한 패치
-from eventlet import tpool
 
 from flask import Flask, request
 from flask_socketio import SocketIO, emit
@@ -44,8 +41,16 @@ debug = args.debug
 app = Flask(__name__)
 CORS(app)
 app.config['SECRET_KEY'] = 'mysecretkey!' # 실제 운영 환경에서는 더 복잡한 키 사용
-# eventlet로 웹소켓을 처리하도록 지정 (threading 모드의 werkzeug 500 오류 방지)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+# Use threading mode to avoid eventlet/ROS compatibility issues
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode='threading',
+    logger=False,
+    engineio_logger=False,
+    allow_upgrades=False,  # disable websocket upgrade (Werkzeug can't serve websockets)
+    transports=["polling"],  # force long-polling for compatibility
+)
 
 pm = ProcessManager(socketio, debug=debug)  # 프로세스 관리 객체 생성
 

@@ -138,10 +138,30 @@ if [ "${XDG_SESSION_TYPE:-}" = "wayland" ]; then
   export QT_QPA_PLATFORM=xcb
 fi
 
-# Log to user data dir for diagnostics
-LOG_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/EasyTrainer"
-mkdir -p "$LOG_DIR"
+# Log to /tmp to avoid host permission issues
+DATA_ROOT="${EASYTRAINER_DATA_DIR:-/opt/easytrainer}"
+export EASYTRAINER_DATA_DIR="${DATA_ROOT}"
+LOG_DIR="${EASYTRAINER_LOG_DIR:-/tmp/easytrainer/logs}"
+export EASYTRAINER_LOG_DIR="${LOG_DIR}"
+export EASYTRAINER_CONFIG_PATH="${EASYTRAINER_CONFIG_PATH:-${DATA_ROOT}/config.json}"
+if ! mkdir -p "$LOG_DIR"; then
+  sudo mkdir -p "$LOG_DIR"
+fi
 LOG_FILE="$LOG_DIR/launcher.log"
+if ! touch "$LOG_FILE" 2>/dev/null; then
+  sudo touch "$LOG_FILE" 2>/dev/null || true
+fi
+if ! chmod 666 "$LOG_FILE" 2>/dev/null; then
+  sudo chmod 666 "$LOG_FILE" 2>/dev/null || true
+fi
+# Fallback to /tmp if primary log path is still unwritable
+if ! touch "$LOG_FILE" 2>/dev/null; then
+  FALLBACK_LOG="/tmp/easytrainer-launcher.log"
+  mkdir -p "$(dirname "$FALLBACK_LOG")" 2>/dev/null || true
+  touch "$FALLBACK_LOG" 2>/dev/null || true
+  chmod 666 "$FALLBACK_LOG" 2>/dev/null || true
+  LOG_FILE="$FALLBACK_LOG"
+fi
 {
 VENV_PY="/opt/easytrainer/venv/bin/python"
 if [ -x "$VENV_PY" ]; then
@@ -230,11 +250,15 @@ if command -v update-desktop-database >/dev/null 2>&1; then
   update-desktop-database || true
 fi
 
-# Resolve target user (fallback to root if unknown)
+# Resolve target user (fallback to first non-system user, else root)
+TARGET_USER=""
 if [ -n "$SUDO_USER" ]; then
   TARGET_USER="$SUDO_USER"
-else
-  TARGET_USER="$(logname 2>/dev/null || true)"
+elif TARGET_USER="$(logname 2>/dev/null || true)"; then
+  :
+fi
+if [ -z "$TARGET_USER" ] || ! id "$TARGET_USER" >/dev/null 2>&1; then
+  TARGET_USER="$(getent passwd | awk -F: '$3>=1000 && $3<65534 {print $1; exit}')"
 fi
 if [ -z "$TARGET_USER" ] || ! id "$TARGET_USER" >/dev/null 2>&1; then
   TARGET_USER="root"
@@ -254,8 +278,27 @@ DEST="/opt/easytrainer/project"
 SRC="/usr/share/easytrainer-project"
 
 # Ensure destination exists with correct ownership/permissions
-install -d -m 755 /opt/easytrainer
+install -d -m 775 -o "$TARGET_USER" -g "$TARGET_GROUP" /opt/easytrainer
 install -d -m 775 -o "$TARGET_USER" -g "$TARGET_GROUP" "$DEST"
+# Logs live in /tmp for runtime; keep this dir for legacy safety only
+install -d -m 775 -o "$TARGET_USER" -g "$TARGET_GROUP" /opt/easytrainer/logs
+touch /opt/easytrainer/logs/.keep >/dev/null 2>&1 || true
+chown "$TARGET_USER":"$TARGET_GROUP" /opt/easytrainer/logs/.keep 2>/dev/null || true
+# Initialize config file location for the launcher
+CONFIG_PATH="/opt/easytrainer/config.json"
+if [ ! -f "$CONFIG_PATH" ]; then
+  echo "{}" > "$CONFIG_PATH" || true
+fi
+chown "$TARGET_USER":"$TARGET_GROUP" "$CONFIG_PATH" 2>/dev/null || true
+chmod 664 "$CONFIG_PATH" 2>/dev/null || true
+# Pre-create runtime log location under /tmp
+install -d -m 777 /tmp/easytrainer/logs || true
+install -m 666 /dev/null /tmp/easytrainer/logs/launcher.log || true
+
+# Normalize ownership/permissions for everything under /opt/easytrainer
+chown -R "$TARGET_USER":"$TARGET_GROUP" /opt/easytrainer || true
+chmod 777 /opt/easytrainer /opt/easytrainer/logs || true
+chmod 666 /opt/easytrainer/config.json /opt/easytrainer/logs/launcher.log 2>/dev/null || true
 
 if [ -d "$SRC" ]; then
   cp -a "$SRC"/. "$DEST"/ || true

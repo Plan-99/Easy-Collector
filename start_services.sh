@@ -50,6 +50,47 @@ detect_low_mem() {
   echo "[ENTRY] Memory total=${mem_kb}kB cgroup_limit=${limit_kb}kB low_mem=${LOW_MEM}"
 }
 
+# Shared data root for config persistence (keep out of $HOME)
+DATA_ROOT=${EASYTRAINER_DATA_DIR:-/opt/easytrainer}
+CONFIG_PATH=${EASYTRAINER_CONFIG_PATH:-${DATA_ROOT}/config.json}
+# Force logs to /tmp to avoid host permission issues (ignore inbound override)
+LOG_DIR="/tmp/easytrainer/logs"
+export EASYTRAINER_DATA_DIR="${DATA_ROOT}"
+export EASYTRAINER_LOG_DIR="${LOG_DIR}"
+export EASYTRAINER_CONFIG_PATH="${CONFIG_PATH}"
+
+ensure_data_root_writable() {
+  mkdir -p "$DATA_ROOT" "$LOG_DIR" 2>/dev/null || sudo mkdir -p "$DATA_ROOT" "$LOG_DIR" || true
+  chmod 777 "$DATA_ROOT" "$LOG_DIR" 2>/dev/null || true
+  if [ ! -f "$CONFIG_PATH" ]; then
+    echo "{}" >"$CONFIG_PATH" 2>/dev/null || sudo sh -c "echo '{}' >\"$CONFIG_PATH\"" || true
+  fi
+  chmod 666 "$CONFIG_PATH" 2>/dev/null || true
+  if [ ! -f "$LOG_DIR/launcher.log" ]; then
+    touch "$LOG_DIR/launcher.log" 2>/dev/null || sudo touch "$LOG_DIR/launcher.log" 2>/dev/null || true
+  fi
+  chmod 666 "$LOG_DIR/launcher.log" 2>/dev/null || true
+
+  # If we still cannot write the config, fall back to /tmp (per-container writable)
+  if ! touch "$CONFIG_PATH" 2>/dev/null; then
+    echo "[ENTRY][WARN] $CONFIG_PATH is not writable; falling back to /tmp/easytrainer"
+    DATA_ROOT="/tmp/easytrainer"
+    CONFIG_PATH="${DATA_ROOT}/config.json"
+    LOG_DIR="/tmp/easytrainer/logs"
+    export EASYTRAINER_DATA_DIR="${DATA_ROOT}"
+    export EASYTRAINER_LOG_DIR="${LOG_DIR}"
+    export EASYTRAINER_CONFIG_PATH="${CONFIG_PATH}"
+    mkdir -p "$LOG_DIR" 2>/dev/null || true
+    echo "{}" >"$CONFIG_PATH" 2>/dev/null || true
+    chmod 777 "$DATA_ROOT" "$LOG_DIR" 2>/dev/null || true
+    chmod 666 "$CONFIG_PATH" 2>/dev/null || true
+    touch "$LOG_DIR/launcher.log" 2>/dev/null || true
+    chmod 666 "$LOG_DIR/launcher.log" 2>/dev/null || true
+  fi
+}
+
+ensure_data_root_writable
+
 detect_low_mem
 if [[ "${LOW_MEM:-0}" == "1" ]]; then
   echo "[ENTRY] Low-memory mode detected (<4GB). Applying safe defaults."
@@ -71,11 +112,13 @@ resolve_sync_source() {
   local src="${EC_SOURCE_PROJECT_ROOT:-${EASYTRAINER_DEV_SRC_ROOT:-}}"
   # Fall back to UI config if env not set
   if [[ -z "$src" ]]; then
-    local cfg="/root/EasyTrainer/config.json"
-    if [[ -f "$cfg" ]]; then
+    local cfg="$CONFIG_PATH"
+    if [[ -f "$cfg" && -r "$cfg" ]]; then
       src=$(python3 - <<'PY'
 import json, sys
-cfg = sys.argv[1]
+cfg = sys.argv[1] if len(sys.argv) > 1 else ""
+if not cfg:
+    sys.exit(0)
 try:
     with open(cfg, encoding='utf-8') as f:
         data = json.load(f)
@@ -118,6 +161,58 @@ sync_project_root() {
 
 sync_project_root
 
+# Ensure missing package init files are present to avoid import failures
+ensure_lerobot_dataset_init() {
+  local target="/root/src/backend/lerobot/datasets/__init__.py"
+  if [ -f "$target" ]; then
+    return
+  fi
+  mkdir -p "$(dirname "$target")"
+  cat >"$target" <<'PYCODE'
+"""Dataset utilities for LeRobot."""
+
+from .utils import (
+    append_jsonlines,
+    embed_images,
+    flatten_dict,
+    get_nested_item,
+    load_info,
+    load_json,
+    load_jsonlines,
+    load_stats,
+    serialize_dict,
+    unflatten_dict,
+    write_info,
+    write_json,
+    write_jsonlines,
+    write_stats,
+    write_task,
+)
+
+__all__ = [
+    "append_jsonlines",
+    "embed_images",
+    "flatten_dict",
+    "get_nested_item",
+    "load_info",
+    "load_json",
+    "load_jsonlines",
+    "load_stats",
+    "serialize_dict",
+    "unflatten_dict",
+    "write_info",
+    "write_json",
+    "write_jsonlines",
+    "write_stats",
+    "write_task",
+]
+PYCODE
+  chmod 644 "$target" 2>/dev/null || true
+  echo "[PATCH] Created missing backend/lerobot/datasets/__init__.py"
+}
+
+ensure_lerobot_dataset_init
+
 # Ensure ROS 2 environment is available for rclpy and ros2 CLI.
 # Temporarily disable nounset because ROS setup scripts reference unset vars.
 set +u
@@ -141,7 +236,6 @@ if [[ "${EC_DEBUG:-0}" == "1" ]]; then
 fi
 
 # Prepare log directory
-LOG_DIR=/root/easytrainer/logs
 mkdir -p "$LOG_DIR"
 
 # 1) Ensure frontend deps; start Quasar dev server (skippable)

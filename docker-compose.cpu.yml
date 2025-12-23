@@ -9,7 +9,7 @@ services:
     network_mode: host
     environment:
       - DISPLAY=${DISPLAY}
-      - ROS_DOMAIN_ID=30
+      - ROS_DOMAIN_ID=0
       - XAUTHORITY=${XAUTHORITY}
       # NPM: regional mirror and retry knobs (override in env if needed)
       - NPM_CONFIG_REGISTRY=${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
@@ -23,6 +23,9 @@ services:
       - EC_NODE_MAX_OLD_SPACE_SIZE=${EC_NODE_MAX_OLD_SPACE_SIZE:-384}
       - EC_MINIMAL_API=${EC_MINIMAL_API:-0}
       - EC_NO_ROS=${EC_NO_ROS:-0}
+      - EASYTRAINER_DATA_DIR=${EASYTRAINER_DATA_DIR:-/opt/easytrainer}
+      - EASYTRAINER_LOG_DIR=${EASYTRAINER_LOG_DIR:-/tmp/easytrainer/logs}
+      - EASYTRAINER_CONFIG_PATH=${EASYTRAINER_CONFIG_PATH:-/opt/easytrainer/config.json}
     volumes:
       - /dev:/dev
       - /tmp/.X11-unix:/tmp/.X11-unix
@@ -30,8 +33,8 @@ services:
       - ./ros2_ws:/root/ros2_ws
       - ./python_pkgs:/root/python_pkgs
       - ./requirements.txt:/root/requirements.txt
-      # Persist service logs on host even if UI is not running
-      - ./logs:/root/easytrainer/logs
+      # Persist service logs/config on host under /opt/easytrainer
+      - /opt/easytrainer:/opt/easytrainer
       # Keep launcher script editable without rebuilds
       - ./start_services.sh:/usr/local/bin/start_services.sh:ro
       # Cache node_modules to avoid reinstall on restarts
