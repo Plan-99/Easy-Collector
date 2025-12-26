@@ -406,10 +406,10 @@ class MainWindow(QMainWindow):
             cfg["project_root"] = str(self.project_root)
             save_config(cfg)
 
-        # Ensure project exists; if not, copy from system payload or repo
-        self._ensure_project_present()
         # Always request auth on startup, then ensure the project root is writable.
         self._ensure_project_root_writable(force_auth=True)
+        # Ensure project exists; if not, copy from system payload or repo
+        self._ensure_project_present()
         # Unify compose service name to 'service' inside project compose files
         self._unify_compose_service()
         # Ensure docker-compose.yml matches the selected variant
@@ -1172,7 +1172,16 @@ class MainWindow(QMainWindow):
 
     def _is_valid_project_root(self, path: Path) -> bool:
         try:
-            return bool(path) and path.is_dir() and (path / "docker-compose.yml").exists()
+            if not path or not path.is_dir():
+                return False
+            required = [
+                path / "docker-compose.yml",
+                path / "Dockerfile",
+                path / "start_services.sh",
+                path / "src" / "backend",
+                path / "src" / "ui",
+            ]
+            return all(p.exists() for p in required)
         except Exception:
             return False
 
@@ -1378,7 +1387,8 @@ class MainWindow(QMainWindow):
         try:
             user = pwd.getpwuid(os.getuid()).pw_name
             group = grp.getgrgid(os.getgid()).gr_name
-            cmd = "chown -R %s:%s %s" % (
+            cmd = "mkdir -p %s && chown -R %s:%s %s" % (
+                shlex.quote(str(path)),
                 shlex.quote(user),
                 shlex.quote(group),
                 shlex.quote(str(path)),
@@ -1845,7 +1855,7 @@ class MainWindow(QMainWindow):
             frontend_ok = self._is_frontend_up()
             detail = f"프론트엔드: {'준비완료' if frontend_ok else '대기중'} | 백엔드: {'준비완료' if backend_ok else '대기중'}"
             self._set_preload_detail(detail)
-            if backend_ok and frontend_ok:
+            if backend_ok:
                 self._stop_ready_timer()
                 self._stop_ready_timeout()
                 self._hide_preload_dialog(ready=True)
@@ -1861,13 +1871,14 @@ class MainWindow(QMainWindow):
         if self._ready_check_timer is not None:
             self._ready_check_timer.start()
 
-        # Fail fast if services never become healthy
+        # Optional timeout if configured
         timeout_ms = self._resolve_ready_timeout_ms()
-        self._ready_timeout_timer = QTimer(self)
-        self._ready_timeout_timer.setSingleShot(True)
-        self._ready_timeout_timer.setInterval(timeout_ms)
-        self._ready_timeout_timer.timeout.connect(self._on_ready_timeout)
-        self._ready_timeout_timer.start()
+        if timeout_ms > 0:
+            self._ready_timeout_timer = QTimer(self)
+            self._ready_timeout_timer.setSingleShot(True)
+            self._ready_timeout_timer.setInterval(timeout_ms)
+            self._ready_timeout_timer.timeout.connect(self._on_ready_timeout)
+            self._ready_timeout_timer.start()
 
     def _check_backend_ready(self) -> bool:
         try:
@@ -1956,36 +1967,7 @@ class MainWindow(QMainWindow):
 
         proc.finished.connect(_on_finish)
 
-        stop_triggered = {"done": False}
-
-        def _stop_services():
-            if stop_triggered["done"]:
-                return
-            stop_triggered["done"] = True
-            self.append_log("[STOP] 로그 창 종료로 서비스 중지 중 ...")
-            # Try synchronous compose down first
-            try:
-                subprocess.run(
-                    ["docker", "compose", "down", "--remove-orphans"],
-                    cwd=str(self.project_root),
-                    check=False,
-                    timeout=20,
-                    capture_output=True,
-                    text=True,
-                )
-            except Exception:
-                pass
-            # Ensure container is gone even if compose down failed/wasn't running
-            try:
-                subprocess.run(
-                    ["docker", "rm", "-f", "easy_collector_service"],
-                    check=False,
-                    timeout=10,
-                    capture_output=True,
-                    text=True,
-                )
-            except Exception:
-                pass
+        on_close_called = {"done": False}
 
         def _cleanup(*_):
             try:
@@ -1994,9 +1976,8 @@ class MainWindow(QMainWindow):
                 proc.kill()
             except Exception:
                 pass
-            _stop_services()
-            if on_close and not stop_triggered.get("closed"):
-                stop_triggered["closed"] = True
+            if on_close and not on_close_called["done"]:
+                on_close_called["done"] = True
                 try:
                     on_close()
                 except Exception:
@@ -2014,15 +1995,17 @@ class MainWindow(QMainWindow):
         self._stop_ready_timer()
         self._stop_ready_timeout()
         self._hide_preload_dialog()
-        self.append_log("[ERROR] 서비스가 제시간에 준비되지 않아 중지되었습니다.")
+        self.append_log("[ERROR] 서비스가 제시간에 준비되지 않아 중지합니다.")
         logs = self._collect_docker_logs("easy_collector_service", tail=200)
         self._show_docker_logs_follow(
             "서비스 시작 실패",
             container="easy_collector_service",
             tail=200,
             initial_text=logs,
-            on_close=lambda: QApplication.quit(),
         )
+        if docker_compose_available() and self._is_valid_project_root(self.project_root):
+            self.append_log("[STOP] docker compose down --remove-orphans ...")
+            self.run_compose(["down", "--remove-orphans"], on_finish=self._on_stop_finished)
 
     def load_ui(self):
         url = QUrl(FRONTEND_URL)
