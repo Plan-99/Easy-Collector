@@ -7,6 +7,8 @@ import shlex
 import shutil
 import subprocess
 import time
+import pwd
+import grp
 from pathlib import Path
 
 # Apply safe Qt WebEngine defaults BEFORE importing Qt modules
@@ -406,6 +408,8 @@ class MainWindow(QMainWindow):
 
         # Ensure project exists; if not, copy from system payload or repo
         self._ensure_project_present()
+        # Ensure project root is writable so later operations don't keep prompting.
+        self._ensure_project_root_writable()
         # Unify compose service name to 'service' inside project compose files
         self._unify_compose_service()
         # Ensure docker-compose.yml matches the selected variant
@@ -1305,16 +1309,75 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
             return False
+        if not self._ensure_project_root_writable():
+            try:
+                self.append_log("[VARIANT][ERROR] 프로젝트 경로 권한 확보에 실패했습니다.")
+            except Exception:
+                pass
+            return False
         try:
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
             return True
         except Exception as e:
             try:
+                if isinstance(e, PermissionError):
+                    if self._ensure_project_root_writable():
+                        shutil.copy2(src, dst)
+                        return True
+            except Exception:
+                pass
+            try:
                 self.append_log(f"[VARIANT][ERROR] compose 템플릿 적용 실패: {e}")
             except Exception:
                 pass
             return False
+
+    def _ensure_project_root_writable(self) -> bool:
+        if getattr(self, "_project_root_writable_fixed", False):
+            return True
+        path = getattr(self, "project_root", None)
+        if not path:
+            return False
+        needs_escalation = False
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            test_file = path / ".ec_write_test"
+            test_file.write_text("ok")
+            try:
+                test_file.unlink()
+            except Exception:
+                pass
+        except Exception:
+            needs_escalation = True
+        compose_file = path / "docker-compose.yml"
+        if compose_file.exists() and not os.access(compose_file, os.W_OK):
+            needs_escalation = True
+        if not needs_escalation:
+            self._project_root_writable_fixed = True
+            return True
+        if not shutil.which("pkexec"):
+            return False
+        try:
+            user = pwd.getpwuid(os.getuid()).pw_name
+            group = grp.getgrgid(os.getgid()).gr_name
+            cmd = "chown -R %s:%s %s" % (
+                shlex.quote(user),
+                shlex.quote(group),
+                shlex.quote(str(path)),
+            )
+            res = subprocess.run(
+                ["pkexec", "/bin/sh", "-c", cmd],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            if res.returncode == 0:
+                self._project_root_writable_fixed = True
+                return True
+        except Exception:
+            pass
+        return False
 
     def _has_host_nvidia_driver(self) -> bool:
         smi = shutil.which("nvidia-smi")
