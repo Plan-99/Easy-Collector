@@ -408,8 +408,8 @@ class MainWindow(QMainWindow):
 
         # Ensure project exists; if not, copy from system payload or repo
         self._ensure_project_present()
-        # Ensure project root is writable so later operations don't keep prompting.
-        self._ensure_project_root_writable()
+        # Always request auth on startup, then ensure the project root is writable.
+        self._ensure_project_root_writable(force_auth=True)
         # Unify compose service name to 'service' inside project compose files
         self._unify_compose_service()
         # Ensure docker-compose.yml matches the selected variant
@@ -422,6 +422,12 @@ class MainWindow(QMainWindow):
         if dev_src_saved:
             self.dev_src_root = Path(dev_src_saved).expanduser()
         self.update_dev_src_label()
+
+        # Always sync latest from dev source on startup (if configured).
+        try:
+            QTimer.singleShot(0, self._auto_sync_on_start)
+        except Exception:
+            pass
 
         self.update_state_label()
         self.update_buttons()
@@ -1333,11 +1339,16 @@ class MainWindow(QMainWindow):
                 pass
             return False
 
-    def _ensure_project_root_writable(self) -> bool:
-        if getattr(self, "_project_root_writable_fixed", False):
+    def _ensure_project_root_writable(self, force_auth: bool = False) -> bool:
+        if not force_auth and getattr(self, "_project_root_writable_fixed", False):
             return True
         path = getattr(self, "project_root", None)
         if not path:
+            return False
+        if force_auth:
+            if self._run_pkexec_chown(path):
+                self._project_root_writable_fixed = True
+                return True
             return False
         needs_escalation = False
         try:
@@ -1356,6 +1367,12 @@ class MainWindow(QMainWindow):
         if not needs_escalation:
             self._project_root_writable_fixed = True
             return True
+        if self._run_pkexec_chown(path):
+            self._project_root_writable_fixed = True
+            return True
+        return False
+
+    def _run_pkexec_chown(self, path: Path) -> bool:
         if not shutil.which("pkexec"):
             return False
         try:
@@ -1372,12 +1389,31 @@ class MainWindow(QMainWindow):
                 stderr=subprocess.DEVNULL,
                 check=False,
             )
-            if res.returncode == 0:
-                self._project_root_writable_fixed = True
-                return True
+            return res.returncode == 0
+        except Exception:
+            return False
+
+    def _auto_sync_on_start(self):
+        if not self._is_valid_dev_src(self.dev_src_root):
+            try:
+                self.append_log("[SYNC][AUTO] 원본 경로가 없어 자동 동기화를 건너뜁니다.")
+            except Exception:
+                pass
+            return
+        try:
+            self.append_log("[SYNC][AUTO] 최신 코드 자동 동기화를 시작합니다.")
         except Exception:
             pass
-        return False
+        if not self._sync_dev_files(show_errors=False):
+            try:
+                self.append_log("[SYNC][AUTO][WARN] 자동 동기화에 실패했습니다.")
+            except Exception:
+                pass
+            return
+        try:
+            self.append_log("[SYNC][AUTO] 자동 동기화 완료.")
+        except Exception:
+            pass
 
     def _has_host_nvidia_driver(self) -> bool:
         smi = shutil.which("nvidia-smi")
