@@ -55,11 +55,12 @@ try:
     )
     try:
         from PySide6.QtWebEngineWidgets import QWebEngineView  # optional
-        from PySide6.QtWebEngineCore import QWebEngineProfile
+        from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
         HAS_WEBENGINE = not _force_external
     except Exception:
         QWebEngineView = None  # type: ignore
         QWebEngineProfile = None  # type: ignore
+        QWebEnginePage = None  # type: ignore
         HAS_WEBENGINE = False
     from PySide6.QtGui import QDesktopServices, QIcon, QPixmap, QFont
 except Exception:
@@ -72,11 +73,12 @@ except Exception:
     )
     try:
         from PyQt6.QtWebEngineWidgets import QWebEngineView  # optional
-        from PyQt6.QtWebEngineCore import QWebEngineProfile
+        from PyQt6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
         HAS_WEBENGINE = not _force_external
     except Exception:
         QWebEngineView = None  # type: ignore
         QWebEngineProfile = None  # type: ignore
+        QWebEnginePage = None  # type: ignore
         HAS_WEBENGINE = False
     from PyQt6.QtGui import QDesktopServices, QIcon, QPixmap, QFont
 
@@ -322,6 +324,8 @@ class MainWindow(QMainWindow):
         self._pending_quick_apply = False
         self._log_windows: list[QDialog] = []
         self._auto_launch_after_install = True
+        self._devtools_view: QWebEngineView | None = None
+        self._devtools_dialog: QDialog | None = None
 
         # UI elements
         self.status_label = QLabel(self)
@@ -389,6 +393,10 @@ class MainWindow(QMainWindow):
         nav_layout.addWidget(self.btn_nav_back)
         nav_layout.addWidget(self.btn_nav_forward)
 
+        self.btn_nav_refresh = _mk_btn("↻", "페이지 새로고침")
+        self.btn_nav_refresh.clicked.connect(lambda: self._nav_action("reload"))
+        nav_layout.addWidget(self.btn_nav_refresh)
+
         self.project_path_display = QLineEdit(self)
         self.project_path_display.setReadOnly(True)
         self.project_path_display.setPlaceholderText("원본 프로젝트 경로 (클릭하여 변경)")
@@ -409,7 +417,7 @@ class MainWindow(QMainWindow):
         self.btn_quick_apply.clicked.connect(self._on_quick_apply_clicked)
         nav_layout.addWidget(self.btn_quick_apply)
 
-        self.btn_logs = _mk_btn("Log", "서비스 로그 보기")
+        self.btn_logs = _mk_btn("⚙︎", "서비스 로그/DevTools 보기")
         self.btn_logs.clicked.connect(self.open_logs_window)
         nav_layout.addWidget(self.btn_logs)
 
@@ -558,6 +566,7 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
         self._log_windows.clear()
+        self._close_devtools()
 
     def closeEvent(self, event):
         """Exit and stop the service container so next launch starts cleanly."""
@@ -2321,11 +2330,45 @@ class MainWindow(QMainWindow):
                     self.web_view.forward()
                 except Exception:
                     self.web_view.history().forward()
+            elif action == "reload":
+                try:
+                    self.web_view.reload()
+                except Exception:
+                    try:
+                        self.web_view.setUrl(self.web_view.url())
+                    except Exception:
+                        pass
         finally:
             try:
                 self._update_nav_buttons()
             except Exception:
                 pass
+
+    def keyPressEvent(self, event):
+        try:
+            key = event.key()
+        except Exception:
+            key = None
+        handled = False
+        if key == Qt.Key_F5:
+            self._nav_action("reload")
+            handled = True
+        elif key == Qt.Key_F12:
+            if self._devtools_dialog and self._devtools_dialog.isVisible():
+                self._close_devtools()
+            else:
+                self._open_devtools()
+            handled = True
+        if handled:
+            try:
+                event.accept()
+            except Exception:
+                pass
+            return
+        try:
+            super().keyPressEvent(event)
+        except Exception:
+            pass
 
     def _on_quick_apply_clicked(self):
         if not self._is_valid_dev_src(self.dev_src_root):
@@ -2363,25 +2406,56 @@ class MainWindow(QMainWindow):
         self._ensure_service_running("RESTART", restart_if_running=True, on_finish=_after_restart)
 
     def open_logs_window(self):
+        menu = QMenu(self)
+        act_launcher = menu.addAction("Launcher Log")
+        act_frontend = menu.addAction("Frontend Log")
+        act_backend = menu.addAction("Backend Log")
+        act_devtools = menu.addAction("DevTools")
+
         svc = "service"
         backend_log = shlex.quote(str(SERVICE_LOG_DIR / "backend.log"))
         frontend_log = shlex.quote(str(SERVICE_LOG_DIR / "frontend.log"))
         tail_backend = ["exec", "-T", svc, "bash", "-lc", f"tail -n 200 -F {backend_log}"]
         tail_frontend = ["exec", "-T", svc, "bash", "-lc", f"tail -n 200 -F {frontend_log}"]
-        backend = self._create_log_dialog("Backend Logs", tail_backend)
-        frontend = self._create_log_dialog("Frontend Logs", tail_frontend)
-        ui_log = self._create_ui_log_dialog("Launcher Logs", UI_LOG_FILE)
 
-        ordered = []
-        for dlg in (frontend, backend, ui_log):
-            if dlg is None:
-                continue
-            self._register_log_window(dlg)
-            ordered.append(dlg)
+        def _open_backend():
+            self._close_log_windows()
+            dlg = self._create_log_dialog("Backend Logs", tail_backend)
+            if dlg:
+                self._register_log_window(dlg)
+                dlg.show()
 
-        self._arrange_log_windows_side_by_side(ordered)
-        for dlg in ordered:
-            dlg.show()
+        def _open_frontend():
+            self._close_log_windows()
+            dlg = self._create_log_dialog("Frontend Logs", tail_frontend)
+            if dlg:
+                self._register_log_window(dlg)
+                dlg.show()
+
+        def _open_launcher():
+            self._close_log_windows()
+            dlg = self._create_ui_log_dialog("Launcher Logs", UI_LOG_FILE)
+            if dlg:
+                self._register_log_window(dlg)
+                dlg.show()
+
+        def _open_dev():
+            self._close_log_windows()
+            self._open_devtools()
+
+        act_launcher.triggered.connect(_open_launcher)
+        act_frontend.triggered.connect(_open_frontend)
+        act_backend.triggered.connect(_open_backend)
+        act_devtools.triggered.connect(_open_dev)
+
+        try:
+            pos = self.btn_logs.mapToGlobal(self.btn_logs.rect().bottomLeft())
+        except Exception:
+            pos = None
+        if pos:
+            menu.exec(pos)
+        else:
+            menu.exec(QCursor.pos())
 
     def _create_log_dialog(self, title: str, compose_args: list[str]) -> QDialog | None:
         dlg = QDialog(self)
@@ -2396,6 +2470,7 @@ class MainWindow(QMainWindow):
         return dlg
 
     def _register_log_window(self, dlg: QDialog):
+        self._close_log_windows()
         self._log_windows.append(dlg)
         def _cleanup(*_):
             try:
@@ -2493,6 +2568,56 @@ class MainWindow(QMainWindow):
         for dlg in dialogs:
             dlg.move(max(start_x, 0), max(y, 0))
             start_x += dlg.width() + spacing
+
+    def _open_devtools(self):
+        """Open WebEngine DevTools window when available."""
+        if not HAS_WEBENGINE or self.web_view is None:
+            return None
+        try:
+            page = self.web_view.page()
+            prof = page.profile() if page else None
+        except Exception:
+            return None
+        if page is None or prof is None or QWebEnginePage is None:
+            return None
+        try:
+            dev_page = QWebEnginePage(prof, self)
+            dev_page.setInspectedPage(page)
+        except Exception:
+            return None
+        try:
+            if self._devtools_dialog is None:
+                dlg = QDialog(self)
+                dlg.setWindowTitle("DevTools")
+                dlg.resize(1100, 800)
+                layout = QVBoxLayout(dlg)
+                layout.setContentsMargins(0, 0, 0, 0)
+                layout.setSpacing(0)
+                view = QWebEngineView(dlg)
+                layout.addWidget(view)
+                self._devtools_dialog = dlg
+                self._devtools_view = view
+                try:
+                    dlg.destroyed.connect(lambda *_: self._close_devtools())
+                except Exception:
+                    pass
+            if self._devtools_view:
+                self._devtools_view.setPage(dev_page)
+            if self._devtools_dialog:
+                self._devtools_dialog.show()
+                self._devtools_dialog.raise_()
+            return self._devtools_dialog
+        except Exception:
+            return None
+
+    def _close_devtools(self):
+        if self._devtools_dialog:
+            try:
+                self._devtools_dialog.close()
+            except Exception:
+                pass
+        self._devtools_view = None
+        self._devtools_dialog = None
 
     # ------------------------ Process helpers ------------------------
     def run_compose(self, args: list[str], on_finish=None):
