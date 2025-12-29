@@ -39,6 +39,10 @@ rsync -a "$RELEASE_DIR/ui/" "$STAGE${INSTALL_ROOT}/ui/"
 if [ -f "$ROOT_DIR/app_icon.png" ]; then
   cp "$ROOT_DIR/app_icon.png" "$STAGE${INSTALL_ROOT}/app_icon.png"
 fi
+# Keep version file alongside the embedded UI so runtime can read it
+if [ -f "$VERSION_FILE" ]; then
+  cp "$VERSION_FILE" "$STAGE${INSTALL_ROOT}/VERSION"
+fi
 
 # Always embed a Python virtualenv with PySide6 to avoid apt GUI deps
 VENV_EMBEDDED=1
