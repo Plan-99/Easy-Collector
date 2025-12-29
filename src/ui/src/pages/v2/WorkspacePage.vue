@@ -573,9 +573,7 @@ const robots = computed(() => {
         return [];
     }
     return selectedWorkspace.value.assembly.robots.map((robot) => {
-        const handler = useRobot(robot, () => {
-            handler.subscribeRobot(() => {});
-        });
+        const handler = useRobot(robot);
         robot.handler = handler;
         return robot;
     })

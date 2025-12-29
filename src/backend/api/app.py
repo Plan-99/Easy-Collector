@@ -36,7 +36,8 @@ argparse = argparse.ArgumentParser(description='Easy Collector Web API')
 argparse.add_argument('--debug', action='store_true', help='Enable debug mode')
 args = argparse.parse_args()
 # 디버그 모드 설정
-debug = args.debug
+# debug = args.debug
+debug = True
 
 # Flask 앱과 SocketIO 객체 생성
 app = Flask(__name__)

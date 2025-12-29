@@ -511,7 +511,7 @@ PY
 cd /root/src
 log_status "[BACKEND] Starting Flask-SocketIO API on 0.0.0.0:5000"
 # Prime backend log so it's never empty
-echo "[BACKEND][BOOT] $(date -Is) starting backend.api.app" >>"$LOG_DIR/backend.log" 2>/dev/null || true
+echo "[BACKEND][BOOT] $(date -Is) starting backend.api.app --debug" >>"$LOG_DIR/backend.log" 2>/dev/null || true
 # Double-check import before start; hard-fail if unresolved
 ensure_orator
 ensure_watchfiles

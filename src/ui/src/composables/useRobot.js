@@ -37,6 +37,7 @@ export function useRobot(robot, robotOnCallback=() => {}) {
 
   if (robot.status === 'on') {
     api.post(`/robot/${robot.id}/:subscribe_robot`);
+    subscribeRobot(() => {});
     robotOnCallback();
   }
 

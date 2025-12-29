@@ -151,7 +151,7 @@ async function stopTraining() {
     } catch (error) {
         Notify.create({ color: 'negative', message: `${error}: Failed to stop training.` });
     }
-    emit('update:modelValue', false);
+    // emit('update:modelValue', false);
 }
 
 function cancelTraing() {
