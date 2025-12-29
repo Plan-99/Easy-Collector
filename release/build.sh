@@ -5,11 +5,11 @@ PKG=easytrainer
 ARCH=${ARCH:-amd64}
 INSTALL_ROOT=/opt/easytrainer
 PAYLOAD_DIR=/usr/share/easytrainer-project
-VERSION_FILE="$ROOT_DIR/VERSION"
 
 # Paths
 RELEASE_DIR=$(cd "$(dirname "$0")" && pwd)
 ROOT_DIR=$(cd "$RELEASE_DIR/.." && pwd)
+VERSION_FILE="$ROOT_DIR/VERSION"
 
 # Version handling: control file always needs a Version, but filename can omit it
 VERSION_ENV="${VERSION:-}"

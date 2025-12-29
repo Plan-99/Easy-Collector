@@ -59,9 +59,8 @@
   - 제거: `bash scripts/clean_easytrainer.sh` *주의 : DB 데이터, 학습데이터 삭제 됨.
 
 - 배포 deb 생성
-  - 기본: `bash release/build.sh`
-  - 버전 지정: `VERSION=1.0.1 bash release/build.sh`
-  - 결과물: `release/easytrainer_amd64.deb`
+  - 기본: `bash release/build.sh` - 버전 자동 지정
+  - 결과물: `release/easytrainer_버전_amd64.deb`
 
 ---
 
