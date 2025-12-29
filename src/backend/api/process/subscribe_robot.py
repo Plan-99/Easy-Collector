@@ -20,7 +20,5 @@ def subscribe_robot_topic(agent: Agent, node, socketio_instance, task_control):
             })
             time.sleep(0.1)
         except Exception as e:
-            socketio_instance.emit('log_robot_' + str(agent.id), {
-                'log': '[ERROR] ' + str(e),
-            })
+            print(f"[ERROR] subscribe_robot_topic: {str(e)}")
             break

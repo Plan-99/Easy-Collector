@@ -70,9 +70,8 @@ def augment_dataset(dataset_id, aug_dataset_id, lightness, rectangles, salt_and_
     aug_dataset_path = os.path.join('/root/src/backend/datasets', str(aug_dataset_id))
 
     if not os.path.exists(dataset_path):
-        log_message = f"Dataset path {dataset_path} does not exist."
+        log_message = f"[ERROR] Dataset path {dataset_path} does not exist."
         print(log_message)
-        socketio_instance.emit('log_augment_dataset', {'log': log_message, 'type': 'stderr'})
         return
 
     if os.path.exists(aug_dataset_path):
@@ -83,7 +82,7 @@ def augment_dataset(dataset_id, aug_dataset_id, lightness, rectangles, salt_and_
 
     for hdf5_file in hdf5_files:
         if task_control.get('stop'):
-            socketio_instance.emit('log_augment_dataset', {'log': 'Stopping Data Augmentation', 'type': 'stdout'})
+            print("Stopping Data Augmentation")
             return
 
         src_file_path = os.path.join(dataset_path, hdf5_file)
@@ -121,12 +120,11 @@ def augment_dataset(dataset_id, aug_dataset_id, lightness, rectangles, salt_and_
                     
                     image_group[key][...] = np.array(augmented_images)
 
-            socketio_instance.emit('log_augment_dataset', {'log': f'Augmented {hdf5_file}', 'type': 'stdout'})
+            print(f"Augmented file saved: {dest_file_path}")
 
         except Exception as e:
-            log_message = f"Error processing file {hdf5_file}: {e}"
+            log_message = f"[ERROR] Error processing file {hdf5_file}: {e}"
             print(log_message)
-            socketio_instance.emit('log_augment_dataset', {'log': log_message, 'type': 'stderr'})
             
     socketio_instance.emit('augmentation_complete', {'dataset_id': aug_dataset_id})
     

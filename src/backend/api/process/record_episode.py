@@ -34,10 +34,7 @@ def record_episode(node, dataset_id, agents, assembly_id, sensors, task, languag
 
         dataset_name = f"episode_{get_auto_index(dataset_dir)}.hdf5"
 
-        socketio_instance.emit('log_record_episode', {
-            'log': f'Recording Data: {dataset_name}',
-            'type': 'stdout '
-        })
+        print(f"Recording Data: {dataset_name}")
 
         max_timesteps = task['episode_len']
         # camera_names = task_config['camera_names']
@@ -63,10 +60,7 @@ def record_episode(node, dataset_id, agents, assembly_id, sensors, task, languag
             teleop = TeleoperatorModel.where('type', 'leader').where('assembly_id', assembly_id).first()
 
             if teleop is None:
-                socketio_instance.emit('log_record_episode', {
-                    'log': f'[ERROR]: No leader robot preset for assembly {assembly_id}',
-                    'type': 'stderr'
-                })
+                print(f'[ERROR]: No leader robot preset for assembly {assembly_id}')
                 tele_control['stop'] = True
                 return
             
@@ -87,26 +81,17 @@ def record_episode(node, dataset_id, agents, assembly_id, sensors, task, languag
 
         for agent in agents:
             if agent.joint_states is None:
-                socketio_instance.emit('log_record_episode', {
-                    'log': f'[ERROR]: No joint states from robot {agent.id}',
-                    'type': 'stderr'
-                })
+                print(f'[ERROR]: No joint states from robot {agent.id}')
                 tele_control['stop'] = True
                 return
             if agent.joint_actions is None:
-                socketio_instance.emit('log_record_episode', {
-                    'log': f'[ERROR]: No joint commands from robot {agent.id}',
-                    'type': 'stderr'
-                })
+                print(f'[ERROR]: No joint commands from robot {agent.id}')
                 tele_control['stop'] = True
                 return
             
         for sensor in sensors:
             if getattr(env, f'sensor_{sensor["id"]}') is None:
-                socketio_instance.emit('log_record_episode', {
-                    'log': f'[ERROR]: No image data from sensor {sensor["id"]}',
-                    'type': 'stderr'
-                })
+                print(f'[ERROR]: No data from sensor {sensor["id"]}')
                 tele_control['stop'] = True
                 return
             
@@ -115,10 +100,7 @@ def record_episode(node, dataset_id, agents, assembly_id, sensors, task, languag
                 'progress': (t+1) / max_timesteps,
             })
             if task_control['stop']:
-                socketio_instance.emit('log_record_episode', {
-                    'log': f'Stopping Data Collection',
-                    'type': 'stdout '
-                })
+                print('Stopping episode recording as requested.')
                 tele_control['stop'] = True
                 return
 
@@ -126,10 +108,7 @@ def record_episode(node, dataset_id, agents, assembly_id, sensors, task, languag
             timesteps.append(ts)
             time.sleep(0.1)
 
-        socketio_instance.emit('log_record_episode', {
-            'log': f'Saving Data: {dataset_name}',
-            'type': 'stdout '
-        })
+        print(f'Saving Data: {dataset_name}')
 
         data_dict = {}
         for agent in agents:
@@ -192,21 +171,13 @@ def record_episode(node, dataset_id, agents, assembly_id, sensors, task, languag
             'name': dataset_name,
         })
             
-        socketio_instance.emit('log_record_episode', {
-            'log': f'Saved Data: {dataset_name} in {time.time() - t0:.2f} seconds',
-            'type': 'stdout '
-        })
+        print(f"Data saved at {dataset_path}, time taken: {time.time() - t0:.4f} sec")
 
         tele_control['stop'] = True
 
         time.sleep(5)
 
-    
-
-    socketio_instance.emit('log_record_episode', {
-        'log': f'Stopping Data Collection',
-        'type': 'stdout '
-    })
+    print("Episode recording process ended.")
 
 # def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
 #     max_idx = 1000

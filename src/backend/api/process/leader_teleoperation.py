@@ -10,13 +10,13 @@ import threading
 from ...env.dxl_controller import DxlController
 from .subscribe_dynamixel import get_available_ports
 from collections import defaultdict
+import sys
 
 
 class Leader():
-    def __init__(self, agents, socketio_instance, teleop_setting, log_emit_id='leader_teleoperation') -> None:
+    def __init__(self, agents, socketio_instance, teleop_setting) -> None:
         # ROS 노드 초기화ur5e/ur5e_scaled_pos_joint_traj_controller/command
         self.socketio_instance = socketio_instance
-        self.log_emit_id = log_emit_id
         # self.origin = leader_robot_preset['origin']  # 다이나믹셀의 원점 위치
         # self.gripper_dxl_range = leader_robot_preset['gripper_dxl_range']  # 다이나믹셀의 원점 위치
         # self.sign_corrector = leader_robot_preset['sign_corrector']
@@ -48,6 +48,7 @@ class Leader():
             )
 
         self.ema = float(teleop_setting.get('ema', 0.0)) # EMA 필터 값
+
 
 
     def read_dxl_and_write_to_joint_map(self):
@@ -142,16 +143,11 @@ class Leader():
             #         pos.append(follower_pos[index])
             #     else:
             #         pos.append(self.rad_to_tick(follower_pos[index], dxl_id))
-            self.socketio_instance.emit(self.log_emit_id, {
-                'log': f'Syncing Leader Robot',
-                'type': 'stdout'
-            })
+
+            print("Syncing Leader Robot")
             moved = dxl_controller.move_controller(dxl_joints)
             if moved:
-                self.socketio_instance.emit(self.log_emit_id, {
-                    'log': 'Will you start teleoperation? Close Gripper to Start!',
-                    'type': 'stdout '
-                })
+                print("[NOTICE] Will you start teleoperation? Close Gripper to Start!")
 
                 gripper_closed = False
                 while not gripper_closed:
@@ -196,114 +192,101 @@ class Leader():
         
 
     def position_pub(self, task_control):
+        try:
+            while not task_control['stop']:
+                start = time.time()
 
-        while not task_control['stop']:
-            start = time.time()
+                # 1. 하드웨어 읽기 작업 (여기서 SerialException 등이 발생할 확률이 높음)
+                try:
+                    self.read_dxl_and_write_to_joint_map()
+                except Exception as e:
+                    print(f"[ERROR] Dynamixel Read Failed: {e}", flush=True)
+                    break # 읽기 실패 시 루프 중단
 
-            self.read_dxl_and_write_to_joint_map()
+                group_by_agent = self.group_joints_by_agent()
 
-            group_by_agent = self.group_joints_by_agent()
+                gripper_rad_pos = None
+                for agent in self.agents:
+                    joint_list = group_by_agent[agent.id]
+                    for joint in joint_list:
+                        joint_name = joint['joint_name']
+                        joint_index = agent.joint_names.index(joint_name)
+                        dxl_id = joint['dxl_id']
+                        position = joint['dxl_position']
+                        if joint.get('is_gripper', True):
+                            joint['target_agent_position'] = self.get_gripper_pos(joint)
 
-            gripper_rad_pos = None
-            for agent in self.agents:
-                joint_list = group_by_agent[agent.id]
-                for joint in joint_list:
-                    joint_name = joint['joint_name']
-                    joint_index = agent.joint_names.index(joint_name)
-                    dxl_id = joint['dxl_id']
-                    position = joint['dxl_position']
-                    if joint.get('is_gripper', True):
-                        joint['target_agent_position'] = self.get_gripper_pos(joint)
+                        else:
+                            target_pos = self.get_rad_pos(joint)
 
-                    else:
-                        target_pos = self.get_rad_pos(joint)
+                            if 'prev_agent_position' not in joint:  # 첫 번째 루프에서 이전 위치 초기화
+                                joint['prev_agent_position'] = target_pos
 
-                        if 'prev_agent_position' not in joint:  # 첫 번째 루프에서 이전 위치 초기화
-                            joint['prev_agent_position'] = target_pos
-
-                        # EMA 필터 적용
-                        joint['target_agent_position'] = self.ema * joint['prev_agent_position'] + (1 - self.ema) * target_pos
-                        joint['prev_agent_position'] = joint['target_agent_position']
-
-
-                action = agent.fetch_joint_map_to_action(joint_list)
-                agent.move_joint_step(action)
-                end = time.time()
-            # self.target_pos[-1] = self.get_gripper_pos()
-            #-----------------------------------------
+                            # EMA 필터 적용
+                            joint['target_agent_position'] = self.ema * joint['prev_agent_position'] + (1 - self.ema) * target_pos
+                            joint['prev_agent_position'] = joint['target_agent_position']
 
 
+                    action = agent.fetch_joint_map_to_action(joint_list)
+                    agent.move_joint_step(action)
+                    end = time.time()
+                # self.target_pos[-1] = self.get_gripper_pos()
+                #-----------------------------------------
 
-            # 그리퍼를 벌리면 정지하도록 하는 코드--------------
 
-            should_pause = [False] * len(self.agents)
-            should_resume = [False] * len(self.agents)
-            dxl_contoller_index = 0
+
+                # 그리퍼를 벌리면 정지하도록 하는 코드--------------
+
+                should_pause = [False] * len(self.agents)
+                should_resume = [False] * len(self.agents)
+                dxl_contoller_index = 0
+                for port, dxl_controller in self.dxl_controllers.items():
+                    gripper_dxl_ids = dxl_controller.gripper_dxl_ids
+                    for dxl_id in gripper_dxl_ids:
+                        gripper_joint = self.get_joint_by_dxl_id(port, dxl_id)
+                        dxl_pos = gripper_joint['dxl_position']
+                        gripper_range = gripper_joint['gripper_dxl_range']
+
+                        if gripper_range[0] < gripper_range[1]:
+                            should_pause[dxl_contoller_index] = dxl_pos < gripper_range[0] - 200
+                            should_resume[dxl_contoller_index] = dxl_pos > gripper_range[0] - 100
+                        else:
+                            should_pause[dxl_contoller_index] = dxl_pos > gripper_range[0] + 200
+                            should_resume[dxl_contoller_index] = dxl_pos < gripper_range[0] + 100
+
+                    dxl_contoller_index += 1
+
+                if not self.is_paused and all(should_pause):
+                    self.is_paused = True
+                    for dxl_controller in self.dxl_controllers.values():
+                        dxl_controller.enable_torque()
+
+                    print("Teleoperation Paused")
+
+                elif self.is_paused and all(should_resume):
+                    self.is_paused = False
+                    for dxl_controller in self.dxl_controllers.values():
+                        dxl_controller.remove_torque()
+
+                    print("Teleoperation Resumed")
+
+        except Exception as e:
+            # 예상치 못한 전체 루프 에러 처리
+            import traceback
+            error_msg = traceback.format_exc()
+            print(f"[CRITICAL ERROR] position_pub loop crashed:\n{error_msg}", flush=True)
+            # SocketIOStream을 통해 프론트엔드로도 전송됨
+            raise e
+        
+        finally:
+            # 에러가 나든 정상 종료되든 반드시 실행되는 블록
+            print("Cleaning up Leader Robot resources...", flush=True)
             for port, dxl_controller in self.dxl_controllers.items():
-                gripper_dxl_ids = dxl_controller.gripper_dxl_ids
-                for dxl_id in gripper_dxl_ids:
-                    gripper_joint = self.get_joint_by_dxl_id(port, dxl_id)
-                    dxl_pos = gripper_joint['dxl_position']
-                    gripper_range = gripper_joint['gripper_dxl_range']
-
-                    if gripper_range[0] < gripper_range[1]:
-                        should_pause[dxl_contoller_index] = dxl_pos < gripper_range[0] - 200
-                        should_resume[dxl_contoller_index] = dxl_pos > gripper_range[0] - 100
-                    else:
-                        should_pause[dxl_contoller_index] = dxl_pos > gripper_range[0] + 200
-                        should_resume[dxl_contoller_index] = dxl_pos < gripper_range[0] + 100
-
-                dxl_contoller_index += 1
-
-            if not self.is_paused and all(should_pause):
-                self.is_paused = True
-                for dxl_controller in self.dxl_controllers.values():
-                    dxl_controller.enable_torque()
-                self.socketio_instance.emit(self.log_emit_id, {
-                    'log': 'Teleoperation Paused',
-                    'type': 'stdout'
-                })
-                print("Teleoperation Paused")
-
-            elif self.is_paused and all(should_resume):
-                self.is_paused = False
-                for dxl_controller in self.dxl_controllers.values():
+                try:
+                    # 안전을 위해 토크 해제 시도
                     dxl_controller.remove_torque()
-                self.socketio_instance.emit(self.log_emit_id, {
-                    'log': 'Teleoperation Resumed',
-                    'type': 'stdout'
-                })
-                print("Teleoperation Resumed")
-
-            # gripper_pos = positions[self.dxl_ids.index(self.trigger_dxl_id)]
-            # gripper_range = self.gripper_dxl_range[self.trigger_gripper_index]
-
-            # if gripper_range[0] < gripper_range[1]:
-            #     should_pause = gripper_pos < gripper_range[0] - 300
-            #     should_resume = gripper_pos > gripper_range[0] - 100
-            # else:
-            #     should_pause = gripper_pos > gripper_range[0] + 300
-            #     should_resume = gripper_pos < gripper_range[0] + 100
-
-            # if not self.is_paused and should_pause:
-            #     self.is_paused = True
-            #     self.dxl_controller.enable_torque()
-            #     self.socketio_instance.emit(self.log_emit_id, {
-            #         'log': 'Teleoperation Paused',
-            #         'type': 'stdout'
-            #     })
-            #     print("Teleoperation Paused")
-
-            # elif self.is_paused and should_resume:
-            #     self.is_paused = False
-            #     self.dxl_controller.remove_torque()
-            #     self.socketio_instance.emit(self.log_emit_id, {
-            #         'log': 'Teleoperation Resumed',
-            #         'type': 'stdout'
-            #     })
-            #     print("Teleoperation Resumed")
-            # #--------------------------------------------
-
-        for dxl_controller in self.dxl_controllers.values():
-            # dxl_controller.remove_torque()
-            dxl_controller.portHandler.closePort()
+                    # 포트 닫기
+                    dxl_controller.portHandler.closePort()
+                    print(f"Port {port} closed safely.", flush=True)
+                except:
+                    print(f"Failed to close port {port} cleanly.", flush=True)

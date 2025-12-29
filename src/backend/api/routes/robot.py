@@ -80,7 +80,7 @@ def start_robot():
         current_app.pm.start_process(
             name='can_config',
             command=['bash', script_path],
-            log_emit_id = 'log_' +  process_id
+            log_emit_id = process_id
         )
         time.sleep(1)
 

@@ -14,11 +14,11 @@ class DxlController:
 
         # 포트 열기 및 Baud rate 설정
         if not self.portHandler.openPort():
-            print("Failed to open the port")
-            return
+            print("[ERROR] Failed to open the port")
+            raise Exception("Failed to open the port")
         if not self.portHandler.setBaudRate(baudrate):
-            print("Failed to set baudrate")
-            return
+            print("[ERROR] Failed to set baudrate")
+            raise Exception("Failed to set baudrate")
         
         self.ADDR_PRESENT_POSITION = 132  # 예시: X-Series의 Present Position 주소
         self.LEN_PRESENT_POSITION = 4     # 예시: X-Series의 Present Position 길이 (bytes)
@@ -29,7 +29,7 @@ class DxlController:
         for dxl_id in self.dxl_ids:
             add_param_result = self.syncRead.addParam(dxl_id)
             if add_param_result != True:
-                print(f"[ID:{dxl_id}] GroupSyncRead addParam failed")
+                print(f"[ERROR] [ID:{dxl_id}] GroupSyncRead addParam failed")
 
         self.closed = False
         self.controlled = False

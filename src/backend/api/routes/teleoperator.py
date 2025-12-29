@@ -43,6 +43,7 @@ def dxl_read():
         f"subscribe_dxl",
         subscribe_dynamixel,
         socketio_instance=current_app.pm.socketio,
+        log_id="start_leader_robot",
     )
     
     return {
@@ -76,6 +77,7 @@ def create_teleoperator():
 def start_leader_teleoperation():
     data = request.json
     log_emit_id = data.get('log_emit_id', 'leader_teleoperation')
+    print(log_emit_id, '---------------------------------------------')
     assembly_id = data.get('assembly_id')
 
     assembly = AssemblyModel.find(assembly_id).to_dict()
@@ -91,9 +93,10 @@ def start_leader_teleoperation():
     try:
         agents = [current_app.agents[robot_id] for robot_id in robot_ids]
     except KeyError as e:
-        current_app.pm.socketio.emit(log_emit_id, {
-            'log': f'[ERROR]: Robot is not running now.',
-            'type': 'stderr'
+        current_app.pm.socketio.emit('task_log', {
+            'id': log_emit_id,
+            'message': f'[ERROR] Robot is not running. Turn on the robot first.',
+            'type': 'error'
         })
         return {'status': 'error', 'message': f'Robot with ID {str(e)} not found.'}, 404
 
@@ -101,11 +104,20 @@ def start_leader_teleoperation():
 
     teleoperator = TeleoperatorModel.where('assembly_id', assembly_id).where('type', 'leader').first()
     
-    leader = Leader(agents, current_app.pm.socketio, teleop_setting=teleoperator.settings, log_emit_id=log_emit_id)
-    leader.sync_leader_robot()
+    try:
+        leader = Leader(agents, current_app.pm.socketio, teleop_setting=teleoperator.settings)
+        leader.sync_leader_robot()
+    except Exception as e:
+        current_app.pm.socketio.emit('task_log', {
+            'id': log_emit_id,
+            'message': f'[ERROR] Leader Teleoperation Init Failed: {str(e)}',
+            'type': 'error'
+        })
+        return {'status': 'error', 'message': f'Leader Teleoperation Init Failed: {str(e)}'}, 500
     current_app.pm.start_function(
         name='leader_teleoperation',
         func=leader.position_pub,
+        log_id=log_emit_id,
     )
 
     return {'status': 'success', 'message': 'Leader teleoperation started'}, 200

@@ -3,6 +3,49 @@ import os
 import signal
 import atexit
 import traceback
+import io
+from contextlib import redirect_stdout
+import sys
+
+def get_log_type(message, default_type='stdout'):
+    """메시지 내용을 분석하여 로그 타입을 반환합니다."""
+    m = message.strip()
+    if m.startswith("[ERROR]"): return 'error'
+    if m.startswith("[NOTICE]"): return 'notice'
+    if m.startswith("[SUCCESS]"): return 'success'
+    if m.startswith("[WARNING]"): return 'warning'
+    return default_type
+
+
+class SocketIOStream(io.TextIOBase):
+    def __init__(self, socketio, task_name):
+        self.socketio = socketio
+        self.task_name = task_name
+        self.terminal = sys.__stdout__
+
+    def write(self, s):
+        # 공백이나 줄바꿈만 있는 경우 처리하지 않음
+        stripped_s = s.strip()
+        if stripped_s:
+            self.terminal.write(stripped_s + '\n')
+            self.terminal.flush()
+
+        if not stripped_s:
+            return len(s)
+
+        msg_type = get_log_type(stripped_s)
+
+        # 3. 설정된 type과 함께 emit
+        self.socketio.emit('task_log', {
+            'id': self.task_name, 
+            'message': s, # 원본 문자열 전송 (또는 stripped_s)
+            'type': msg_type
+        })
+        
+        return len(s)
+
+    def flush(self):
+        self.terminal.flush()
 
 class ProcessManager:
     def __init__(self, socketio, debug=False):
@@ -23,8 +66,14 @@ class ProcessManager:
         """스트림을 안정적으로 읽어 클라이언트로 전송합니다."""
         try:
             for line in process_stream:
-                log_data = {'log': line.strip(), 'type': stream_type}
-                self.socketio.emit(log_emit_id, log_data, to=sid)
+                stripped_line = line.strip()
+                msg_type = get_log_type(stripped_line)
+                log_data = {
+                    'id': log_emit_id, 
+                    'message': stripped_line, 
+                    'type': msg_type
+                }
+                self.socketio.emit('task_log', log_data, to=sid)
                 if self.debug:
                     print(f"[{process_name} {stream_type}] {line.strip()}")
         finally:
@@ -36,7 +85,7 @@ class ProcessManager:
             return None
         
         if log_emit_id is None:
-            log_emit_id = 'log_' + name
+            log_emit_id = name
 
         command_full = ' '.join(command)
 
@@ -123,10 +172,13 @@ class ProcessManager:
                 process.kill()
             print(f"'{name}' Process terminated.")
 
-    def start_function(self, name, func, *args, **kwargs):
+    def start_function(self, name, func, log_id=None, *args, **kwargs):
         if name in self.tasks and self.tasks[name]['stop'] is False:
             print(f"[ERROR] '{name}' Function is already running.", self.tasks)
             return
+        
+        if log_id is None:
+            log_id = name
 
         # 1. 작업을 제어할 '중지 플래그'를 생성합니다.
         task_control = {'stop': False}
@@ -137,24 +189,22 @@ class ProcessManager:
         kwargs['task_control'] = task_control
 
         def task_wrapper(*wrapper_args, **wrapper_kwargs):
-            """
-            실제 작업을 감싸고, 작업 완료 후 정리 작업을 수행합니다.
-            *args, **kwargs를 직접 받아 명시적으로 전달합니다.
-            """
             print(f"Wrapper for '{name}' started.")
+            # 소켓 스트림 생성
+            socket_stream = SocketIOStream(self.socketio, log_id)
+            
             try:
-                # 2. 실제 작업 함수(func)를 실행합니다.
-                func(*wrapper_args, **wrapper_kwargs)
+                # redirect_stdout을 사용하여 이 블록 안의 print를 가로챕니다.
+                with redirect_stdout(socket_stream):
+                    func(*wrapper_args, **wrapper_kwargs)
             except Exception as e:
                 error_traceback = traceback.format_exc()
-                # 콘솔에도 출력하고, 로그로도 남길 수 있습니다.
-                print(f"[ERROR] An error occurred in task '{name}':\n{error_traceback}")
+                print(f"[ERROR] {error_traceback}")
+                self.socketio.emit('task_log', {'id': log_id, 'message': f"Error: {str(e)}"})
             finally:
-                # 3. 작업이 어떻게 끝나든(성공, 실패, 중단) 항상 상태를 정리합니다.
                 print(f"Task '{name}' finished. Cleaning up.")
                 if name in self.tasks:
                     del self.tasks[name]
-                # 클라이언트에게도 작업이 최종적으로 끝났음을 알릴 수 있습니다.
                 self.socketio.emit('stop_process', {'id': name})
 
         try:

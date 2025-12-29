@@ -80,7 +80,7 @@
                                                 </div>
                                                 <q-input
                                                     v-model="j.origin"
-                                                    :label="`ID ${j.dxl_id} (${j.port})`"
+                                                    :label="`ID ${j.dxl_id}`"
                                                     type="number"
                                                     dense
                                                     outlined
@@ -88,7 +88,18 @@
                                                     class="bg-dark"
                                                     v-if="j.dxl_id !== null && j.port !== null"
                                                 >
-                                                    <q-badge color="grey-7" floating class="cursor-pointer" @click="removeDxlFromJointMap(i)">x</q-badge>
+                                                    <template v-slot:append>
+                                                        <q-btn
+                                                            flat
+                                                            color="primary"
+                                                            :outline="false"
+                                                            size="sm"
+                                                            dense
+                                                            @click="j.port = '/dev/ttyUSB' + (Number(j.port[j.port.length-1]) + 1) % 5"
+                                                        >ttyUSB{{ j.port[j.port.length-1] }}</q-btn>
+                                                        <q-badge color="grey-7" floating class="cursor-pointer" @click="removeDxlFromJointMap(i)">x</q-badge>
+
+                                                    </template>
                                                 </q-input>
                                                 <q-checkbox size="xs" dark v-model="j.is_gripper" val="xs" label="Tool Joint" v-if="toolEditable" />
                                             </div>
@@ -108,7 +119,8 @@
                                                 @dragstart="(e) => onDragStart(e, i)"
                                                 :id="`dxl-${j.port}-${j.dxl_id}`"
                                                 style=" cursor: move;"
-                                            />
+                                            >
+                                            </q-input>
                                         </div>
                                     </div>
                                     <q-stepper-navigation>
@@ -163,7 +175,7 @@
                                         <q-btn
                                             color="positive"
                                             label="Start Teleoperation"
-                                            @click="startLeaderTele(assembly.id, 'log_start_leader_robot')"
+                                            @click="startLeaderTele(assembly.id, 'start_leader_robot')"
                                             class="full-width q-mt-md"
                                             outline
                                             v-if="!leaderTeleStarted"
@@ -210,7 +222,7 @@
                                         <q-btn
                                             color="primary"
                                             label="Start Teleoperation"
-                                            @click="startLeaderTele(assembly.id, 'log_start_leader_robot')"
+                                            @click="startLeaderTele(assembly.id, 'start_leader_robot')"
                                             class="full-width q-mt-md"
                                             outline
                                             v-if="!leaderTeleStarted"

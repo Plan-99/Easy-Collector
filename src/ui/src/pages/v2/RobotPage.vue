@@ -106,7 +106,7 @@
                                 </q-badge>
                             </q-btn>
                             <div v-if="watchingRobot.leader_robot_preset">
-                                <q-btn class="full-width" @click="() => { startLeaderTele(watchingRobot, watchingRobot.leader_robot_preset, 'log_' + watchingRobot.process_id) }" icon="play_arrow" color="blue" v-if="!leaderTeleStarted">
+                                <q-btn class="full-width" @click="() => { startLeaderTele(watchingRobot, watchingRobot.leader_robot_preset, watchingRobot.process_id) }" icon="play_arrow" color="blue" v-if="!leaderTeleStarted">
                                     <q-tooltip class="text-body2">Start teleoperation with leader robot</q-tooltip>
                                 </q-btn>
                                 <q-btn class="full-width" @click="() => { stopLeaderTele() }" icon="pause" color="blue" v-else>

@@ -60,30 +60,18 @@ def subscribe_dynamixel(socketio_instance, task_control, baudrate=57600):
         connected_ids = scan_ids_on_port(port, baudrate=baudrate)
         
         if len(connected_ids) > 0:
-            socketio_instance.emit('log_start_leader_robot', {
-                'log': f'Connected Dynamixel IDs on {port}: {connected_ids}',
-                'type': 'stdout'
-            })
-            
+            print(f'Connected Dynamixel IDs on {port}: {connected_ids}')
+
             # 3. DxlController 인스턴스 생성
             try:
                 ctrl = DxlController(serial_port=port, dxl_ids=connected_ids, baudrate=baudrate)
                 controllers.append(ctrl)
             except Exception as e:
-                socketio_instance.emit('log_start_leader_robot', {
-                    'log': f'[ERROR] Error creating controller for {port}: {str(e)}',
-                    'type': 'stderr'
-                })
+                print(f'[ERROR] Error creating controller for {port}: {str(e)}')
         else:
-            socketio_instance.emit('log_start_leader_robot', {
-                'log': f'No Dynamixels found on port {port}.',
-                'type': 'stdout'
-            })
+            print(f'[ERROR] No Dynamixels found on port {port}.')
 
-    socketio_instance.emit('log_start_leader_robot', {
-        'log': f'Total Controllers Created: {len(controllers)}',
-        'type': 'stdout'
-    })
+    print(f"Total Controllers Created: {len(controllers)}")
 
     # 4. 생성된 컨트롤러로 현재 위치 읽기
     try:

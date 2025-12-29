@@ -7,12 +7,11 @@
 </template>
 
 <script setup>
-import { ref, onUnmounted, watch } from 'vue';
+import { computed } from 'vue';
 import { defineProps } from 'vue';
-import { useSocket } from '../../composables/useSocket';
+import { useProcessStore } from '../../stores/processStore';
 
-const { socket } = useSocket();
-const logs = ref([]);
+const processStore = useProcessStore();
 
 const props = defineProps({
     process: {
@@ -21,25 +20,12 @@ const props = defineProps({
     }
 });
 
-const logHandler = (data) => {
-    const type = data.log.startsWith('[ERROR]') ? 'error' : 'stdout';
-    logs.value.push({ type: type, message: data.log });
-};
+// const logHandler = (data) => {
+//     const type = data.log.startsWith('[ERROR]') ? 'error' : 'stdout';
+//     logs.value.push({ type: type, message: data.log });
+// };
 
-watch(() => props.process, (newProcess, oldProcess) => {
-    logs.value = []; // 새로운 프로세스를 위해 로그를 비웁니다.
-    if (oldProcess) {
-        socket.off(`log_${oldProcess}`, logHandler);
-    }
-    if (newProcess) {
-        socket.on(`log_${newProcess}`, logHandler);
-    }
-}, { immediate: true });
-
-onUnmounted(() => {
-    if (props.process) {
-        socket.off(`log_${props.process}`, logHandler);
-    }
-});
+// 특정 프로세스의 로그가 변경될 때마다 실행
+const logs = computed(() => processStore.taskLogs[props.process] || []);
 
 </script>

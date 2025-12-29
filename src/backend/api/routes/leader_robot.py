@@ -1,7 +1,6 @@
 from flask import Blueprint, request, current_app
 from flask_socketio import Namespace, emit
 from ...database.models.leader_robot_preset_model import LeaderRobotPreset as LeaderRobotPresetModel
-from ...env.dxl_controller import DxlController
 from ..process.leader_teleoperation import Leader
 from ...env.agent import Agent
 from ...database.models.robot_model import Robot as RobotModel

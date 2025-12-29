@@ -1,0 +1,40 @@
+defaults:
+- _self_
+- eval: rnd_oe
+- task: '11'
+- results: base
+tasks:
+- '11'
+rnd_models:
+- rnd_oe
+methods:
+- entropy
+combine_methods: true
+combined_methods:
+  1:
+    m1:
+      name: rnd_oe
+      window_sizes:
+      - 7
+      quantiles:
+      - 0.95
+    m2:
+      name: entropy
+      window_sizes:
+      - 7
+      quantiles:
+      - 0.95
+    operation: and
+train_rnd: true
+available_tasks:
+- '11'
+implemented_methods:
+- rnd_oe
+- rnd_a
+- entropy
+- tc
+- similarity
+- logpzo
+available_rnd_models:
+- rnd_oe
+- rnd_a
