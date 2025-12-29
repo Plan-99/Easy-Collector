@@ -462,12 +462,18 @@
             :ok-button-label="$t('save')"
         ></form-dialog>
 
-        <data-augmentation-dialog
+        <q-dialog
             v-model="showAugmentationForm"
-            :dataset="augmentingDataset"
-            :task-id="selectedWorkspaceId"
-            v-if="selectedWorkspaceId"
-        />
+            maximized
+            persistent
+        >
+            <data-augmentation-dialog
+                :dataset="augmentingDataset"
+                :task-id="selectedWorkspaceId"
+                v-if="selectedWorkspaceId"
+            />
+        </q-dialog>
+
         <q-dialog v-model="showCheckpointInfo" full-width>
             <q-card class="bg-secondary border-rounded border-white" dark>
                 <q-card-section class="bg-dark text-white row">
@@ -913,10 +919,7 @@ onMounted(() => {
     // listRobots();
     listAssemblies();
     socket.on('augmentation_complete', (data) => {
-        Notify.create({
-            color: 'positive',
-            message: 'Augmentation complete'
-        });
+        showAugmentationForm.value = false
         listDatasets().then(() => {
             showAugmentationForm.value = false;
             const new_dataset = datasets.value.find(d => d.id === data.dataset_id);

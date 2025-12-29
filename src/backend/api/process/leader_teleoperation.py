@@ -65,6 +65,8 @@ class Leader():
         for agent in self.agents:
             joint_positions = agent.get_joint_states()
             for joint in self.joint_map:
+                if 'is_dummy_gripper' in joint and joint['is_dummy_gripper']:
+                    continue
                 if joint['robot_id'] != agent.id:
                     continue
                 joint_name = joint['joint_name']
@@ -82,12 +84,16 @@ class Leader():
     def group_joints_by_agent(self):
         grouped_by_port = defaultdict(list)
         for joint in self.joint_map:
+            if 'is_dummy_gripper' in joint and joint['is_dummy_gripper']:
+                continue
             grouped_by_port[joint['robot_id']].append(joint)
 
         return grouped_by_port
     
     def get_joint_by_joint_name(self, agent, joint_name):
         for joint in self.joint_map:
+            if 'is_dummy_gripper' in joint and joint['is_dummy_gripper']:
+                continue
             if joint['robot_id'] != agent.id:
                 continue
             if joint['joint_name'] == joint_name:
@@ -131,6 +137,8 @@ class Leader():
         def sync_dxl_controller(port, dxl_joints):
             dxl_controller = self.dxl_controllers[port]
             for dxl_joint in dxl_joints:
+                if 'is_dummy_gripper' in dxl_joint and dxl_joint['is_dummy_gripper']:
+                    continue
                 dxl_id = dxl_joint['dxl_id']
                 agent_position = dxl_joint['agent_position']
                 pos = self.rad_to_tick(agent_position, dxl_joint['origin'], dxl_joint['sign'])
@@ -209,6 +217,8 @@ class Leader():
                 for agent in self.agents:
                     joint_list = group_by_agent[agent.id]
                     for joint in joint_list:
+                        if 'is_dummy_gripper' in joint and joint['is_dummy_gripper']:
+                            continue
                         joint_name = joint['joint_name']
                         joint_index = agent.joint_names.index(joint_name)
                         dxl_id = joint['dxl_id']

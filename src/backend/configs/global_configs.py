@@ -67,6 +67,12 @@ SUPPORT_ROBOTS = [
         'tool_inner': False,
         'tool_index': [],
         'custom_fields': ['ip_address'],
+        'urdf_path': '/ros2_ws/src/rbpodo_ros2/rbpodo_description/robots/rb3_730es_u.urdf',
+        'urdf_package_dir': '/ros2_ws/src/piper_ros/src/rbpodo_ros2/rbpodo_description/',
+        'ik_setting': {
+            'joints_to_lock': [],
+            'ee_definitions': [('ee', 'tcp_joint', None)],
+        },
     },
     {
         'name': 'ur3',

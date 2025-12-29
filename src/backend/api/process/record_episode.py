@@ -81,17 +81,17 @@ def record_episode(node, dataset_id, agents, assembly_id, sensors, task, languag
 
         for agent in agents:
             if agent.joint_states is None:
-                print(f'[ERROR]: No joint states from robot {agent.id}')
+                print(f'[ERROR] No joint states from robot {agent.id}')
                 tele_control['stop'] = True
                 return
             if agent.joint_actions is None:
-                print(f'[ERROR]: No joint commands from robot {agent.id}')
+                print(f'[ERROR] No joint commands from robot {agent.id}')
                 tele_control['stop'] = True
                 return
             
         for sensor in sensors:
             if getattr(env, f'sensor_{sensor["id"]}') is None:
-                print(f'[ERROR]: No data from sensor {sensor["id"]}')
+                print(f'[ERROR] No data from sensor {sensor["id"]}')
                 tele_control['stop'] = True
                 return
             

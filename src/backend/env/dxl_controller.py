@@ -38,8 +38,6 @@ class DxlController:
         torque_enable_address = 64  # MX, X 시리즈 기준
         self.controlled = True
         for index, dxl_id in enumerate(self.dxl_ids):
-            print(f"Enabling torque for DXL ID: {dxl_id}")
-            print(f"Gripper DXL IDs: {self.gripper_dxl_ids}")
             if dxl_id in self.gripper_dxl_ids:
                 continue
             with self.port_lock:

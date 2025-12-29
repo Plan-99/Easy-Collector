@@ -21,7 +21,7 @@
                 </q-tabs>
                 <q-tab-panels v-model="teleSettingTab" animated>
                     <q-tab-panel name="leader" class="row q-col-gutter-x-md bg-secondary">
-                        <div class="col ">
+                        <div class="col-5">
                             <div class="row q-col-gutter-x-md">
                                 <div  class="col">
                                     <q-btn class="full-width full-height" outline color="primary" @click="startLeaderRobot" v-if="!leaderRobotStarted">Start Leader Robot</q-btn>
@@ -101,7 +101,7 @@
 
                                                     </template>
                                                 </q-input>
-                                                <q-checkbox size="xs" dark v-model="j.is_gripper" val="xs" label="Tool Joint" v-if="toolEditable" />
+                                                <q-checkbox size="xs" dark v-model="j.is_gripper" val="xs" label="Tool Joint" />
                                             </div>
                                         </div>
                                     </div>
@@ -121,6 +121,7 @@
                                                 style=" cursor: move;"
                                             >
                                             </q-input>
+                                            <q-btn size="xs" dense label="Set as Gripper" flat icon="add" color="primary" @click="dxlSetAsGripper(j)" />
                                         </div>
                                     </div>
                                     <q-stepper-navigation>
@@ -337,18 +338,35 @@ if (!props.assembly.teleoperators.find(e => e.type === 'leader')) {
     })
 }
 
-const toolEditable = computed(() => {
-    let result = false;
-    ['left_arm', 'left_tool', 'right_arm', 'right_tool'].forEach((e) => {
-        if (!props.assembly[e]) {
-            return false;
-        }
-        if (props.assembly[e].tool_inner) {
-            result = true;
-        }
-    })
-    return result;
-})
+function dxlSetAsGripper(dxl) {
+    console.log(dxl)
+    leaderSettingForm.value.joint_map.push({
+        joint_name: 'Gripper (no robot)',
+        port: dxl.port,
+        dxl_id: dxl.dxl_id,
+        origin: dxl.origin,
+        is_gripper: true,
+        is_dummy_gripper: true,
+        sign: 1,
+        gripper_dxl_range: [0, 0],
+        gripper_dxl_range_saved: [false, false],
+    });
+    dxlArray.value.splice(dxlArray.value.indexOf(dxl), 1);
+
+}
+
+// const toolEditable = computed(() => {
+//     let result = false;
+//     ['left_arm', 'left_tool', 'right_arm', 'right_tool'].forEach((e) => {
+//         if (!props.assembly[e]) {
+//             return false;
+//         }
+//         if (props.assembly[e].tool_inner) {
+//             result = true;
+//         }
+//     })
+//     return result;
+// })
 
 const dxlArray = ref([]);
 
@@ -431,6 +449,10 @@ function onDrop (targetJointIndex) {
 function removeDxlFromJointMap(jointIndex) {
     const joint = leaderSettingForm.value.joint_map[jointIndex];
     if (joint.dxl_id === null || joint.port === null) {
+        return;
+    }
+    if (joint.is_dummy_gripper) {
+        leaderSettingForm.value.joint_map.splice(jointIndex, 1);
         return;
     }
     dxlArray.value.push({

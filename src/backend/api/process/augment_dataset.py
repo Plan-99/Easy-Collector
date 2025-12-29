@@ -80,7 +80,11 @@ def augment_dataset(dataset_id, aug_dataset_id, lightness, rectangles, salt_and_
 
     hdf5_files = [f for f in os.listdir(dataset_path) if f.endswith('.hdf5')]
 
-    for hdf5_file in hdf5_files:
+    socketio_instance.emit('augmentation_progress', {
+        'progress': 0,
+    })
+
+    for i, hdf5_file in enumerate(hdf5_files):
         if task_control.get('stop'):
             print("Stopping Data Augmentation")
             return
@@ -120,8 +124,9 @@ def augment_dataset(dataset_id, aug_dataset_id, lightness, rectangles, salt_and_
                     
                     image_group[key][...] = np.array(augmented_images)
 
-            print(f"Augmented file saved: {dest_file_path}")
-
+            socketio_instance.emit('augmentation_progress', {
+                'progress': (i+1) / len(hdf5_files),
+            })
         except Exception as e:
             log_message = f"[ERROR] Error processing file {hdf5_file}: {e}"
             print(log_message)
