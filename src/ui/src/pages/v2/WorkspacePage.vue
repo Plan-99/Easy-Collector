@@ -163,7 +163,7 @@
                                     class="q-pa-sm q-px-md q-my-sm border-rounded row"
                                     v-for="robot in robots" 
                                     :key="robot.id"
-                                    :class="robot.status === 'on' ? 'bg-green-10' : 'bg-grey-8'"
+                                    :class="robot.status === 'on' ? 'bg-green-10' : (robot.status === 'error' ? 'bg-red-10' : 'bg-grey-8')"
                                 >
                                     <div>{{ robot.name }}</div>
                                     <q-space />
@@ -177,6 +177,7 @@
                                     <div v-else>
                                         <div class="text-caption text-grey" v-if="robot.status === 'off'">TOPIC OFF</div>
                                         <div class="text-caption text-positive" v-else-if="robot.status === 'on'">TOPIC ON</div>
+                                        <div class="text-caption text-negative" v-else-if="robot.status === 'error'">ERROR</div>
                                     </div>
                                     <q-inner-loading :showing="robot.status === 'loading'"></q-inner-loading>
                                 </div>
@@ -572,9 +573,10 @@ const robots = computed(() => {
         return [];
     }
     return selectedWorkspace.value.assembly.robots.map((robot) => {
-        robot.handler = useRobot(robot, () => {
-            robot.handler.subscribeRobot(() => {});
+        const handler = useRobot(robot, () => {
+            handler.subscribeRobot(() => {});
         });
+        robot.handler = handler;
         return robot;
     })
 });
@@ -647,10 +649,13 @@ watch(selectedWorkspaceId, (newVal) => {
 
 function toggleRobot(robot) {
     robot.process_id = `robot_${robot.id}`;
+    const startFlow = () => robot.handler.startRobot();
     if (robot.status === 'on') {
-        robot.handler.stopRobot()
+        robot.handler.stopRobot();
+    } else if (robot.status === 'error') {
+        robot.handler.stopRobot().finally(() => startFlow());
     } else {
-        robot.handler.startRobot()
+        startFlow();
     }
 }
 

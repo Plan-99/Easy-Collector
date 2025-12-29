@@ -36,8 +36,9 @@
                     </q-card-section>
                     <q-card-section class="q-pa-none q-mt-sm row" v-if="robot.type !== 'custom'">
                         <div class="text-primary text-caption" v-if="robot.status === 'on'">ONLINE</div>
-                        <div class="text-orange text-caption" v-if="robot.status === 'loading'">LOADING</div>
-                        <div class="text-grey-7 text-caption" v-if="robot.status === 'off'">OFFLINE</div>
+                        <div class="text-orange text-caption" v-else-if="robot.status === 'loading'">LOADING</div>
+                        <div class="text-negative text-caption" v-else-if="robot.status === 'error'">ERROR</div>
+                        <div class="text-grey-7 text-caption" v-else>OFFLINE</div>
                         <q-space></q-space>
                         <q-toggle
                             :model-value="robot.status === 'on'"
@@ -48,6 +49,7 @@
                     </q-card-section>
                     <q-card-section class="q-pa-none q-mt-sm row" v-else>
                         <div class="text-primary text-caption" v-if="robot.status === 'on'">TOPIC ON</div>
+                        <div class="text-negative text-caption" v-else-if="robot.status === 'error'">ERROR</div>
                         <div class="text-grey-7 text-caption" v-else-if="robot.status === 'off'">TOPIC OFF</div>
                         <div class="text-grey-7 text-caption" v-else>LOADING</div>
                     </q-card-section>   
@@ -70,14 +72,14 @@
         </div>
 
         <bottom-terminal
-            :tabs="robots.filter((e) => e.status !== 'off')"
+            :tabs="robots"
             tab-label="name"
             tab-value="id"
             v-model="watchingRobot"
-            v-if="robots.filter((e) => e.status !== 'off').length > 0 && watchingRobot"
+            v-if="watchingRobot"
             @update:model-value="watchRobot($event)"
         >
-            <template v-for="robot in robots.filter((e) => e.status !== 'off')" :key="robot.id" v-slot:[robot.id]>
+            <template v-for="robot in robots" :key="robot.id" v-slot:[robot.id]>
                 <div class="row row q-gutter-x-md">
                     <div class="col-5">
                         <robot-pendant
@@ -287,7 +289,7 @@ const robotForm = ref([
         value: robot.name
     }))) },
     // Custom fields based on robot type
-    { label: 'CAN Port', key: 'can_port', type: 'text', value: 'can_0', default: 'can_0', show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('can_port') },
+    { label: 'CAN Port', key: 'can_port', type: 'text', value: 'can0', default: 'can0', show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('can_port') },
     { label: 'IP Address', key: 'ip_address', type: 'text', value: '10.0.2.27', default: '10.0.2.27', show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('ip_address') },
     { label: 'Port', key: 'port', type: 'number', value: 502, default: 502, show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('port') },
     { label: 'Changer Address', key: 'changer_address', type: 'number', value: 5, default: 5, show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('changer_address') },
@@ -409,14 +411,23 @@ function deleteRobot(robot) {
 }
 
 function toggleRobot(robot) {
-    if (robot.status === 'on') {
-        robot.handler.stopRobot().then(() => {
-            watchingRobot.value = null; // Stop watching if robot is stopped
-        });
-    } else {
+    const startFlow = () => {
         robot.handler.startRobot().then(() => {
             watchRobot(robot); // Start watching the robot after it is started
-        })
+        });
+    };
+
+    if (robot.status === 'on') {
+        robot.handler.stopRobot().then(() => {
+            // Keep watching to preserve logs/pendant view
+        });
+    } else if (robot.status === 'error') {
+        // clean up lingering processes then retry start
+        robot.handler.stopRobot().finally(() => {
+            startFlow();
+        });
+    } else {
+        startFlow();
     }
 }
 

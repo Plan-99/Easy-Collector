@@ -1,8 +1,7 @@
 import numpy as np
 from .ik_solver import IK_Solver
-import os # 파일 상단에 import os 추가
-
 import os
+from pathlib import Path
 
 cwd = os.getcwd()  # 예: /root/src
 parent_of_cwd = os.path.dirname(cwd)  # 예: /root
@@ -10,8 +9,9 @@ parent_of_cwd = os.path.dirname(cwd)  # 예: /root
 class Piper_ArmIK(IK_Solver):
     def __init__(self):
 
-        urdf_path = parent_of_cwd + '/ros2_ws/src/piper_ros/src/piper_description/urdf/piper_description.urdf'
-        package_dir = parent_of_cwd + '/ros2_ws/src/piper_ros/src/piper_description/'
+        urdf_path = os.path.join(parent_of_cwd, 'ros2_ws/src/piper_ros/src/piper_description/urdf/piper_description.urdf')
+        pdir = Path(parent_of_cwd) / 'ros2_ws/src/piper_ros/src/piper_description/'
+        package_dir = [str(pdir), str(pdir.parent)]
         # urdf_path = '../../assets/g1/g1_body23.urdf'
         # package_dir = '../../assets/g1/'
 

@@ -5,6 +5,7 @@ PKG=easytrainer
 ARCH=${ARCH:-amd64}
 INSTALL_ROOT=/opt/easytrainer
 PAYLOAD_DIR=/usr/share/easytrainer-project
+VERSION_FILE="$ROOT_DIR/VERSION"
 
 # Paths
 RELEASE_DIR=$(cd "$(dirname "$0")" && pwd)
@@ -12,15 +13,16 @@ ROOT_DIR=$(cd "$RELEASE_DIR/.." && pwd)
 
 # Version handling: control file always needs a Version, but filename can omit it
 VERSION_ENV="${VERSION:-}"
+if [ -z "$VERSION_ENV" ] && [ -f "$VERSION_FILE" ]; then
+  VERSION_ENV="$(tr -d ' \t\r\n' <"$VERSION_FILE")"
+fi
 if [ -n "$VERSION_ENV" ]; then
   VERSION_VAL="$VERSION_ENV"
-  STAGE="$RELEASE_DIR/${PKG}_${VERSION_VAL}_${ARCH}"
-  DEB_NAME="$STAGE.deb"
 else
   VERSION_VAL="1.0.0"  # default for control metadata only
-  STAGE="$RELEASE_DIR/${PKG}_${ARCH}"
-  DEB_NAME="$STAGE.deb"
 fi
+STAGE="$RELEASE_DIR/${PKG}_${VERSION_VAL}_${ARCH}"
+DEB_NAME="$STAGE.deb"
 
 echo "[deb] Building $PKG ${VERSION_ENV:-no-version} ($ARCH)"
 rm -rf "$STAGE" && mkdir -p "$STAGE/DEBIAN"
@@ -91,7 +93,9 @@ RSYNC_EXCLUDES=(
   'release'
   '.vscode'
   '.idea'
-  'datasets'
+  # Skip only the top-level datasets payload (user-provided data), keep code packages named datasets
+  '/datasets'
+  '/datasets/**'
   'node_modules'
   'src/ui/node_modules'
   'src/ui/.quasar'
@@ -125,6 +129,34 @@ if [ "${SKIP_PAYLOAD_SIZE_CHECK:-0}" != "1" ] && [ "$PAYLOAD_SIZE" -ge "$MAX_PAY
   find "$STAGE${PAYLOAD_DIR}" -type f -printf '%s\t%p\n' | sort -rn | head -n 15 | numfmt --to=iec --field=1 || true
   exit 1
 fi
+
+# Validate critical runtime paths (prevent shipping stale payloads)
+PY_CHECK="${STAGE}${PAYLOAD_DIR}/src/backend/configs/global_configs.py"
+if [ -f "$PY_CHECK" ]; then
+  python3 - "$PY_CHECK" <<'PY'
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+required = "/root/ros2_ws/src/piper_ros/src/piper_description/"
+if required not in text:
+    raise SystemExit(f"[deb][ERROR] Missing '{required}' in {path} (payload may be stale).")
+PY
+fi
+# Ensure critical code paths exist in the payload (avoid shipping partial copies)
+REQUIRED_PATHS=(
+  "$STAGE${PAYLOAD_DIR}/docker-compose.yml"
+  "$STAGE${PAYLOAD_DIR}/start_services.sh"
+  "$STAGE${PAYLOAD_DIR}/scripts/quick_apply.sh"
+  "$STAGE${PAYLOAD_DIR}/src/backend/api/app.py"
+  "$STAGE${PAYLOAD_DIR}/src/backend/lerobot/datasets/utils.py"
+)
+for req in "${REQUIRED_PATHS[@]}"; do
+  if [ ! -f "$req" ]; then
+    echo "[deb][ERROR] Missing required payload file: $req" >&2
+    exit 1
+  fi
+done
 
 # Launcher wrapper
 cat > "$STAGE/usr/bin/easytrainer-launcher" <<'EOF'
@@ -234,9 +266,11 @@ Architecture: ${ARCH}
 Maintainer: EasyTrainer <noreply@example.com>
 ${DEPENDS_LINE}
 Recommends: docker.io, docker-compose-plugin
-Description: EasyTrainer Launcher (+ project payload under /opt)
- Installs a Qt launcher and embeds the project payload.
- On install, the project is placed under /opt/easytrainer/project.
+Description: Easy Trainer launcher for the containerized runtime
+ Provides a Qt launcher to build/start the Easy Trainer service,
+ bundles the current project under /opt/easytrainer/project,
+ embeds a local PySide6 runtime, and installs a desktop entry.
+ Docker/Compose is recommended; NVIDIA runtime is used for GPU builds.
 EOF
 
 # postinst

@@ -30,6 +30,7 @@ import os
 import argparse
 
 import threading
+from ..database.config.database import DATABASES
 
 argparse = argparse.ArgumentParser(description='Easy Collector Web API')
 argparse.add_argument('--debug', action='store_true', help='Enable debug mode')
@@ -72,18 +73,7 @@ socketio.on_namespace(SensorNamespace('/sensor', pm))
 socketio.on_namespace(RobotNamespace('/robot', pm))
 
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DB_DIR = os.path.join(BASE_DIR, 'backend/database')
-DB_PATH = os.path.join(DB_DIR, 'main.db')
-
-config = {
-    'mysql': {
-        'driver': 'sqlite',
-        'database': DB_PATH,
-    }
-}
-
-db = DatabaseManager(config)
+db = DatabaseManager(DATABASES)
 Model.set_connection_resolver(db)
 
 

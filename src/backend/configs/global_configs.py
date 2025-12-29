@@ -19,8 +19,8 @@ SUPPORT_ROBOTS = [
         'tool_inner': True,
         'tool_index': [6],
         'custom_fields': ['can_port'],
-        'urdf_path': '/ros2_ws/src/piper_ros/src/piper_description/urdf/piper_description.urdf',
-        'urdf_package_dir': '/ros2_ws/src/piper_ros/src/piper_description/',
+        'urdf_path': '/root/ros2_ws/src/piper_ros/src/piper_description/urdf/piper_description.urdf',
+        'urdf_package_dir': '/root/ros2_ws/src/piper_ros/src/piper_description/',
         'ik_setting': {
             'joints_to_lock': [
                 'joint6_to_gripper_base', 'joint7', 'joint8'
@@ -44,8 +44,8 @@ SUPPORT_ROBOTS = [
         'tool_inner': False,
         'tool_index': [],
         'custom_fields': ['can_port'],
-        'urdf_path': '/ros2_ws/src/piper_ros/src/piper_description/urdf/piper_no_gripper_description.urdf',
-        'urdf_package_dir': '/ros2_ws/src/piper_ros/src/piper_description/',
+        'urdf_path': '/root/ros2_ws/src/piper_ros/src/piper_description/urdf/piper_no_gripper_description.urdf',
+        'urdf_package_dir': '/root/ros2_ws/src/piper_ros/src/piper_description/',
         'ik_setting': {
             'joints_to_lock': [],
             'ee_definitions': [('ee', 'joint6', np.array([0.20, 0, 0]).T)],

@@ -10,8 +10,9 @@ usage() {
   cat <<'USAGE' >&2
 Usage: quick_apply.sh <DEV_SRC_ROOT> <RUNTIME_PROJECT_ROOT>
 
-Copies src/backend, src/ui, docker-compose files, and helper scripts from the
-development checkout into the runtime project directory used by services.
+Copies src/backend, src/ui, ros2_ws/src, docker-compose files, and helper
+scripts from the development checkout into the runtime project directory used
+by services.
 This script avoids rebuilding Docker images; it simply updates files in-place.
 USAGE
 }
@@ -57,7 +58,11 @@ copy_tree() {
   fi
   mkdir -p "$dst"
   if [ -n "$RSYNC_BIN" ]; then
-    "$RSYNC_BIN" -a --exclude='__pycache__/' --exclude='node_modules/' "$src/" "$dst/"
+    "$RSYNC_BIN" -a \
+      --exclude='__pycache__/' \
+      --exclude='node_modules/' \
+      --exclude='database/*.db' \
+      "$src/" "$dst/"
   else
     # Portable fallback using tar over a pipe.
     (
@@ -87,6 +92,7 @@ copy_file() {
 
 copy_tree "src/backend"
 copy_tree "src/ui"
+copy_tree "ros2_ws/src"
 
 copy_file "docker-compose.yml"
 copy_file "docker-compose.dev.yml"

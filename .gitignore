@@ -1,2 +1,3 @@
 release/*.deb
 logs/
+src/backend/database/*.db

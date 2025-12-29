@@ -98,24 +98,58 @@ UI_LOG_DIR = SERVICE_LOG_DIR
 UI_LOG_FILE = UI_LOG_DIR / "ui.log"
 
 
+def _load_app_version() -> str:
+    """Resolve app version from bundled file or repo root."""
+    candidates = [
+        REPO_ROOT_CANDIDATE / "VERSION",
+    ]
+    for p in candidates:
+        try:
+            if p.is_file():
+                ver = p.read_text(encoding="utf-8").strip()
+                if ver:
+                    return ver
+        except Exception:
+            continue
+    return "0.0.0"
+
+
+APP_VERSION = _load_app_version()
+
+
 class ServiceSplash(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setModal(True)
-        self.setFixedSize(320, 150)
+        self.setFixedSize(360, 150)
         flags = self.windowFlags()
         flags = (flags & ~Qt.WindowContextHelpButtonHint) | Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint
         self.setWindowFlags(flags)
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 2, 6, 4)
+        layout.setSpacing(2)
         self.message_label = QLabel("서비스 준비중...", self)
         self.message_label.setAlignment(Qt.AlignCenter)
+        self.message_label.setStyleSheet("font-weight: 600; margin: 0; padding: 0;")
         layout.addWidget(self.message_label)
+        try:
+            self.restart_button.setEnabled(True)
+        except Exception:
+            pass
         self.progress = QProgressBar(self)
         self.progress.setRange(0, 0)  # indefinite
+        self.progress.setFixedHeight(32)
         layout.addWidget(self.progress)
         self.detail_label = QLabel("", self)
         self.detail_label.setAlignment(Qt.AlignCenter)
+        self.detail_label.setStyleSheet("color: #aaa; font-size: 12px; font-weight: 600; margin: 0; padding: 0;")
         layout.addWidget(self.detail_label)
+        self.restart_button = QPushButton("서비스 재실행", self)
+        self.restart_button.setVisible(False)
+        self.restart_button.setFixedHeight(22)
+        self.restart_button.setStyleSheet("padding: 2px 6px; font-size: 11px;")
+        layout.addWidget(self.restart_button)
+        self._restart_handler = None
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -140,6 +174,22 @@ class ServiceSplash(QDialog):
 
     def set_detail(self, text: str):
         self.detail_label.setText(text)
+
+    def set_restart_handler(self, handler):
+        try:
+            if self._restart_handler:
+                self.restart_button.clicked.disconnect(self._restart_handler)
+        except Exception:
+            pass
+        try:
+            self.restart_button.clicked.connect(handler)
+            self._restart_handler = handler
+        except Exception:
+            pass
+
+    def show_restart(self, show: bool, enabled: bool = True):
+        self.restart_button.setVisible(show)
+        self.restart_button.setEnabled(enabled)
 
 
 def _app_icon_path() -> str | None:
@@ -247,7 +297,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.install_variant = "gpu"
-        self.setWindowTitle("Easy Trainer (GPU)")
+        self._update_window_title()
         try:
             icon = _window_icon()
             if icon:
@@ -260,9 +310,14 @@ class MainWindow(QMainWindow):
         self._preload_dialog: ServiceSplash | None = None
         self._ready_check_timer: QTimer | None = None
         self._ready_timeout_timer: QTimer | None = None
+        self._restart_btn_timer: QTimer | None = None
+        self._inline_log_proc: QProcess | None = None
+        self._inline_log_retry: QTimer | None = None
+        self._inline_log_initialized: bool = False
         self._main_visible = False
         self._fullscreen_pref = False
         self._closing = False
+        self._pending_quick_apply = False
         self._log_windows: list[QDialog] = []
         self._auto_launch_after_install = True
 
@@ -407,7 +462,16 @@ class MainWindow(QMainWindow):
             save_config(cfg)
 
         # Always request auth on startup, then ensure the project root is writable.
-        self._ensure_project_root_writable(force_auth=True)
+        if not self._ensure_project_root_writable(force_auth=True):
+            try:
+                QMessageBox.critical(self, "권한 필요", "프로젝트 경로 권한을 획득하지 못해 종료합니다.")
+            except Exception:
+                pass
+            try:
+                QTimer.singleShot(0, lambda: QApplication.instance().quit())
+            except Exception:
+                sys.exit(1)
+            return
         # Ensure project exists; if not, copy from system payload or repo
         self._ensure_project_present()
         # Unify compose service name to 'service' inside project compose files
@@ -484,8 +548,17 @@ class MainWindow(QMainWindow):
             self.showMaximized()
         self._main_visible = True
 
+    def _close_log_windows(self):
+        """Close any opened log dialogs when main UI exits."""
+        for dlg in list(self._log_windows):
+            try:
+                dlg.close()
+            except Exception:
+                pass
+        self._log_windows.clear()
+
     def closeEvent(self, event):
-        """Ensure services stop gracefully before exiting."""
+        """Exit and stop the service container so next launch starts cleanly."""
         if self._closing:
             try:
                 super().closeEvent(event)
@@ -500,12 +573,15 @@ class MainWindow(QMainWindow):
         event.ignore()
         self._closing = True
         self.hide()
+        self._close_log_windows()
+        self._stop_inline_logs()
         if not docker_compose_available() or not self._is_valid_project_root(self.project_root):
             QApplication.instance().quit()
             return
-        def _after_down(_code: int, *_):
+        def _after_stop(_code: int, *_):
             QApplication.instance().quit()
-        self.run_compose(["down", "--remove-orphans"], on_finish=_after_down)
+        self.append_log("[EXIT] docker compose stop service ...")
+        self.run_compose(["stop", "service"], on_finish=_after_stop)
 
     def run_compose_blocking(self, args: list[str]) -> int:
         program, prefix = get_compose_cmd()
@@ -1218,6 +1294,19 @@ class MainWindow(QMainWindow):
 
         # Dynamic service detection removed; we standardize on 'service'.
 
+    def _service_exists(self) -> bool:
+        """Check whether the service container exists (running or stopped)."""
+        try:
+            import subprocess
+            out = subprocess.check_output(
+                ["docker", "ps", "-a", "--format", "{{.Names}}"],
+                text=True,
+            )
+            names = [n.strip() for n in out.splitlines() if n.strip()]
+            return "easy_collector_service" in names
+        except Exception:
+            return False
+
 
     def _image_exists(self, image: str) -> bool:
         """Return True if a local Docker image exists, without noisy stderr."""
@@ -1308,8 +1397,10 @@ class MainWindow(QMainWindow):
     def _update_window_title(self):
         variant = self._current_variant()
         label = "GPU" if variant == "gpu" else "CPU"
+        version = APP_VERSION or "0.0.0"
+        title = f"Easy Trainer v{version} ({label})"
         try:
-            self.setWindowTitle(f"Easy Trainer ({label})")
+            self.setWindowTitle(title)
         except Exception:
             pass
 
@@ -1538,9 +1629,8 @@ class MainWindow(QMainWindow):
             self.append_log(f"[WARN] Failed to prepare project: {e}")
 
     def _clear_conflicting_containers(self):
-        """Remove stale containers that can block compose up due to duplicate names."""
+        """Remove stale legacy containers that can block compose up due to duplicate names."""
         targets = [
-            "easy_collector_service",
             "easy_collector_frontend",
             "easy_collector_backend",
         ]
@@ -1556,6 +1646,26 @@ class MainWindow(QMainWindow):
         except Exception:
             # Non-fatal; compose will still emit the conflict if removal fails
             pass
+
+    def _ensure_service_running(self, reason: str, restart_if_running: bool, on_finish=None):
+        """Start or restart the main service without destroying the container."""
+        running = "service" in self._get_running_services()
+        exists = self._service_exists()
+        if running and not restart_if_running:
+            self.append_log(f"[{reason}] 서비스가 이미 실행 중입니다.")
+            if on_finish:
+                on_finish(0)
+            return
+        if running and restart_if_running:
+            self.append_log(f"[{reason}] docker compose restart service ...")
+            cmd = ["restart", "service"]
+        elif exists:
+            self.append_log(f"[{reason}] docker compose start service ...")
+            cmd = ["start", "service"]
+        else:
+            self.append_log(f"[{reason}] docker compose up -d --no-recreate service ...")
+            cmd = ["up", "-d", "--no-recreate", "service"]
+        self.run_compose(cmd, on_finish=on_finish)
 
     # ------------------------ Actions ------------------------
     def on_install(self):
@@ -1602,14 +1712,7 @@ class MainWindow(QMainWindow):
             return
         self._clear_conflicting_containers()
         self._show_preload_dialog("서비스 준비중...")
-        self.append_log("[START] docker compose clean start (down -> up -d) ...")
-        self._run_compose_sequence(
-            [
-                ["down", "--remove-orphans"],
-                ["up", "-d", "service"],
-            ],
-            on_finish=self._on_start_finished,
-        )
+        self._ensure_service_running("START", restart_if_running=False, on_finish=self._on_start_finished)
 
     def _on_start_finished(self, exit_code: int, *_):
         if exit_code == 0:
@@ -1627,8 +1730,8 @@ class MainWindow(QMainWindow):
         if not docker_compose_available():
             QMessageBox.critical(self, "오류", self._compose_help_text())
             return
-        self.append_log("[STOP] docker compose down --remove-orphans ...")
-        self.run_compose(["down", "--remove-orphans"], on_finish=self._on_stop_finished)
+        self.append_log("[STOP] docker compose stop service ...")
+        self.run_compose(["stop", "service"], on_finish=self._on_stop_finished)
 
     def _on_stop_finished(self, exit_code: int):
         if exit_code == 0:
@@ -1674,13 +1777,7 @@ class MainWindow(QMainWindow):
             else:
                 self._hide_preload_dialog()
         self._clear_conflicting_containers()
-        self._run_compose_sequence(
-            [
-                ["down", "--remove-orphans"],
-                ["up", "-d", "service"],
-            ],
-            on_finish=_after_restart,
-        )
+        self._ensure_service_running("RESTART", restart_if_running=True, on_finish=_after_restart)
 
     def _quick_apply_script_candidates(self) -> list[Path]:
         return [
@@ -1777,6 +1874,7 @@ class MainWindow(QMainWindow):
             self.append_log("[SYNC][WARN] quick_apply 스크립트를 찾을 수 없어 내부 복사를 사용합니다.")
             self._sync_dirs(self.dev_src_root / "src" / "backend", self.project_root / "src" / "backend")
             self._sync_dirs(self.dev_src_root / "src" / "ui", self.project_root / "src" / "ui")
+            self._sync_dirs(self.dev_src_root / "ros2_ws" / "src", self.project_root / "ros2_ws" / "src")
             self._sync_core_files()
             self._apply_compose_variant(self.install_variant)
             return True
@@ -1790,19 +1888,27 @@ class MainWindow(QMainWindow):
     def _show_preload_dialog(self, message: str):
         if self._preload_dialog is None:
             self._preload_dialog = ServiceSplash(self)
+            self._preload_dialog.set_restart_handler(self._on_restart_button_clicked)
         text = message or "서비스 준비중..."
         self._preload_dialog.set_message(text)
         self._preload_dialog.set_detail("프론트엔드: 대기중 | 백엔드: 대기중")
+        self._preload_dialog.show_restart(False)
         self._preload_dialog.show()
         self._preload_dialog.raise_()
+        self._start_inline_logs()
 
     def _set_preload_detail(self, text: str):
         if self._preload_dialog:
             self._preload_dialog.set_detail(text)
+            # Show restart button if waiting long (timer handles when to enable)
+            if self._restart_btn_timer is None:
+                self._start_restart_timer()
 
     def _hide_preload_dialog(self, ready: bool = False):
         self._stop_ready_timer()
         self._stop_ready_timeout()
+        self._stop_restart_timer()
+        self._stop_inline_logs()
         if self._preload_dialog:
             self._preload_dialog.hide()
         if ready:
@@ -1820,6 +1926,108 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
             self._ready_timeout_timer = None
+
+    def _start_restart_timer(self):
+        try:
+            if self._restart_btn_timer is not None:
+                return
+            self._restart_btn_timer = QTimer(self)
+            self._restart_btn_timer.setSingleShot(True)
+            self._restart_btn_timer.setInterval(60000)  # 60s
+            self._restart_btn_timer.timeout.connect(self._enable_restart_button)
+            self._restart_btn_timer.start()
+        except Exception:
+            self._restart_btn_timer = None
+
+    def _stop_restart_timer(self):
+        if self._restart_btn_timer:
+            try:
+                self._restart_btn_timer.stop()
+            except Exception:
+                pass
+            self._restart_btn_timer = None
+
+    def _start_inline_logs(self):
+        # Inline logs removed; keep method to satisfy callers.
+        self._stop_inline_log_retry()
+        try:
+            proc = self._inline_log_proc
+            if proc is not None and proc.state() != QProcess.NotRunning:
+                proc.terminate()
+                proc.waitForFinished(500)
+                proc.kill()
+        except Exception:
+            pass
+        self._inline_log_proc = None
+        self._inline_log_initialized = False
+        return
+
+    def _stop_inline_logs(self):
+        self._inline_log_proc = None
+        self._stop_inline_log_retry()
+
+    def _schedule_inline_log_retry(self):
+        try:
+            if self._inline_log_retry is None:
+                self._inline_log_retry = QTimer(self)
+                self._inline_log_retry.setSingleShot(True)
+                self._inline_log_retry.setInterval(1000)
+                self._inline_log_retry.timeout.connect(self._start_inline_logs)
+            self._inline_log_retry.start()
+        except Exception:
+            self._inline_log_retry = None
+
+    def _stop_inline_log_retry(self):
+        if self._inline_log_retry:
+            try:
+                self._inline_log_retry.stop()
+            except Exception:
+                pass
+            self._inline_log_retry = None
+
+    def _enable_restart_button(self):
+        try:
+            if self._preload_dialog:
+                self._preload_dialog.show_restart(True, enabled=True)
+        except Exception:
+            pass
+
+    def _on_restart_button_clicked(self):
+        if not docker_compose_available() or not self._is_valid_project_root(self.project_root):
+            try:
+                QMessageBox.critical(self, "오류", self._compose_help_text())
+            except Exception:
+                pass
+            return
+        if self.process is not None and self.process.state() != QProcess.NotRunning:
+            self.append_log("[RESTART][INFO] 다른 작업이 실행 중입니다. 완료 후 다시 시도하세요.")
+            return
+        try:
+            if self._preload_dialog:
+                self._preload_dialog.show_restart(True, enabled=False)
+        except Exception:
+            pass
+        self.append_log("[RESTART] 컨테이너를 중지/삭제 후 재시작합니다...")
+        self._restart_service_container()
+
+    def _restart_service_container(self):
+        self._show_preload_dialog("서비스 재시작 중...")
+        self._set_preload_detail("서비스 재시작 중...")
+        self._clear_conflicting_containers()
+        seq = [
+            ["stop", "service"],
+            ["rm", "-f", "service"],
+            ["up", "-d", "service"],
+        ]
+        def _after(ec: int, *_):
+            if ec == 0:
+                self.append_log("[RESTART] 완료. 준비 상태를 확인합니다.")
+                self._wait_for_services_ready(self.load_ui)
+            else:
+                self.append_log(f"[RESTART][ERROR] 재시작 실패 (code={ec})")
+                self._enable_restart_button()
+                self._hide_preload_dialog()
+        self._run_compose_sequence(seq, on_finish=_after)
 
     def _resolve_ready_timeout_ms(self) -> int:
         # Allow multiple env keys; treat small numbers as seconds for convenience
@@ -1841,7 +2049,7 @@ class MainWindow(QMainWindow):
                 return int(num * 1000) if num <= 300 else int(num)
             except Exception:
                 continue
-        return 45000  # default 45s
+        return 120000  # default 120s for slower cold starts
 
     def _wait_for_services_ready(self, on_ready=None):
         if on_ready is None:
@@ -1858,6 +2066,7 @@ class MainWindow(QMainWindow):
             if backend_ok:
                 self._stop_ready_timer()
                 self._stop_ready_timeout()
+                self._stop_inline_logs()
                 self._hide_preload_dialog(ready=True)
                 try:
                     on_ready()
@@ -1994,6 +2203,8 @@ class MainWindow(QMainWindow):
     def _on_ready_timeout(self):
         self._stop_ready_timer()
         self._stop_ready_timeout()
+        self._stop_restart_timer()
+        self._stop_inline_logs()
         self._hide_preload_dialog()
         self.append_log("[ERROR] 서비스가 제시간에 준비되지 않아 중지합니다.")
         logs = self._collect_docker_logs("easy_collector_service", tail=200)
@@ -2003,9 +2214,10 @@ class MainWindow(QMainWindow):
             tail=200,
             initial_text=logs,
         )
+        self._enable_restart_button()
         if docker_compose_available() and self._is_valid_project_root(self.project_root):
-            self.append_log("[STOP] docker compose down --remove-orphans ...")
-            self.run_compose(["down", "--remove-orphans"], on_finish=self._on_stop_finished)
+            self.append_log("[STOP] docker compose stop service ...")
+            self.run_compose(["stop", "service"], on_finish=self._on_stop_finished)
 
     def load_ui(self):
         url = QUrl(FRONTEND_URL)
@@ -2047,9 +2259,48 @@ class MainWindow(QMainWindow):
         if not self._is_valid_dev_src(self.dev_src_root):
             self.load_ui()
             return
-        self.append_log("[SYNC] 원본에서 빠른 적용 중 (재시작 없음)...")
+        self.append_log("[SYNC] 원본에서 빠른 적용 중...")
         if not self._sync_dev_files(show_errors=False):
             self.append_log("[SYNC][WARN] 원본 적용에 실패했습니다. 경로를 확인하세요.")
+            return
+        # Default to fast path: assume backend autoreload is on (container default) to avoid restarts
+        fast_backend_reload = os.environ.get("EC_BACKEND_AUTORELOAD", "1") != "0"
+        running = "service" in self._get_running_services()
+        if docker_compose_available() and self._is_valid_project_root(self.project_root):
+            if self.process is not None and self.process.state() != QProcess.NotRunning:
+                if self._pending_quick_apply:
+                    self.append_log("[SYNC][INFO] 다른 작업이 끝나면 대기 중인 빠른 동기화를 실행합니다.")
+                    return
+                self._pending_quick_apply = True
+                self.append_log("[SYNC][INFO] 다른 작업 종료 후 빠른 동기화를 바로 실행합니다.")
+                def _after_current(*_):
+                    try:
+                        self.process.finished.disconnect(_after_current)
+                    except Exception:
+                        pass
+                    self._pending_quick_apply = False
+                    self._quick_apply_from_dev_src()
+                self.process.finished.connect(_after_current)
+                return
+            if running:
+                if fast_backend_reload:
+                    self.append_log("[SYNC] 빠른 적용 완료. 컨테이너는 유지하고 autoreload/HMR로 바로 반영합니다.")
+                    self.load_ui()
+                    return
+                self.append_log("[SYNC][INFO] 컨테이너 유지 (autreload=off). 필요하면 수동 재시작해 주세요.")
+                self.load_ui()
+                return
+            self.append_log("[SYNC] 빠른 적용 완료. 서비스 시작 중...")
+            self._show_preload_dialog("서비스 시작 중...")
+            self._clear_conflicting_containers()
+            def _after_restart(exit_code: int, *_):
+                if exit_code == 0:
+                    self.append_log("[START] 완료, UI 새로고침 중...")
+                    self._wait_for_services_ready(self.load_ui)
+                else:
+                    self.append_log(f"[START][ERROR] 시작 실패 (code={exit_code})")
+                    self._hide_preload_dialog()
+            self._ensure_service_running("SYNC", restart_if_running=False, on_finish=_after_restart)
             return
         self.append_log("[SYNC] 빠른 적용 완료. UI 새로고침 중...")
         self.load_ui()
@@ -2107,13 +2358,7 @@ class MainWindow(QMainWindow):
             else:
                 self._hide_preload_dialog()
         self._clear_conflicting_containers()
-        self._run_compose_sequence(
-            [
-                ["down", "--remove-orphans"],
-                ["up", "-d", "service"],
-            ],
-            on_finish=_after_restart,
-        )
+        self._ensure_service_running("RESTART", restart_if_running=True, on_finish=_after_restart)
 
     def open_logs_window(self):
         svc = "service"
@@ -2126,7 +2371,7 @@ class MainWindow(QMainWindow):
         ui_log = self._create_ui_log_dialog("Launcher Logs", UI_LOG_FILE)
 
         ordered = []
-        for dlg in (ui_log, frontend, backend):
+        for dlg in (frontend, backend, ui_log):
             if dlg is None:
                 continue
             self._register_log_window(dlg)

@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "[ENTRY] Starting Easy Collector services (single container)"
+STATUS_LOG=""
+
+log_status() {
+  local msg="$1"
+  echo "$msg"
+  if [[ -n "${STATUS_LOG:-}" ]]; then
+    printf '%s\n' "$msg" >>"$STATUS_LOG" 2>/dev/null || true
+  fi
+}
 
 # Print environment and runtime summary for diagnostics
 env_summary() {
@@ -9,6 +17,8 @@ env_summary() {
   echo "[ENV] Node max-old-space-size: ${EC_NODE_MAX_OLD_SPACE_SIZE:-unset}"
   echo "[ENV] Python: $(python3 -V 2>/dev/null || echo N/A) | Pip: $(python3 -m pip -V 2>/dev/null || echo N/A)"
   echo "[ENV] Pip index: ${PIP_INDEX_URL:-unset} | extra-index: ${PIP_EXTRA_INDEX_URL:-unset}"
+  echo "[ENV] Pip cache: NO_CACHE=${PIP_NO_CACHE_DIR:-unset} DIR=${PIP_CACHE_DIR:-unset}"
+  echo "[ENV] Backend autoreload: EC_BACKEND_AUTORELOAD=${EC_BACKEND_AUTORELOAD:-0}"
   echo "[ENV] npm registry: ${NPM_CONFIG_REGISTRY:-unset}"
   python3 - <<'PY'
 try:
@@ -23,6 +33,15 @@ try:
 except Exception as e:
     print('[ENV] Packages: unavailable', e)
 PY
+}
+
+init_status_log() {
+  STATUS_LOG="${LOG_DIR}/status.log"
+  mkdir -p "$LOG_DIR" 2>/dev/null || true
+  if ! touch "$STATUS_LOG" 2>/dev/null; then
+    sudo touch "$STATUS_LOG" 2>/dev/null || true
+  fi
+  chmod 666 "$STATUS_LOG" 2>/dev/null || true
 }
 
 # Detect low-memory environments and enable safe defaults unless explicitly overridden
@@ -47,7 +66,7 @@ detect_low_mem() {
   else
     LOW_MEM=0
   fi
-  echo "[ENTRY] Memory total=${mem_kb}kB cgroup_limit=${limit_kb}kB low_mem=${LOW_MEM}"
+  log_status "[ENTRY] Memory total=${mem_kb}kB cgroup_limit=${limit_kb}kB low_mem=${LOW_MEM}"
 }
 
 # Shared data root for config persistence (keep out of $HOME)
@@ -73,7 +92,7 @@ ensure_data_root_writable() {
 
   # If we still cannot write the config, fall back to /tmp (per-container writable)
   if ! touch "$CONFIG_PATH" 2>/dev/null; then
-    echo "[ENTRY][WARN] $CONFIG_PATH is not writable; falling back to /tmp/easytrainer"
+    log_status "[ENTRY][WARN] $CONFIG_PATH is not writable; falling back to /tmp/easytrainer"
     DATA_ROOT="/tmp/easytrainer"
     CONFIG_PATH="${DATA_ROOT}/config.json"
     LOG_DIR="/tmp/easytrainer/logs"
@@ -91,20 +110,29 @@ ensure_data_root_writable() {
 
 ensure_data_root_writable
 
+init_status_log
+log_status "[ENTRY] Starting Easy Collector services (single container)"
+log_status "[ENTRY] Data root=${DATA_ROOT} logs=${LOG_DIR}"
+
 detect_low_mem
 if [[ "${LOW_MEM:-0}" == "1" ]]; then
-  echo "[ENTRY] Low-memory mode detected (<4GB). Applying safe defaults."
+  log_status "[ENTRY] Low-memory mode detected (<4GB). Applying safe defaults."
   : "${EC_NO_FRONTEND:=1}"; export EC_NO_FRONTEND
   : "${EC_NO_SIDE_PROCESSES:=1}"; export EC_NO_SIDE_PROCESSES
   : "${EC_SKIP_TORCHVISION_COMPAT:=1}"; export EC_SKIP_TORCHVISION_COMPAT
   : "${EC_NODE_MAX_OLD_SPACE_SIZE:=256}"; export EC_NODE_MAX_OLD_SPACE_SIZE
 fi
+# Default to fast dev turnaround (backend autoreload) unless explicitly disabled
+: "${EC_BACKEND_AUTORELOAD:=1}"; export EC_BACKEND_AUTORELOAD
 
 # Persistent Python vendor path and pip cache (mounted volume on host)
 PY_VENDOR_DIR=${PY_VENDOR_DIR:-/root/python_pkgs/vendor}
 PIP_CACHE_DIR=${PIP_CACHE_DIR:-/root/python_pkgs/.cache/pip}
+PIP_NO_CACHE_DIR=${PIP_NO_CACHE_DIR:-0}
+export PIP_NO_CACHE_DIR
 mkdir -p "$PY_VENDOR_DIR" "$PIP_CACHE_DIR"
 
+log_status "[ENTRY] Capturing environment summary"
 env_summary
 
 # Resolve a developer source path (env > UI config) and sync into /root/src before start
@@ -139,24 +167,25 @@ sync_project_root() {
   src="$(resolve_sync_source)"
   local dest="/root/src"
   if [[ -z "$src" ]]; then
-    echo "[SYNC] No dev source configured (env or UI config); skipping sync"
+    log_status "[SYNC] No dev source configured (env or UI config); skipping sync"
     return
   fi
   if [[ ! -d "$src" ]]; then
-    echo "[SYNC][WARN] Dev source path not found: $src"
+    log_status "[SYNC][WARN] Dev source path not found: $src"
     return
   fi
   if [[ "$src" == "$dest" ]]; then
-    echo "[SYNC] Source and destination are the same ($src); skipping sync"
+    log_status "[SYNC] Source and destination are the same ($src); skipping sync"
     return
   fi
-  echo "[SYNC] Syncing project from $src -> $dest"
+  log_status "[SYNC] Syncing project from $src -> $dest"
   mkdir -p "$dest"
   rsync -a --delete \
     --exclude '.git' \
     --exclude 'node_modules' \
+    --exclude 'backend/database/*.db' \
     --exclude 'logs' \
-    "$src"/ "$dest"/ || echo "[SYNC][WARN] rsync encountered errors"
+    "$src"/ "$dest"/ || log_status "[SYNC][WARN] rsync encountered errors"
 }
 
 sync_project_root
@@ -208,21 +237,51 @@ __all__ = [
 ]
 PYCODE
   chmod 644 "$target" 2>/dev/null || true
-  echo "[PATCH] Created missing backend/lerobot/datasets/__init__.py"
+  log_status "[PATCH] Created missing backend/lerobot/datasets/__init__.py"
 }
 
 ensure_lerobot_dataset_init
+
+build_ros2_workspace() {
+  local ws="/root/ros2_ws"
+  log_status "[ROS] Building ROS 2 workspace at $ws (this may take a while)"
+  ( cd "$ws" && source /opt/ros/humble/setup.bash && colcon build --symlink-install )
+}
+
+ensure_ros2_workspace() {
+  local ws="/root/ros2_ws"
+  local install="$ws/install/setup.bash"
+  if [[ "${EC_NO_ROS:-0}" == "1" ]]; then
+    log_status "[ROS] Skipped workspace build (EC_NO_ROS=1)"
+    return
+  fi
+  if [[ ! -d "$ws" ]]; then
+    log_status "[ROS][WARN] ROS 2 workspace not found at $ws; skipping build"
+    return
+  fi
+  if [[ ! -f "$install" ]]; then
+    build_ros2_workspace
+    return
+  fi
+  if ! (source /opt/ros/humble/setup.bash && source "$install" && ros2 pkg list 2>/dev/null | grep -q '^piper$'); then
+    log_status "[ROS] Workspace found but required packages missing; rebuilding"
+    build_ros2_workspace
+  else
+    log_status "[ROS] Workspace already built (piper package found)"
+  fi
+}
 
 # Ensure ROS 2 environment is available for rclpy and ros2 CLI.
 # Temporarily disable nounset because ROS setup scripts reference unset vars.
 set +u
 if [[ -f "/opt/ros/humble/setup.bash" ]]; then
-  echo "[ROS] Sourcing /opt/ros/humble/setup.bash"
+  log_status "[ROS] Sourcing /opt/ros/humble/setup.bash"
   # shellcheck disable=SC1091
   source /opt/ros/humble/setup.bash
 fi
+ensure_ros2_workspace
 if [[ -f "/root/ros2_ws/install/setup.bash" ]]; then
-  echo "[ROS] Sourcing /root/ros2_ws/install/setup.bash"
+  log_status "[ROS] Sourcing /root/ros2_ws/install/setup.bash"
   # shellcheck disable=SC1091
   source /root/ros2_ws/install/setup.bash
 fi
@@ -232,7 +291,7 @@ set -u
 BACKEND_FLAGS=""
 if [[ "${EC_DEBUG:-0}" == "1" ]]; then
   BACKEND_FLAGS="--debug"
-  echo "[ENTRY] Backend debug mode enabled"
+  log_status "[ENTRY] Backend debug mode enabled"
 fi
 
 # Prepare log directory
@@ -248,21 +307,24 @@ if [[ "${EC_NO_FRONTEND:-0}" != "1" ]]; then
   export NPM_CONFIG_AUDIT=${NPM_CONFIG_AUDIT:-false}
   export NPM_CONFIG_FUND=${NPM_CONFIG_FUND:-false}
   if [[ ! -d node_modules ]] || [[ ! -x ./node_modules/.bin/quasar ]]; then
-    echo "[FRONTEND] Installing node modules ..."
+    log_status "[FRONTEND] Installing node modules ..."
     (npm ci --no-audit --no-fund --prefer-offline --legacy-peer-deps || npm install --no-audit --no-fund --legacy-peer-deps)
   fi
-  echo "[FRONTEND] Starting Quasar dev server on 0.0.0.0:5173"
+  log_status "[FRONTEND] Starting Quasar dev server on 0.0.0.0:5173"
   export NODE_OPTIONS="--max-old-space-size=${EC_NODE_MAX_OLD_SPACE_SIZE:-384}"
   ./node_modules/.bin/quasar dev -p 5173 --host 0.0.0.0 >>"$LOG_DIR/frontend.log" 2>&1 &
   FRONT_PID=$!
+  log_status "[FRONTEND] Quasar dev server launched (pid=${FRONT_PID})"
 else
-  echo "[FRONTEND] Skipped (EC_NO_FRONTEND=1)"
+  log_status "[FRONTEND] Skipped (EC_NO_FRONTEND=1)"
   FRONT_PID=0
 fi
 
 ensure_orator() {
+  # Best-effort install with retries; never fail the entire entrypoint for transient issues.
   # Check import inside an if to avoid set -e aborts
-  if python3 - <<'PY'
+  for attempt in 1 2 3; do
+    if python3 - <<'PY'
 import sys
 try:
     import orator  # noqa: F401
@@ -270,18 +332,25 @@ try:
 except Exception:
     sys.exit(1)
 PY
-  then
-    :
-  else
-    echo "[SETUP] Installing orator deps (no-deps mode)..."
-    python3 -m pip install --no-deps --no-input backpack==0.1 simplejson faker lazy-object-proxy cleo==0.6.8 inflection pendulum==1.5.1 pytzdata python-dateutil >/dev/null 2>&1 || true
-    echo "[SETUP] Installing orator (no-deps)..."
-    python3 -m pip install --no-deps --no-input --prefer-binary orator==0.9.9 && hash -r || {
-      echo "[SETUP][ERROR] Failed to install orator" >&2
-      exit 1
-    }
-    # Verify import now
-    if python3 - <<'PY'
+    then
+      break
+    fi
+    log_status "[SETUP] Installing orator deps (no-deps mode)... (try ${attempt}/3)"
+    python3 -m pip install --no-deps --no-input --timeout 180 --retries 3 \
+      --cache-dir "${PIP_CACHE_DIR}" \
+      backpack==0.1 simplejson faker lazy-object-proxy cleo==0.6.8 inflection pendulum==1.5.1 pytzdata python-dateutil >/dev/null 2>&1 || true
+    log_status "[SETUP] Installing orator (no-deps)... (try ${attempt}/3)"
+    if python3 -m pip install --no-deps --no-input --prefer-binary --timeout 180 --retries 3 \
+      --cache-dir "${PIP_CACHE_DIR}" \
+      orator==0.9.9 >/dev/null 2>&1; then
+      hash -r
+    else
+      log_status "[SETUP][WARN] orator install attempt ${attempt} failed; retrying..."
+      sleep 5
+    fi
+  done
+  # Verify import now (do not exit hard; just warn)
+  if python3 - <<'PY'
 import sys
 try:
     import orator  # noqa: F401
@@ -291,12 +360,10 @@ except Exception as e:
     print('orator_import_failed:', e)
     sys.exit(1)
 PY
-    then
-      :
-    else
-      echo "[SETUP][ERROR] orator import still failing after install" >&2
-      exit 1
-    fi
+  then
+    :
+  else
+    log_status "[SETUP][ERROR] orator import still failing after retries; continuing but backend may fail."
   fi
 
   # Log orator details (module version, CLI path + version) once per container
@@ -311,13 +378,38 @@ except Exception:
 print(f"[SETUP] orator python module version: {v}")
 PY
     if command -v orator >/dev/null 2>&1; then
-      echo "[SETUP] orator CLI path: $(command -v orator)"
+      log_status "[SETUP] orator CLI path: $(command -v orator)"
       python3 -m orator --version 2>/dev/null || true
     else
-      echo "[SETUP] orator CLI path: not found (using python -m orator)"
+      log_status "[SETUP] orator CLI path: not found (using python -m orator)"
       python3 -m orator --version 2>/dev/null || true
     fi
   fi
+}
+
+ensure_watchfiles() {
+  # Optional dependency for dev autoreload mode
+  if [[ "${EC_BACKEND_AUTORELOAD:-0}" != "1" ]]; then
+    return
+  fi
+  for attempt in 1 2; do
+    if python3 - <<'PY'
+import sys
+try:
+    import watchfiles  # noqa: F401
+    sys.exit(0)
+except Exception:
+    sys.exit(1)
+PY
+    then
+      break
+    fi
+    log_status "[SETUP] Installing watchfiles for backend autoreload (try ${attempt}/2)..."
+    python3 -m pip install --no-deps --no-input --prefer-binary --timeout 180 --retries 2 \
+      --cache-dir "${PIP_CACHE_DIR}" \
+      "watchfiles==0.21.0" >/dev/null 2>&1 || true
+    hash -r
+  done
 }
 
 # Ensure torchvision/torch compatibility (avoid AttributeError: torch.library.register_fake)
@@ -354,9 +446,9 @@ except Exception:
 
 print(desired or '', current or '', torch_ver or '')
 PY
-)
+  )
   if [[ -n "${desired:-}" && "${current:-}" != "$desired" ]]; then
-    echo "[SETUP] Installing torchvision==$desired to match torch ${torch_ver:-unknown} (current: ${current:-none})..."
+    log_status "[SETUP] Installing torchvision==$desired to match torch ${torch_ver:-unknown} (current: ${current:-none})..."
     python3 -m pip install --no-deps --no-input --prefer-binary \
       --cache-dir "${PIP_CACHE_DIR}" \
       "torchvision==$desired" && hash -r || true
@@ -365,19 +457,21 @@ PY
 
 # 2) Ensure DB deps and run migrations (idempotent)
 if [[ "${EC_SKIP_TORCHVISION_COMPAT:-0}" == "1" ]]; then
-  echo "[STEP] Skipping torchvision/torch compatibility (EC_SKIP_TORCHVISION_COMPAT=1)"
+  log_status "[STEP] Skipping torchvision/torch compatibility (EC_SKIP_TORCHVISION_COMPAT=1)"
 else
-  echo "[STEP] Ensuring torchvision/torch compatibility"
+  log_status "[STEP] Ensuring torchvision/torch compatibility"
   ensure_torchvision_compat
 fi
-echo "[STEP] Ensuring orator availability"
+log_status "[STEP] Ensuring orator availability"
 ensure_orator
-echo "[STEP] Switching to /root/src/backend/database"
+log_status "[STEP] Switching to /root/src/backend/database"
 cd /root/src/backend/database
-echo "[DB] Running migrations (Python API) ..."
+log_status "[DB] Running migrations (Python API) ..."
 (
   python3 -m pip show orator >/dev/null 2>&1 || \
-    python3 -m pip install --no-deps --no-input --prefer-binary -q orator==0.9.9
+    python3 -m pip install --no-deps --no-input --prefer-binary -q \
+      --cache-dir "${PIP_CACHE_DIR}" \
+      orator==0.9.9
   python3 - <<'PY'
 import os, sys
 sys.path.insert(0, os.path.abspath('.'))
@@ -408,42 +502,62 @@ except Exception as e:
     sys.exit(1)
 PY
 ) || {
-  echo "[DB][WARN] Python API migration failed; trying migration.sh if present" >&2
+  log_status "[DB][WARN] Python API migration failed; trying migration.sh if present"
   bash migration.sh || true
 }
 
 # 3) Start backend API
 cd /root/src
-echo "[BACKEND] Starting Flask-SocketIO API on 0.0.0.0:5000"
+log_status "[BACKEND] Starting Flask-SocketIO API on 0.0.0.0:5000"
 # Prime backend log so it's never empty
 echo "[BACKEND][BOOT] $(date -Is) starting backend.api.app" >>"$LOG_DIR/backend.log" 2>/dev/null || true
 # Double-check import before start; hard-fail if unresolved
 ensure_orator
+ensure_watchfiles
 if [[ "${EC_SKIP_TORCHVISION_COMPAT:-0}" != "1" ]]; then
   ensure_torchvision_compat
 fi
 BACKEND_ENTRY="${EC_BACKEND_ENTRY:-backend.api.app}"
-echo "[BACKEND] Entry: ${BACKEND_ENTRY}"
-python3 -u -m "${BACKEND_ENTRY}" ${BACKEND_FLAGS} >>"$LOG_DIR/backend.log" 2>&1 &
+log_status "[BACKEND] Entry: ${BACKEND_ENTRY}"
+BACKEND_CMD=()
+if [[ "${EC_BACKEND_AUTORELOAD:-0}" == "1" ]]; then
+  log_status "[BACKEND] Autoreload enabled (watchfiles)"
+  TARGET_CMD="bash -lc 'cd /root/src && python3 -u -m ${BACKEND_ENTRY} ${BACKEND_FLAGS}'"
+  # Use watchfiles CLI in command mode; target is a single shell string (shlex-split inside watchfiles)
+  BACKEND_CMD=(python3 -m watchfiles --filter python --target-type=command "$TARGET_CMD" /root/src/backend)
+else
+  BACKEND_CMD=(python3 -u -m "${BACKEND_ENTRY}" ${BACKEND_FLAGS})
+fi
+"${BACKEND_CMD[@]}" >>"$LOG_DIR/backend.log" 2>&1 &
 BACK_PID=$!
-echo "[BACKEND] PID=${BACK_PID}"
+log_status "[BACKEND] PID=${BACK_PID} CMD=${BACKEND_CMD[*]}"
 
-# Probe simple health endpoint so status shows in docker logs
-(
-  for i in $(seq 1 30); do
-    if curl -fsS -m 2 http://127.0.0.1:5000/api/healthz >/dev/null 2>&1; then
-      echo "[HEALTH] backend /api/healthz OK"
+# Probe simple health endpoint so status shows in docker logs (wait up to 100s)
+HEALTH_OK=0
+log_status "[HEALTH] Probing backend /api/healthz (max 100s)"
+for i in $(seq 1 100); do
+  if curl -fsS -m 2 http://127.0.0.1:5000/api/healthz >/dev/null 2>&1; then
+    log_status "[HEALTH] backend /api/healthz OK"
+    HEALTH_OK=1
+    break
+  else
+    if [[ ${BACK_PID:-0} -gt 0 ]] && ! kill -0 "$BACK_PID" >/dev/null 2>&1; then
+      log_status "[HEALTH][WARN] backend process exited early (pid=$BACK_PID)"
       break
-    else
-      echo "[HEALTH] waiting backend (try $i)"
-      sleep 1
     fi
-  done
-) &
+    if (( i == 1 || i % 10 == 0 )); then
+      log_status "[HEALTH] waiting backend (try $i)"
+    fi
+    sleep 1
+  fi
+done
+if [[ "${HEALTH_OK}" != "1" ]]; then
+  log_status "[HEALTH][ERROR] backend not ready after 100 attempts"
+fi
 
 # Handle termination and child exit
 term() {
-  echo "[ENTRY] Shutting down..."
+  log_status "[ENTRY] Shutting down..."
   local pids=()
   [[ ${TAIL_PID:-0} -gt 0 ]] && pids+=("${TAIL_PID}")
   [[ ${BACK_PID:-0} -gt 0 ]] && pids+=("${BACK_PID}")
@@ -456,8 +570,13 @@ trap term INT TERM
 
 # Aggregate logs to container STDOUT so `docker logs` shows both backend and frontend logs
 touch "$LOG_DIR/backend.log" "$LOG_DIR/frontend.log" 2>/dev/null || true
-echo "[LOGS] Aggregating backend/frontend logs to STDOUT"
-tail -n +1 -F "$LOG_DIR/backend.log" "$LOG_DIR/frontend.log" &
+tail_targets=("$LOG_DIR/backend.log" "$LOG_DIR/frontend.log")
+if [[ -n "${STATUS_LOG:-}" ]]; then
+  touch "$STATUS_LOG" 2>/dev/null || true
+  tail_targets+=("$STATUS_LOG")
+fi
+log_status "[LOGS] Aggregating backend/frontend/status logs to STDOUT"
+tail -n +1 -q -F "${tail_targets[@]}" &
 TAIL_PID=$!
 
 # Wait for either to exit, then terminate the other
@@ -468,11 +587,22 @@ wait_pids=()
 if ((${#wait_pids[@]})); then
   wait -n "${wait_pids[@]}"
   EC=$?
+  ended_roles=()
+  if [[ ${BACK_PID:-0} -gt 0 ]] && ! kill -0 "$BACK_PID" >/dev/null 2>&1; then
+    ended_roles+=("backend")
+  fi
+  if [[ ${FRONT_PID:-0} -gt 0 ]] && ! kill -0 "$FRONT_PID" >/dev/null 2>&1; then
+    ended_roles+=("frontend")
+  fi
+  if ((${#ended_roles[@]})); then
+    role_label=$( (IFS=/; echo "${ended_roles[*]}") )
+    log_status "[ENTRY] ${role_label} process exited (code=${EC})"
+  fi
 else
-  echo "[ENTRY][ERROR] No child processes to wait for."
+  log_status "[ENTRY][ERROR] No child processes to wait for."
   EC=1
 fi
 term
 wait || true
-echo "[ENTRY] Exit code: ${EC}"
+log_status "[ENTRY] Exit code: ${EC}"
 exit ${EC}

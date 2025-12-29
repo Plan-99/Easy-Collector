@@ -158,7 +158,10 @@ class Robot(Model, SoftDeletes):
         if self.type != 'custom':
             custom_fields = self.get_robot_type_info().get('custom_fields', [])
             if 'can_port' in custom_fields:
-                return self.settings.get('can_port', 'can_0')
+                port = self.settings.get('can_port', 'can0')
+                if port.startswith('can_'):
+                    port = 'can' + port[4:]
+                return port
         return None
     
     @accessor
