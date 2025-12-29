@@ -123,6 +123,7 @@ if [[ "${LOW_MEM:-0}" == "1" ]]; then
   : "${EC_NODE_MAX_OLD_SPACE_SIZE:=256}"; export EC_NODE_MAX_OLD_SPACE_SIZE
 fi
 # Default to fast dev turnaround (backend autoreload) unless explicitly disabled
+: "${EC_DEBUG:=1}"; export EC_DEBUG
 : "${EC_BACKEND_AUTORELOAD:=1}"; export EC_BACKEND_AUTORELOAD
 
 # Persistent Python vendor path and pip cache (mounted volume on host)
