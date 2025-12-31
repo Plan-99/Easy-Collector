@@ -90,3 +90,7 @@
   - 로그: `docker logs -f easy_collector_service`
 
 ---
+
+### 매뉴얼
+
+[https://vertic-ai.com/manual/html/index.html]

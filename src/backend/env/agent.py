@@ -23,6 +23,7 @@ class Agent:
         self.ee_target = None
         self.last_joint_update = None
         self.robot_type = robot['type']
+        self.robot_company = robot['company']
         self.joint_len = len(robot['joint_names'])
         self.joint_names = robot['joint_names']
         self.joint_upper_bounds = robot['joint_upper_bounds']
@@ -228,23 +229,22 @@ class Agent:
             return joint_positions, None
 
     def move_to(self, target_pos, step_size=0.1):
-        self.move_joint_step(target_pos)
-        # else:
-        #     while True:
-        #         with self.js_mutex:
-        #             current_pos = self.joint_states
+        if self.robot_company == 'Piper':
+            self.move_joint_step(target_pos)
+        else:
+            while True:
+                current_pos = self.get_joint_states()
+                # 현재 위치와 목표 위치의 차이를 계산
+                pos_diff = [target - current for target, current in zip(target_pos, current_pos)]
                 
-        #         # 현재 위치와 목표 위치의 차이를 계산
-        #         pos_diff = [target - current for target, current in zip(target_pos, current_pos)]
-                
-        #         # 목표 위치에 도달했는지 확인
-        #         if all(abs(diff) < 0.03 for diff in pos_diff):
-        #             print("Reached target position.")
-        #             break
+                # 목표 위치에 도달했는지 확인
+                if all(abs(diff) < 0.01 for diff in pos_diff):
+                    print("Reached target position.")
+                    break
 
-        #         # 각 관절의 위치를 step_size만큼 이동
-        #         next_pos = [current + step_size * diff for current, diff in zip(current_pos, pos_diff)]
+                # 각 관절의 위치를 step_size만큼 이동
+                next_pos = [current + step_size * diff for current, diff in zip(current_pos, pos_diff)]
                 
-        #         # 이동 명령을 발행
-        #         self.move_joint_step(next_pos)
-        #         time.sleep(0.1)  # 잠시 대기하여 이동이 완료될 시간을 줌
+                # 이동 명령을 발행
+                self.move_joint_step(next_pos)
+                time.sleep(0.01)  # 짧은 대기 시간 추가

@@ -49,12 +49,10 @@ def record_episode(node, dataset_id, agents, assembly_id, sensors, task, languag
         if home_pose is not None and tele_type != 'externel':
             for agent in agents:
                 agent.move_to(home_pose[str(agent.id)])
-            time.sleep(3)
+            # time.sleep(3)
 
         # Reset the environment to get the first timestep at the home_pose
-        ts = env.reset()
-        timesteps = [ts]
-        time.sleep(1)
+
 
         if tele_type == 'leader':
             teleop = TeleoperatorModel.where('type', 'leader').where('assembly_id', assembly_id).first()
@@ -64,13 +62,15 @@ def record_episode(node, dataset_id, agents, assembly_id, sensors, task, languag
                 tele_control['stop'] = True
                 return
             
-            leader = Leader(agents, socketio_instance, teleop.settings, log_emit_id='record_episode')
+            leader = Leader(agents, socketio_instance, teleop.settings)
 
-            leader.sync_leader_robot()
             socketio_instance.start_background_task(
-                target=leader.position_pub,
+                target=leader.leader_teleop_workflow,
                 task_control=tele_control
             )
+
+            while not leader.is_synced:
+                time.sleep(0.1)
 
         # # saving dataset
         if not os.path.isdir(dataset_dir):
@@ -94,6 +94,10 @@ def record_episode(node, dataset_id, agents, assembly_id, sensors, task, languag
                 print(f'[ERROR] No data from sensor {sensor["id"]}')
                 tele_control['stop'] = True
                 return
+            
+        ts = env.reset()
+        timesteps = [ts]
+
             
         for t in range(max_timesteps):
             socketio_instance.emit('record_episode_progress', {

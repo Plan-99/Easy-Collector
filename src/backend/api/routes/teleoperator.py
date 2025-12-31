@@ -77,11 +77,11 @@ def create_teleoperator():
 def start_leader_teleoperation():
     data = request.json
     log_emit_id = data.get('log_emit_id', 'leader_teleoperation')
-    print(log_emit_id, '---------------------------------------------')
     assembly_id = data.get('assembly_id')
 
     assembly = AssemblyModel.find(assembly_id).to_dict()
-
+    
+    # 로봇 ID 추출 로직 (동일)
     robot_ids = list(set(v for v in {
         'left_arm_id': assembly.get('left_arm_id'),
         'right_arm_id': assembly.get('right_arm_id'),
@@ -93,31 +93,28 @@ def start_leader_teleoperation():
     try:
         agents = [current_app.agents[robot_id] for robot_id in robot_ids]
     except KeyError as e:
-        current_app.pm.socketio.emit('task_log', {
-            'id': log_emit_id,
-            'message': f'[ERROR] Robot is not running. Turn on the robot first.',
-            'type': 'error'
-        })
         return {'status': 'error', 'message': f'Robot with ID {str(e)} not found.'}, 404
 
+    # 1. 기존에 실행 중인 관련 태스크 종료
     current_app.pm.stop_function(name='subscribe_dxl')
+    current_app.pm.stop_function(name='leader_teleoperation')
 
     teleoperator = TeleoperatorModel.where('assembly_id', assembly_id).where('type', 'leader').first()
     
     try:
+        # 2. Leader 객체 초기화 (이 과정은 짧으므로 메인에서 수행)
         leader = Leader(agents, current_app.pm.socketio, teleop_setting=teleoperator.settings)
-        leader.sync_leader_robot()
-    except Exception as e:
-        current_app.pm.socketio.emit('task_log', {
-            'id': log_emit_id,
-            'message': f'[ERROR] Leader Teleoperation Init Failed: {str(e)}',
-            'type': 'error'
-        })
-        return {'status': 'error', 'message': f'Leader Teleoperation Init Failed: {str(e)}'}, 500
-    current_app.pm.start_function(
-        name='leader_teleoperation',
-        func=leader.position_pub,
-        log_id=log_emit_id,
-    )
+        
+        # 3. 전체 워크플로우를 백그라운드로 실행
+        # pm.start_function이 내부적으로 thread/background task를 생성함
+        current_app.pm.start_function(
+            name='leader_teleoperation',
+            func=leader.leader_teleop_workflow, # 통합 워크플로우 함수
+            log_id=log_emit_id,
+        )
 
-    return {'status': 'success', 'message': 'Leader teleoperation started'}, 200
+    except Exception as e:
+        return {'status': 'error', 'message': f'Init Failed: {str(e)}'}, 500
+
+    # 즉시 응답 반환
+    return {'status': 'success', 'message': 'Leader sync and teleop started in background'}, 200

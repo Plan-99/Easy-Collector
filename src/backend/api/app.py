@@ -85,10 +85,10 @@ pm.start_process(
     ['python3', '-m', 'backend.api.streaming']
 )
 
-pm.start_process(
-    'rosbridge_websocket',
-    ['ros2', 'launch', 'rosbridge_server', 'rosbridge_websocket_launch.xml', 'port:=9090']
-)
+# pm.start_process(
+#     'rosbridge_websocket',
+#     ['ros2', 'launch', 'rosbridge_server', 'rosbridge_websocket_launch.xml', 'port:=9090']
+# )
 
 @app.route('/api/healthz', methods=['GET'])
 def healthz():

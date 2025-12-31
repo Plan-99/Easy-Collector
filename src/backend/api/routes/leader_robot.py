@@ -68,11 +68,12 @@ def start_leader_teleoperation():
     current_app.pm.stop_process(name='start_leader_robot')
     agent = current_app.agents[robot['id']]
     
-    leader = Leader(agent, current_app.pm.socketio, preset, log_emit_id=log_emit_id, port=preset['port_name'])
-    leader.sync_leader_robot()
+    leader = Leader(agent, current_app.pm.socketio, preset)
+# 2. 전체 워크플로우를 start_function으로 실행
     current_app.pm.start_function(
-        name='leader_teleoperation',
-        func=leader.position_pub,
+        name='leader_teleoperation', # 프로세스 이름
+        func=leader.leader_full_workflow,   # 위에서 만든 통합 함수
+        log_id=log_emit_id,          # 로그 아이디
     )
 
     return {'status': 'success', 'message': 'Leader teleoperation started'}, 200

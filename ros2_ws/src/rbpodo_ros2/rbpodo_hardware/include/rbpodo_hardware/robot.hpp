@@ -42,10 +42,10 @@ class Robot {
     double t2{0.1};
 
     /// Speed tracking rate (gain > 0)
-    double gain{0.5};
+    double gain{0.05};
 
     /// Low-pass filter gain (The smaller it is, the smoother the action becomes. 0 < alpha < 1)
-    double alpha{0.5};
+    double alpha{0.05};
   };
 
   struct JointVelocityControllerConfig {
@@ -56,10 +56,10 @@ class Robot {
     double t2{0.1};
 
     /// Speed tracking rate (gain > 0)
-    double gain{0.5};
+    double gain{0.05};
 
     /// Low-pass filter gain (The smaller it is, the smoother the action becomes. 0 < alpha < 1)
-    double alpha{0.5};
+    double alpha{0.05};
   };
 
   struct JointEffortControllerConfig {
@@ -86,10 +86,10 @@ class Robot {
     double t2{0.1};
 
     /// Speed tracking rate (gain > 0)
-    double gain{0.5};
+    double gain{0.05};
 
     /// Low-pass filter gain (The smaller it is, the smoother the action becomes. 0 < alpha < 1)
-    double alpha{0.5};
+    double alpha{0.05};
   };
 
   struct CartesianVelocityControllerConfig {
@@ -100,10 +100,10 @@ class Robot {
     double t2{0.1};
 
     /// Speed tracking rate (gain > 0)
-    double gain{0.5};
+    double gain{0.05};
 
     /// Low-pass filter gain (The smaller it is, the smoother the action becomes. 0 < alpha < 1)
-    double alpha{0.5};
+    double alpha{0.05};
   };
 
   explicit Robot(const std::string& ip, bool simulation, const rclcpp::Logger& logger);

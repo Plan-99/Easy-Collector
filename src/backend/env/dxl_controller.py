@@ -203,7 +203,6 @@ def calculate_shortest_path_goal(current_pos, goal_pos, max_pos=4096):
     현재 위치에서 목표 위치까지의 최단 경로를 계산하여 새로운 목표 위치를 반환합니다.
     확장 위치 제어 모드에서 사용됩니다.
     """
-    print(f"Current Position: {current_pos}, Goal Position: {goal_pos}")
     diff = goal_pos - current_pos
     half_pos = max_pos / 2
 

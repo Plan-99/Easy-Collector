@@ -130,6 +130,7 @@ class Leader():
     
 
     def sync_leader_robot(self):
+        self.is_synced = False
         self.read_agent_and_write_to_joint_map()
 
         groups_by_port = self.group_joints_by_port()
@@ -158,18 +159,26 @@ class Leader():
                 print("[NOTICE] Will you start teleoperation? Close Gripper to Start!")
 
                 gripper_closed = False
+
+                count = 0
                 while not gripper_closed:
                     gripper_closed = True
                     for gripper_dxl_id in dxl_controller.gripper_dxl_ids:
                         gripper_pos = dxl_controller.read_dynamixel(gripper_dxl_id)  # 그리퍼의 현재 위치를 읽어오기
-                        gripper_range = self.get_joint_by_dxl_id(port, gripper_dxl_id)['gripper_dxl_range']
+                        gripper_range = self.get_joint_by_dxl_id(port, gripper_dxl_id)['gripper_dxl_range']                        
                         if gripper_range[0] < gripper_range[1]:
                             if gripper_pos < gripper_range[1]:
                                 gripper_closed = False
                         else:
                             if gripper_pos > gripper_range[1]:
                                 gripper_closed = False
-                
+
+                        if count == 0 and gripper_closed:
+                            print("[ERROR] Teleoperation Failed. You have to keep controller's gripper opened")
+                            raise Exception
+                        
+                    count = 1
+
                 dxl_controller.remove_torque()
             else:
                 raise Exception
@@ -185,6 +194,9 @@ class Leader():
 
         while any([dc.controlled for dc in self.dxl_controllers.values()]):
             time.sleep(0.1)
+
+        self.is_synced = True
+        print("[SUCCESS] Leader Robot Synced Successfully!")
 
 
     def get_gripper_pos(self, joint):
@@ -293,10 +305,29 @@ class Leader():
             print("Cleaning up Leader Robot resources...", flush=True)
             for port, dxl_controller in self.dxl_controllers.items():
                 try:
-                    # 안전을 위해 토크 해제 시도
-                    dxl_controller.remove_torque()
                     # 포트 닫기
                     dxl_controller.portHandler.closePort()
                     print(f"Port {port} closed safely.", flush=True)
                 except:
                     print(f"Failed to close port {port} cleanly.", flush=True)
+
+
+    def leader_teleop_workflow(self, task_control):
+        """
+        이 함수는 ProcessManager.start_function에 의해 백그라운드에서 실행됩니다.
+        """
+        print("[SYSTEM] Starting Leader Sync Process...")
+        
+        # 1. 동기화 실행 (내부의 while 루프 덕분에 완료될 때까지 여기서 블로킹됨)
+        self.sync_leader_robot()
+        
+        # 만약 중간에 사용자가 중지 버튼을 눌렀다면 체크
+        if task_control['stop']:
+            print("[SYSTEM] Workflow stopped by user during sync.")
+            return
+
+        print("[SUCCESS] Sync completed. Transitioning to Teleoperation...")
+
+        # 2. 곧바로 텔레옵(무한 루프) 실행
+        # leader.position_pub 내부에 task_control을 체크하는 로직이 있으면 더욱 좋습니다.
+        self.position_pub(task_control=task_control)

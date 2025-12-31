@@ -53,4 +53,4 @@ pymodbus== 3.9.2
 # jax
 # jax-lib
 # s3fs
---extra-index-url https://download.pytorch.org/whl/cu118
+--extra-index-url https://download.pytorch.org/whl/cu124

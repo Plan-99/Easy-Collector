@@ -113,8 +113,10 @@ def start_robot():
                    f'gripper_exist:={gripper_exist}']
 
     if company == 'Rainbow Robotics':
+        # moveit_command = ['ros2', 'launch', 'rbpodo_bringup', 'moveit.launch.py', f'namespace:=ec_robot_{id}', f'robot_ip:={settings.get("ip", "10.0.2.27")}', 'use_fake_hardware:=false']
+        
         command = ['ros2', 'launch', 'rbpodo_bringup', 'rbpodo.launch.py', f'namespace:=ec_robot_{id}', f'robot_ip:={settings.get("ip", "10.0.2.27")}', 'use_fake_hardware:=false']
-
+        
     if company == 'OnRobot':
         command = ['ros2', 'launch', 'onrobot_rg_control', 'bringup.launch.py',
                    f'namespace:=ec_robot_{id}',
@@ -296,11 +298,9 @@ def subscribe_robot(id):
 @robot_bp.route('/robot/<id>/:unsubscribe_robot', methods=['POST'])
 def unsubscribe_robot(id):
     current_app.pm.stop_function('subscribe_robot_' + str(id))
-    try:
-        current_app.agents.pop(int(id), None)
-    except Exception:
-        current_app.agents.pop(id, None)
     return {'status': 'success', 'message': 'Unsubscribed from robot topic'}, 200
+
+
 def _ensure_can_interface(name: str):
     """
     Make sure the requested CAN interface exists.

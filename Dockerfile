@@ -4,7 +4,7 @@
 # ===================================================================
 
 # 베이스 이미지 설정 (GPU 지원을 위해 NVIDIA CUDA 런타임 사용)
-FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
+FROM nvidia/cuda:12.4.1-devel-ubuntu22.04
 
 # 빌드 중 대화형 프롬프트 방지 및 환경 변수 설정
 ENV DEBIAN_FRONTEND=noninteractive
@@ -130,10 +130,10 @@ ENV CMAKE_PREFIX_PATH="/opt/openrobots:${CMAKE_PREFIX_PATH}"
 
 # pip 패키지를 먼저 설치하여 충돌 시 빠르게 실패하도록 배치
 COPY requirements.txt .
-# 미리 torch/torchvision을 설치해 의존성 충돌을 방지하고 이후 패키지는 --no-deps로 설치
+# RTX 5090(sm_100) 및 하위 호환성을 위해 CUDA 12.4용 최신 PyTorch 설치
 RUN python3 -m pip install --no-cache-dir --timeout 300 --prefer-binary \
-      --extra-index-url https://download.pytorch.org/whl/cu118 \
-      torch==2.3.0+cu118 torchvision==0.18.0+cu118 \
+      --extra-index-url https://download.pytorch.org/whl/cu124 \
+      torch torchvision torchaudio \
     && python3 -m pip install --no-cache-dir --timeout 300 --prefer-binary -r requirements.txt \
     && python3 -m pip install --no-cache-dir --timeout 300 --prefer-binary "pyyaml==6.0.2" \
     && rm -rf /root/.cache/pip
