@@ -1,6 +1,7 @@
 from flask import Blueprint, request, current_app, Response
 import json
 from ...database.models.assembly_model import Assembly as AssemblyModel
+from ..utils.runtime import attach_robot_runtime
 
 # 1. Blueprint 생성
 # 이 블루프린트는 어셈블리와 관련된 'HTTP' 라우트를 관리합니다.
@@ -16,6 +17,10 @@ def get_assemblies():
         'mobile_base',    
     ).get()
     assemblies = [assembly.to_dict() for assembly in assemblies]
+    processes = set(current_app.pm.list_processes())
+    for assembly in assemblies:
+        if assembly.get('robots'):
+            assembly['robots'] = [attach_robot_runtime(robot, processes) for robot in assembly['robots']]
     return {
         'status': 'success',
         'assemblies': assemblies

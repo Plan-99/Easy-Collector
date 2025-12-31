@@ -1,10 +1,22 @@
-DATABASES = {
-    'default': 'sqlite',  # 기본으로 사용할 DB 설정 이름
+import os
 
+# Compute persistent DB location. If EASYTRAINER_DATA_DIR is set (container runtime),
+# store DB under <data_root>/database/main.db to avoid overwrites from code sync.
+# Otherwise fall back to the repo-local DB path.
+data_root = os.environ.get('EASYTRAINER_DATA_DIR')
+if data_root:
+    db_dir = os.path.join(data_root, 'database')
+    os.makedirs(db_dir, exist_ok=True)
+    DB_PATH = os.path.join(db_dir, 'main.db')
+else:
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    DB_PATH = os.path.join(base_dir, 'main.db')
+
+DATABASES = {
+    'default': 'sqlite',
     'sqlite': {
         'driver': 'sqlite',
-        # 프로젝트 폴더에 'my_database.sqlite' 라는 파일로 DB가 생성됩니다.
-        'database': 'main.db',
+        'database': DB_PATH,
         'prefix': ''
     }
 }

@@ -3,9 +3,11 @@ from flask_socketio import Namespace, emit
 from ...database.models.robot_model import Robot as RobotModel
 import time
 import os
+import subprocess
 from ...env.agent import Agent
 from ..process.subscribe_robot import subscribe_robot_topic
 from ...configs.global_configs import SUPPORT_ROBOTS
+from ..utils.runtime import attach_robot_runtime
 
 # 1. Blueprint 생성
 # 이 블루프린트는 카메라와 관련된 'HTTP' 라우트를 관리합니다.
@@ -30,9 +32,9 @@ def get_robots():
     robots = RobotModel.with_('leader_robot_preset').where('hide', False).get()
     robots = [robot.to_dict() for robot in robots]
 
+    processes = set(current_app.pm.list_processes())
     for robot in robots:
-        # 프로세스 ID 초기화
-        robot['process_id'] = 'robot_' + str(robot['id'])
+        attach_robot_runtime(robot, processes)
 
     return {
         'status': 'success',
@@ -55,9 +57,11 @@ def get_supporting_robots():
 def get_robot(id):
     robot = RobotModel.find(id)
     if robot:
+        processes = set(current_app.pm.list_processes())
+        robot = attach_robot_runtime(robot.to_dict(), processes)
         return {
             'status': 'success',
-            'robot': robot.to_dict()
+            'robot': robot
         }, 200
     else:
         return {
@@ -74,6 +78,16 @@ def start_robot():
     company = data.get('company', '')
     settings = data.get('settings', {})
 
+    # Stop lingering processes from previous attempts to allow clean restart
+    try:
+        current_app.pm.stop_process(process_id)
+    except Exception:
+        pass
+    try:
+        current_app.pm.stop_function('subscribe_robot_' + str(id))
+    except Exception:
+        pass
+
     command = ''
     if company == 'Piper':
         script_path = os.path.expanduser('~/ros2_ws/src/piper_ros/can_activate_main.sh')
@@ -85,9 +99,16 @@ def start_robot():
         time.sleep(1)
 
         gripper_exist = 'true' if type == 'piper' else 'false'
+        can_port = settings.get("can_port", "can0")
+        if can_port.startswith("can_"):
+            can_port = "can" + can_port[4:]
+        can_port = _ensure_can_interface(can_port)
+        # If still missing, fail fast
+        if not os.path.exists(f"/sys/class/net/{can_port}"):
+            return {'status': 'error', 'message': f'CAN interface {can_port} not found'}, 400
         command = ['ros2', 'launch', 'piper', 'start_single_piper.launch.py', 
                    f'namespace:=ec_robot_{id}', 
-                   f'can_port:={settings.get("can_port", "can_0")}', 
+                   f'can_port:={can_port}', 
                    'auto_enable:=true', 'rviz_ctrl_flag:=false', 
                    f'gripper_exist:={gripper_exist}']
 
@@ -164,6 +185,9 @@ def create_robot():
         if field in request.json:
             settings[field] = request.json.get(field)
 
+    # Normalize CAN port names (can0/can1) in case underscores are provided
+    if 'can_port' in settings and settings['can_port'].startswith('can_'):
+        settings['can_port'] = 'can' + settings['can_port'][4:]
 
     RobotModel.create(
         name=name,
@@ -209,7 +233,10 @@ def update_robot(id):
 
 
     if 'can_port' in request.json:
-        settings['can_port'] = request.json.get('can_port', 'can_0')
+        can_port = request.json.get('can_port', 'can0')
+        if isinstance(can_port, str) and can_port.startswith('can_'):
+            can_port = 'can' + can_port[4:]
+        settings['can_port'] = can_port
 
     if 'ip_address' in request.json:
         settings['ip_address'] = request.json.get('ip_address', '')
@@ -269,4 +296,31 @@ def subscribe_robot(id):
 @robot_bp.route('/robot/<id>/:unsubscribe_robot', methods=['POST'])
 def unsubscribe_robot(id):
     current_app.pm.stop_function('subscribe_robot_' + str(id))
+    try:
+        current_app.agents.pop(int(id), None)
+    except Exception:
+        current_app.agents.pop(id, None)
     return {'status': 'success', 'message': 'Unsubscribed from robot topic'}, 200
+def _ensure_can_interface(name: str):
+    """
+    Make sure the requested CAN interface exists.
+    If 'canX' is missing but 'can_X' exists, rename it to 'canX'.
+    """
+    if not name.startswith("can"):
+        return name
+    # Already exists
+    if os.path.exists(f"/sys/class/net/{name}"):
+        return name
+    # Try underscore variant
+    num = name[3:]
+    alt = f"can_{num}"
+    if os.path.exists(f"/sys/class/net/{alt}"):
+        try:
+            subprocess.run(["ip", "link", "set", alt, "down"], check=True)
+            subprocess.run(["ip", "link", "set", alt, "name", name], check=True)
+            subprocess.run(["ip", "link", "set", name, "type", "can", "bitrate", "1000000"], check=True)
+            subprocess.run(["ip", "link", "set", name, "up"], check=True)
+            print(f"[PIPER] Renamed {alt} -> {name}")
+        except Exception as e:
+            print(f"[PIPER][WARN] Failed to rename {alt} -> {name}: {e}")
+    return name

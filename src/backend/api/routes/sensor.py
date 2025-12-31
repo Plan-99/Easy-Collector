@@ -45,6 +45,7 @@ def start_sensor():
     command = ''
     if type == 'realsense_camera':
         # command = ['roslaunch', 'realsense2_camera', 'rs_camera.launch', f'camera:=ec_sensor_{id}', f'serial_no:={serial_no}']
+        # serial_no must be passed as string to avoid type mismatch
         command = ['ros2', 'launch', 'realsense2_camera', 'rs_launch.py', f'camera_namespace:=ec_sensor_{id}', f'serial_no:="{serial_no}"']
 
     if not serial_no:
@@ -114,6 +115,4 @@ def delete_sensor(id):
     sensor.hide = True
     sensor.save()
     return {'status': 'success', 'message': 'Sensor Deleted'}, 200
-
-
 

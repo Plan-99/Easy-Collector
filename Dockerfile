@@ -3,12 +3,27 @@
 # with tmux for multi-terminal support
 # ===================================================================
 
-# 베이스 이미지 설정
-FROM ubuntu:22.04
+# 베이스 이미지 설정 (GPU 지원을 위해 NVIDIA CUDA 런타임 사용)
+FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
 
 # 빌드 중 대화형 프롬프트 방지 및 환경 변수 설정
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Asia/Seoul
+ENV PIP_NO_CACHE_DIR=1
+# Make pip more resilient to slow networks
+ENV PIP_DEFAULT_TIMEOUT=300
+ENV PIP_PROGRESS_BAR=off
+# NVIDIA Container Toolkit와 함께 사용할 때 GPU를 항상 노출
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+
+# Regional PyPI mirror (defaults to Kakao; can be overridden at build time)
+ARG PIP_INDEX_URL=https://mirror.kakao.com/pypi/simple
+ARG PIP_EXTRA_INDEX_URL=https://pypi.org/simple
+ENV PIP_INDEX_URL=${PIP_INDEX_URL}
+ENV PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL}
+RUN printf "[global]\nindex-url = %s\nextra-index-url = %s\n" "$PIP_INDEX_URL" "$PIP_EXTRA_INDEX_URL" > /etc/pip.conf
+
 
 # ROS 설치를 위한 준비 작업 및 필수 패키지 설치
 RUN \
@@ -42,10 +57,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends ethtool can-uti
 
 # ROS 2 Humble (Desktop-Full) 및 관련 패키지 설치
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ros-humble-ros-base \
-    ros-humble-image-transport-plugins \
+    ros-humble-desktop-full \
     ros-humble-realsense2-camera \
     ros-humble-realsense2-description \
+    ros-humble-usb-cam \
+    ros-humble-image-transport-plugins \
+    v4l-utils \
     ros-humble-ruckig \
     ros-humble-eigen-stl-containers \
     ros-humble-geometric-shapes \
@@ -62,6 +79,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-controller-manager \
     ros-humble-rmw-cyclonedds-cpp \
     ros-humble-rosidl-generator-dds-idl \
+    ros-humble-ament-cmake \
+    ros-humble-joint-state-publisher \
+    ros-humble-moveit \
+    ros-humble-pluginlib \
+    ros-humble-robot-state-publisher \
+    ros-humble-urdf-launch \
+    ros-humble-xacro \
     python3-pip \
     python3-rosdep \
     python3-colcon-common-extensions \
@@ -69,17 +93,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
     && apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*
-
-
-# 추가 Rainbow Robotics ROS 2 패키지 설치
-RUN apt-get update && apt install -y \
-    ros-humble-ament-cmake \
-    ros-humble-joint-state-publisher \
-    ros-humble-moveit \
-    ros-humble-pluginlib \
-    ros-humble-robot-state-publisher \
-    ros-humble-urdf-launch \
-    ros-humble-xacro
 
 # ROS 2 환경 설정
 RUN echo "source /opt/ros/humble/setup.bash" >> /etc/bash.bashrc
@@ -102,7 +115,7 @@ RUN apt-get update && \
         | tee /etc/apt/sources.list.d/robotpkg.list && \
     \
     apt-get update && \
-    apt-get install -qqy robotpkg-py3*-pinocchio && \
+    apt-get install -y --no-install-recommends robotpkg-py3*-pinocchio && \
     \
     rm -rf /var/lib/apt/lists/* && \
     apt-get clean
@@ -114,6 +127,16 @@ ENV LD_LIBRARY_PATH="/opt/openrobots/lib:${LD_LIBRARY_PATH}"
 ENV PYTHONPATH="/opt/openrobots/lib/python3.10/site-packages:${PYTHONPATH}"
 ENV CMAKE_PREFIX_PATH="/opt/openrobots:${CMAKE_PREFIX_PATH}"
 
+
+# pip 패키지를 먼저 설치하여 충돌 시 빠르게 실패하도록 배치
+COPY requirements.txt .
+# 미리 torch/torchvision을 설치해 의존성 충돌을 방지하고 이후 패키지는 --no-deps로 설치
+RUN python3 -m pip install --no-cache-dir --timeout 300 --prefer-binary \
+      --extra-index-url https://download.pytorch.org/whl/cu118 \
+      torch==2.3.0+cu118 torchvision==0.18.0+cu118 \
+    && python3 -m pip install --no-cache-dir --timeout 300 --prefer-binary -r requirements.txt \
+    && python3 -m pip install --no-cache-dir --timeout 300 --prefer-binary "pyyaml==6.0.2" \
+    && rm -rf /root/.cache/pip
 
 # Node.js 설치 (npm도 함께 설치됨)
 RUN apt-get update && apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*
@@ -128,18 +151,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Git 설치
-RUN apt-get update && apt-get install git -y
-
-# pip 패키지 설치
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 
 # --- ROS2 Workspace & UI Setup ---
+WORKDIR /root
 # src 디렉토리 전체를 복사하여 ui와 backend를 모두 포함하도록 수정
 COPY src /root/src
-
-WORKDIR /root/src/ui
-RUN npm install
+# Defer UI dependency install to runtime for resilience; start_services.sh handles npm ci/install
 
 
 # ===================================================================
@@ -150,30 +168,46 @@ RUN npm install
 # python_pkgs 폴더 복사!
 COPY python_pkgs /root/python_pkgs
 
-WORKDIR /root/python_pkgs
-RUN bash install.sh
+# 0. pip 업그레이드
+# NOTE: setuptools는 ROS2 Humble의 ament/colcon (setup.py develop, script_dir 등)과
+#       호환성 문제가 생길 수 있어 여기서 업그레이드하지 않습니다.
+RUN python3 -m pip install --no-cache-dir --timeout 300 --upgrade pip \
+    && rm -rf /root/.cache/pip
 
-# 4. (추가됨) PyTorch 업그레이드
-RUN pip install --upgrade torch
+# 1. Dex Retargeting 설치
+WORKDIR /root/python_pkgs/xr_teleoperate/teleop/robot_control/dex-retargeting
+RUN python3 -m pip install --no-cache-dir --timeout 300 -e . \
+    && rm -rf /root/.cache/pip
 
+# 2. Televuer 설치 및 SSL 인증서 생성 
+WORKDIR /root/python_pkgs/xr_teleoperate/teleop/televuer
+RUN python3 -m pip install --no-cache-dir --timeout 300 -e . && \
+    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+    -keyout key.pem -out cert.pem \
+    -subj "/C=KR/ST=Seoul/L=Seoul/O=Robot/CN=localhost" \
+    -addext "subjectAltName=DNS:localhost" && rm -rf /root/.cache/pip
+
+# 3. Unitree SDK 설치
+WORKDIR /root/python_pkgs/unitree_sdk2_python
+RUN python3 -m pip install --no-cache-dir --timeout 300 -e . \
+    && rm -rf /root/.cache/pip
+
+# Build C++ dependencies shipped in cmake_pkgs (e.g., rbpodo)
 COPY cmake_pkgs /root/cmake_pkgs
+WORKDIR /root/cmake_pkgs/rbpodo
+RUN mkdir -p build && cd build && cmake -DCMAKE_BUILD_TYPE=Release .. && make -j"$(nproc)" && make install
 
-WORKDIR /root/cmake_pkgs
-RUN bash install.sh
-
+# Build ROS 2 workspace
+COPY ros2_ws /root/ros2_ws
 WORKDIR /root/ros2_ws
-RUN colcon build
+RUN bash -c "source /opt/ros/humble/setup.bash && colcon build --symlink-install"
+
 
 # 작업 디렉토리 원상 복구
 WORKDIR /root
 
 # ===================================================================
 
-# # --- Entrypoint Setup ---
-# # 위에서 생성한 entrypoint.sh 스크립트를 컨테이너에 복사
-# COPY entrypoint.sh /usr/local/bin/
-# # 스크립트에 실행 권한 부여
-# RUN chmod +x /usr/local/bin/entrypoint.sh
-
-# # 컨테이너 시작 시 실행할 기본 명령어로 entrypoint 스크립트 지정
-# ENTRYPOINT ["entrypoint.sh"]
+# Helper to launch both backend and frontend in one container
+COPY start_services.sh /usr/local/bin/start_services.sh
+RUN chmod +x /usr/local/bin/start_services.sh

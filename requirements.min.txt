@@ -1,0 +1,13 @@
+flask[async]
+flask-cors
+flask-socketio
+pyusb
+python-can
+# Minimal Orator runtime deps (avoid legacy pins that break on py3.10)
+pendulum==1.5.1
+cleo==0.6.8
+inflection
+pyyaml==5.4.1
+lazy-object-proxy
+pygments
+eventlet

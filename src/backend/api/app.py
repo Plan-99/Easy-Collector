@@ -1,7 +1,4 @@
 # -*- coding: utf-8 -*-
-# import eventlet
-# eventlet.monkey_patch()  # eventlet를 사용하기 위해 필요한 패치
-# from eventlet import tpool
 
 from flask import Flask, request
 from flask_socketio import SocketIO, emit
@@ -33,18 +30,29 @@ import os
 import argparse
 
 import threading
+from ..database.config.database import DATABASES
 
 argparse = argparse.ArgumentParser(description='Easy Collector Web API')
 argparse.add_argument('--debug', action='store_true', help='Enable debug mode')
 args = argparse.parse_args()
 # 디버그 모드 설정
-debug = args.debug
+# debug = args.debug
+debug = True
 
 # Flask 앱과 SocketIO 객체 생성
 app = Flask(__name__)
 CORS(app)
 app.config['SECRET_KEY'] = 'mysecretkey!' # 실제 운영 환경에서는 더 복잡한 키 사용
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+# Use threading mode to avoid eventlet/ROS compatibility issues
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode='threading',
+    logger=False,
+    engineio_logger=False,
+    allow_upgrades=False,  # disable websocket upgrade (Werkzeug can't serve websockets)
+    transports=["polling"],  # force long-polling for compatibility
+)
 
 pm = ProcessManager(socketio, debug=debug)  # 프로세스 관리 객체 생성
 
@@ -66,18 +74,7 @@ socketio.on_namespace(SensorNamespace('/sensor', pm))
 socketio.on_namespace(RobotNamespace('/robot', pm))
 
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DB_DIR = os.path.join(BASE_DIR, 'backend/database')
-DB_PATH = os.path.join(DB_DIR, 'main.db')
-
-config = {
-    'mysql': {
-        'driver': 'sqlite',
-        'database': DB_PATH,
-    }
-}
-
-db = DatabaseManager(config)
+db = DatabaseManager(DATABASES)
 Model.set_connection_resolver(db)
 
 
@@ -92,6 +89,13 @@ pm.start_process(
     'rosbridge_websocket',
     ['ros2', 'launch', 'rosbridge_server', 'rosbridge_websocket_launch.xml', 'port:=9090']
 )
+
+@app.route('/api/healthz', methods=['GET'])
+def healthz():
+    return {
+        'status': 'ok',
+        'ros_ok': bool(rclpy.ok()),
+    }, 200
 
 @app.route('/api/processes', methods=['GET'])
 def list_processes():
@@ -202,7 +206,13 @@ def main():
         executor_thread = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
         executor_thread.start()
         # 이 함수는 서버가 종료(예: Ctrl+C)될 때까지 여기서 멈춥니다.
-        socketio.run(app, host='0.0.0.0', port=5000, debug=False)
+        socketio.run(
+            app,
+            host='0.0.0.0',
+            port=5000,
+            debug=False,
+            allow_unsafe_werkzeug=True,
+        )
 
     finally:
         import subprocess

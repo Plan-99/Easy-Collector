@@ -22,6 +22,7 @@ from ..database.models.task_model import Task
 from ..database.models.gripper_model import Gripper
 from ..database.models.sensor_model import Sensor
 from ..database.models.checkpoint_model import Checkpoint
+from ..database.config.database import DATABASES
 
 from ..lerobot.policies.act.configuration_act import ACTConfig
 from ..lerobot.policies.act.modeling_act import ACTPolicy
@@ -177,14 +178,7 @@ def main(args):
     """Main execution function to load configs and start training."""
     
     # Setup database connection using Orator
-    db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'database', 'main.db'))
-    config = {
-        'sqlite': {
-            'driver': 'sqlite',
-            'database': db_path,
-        }
-    }
-    db = DatabaseManager(config)
+    db = DatabaseManager(DATABASES)
     Model.set_connection_resolver(db)
     
     # Create a temporary directory to store dataset files

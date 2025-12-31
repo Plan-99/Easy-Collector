@@ -21,6 +21,7 @@ class Agent:
         self.joint_actions = None
         self.ee_pos = None
         self.ee_target = None
+        self.last_joint_update = None
         self.robot_type = robot['type']
         self.joint_len = len(robot['joint_names'])
         self.joint_names = robot['joint_names']
@@ -73,7 +74,20 @@ class Agent:
         if not from_ee:
             self.ee_pos_cmd = None
 
-        action = [float(a) for a in action]
+        try:
+            if action is None:
+                raise ValueError("action is None")
+            # Replace None entries with 0.0 to avoid crashes from partial UI payloads
+            action = [0.0 if a is None else float(a) for a in action]
+            if len(action) != self.joint_len:
+                print(f"[WARN] action length {len(action)} does not match joint_len {self.joint_len}; padding/truncating")
+                if len(action) < self.joint_len:
+                    action = action + [0.0] * (self.joint_len - len(action))
+                else:
+                    action = action[:self.joint_len]
+        except Exception as exc:
+            print(f"[ERROR] move_joint_step received invalid action {action}: {exc}")
+            return
 
         if self.write_type == 'topic':
             self.move_joint_step_by_topic(action)
@@ -136,6 +150,11 @@ class Agent:
     def joint_state_cb(self, msg):
         with self.js_mutex:
             self.joint_states = msg
+            try:
+                import time as _t
+                self.last_joint_update = _t.time()
+            except Exception:
+                self.last_joint_update = None
 
     def joint_action_cb(self, msg):
         with self.js_mutex:

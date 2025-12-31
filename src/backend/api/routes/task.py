@@ -3,6 +3,7 @@ from ...database.models.task_model import Task as TaskModel
 import json
 from ...database.models.checkpoint_model import Checkpoint as CheckpointModel
 from ...database.models.assembly_model import Assembly as AssemblyModel
+from ..utils.runtime import attach_robot_runtime
 
 from ..process.failure_detection import failure_detection
 
@@ -15,6 +16,12 @@ task_bp = Blueprint('task', __name__)
 def get_tasks():
     tasks = TaskModel.with_('assembly').get()
     tasks = [task.to_dict() for task in tasks]
+    processes = set(current_app.pm.list_processes())
+    for task in tasks:
+        if task.get('assembly') and task['assembly'].get('robots'):
+            task['assembly']['robots'] = [
+                attach_robot_runtime(robot, processes) for robot in task['assembly']['robots']
+            ]
     return {
         'status': 'success',
         'tasks': tasks
@@ -25,9 +32,15 @@ def get_task(id):
     task = TaskModel.find(id)
     if not task:
         return {'status': 'error', 'message': 'Task not found'}, 404
+    task_dict = task.to_dict()
+    processes = set(current_app.pm.list_processes())
+    if task_dict.get('assembly') and task_dict['assembly'].get('robots'):
+        task_dict['assembly']['robots'] = [
+            attach_robot_runtime(robot, processes) for robot in task_dict['assembly']['robots']
+        ]
     return {
         'status': 'success',
-        'task': task.to_dict()
+        'task': task_dict
     }, 200
 
 

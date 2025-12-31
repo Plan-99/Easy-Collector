@@ -1,0 +1,39 @@
+# Reduce Docker build context and final image size
+
+# VCS
+.git
+.gitignore
+
+# IDE/editor
+.vscode/
+.idea/
+
+# Python caches
+**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+
+# Node artifacts
+node_modules/
+src/node_modules/
+src/ui/node_modules/
+src/ui/.quasar/
+src/ui/.vscode/
+
+# ROS/colcon workspaces and build outputs (if present locally)
+build/
+install/
+log/
+logs/
+
+# Python package build artifacts
+python_pkgs/**/build/
+python_pkgs/**/dist/
+python_pkgs/**/*.egg-info/
+python_pkgs/**/.git/
+
+# Misc
+.DS_Store
+*.log

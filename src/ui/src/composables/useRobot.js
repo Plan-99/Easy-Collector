@@ -9,10 +9,21 @@ export function useRobot(robot, robotOnCallback=() => {}) {
   // const { createSubscriber, connectROS } = useROS();
   let robotTopicChecker = null;
 
-  checkRobotTopic(1);
+  const formatError = (error) => {
+    if (error?.response?.data?.message) {
+      return error.response.data.message;
+    }
+    if (error?.message) {
+      return error.message;
+    }
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return String(error);
+    }
+  };
 
-  // connectROS();
-
+  robot.status = robot.status || 'off';
   robot.jointSub = null;
   robot.jointState = [];
   robot.jointAction = [];
@@ -20,32 +31,71 @@ export function useRobot(robot, robotOnCallback=() => {}) {
   robot.eeTarget = {};
   // let cmdPublisher = () => {};
 
+  if (!robot.lastError) {
+    robot.lastError = null;
+  }
+
+  if (robot.status === 'on') {
+    api.post(`/robot/${robot.id}/:subscribe_robot`);
+    subscribeRobot(() => {});
+    robotOnCallback();
+  }
+
   function status() {
     return robot.status
   }
 
   function startRobot() {
     robot.status = 'loading'
+    robot.lastError = null;
     return api.post('/robot:start', robot).then(() => {
       checkRobotTopic()
     }).catch((error) => {
-      console.error('Error starting robot:', error);
+      const msg = formatError(error);
+      console.error('Error starting robot:', msg);
+      robot.lastError = msg;
       robot.status = 'off';
     });
   }
 
   function stopRobot() {
-    robot.status = 'loading'
+    robot.status = 'loading';
+    if (robotTopicChecker) {
+      clearInterval(robotTopicChecker);
+      robotTopicChecker = null;
+    }
     return api.post('/robot:stop', robot).then(() => {
-      checkRobotTopic(1)
+      robot.status = 'off';
+      robot.lastError = null;
+      robot.jointState = [];
+      robot.jointAction = [];
+      robot.eePos = {};
+      robot.eeTarget = {};
+      socket.off(`robot_status_${robot.id}`);
+      api.post(`/robot/${robot.id}/:unsubscribe_robot`);
     }).catch((error) => {
-      console.error('Error stopping robot:', error);
+      const msg = formatError(error);
+      console.error('Error stopping robot:', msg);
       robot.status = 'on';
     });
   }
 
   function subscribeRobot(callback) {
+    socket.off(`robot_status_${robot.id}`);
     socket.on(`robot_status_${robot.id}`, (data) => {
+      if (data.connected === false) {
+        robot.status = 'off';
+        robot.lastError = null;
+        robot.jointState = [];
+        robot.jointAction = [];
+        robot.eePos = {};
+        robot.eeTarget = {};
+        return;
+      }
+      if (data.connected === true && robot.status !== 'on') {
+        robot.status = 'on';
+        robot.lastError = null;
+      }
       robot.jointState = data.joint_states;
       robot.jointAction = data.joint_actions;
       robot.eePos = data.ee_pos;
@@ -62,11 +112,20 @@ export function useRobot(robot, robotOnCallback=() => {}) {
   }
 
   function unSubscribeRobot() {
+    if (robotTopicChecker) {
+      clearInterval(robotTopicChecker);
+      robotTopicChecker = null;
+    }
     // if (robot.jointSub) {
     //   robot.jointSub.unsubscribe();
     //   robot.jointSub = null;
     // }
     api.post(`/robot/${robot.id}/:unsubscribe_robot`);
+    robot.status = 'off';
+    robot.jointState = [];
+    robot.jointAction = [];
+    robot.eePos = {};
+    robot.eeTarget = {};
     socket.off(`robot_status_${robot.id}`);
   }
 
@@ -108,28 +167,36 @@ export function useRobot(robot, robotOnCallback=() => {}) {
     }
     let steps = 0;
     robotTopicChecker = setInterval(() => {
+      const handleNoTopic = () => {
+        steps++;
+        if (steps >= maxSteps) {
+          clearInterval(robotTopicChecker);
+          robotTopicChecker = null;
+          robot.status = 'off';
+          robot.lastError = 'Robot topics not found after start.';
+          api.post('/robot:stop', robot);
+          api.post(`/robot/${robot.id}/:unsubscribe_robot`);
+        }
+      };
+
       api.get(`/topics`)
       .then((res) => {
         const isPublished = Boolean(res.data.topics.find(topic => topic.name === robot.read_topic));
         if (isPublished) {
           robot.status = 'on';
+          robot.lastError = null;
           robotOnCallback();
           api.post(`/robot/${robot.id}/:subscribe_robot`);
           clearInterval(robotTopicChecker);
+          robotTopicChecker = null;
+          return;
         }
+        handleNoTopic();
       })
       .catch(error => {
         console.error('Error setting up WebRTC:', error);
+        handleNoTopic();
       });
-      steps++;
-      if (steps >= maxSteps) {
-        clearInterval(robotTopicChecker);
-        if (robot.status === 'on') {
-          stopRobot();
-        }
-        robot.status = 'off';
-        api.post(`/robot/${robot.id}/:unsubscribe_robot`);
-      }
     }, 1000);
   }
 
