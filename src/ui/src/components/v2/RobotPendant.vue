@@ -8,7 +8,7 @@
                         flat
                         color="white"
                         icon="remove"
-                        @click="moveOneJoint(i, -0.05)"
+                        @click="moveOneJoint(i, -0.01)"
                     ></q-btn>
                     <q-space></q-space>
                     <div class="q-mx-sm">
@@ -23,7 +23,7 @@
                         flat
                         color="white"
                         icon="add"
-                        @click="moveOneJoint(i, 0.05)"
+                        @click="moveOneJoint(i, 0.01)"
                     ></q-btn>
                 </div>
             </div>
@@ -37,7 +37,7 @@
                             flat
                             color="primary"
                             icon="remove"
-                            @click="moveOneEE(i, j, -0.05)"
+                            @click="moveOneEE(i, j, -0.01)"
                         ></q-btn>
                         <q-space></q-space>
                         <div class="q-mx-sm">
@@ -52,7 +52,7 @@
                             flat
                             color="primary"
                             icon="add"
-                            @click="moveOneEE(i, j, +0.05)"
+                            @click="moveOneEE(i, j, +0.01)"
                         ></q-btn>
                     </div>
                 </div>

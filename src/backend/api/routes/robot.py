@@ -113,7 +113,7 @@ def start_robot():
                    f'gripper_exist:={gripper_exist}']
 
     if company == 'Rainbow Robotics':
-        command = ['ros2', 'launch', 'rbpodo_bringup', 'rbpodo.launch.py', f'namespace:=ec_robot_{id}', f'robot_ip:={settings.get("ip", "10.1.1.1")}', 'use_fake_hardware:=true']
+        command = ['ros2', 'launch', 'rbpodo_bringup', 'rbpodo.launch.py', f'namespace:=ec_robot_{id}', f'robot_ip:={settings.get("ip", "10.0.2.27")}', 'use_fake_hardware:=false']
 
     if company == 'OnRobot':
         command = ['ros2', 'launch', 'onrobot_rg_control', 'bringup.launch.py',
