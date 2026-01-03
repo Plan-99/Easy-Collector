@@ -1123,7 +1123,11 @@ class MainWindow(QMainWindow):
                     btn_next.setEnabled(True)
                 self.run_compose_to_widget(["up", "-d", svc], log, on_finish=_after_up)
 
-            self.run_compose_to_widget(["run", "--rm", svc, "bash", "-lc", migrate_cmd], log, on_finish=_after_migrate)
+            self.run_compose_to_widget(
+                ["run", "--rm", "--entrypoint", "bash", svc, "-c", migrate_cmd], 
+                log, 
+                on_finish=_after_migrate
+            )
 
         btn_install.clicked.connect(on_install_click)
 

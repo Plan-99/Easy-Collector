@@ -43,7 +43,7 @@ matplotlib
 pandas
 zarr
 logging_mp
-pymodbus== 3.9.2
+pymodbus==3.9.2
 
 # # diffusion policy
 # dill
@@ -53,4 +53,3 @@ pymodbus== 3.9.2
 # jax
 # jax-lib
 # s3fs
---extra-index-url https://download.pytorch.org/whl/cu124

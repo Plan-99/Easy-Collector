@@ -456,13 +456,13 @@ PY
   fi
 }
 
-# 2) Ensure DB deps and run migrations (idempotent)
-if [[ "${EC_SKIP_TORCHVISION_COMPAT:-0}" == "1" ]]; then
-  log_status "[STEP] Skipping torchvision/torch compatibility (EC_SKIP_TORCHVISION_COMPAT=1)"
-else
-  log_status "[STEP] Ensuring torchvision/torch compatibility"
-  ensure_torchvision_compat
-fi
+# # 2) Ensure DB deps and run migrations (idempotent)
+# if [[ "${EC_SKIP_TORCHVISION_COMPAT:-0}" == "1" ]]; then
+#   log_status "[STEP] Skipping torchvision/torch compatibility (EC_SKIP_TORCHVISION_COMPAT=1)"
+# else
+#   log_status "[STEP] Ensuring torchvision/torch compatibility"
+#   ensure_torchvision_compat
+# fi
 log_status "[STEP] Ensuring orator availability"
 ensure_orator
 log_status "[STEP] Switching to /root/src/backend/database"
@@ -515,9 +515,9 @@ echo "[BACKEND][BOOT] $(date -Is) starting backend.api.app --debug" >>"$LOG_DIR/
 # Double-check import before start; hard-fail if unresolved
 ensure_orator
 ensure_watchfiles
-if [[ "${EC_SKIP_TORCHVISION_COMPAT:-0}" != "1" ]]; then
-  ensure_torchvision_compat
-fi
+# if [[ "${EC_SKIP_TORCHVISION_COMPAT:-0}" != "1" ]]; then
+#   ensure_torchvision_compat
+# fi
 BACKEND_ENTRY="${EC_BACKEND_ENTRY:-backend.api.app}"
 log_status "[BACKEND] Entry: ${BACKEND_ENTRY}"
 BACKEND_CMD=()
