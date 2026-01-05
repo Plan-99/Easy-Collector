@@ -105,4 +105,24 @@ copy_file "requirements.txt"
 copy_file "requirements.min.txt"
 copy_file "scripts/install_nvidia_runtime.sh" 755
 
+# Also update the installed Qt launcher UI (release/ui/main.py) if it exists in runtime root.
+copy_launcher_ui() {
+  local src="$DEV_SRC/release/ui/main.py"
+  local runtime_root
+  runtime_root="$(dirname "$PROJECT_ROOT")"
+  local dst="$runtime_root/ui/main.py"
+  if [ ! -f "$src" ]; then
+    echo "[quick-apply] 경고: launcher UI 소스가 없어 건너뜀: $src" >&2
+    return 0
+  fi
+  if [ ! -d "$(dirname "$dst")" ]; then
+    echo "[quick-apply] 경고: 런타임 UI 경로가 없어 건너뜀: $(dirname "$dst")" >&2
+    return 0
+  fi
+  install -m 644 "$src" "$dst"
+  echo "[quick-apply] 런처 UI 동기화 완료: $dst"
+}
+
+copy_launcher_ui
+
 echo "[quick-apply] 동기화가 완료되었습니다."

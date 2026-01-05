@@ -10,6 +10,10 @@ import time
 import pwd
 import grp
 from pathlib import Path
+try:
+    import requests  # type: ignore
+except Exception:
+    requests = None
 
 # Apply safe Qt WebEngine defaults BEFORE importing Qt modules
 _force_external = os.environ.get("EASYCOLLECTOR_FORCE_EXTERNAL_BROWSER", "0") == "1"
@@ -51,7 +55,7 @@ try:
         QApplication, QMainWindow, QWidget, QPushButton, QTextEdit, QLabel,
         QVBoxLayout, QHBoxLayout, QMessageBox, QTabWidget, QFileDialog, QLineEdit,
         QDialog, QFrame, QListWidget, QListWidgetItem, QProgressBar, QToolButton,
-        QMenu, QPlainTextEdit, QSizePolicy, QRadioButton, QCheckBox
+        QMenu, QPlainTextEdit, QSizePolicy, QRadioButton, QCheckBox, QInputDialog
     )
     try:
         from PySide6.QtWebEngineWidgets import QWebEngineView  # optional
@@ -62,14 +66,14 @@ try:
         QWebEngineProfile = None  # type: ignore
         QWebEnginePage = None  # type: ignore
         HAS_WEBENGINE = False
-    from PySide6.QtGui import QDesktopServices, QIcon, QPixmap, QFont
+    from PySide6.QtGui import QDesktopServices, QIcon, QPixmap, QFont, QCursor
 except Exception:
     from PyQt6.QtCore import Qt, QUrl, QProcess, QTimer, QPoint, QEvent
     from PyQt6.QtWidgets import (
         QApplication, QMainWindow, QWidget, QPushButton, QTextEdit, QLabel,
         QVBoxLayout, QHBoxLayout, QMessageBox, QTabWidget, QFileDialog, QLineEdit,
         QDialog, QFrame, QListWidget, QListWidgetItem, QProgressBar, QToolButton,
-        QMenu, QPlainTextEdit, QSizePolicy, QRadioButton, QCheckBox
+        QMenu, QPlainTextEdit, QSizePolicy, QRadioButton, QCheckBox, QInputDialog
     )
     try:
         from PyQt6.QtWebEngineWidgets import QWebEngineView  # optional
@@ -80,7 +84,7 @@ except Exception:
         QWebEngineProfile = None  # type: ignore
         QWebEnginePage = None  # type: ignore
         HAS_WEBENGINE = False
-    from PyQt6.QtGui import QDesktopServices, QIcon, QPixmap, QFont
+    from PyQt6.QtGui import QDesktopServices, QIcon, QPixmap, QFont, QCursor
 
 
 APP_HOME = DATA_ROOT
@@ -326,6 +330,7 @@ class MainWindow(QMainWindow):
         self._auto_launch_after_install = True
         self._devtools_view: QWebEngineView | None = None
         self._devtools_dialog: QDialog | None = None
+        self.api_base = "http://localhost:5000/api"
 
         # UI elements
         self.status_label = QLabel(self)
@@ -417,8 +422,8 @@ class MainWindow(QMainWindow):
         self.btn_quick_apply.clicked.connect(self._on_quick_apply_clicked)
         nav_layout.addWidget(self.btn_quick_apply)
 
-        self.btn_logs = _mk_btn("⚙︎", "서비스 로그/DevTools 보기")
-        self.btn_logs.clicked.connect(self.open_logs_window)
+        self.btn_logs = _mk_btn("⚙︎", "설정/로그")
+        self.btn_logs.clicked.connect(self._open_settings_menu)
         nav_layout.addWidget(self.btn_logs)
 
         # Main layout
@@ -2378,6 +2383,251 @@ class MainWindow(QMainWindow):
                 return
         self._quick_apply_from_dev_src()
 
+    def _ensure_requests(self) -> bool:
+        if requests is None:
+            QMessageBox.warning(self, "의존성 필요", "'requests' 모듈이 필요합니다. pip install requests 후 다시 시도하세요.")
+            return False
+        return True
+
+    def _api_get_json(self, path: str) -> dict:
+        resp = requests.get(f"{self.api_base}{path}", timeout=20)
+        resp.raise_for_status()
+        return resp.json()
+
+    def _api_download(self, path: str) -> tuple[bytes, str | None, str | None]:
+        resp = requests.get(f"{self.api_base}{path}", stream=True, timeout=60)
+        resp.raise_for_status()
+        content_disp = resp.headers.get("content-disposition")
+        content_type = resp.headers.get("content-type")
+        data = resp.content
+        filename = None
+        if content_disp:
+            try:
+                for part in content_disp.split(";"):
+                    part = part.strip()
+                    if part.lower().startswith("filename="):
+                        filename = part.split("=", 1)[1].strip(' "')
+                        break
+            except Exception:
+                filename = None
+        return data, filename, content_type
+
+    def _api_upload(self, path: str, file_path: Path, form: dict[str, str]) -> dict:
+        with open(file_path, "rb") as f:
+            files = {"file": (file_path.name, f)}
+            resp = requests.post(f"{self.api_base}{path}", data=form, files=files, timeout=120)
+            resp.raise_for_status()
+            return resp.json()
+
+    def _select_from_list(self, title: str, label: str, options: list[tuple[str, str]]) -> str | None:
+        if not options:
+            QMessageBox.information(self, title, "선택할 항목이 없습니다.")
+            return None
+        items = [o[0] for o in options]
+        vals = [o[1] for o in options]
+        item, ok = QInputDialog.getItem(self, title, label, items, editable=False)
+        if ok and item in items:
+            return vals[items.index(item)]
+        return None
+
+    def _pick_save_path(self, title: str, suggested: str) -> Path | None:
+        path, _ = QFileDialog.getSaveFileName(self, title, suggested, "Zip Files (*.zip);;All Files (*)")
+        return Path(path) if path else None
+
+    def _pick_open_path(self, title: str, filter_str: str = "Zip Files (*.zip);;All Files (*)") -> Path | None:
+        path, _ = QFileDialog.getOpenFileName(self, title, "", filter_str)
+        return Path(path) if path else None
+
+    def _save_bytes(self, data: bytes, dest: Path):
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with open(dest, "wb") as f:
+            f.write(data)
+
+    def _open_settings_menu(self):
+        menu = QMenu(self)
+
+        open_menu = menu.addMenu("Open")
+        act_open_db = open_menu.addAction("DB")
+        act_open_dataset = open_menu.addAction("DATASET")
+        act_open_model = open_menu.addAction("MODEL")
+
+        save_menu = menu.addMenu("Save As")
+        act_save_db = save_menu.addAction("DB")
+        act_save_dataset = save_menu.addAction("DATASET")
+        act_save_model = save_menu.addAction("MODEL")
+
+        logs_menu = menu.addMenu("Logs")
+        act_log_launcher = logs_menu.addAction("Launcher")
+        act_log_frontend = logs_menu.addAction("Frontend")
+        act_log_backend = logs_menu.addAction("Backend")
+
+        tools_menu = menu.addMenu("Tools")
+        act_log_devtools = tools_menu.addAction("Dev Tools")
+
+        act_open_db.triggered.connect(self._do_import_settings)
+        act_open_dataset.triggered.connect(self._do_import_dataset)
+        act_open_model.triggered.connect(self._do_import_checkpoint)
+
+        act_save_db.triggered.connect(self._do_export_settings)
+        act_save_dataset.triggered.connect(self._do_export_dataset)
+        act_save_model.triggered.connect(self._do_export_checkpoint)
+
+        act_log_launcher.triggered.connect(lambda: self.open_logs_window("launcher"))
+        act_log_frontend.triggered.connect(lambda: self.open_logs_window("frontend"))
+        act_log_backend.triggered.connect(lambda: self.open_logs_window("backend"))
+        act_log_devtools.triggered.connect(lambda: self.open_logs_window("devtools"))
+
+        try:
+            pos = self.btn_logs.mapToGlobal(self.btn_logs.rect().bottomLeft())
+        except Exception:
+            pos = None
+        if pos:
+            menu.exec(pos)
+        else:
+            menu.exec(QCursor.pos())
+
+    def _do_export_settings(self):
+        if not self._ensure_requests():
+            return
+        save_path = self._pick_save_path("설정 데이터 내보내기", "main.db")
+        if not save_path:
+            return
+        try:
+            data, filename, _ = self._api_download("/export/settings")
+            if filename:
+                save_path = save_path.with_name(filename)
+            self._save_bytes(data, save_path)
+            QMessageBox.information(self, "완료", f"저장됨: {save_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "실패", f"설정 내보내기에 실패했습니다: {e}")
+
+    def _do_import_settings(self):
+        if not self._ensure_requests():
+            return
+        open_path = self._pick_open_path("설정 데이터 불러오기", "DB Files (*.db);;All Files (*)")
+        if not open_path:
+            return
+        try:
+            res = self._api_upload("/import/settings", open_path, {})
+            QMessageBox.information(self, "완료", res.get("message", "설정을 불러왔습니다."))
+            # Reload the embedded web UI to reflect new settings without a manual restart.
+            try:
+                self._nav_action("reload")
+            except Exception:
+                pass
+        except Exception as e:
+            QMessageBox.critical(self, "실패", f"설정 불러오기에 실패했습니다: {e}")
+
+    def _do_export_dataset(self):
+        if not self._ensure_requests():
+            return
+        try:
+            data = self._api_get_json("/datasets")
+            datasets = data.get("datasets", [])
+            options = [(f"{d.get('name')} (#{d.get('id')})", str(d.get("id"))) for d in datasets]
+            dataset_id = self._select_from_list("데이터셋 선택", "내보낼 데이터셋을 선택하세요.", options)
+            if not dataset_id:
+                return
+            save_path = self._pick_save_path("데이터셋 내보내기", f"dataset_{dataset_id}.zip")
+            if not save_path:
+                return
+            blob, filename, _ = self._api_download(f"/export/dataset/{dataset_id}")
+            if filename:
+                save_path = save_path.with_name(filename)
+            self._save_bytes(blob, save_path)
+            QMessageBox.information(self, "완료", f"저장됨: {save_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "실패", f"데이터셋 내보내기에 실패했습니다: {e}")
+
+    def _do_import_dataset(self):
+        if not self._ensure_requests():
+            return
+        open_path = self._pick_open_path("데이터셋 불러오기")
+        if not open_path:
+            return
+        try:
+            data = self._api_get_json("/tasks")
+            tasks = data.get("tasks", [])
+            task_options = [(f"{t.get('name')} (#{t.get('id')})", str(t.get("id"))) for t in tasks]
+            replace = QMessageBox.question(self, "교체 여부", "기존 데이터셋을 교체하시겠습니까?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            form: dict[str, str] = {"mode": "replace" if replace == QMessageBox.Yes else "add"}
+            dataset_id = None
+            if replace == QMessageBox.Yes:
+                ds_data = self._api_get_json("/datasets").get("datasets", [])
+                options = [(f"{d.get('name')} (#{d.get('id')})", str(d.get("id"))) for d in ds_data]
+                dataset_id = self._select_from_list("교체할 데이터셋", "대상 데이터셋을 선택하세요.", options)
+                if not dataset_id:
+                    return
+                form["dataset_id"] = dataset_id
+            if form["mode"] == "add":
+                task_id = self._select_from_list("Workspace 선택", "데이터셋을 연결할 Workspace(Task)를 선택하세요.", task_options)
+                if not task_id:
+                    return
+                form["task_id"] = task_id
+            name, ok = QInputDialog.getText(self, "이름", "데이터셋 이름 (선택):")
+            if ok and name:
+                form["name"] = name
+            res = self._api_upload("/import/dataset", open_path, form)
+            QMessageBox.information(self, "완료", res.get("message", "데이터셋을 불러왔습니다."))
+        except Exception as e:
+            QMessageBox.critical(self, "실패", f"데이터셋 불러오기에 실패했습니다: {e}")
+
+    def _do_export_checkpoint(self):
+        if not self._ensure_requests():
+            return
+        try:
+            data = self._api_get_json("/checkpoints")
+            ckpts = data.get("checkpoints", [])
+            options = [(f"{c.get('name')} (#{c.get('id')})", str(c.get("id"))) for c in ckpts]
+            ckpt_id = self._select_from_list("모델 선택", "내보낼 모델(Checkpoint)을 선택하세요.", options)
+            if not ckpt_id:
+                return
+            save_path = self._pick_save_path("모델 내보내기", f"checkpoint_{ckpt_id}.zip")
+            if not save_path:
+                return
+            blob, filename, _ = self._api_download(f"/export/checkpoint/{ckpt_id}")
+            if filename:
+                save_path = save_path.with_name(filename)
+            self._save_bytes(blob, save_path)
+            QMessageBox.information(self, "완료", f"저장됨: {save_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "실패", f"모델 내보내기에 실패했습니다: {e}")
+
+    def _do_import_checkpoint(self):
+        if not self._ensure_requests():
+            return
+        open_path = self._pick_open_path("모델 불러오기")
+        if not open_path:
+            return
+        try:
+            form: dict[str, str] = {}
+            replace = QMessageBox.question(self, "교체 여부", "기존 모델을 교체하시겠습니까?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            form["mode"] = "replace" if replace == QMessageBox.Yes else "add"
+            if form["mode"] == "replace":
+                ckpts = self._api_get_json("/checkpoints").get("checkpoints", [])
+                options = [(f"{c.get('name')} (#{c.get('id')})", str(c.get("id"))) for c in ckpts]
+                ckpt_id = self._select_from_list("교체 대상 모델", "교체할 모델을 선택하세요.", options)
+                if not ckpt_id:
+                    return
+                form["checkpoint_id"] = ckpt_id
+            policies = self._api_get_json("/policies").get("policies", [])
+            policy_options = [(f"{p.get('name')} ({p.get('type')})", str(p.get("id"))) for p in policies]
+            tasks = self._api_get_json("/tasks").get("tasks", [])
+            task_options = [(f"{t.get('name')} (#{t.get('id')})", str(t.get("id"))) for t in tasks]
+            name, ok = QInputDialog.getText(self, "이름", "모델 이름 (선택):")
+            if ok and name:
+                form["name"] = name
+            policy_id = self._select_from_list("정책 선택 (선택)", "정책을 지정하려면 선택하세요. 취소하면 메타데이터를 사용합니다.", policy_options)
+            if policy_id:
+                form["policy_id"] = policy_id
+            task_id = self._select_from_list("Workspace 선택 (선택)", "모델에 연결할 Workspace(Task)를 선택하세요. 취소하면 메타데이터를 사용합니다.", task_options)
+            if task_id:
+                form["task_id"] = task_id
+            res = self._api_upload("/import/checkpoint", open_path, form)
+            QMessageBox.information(self, "완료", res.get("message", "모델을 불러왔습니다."))
+        except Exception as e:
+            QMessageBox.critical(self, "실패", f"모델 불러오기에 실패했습니다: {e}")
+
     def _update_nav_buttons(self):
         try:
             if not HAS_WEBENGINE or self.web_view is None:
@@ -2405,7 +2655,7 @@ class MainWindow(QMainWindow):
         self._clear_conflicting_containers()
         self._ensure_service_running("RESTART", restart_if_running=True, on_finish=_after_restart)
 
-    def open_logs_window(self):
+    def open_logs_window(self, target: str | None = None):
         menu = QMenu(self)
         act_launcher = menu.addAction("Launcher Log")
         act_frontend = menu.addAction("Frontend Log")
@@ -2442,6 +2692,16 @@ class MainWindow(QMainWindow):
         def _open_dev():
             self._close_log_windows()
             self._open_devtools()
+
+        mapping = {
+            "launcher": _open_launcher,
+            "frontend": _open_frontend,
+            "backend": _open_backend,
+            "devtools": _open_dev,
+        }
+        if target in mapping:
+            mapping[target]()
+            return
 
         act_launcher.triggered.connect(_open_launcher)
         act_frontend.triggered.connect(_open_frontend)
