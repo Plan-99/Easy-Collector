@@ -43,6 +43,7 @@ RUN curl -sSL "http://keyserver.ubuntu.com/pks/lookup?op=get&search=0xF6E65AC044
 # 4. ROS 2 Humble 및 관련 종속성 설치
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-desktop-full \
+    ros-humble-rmw-cyclonedds-cpp \
     ros-humble-realsense2-camera \
     ros-humble-realsense2-description \
     ros-humble-usb-cam \
@@ -127,6 +128,7 @@ RUN python3 -m pip install --no-cache-dir --ignore-installed \
     torch torchvision torchaudio
     
 # 최종 환경 설정
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 WORKDIR /root
 RUN echo "source /opt/ros/humble/setup.bash" >> /etc/bash.bashrc && \
     echo "source /root/ros2_ws/install/setup.bash" >> /etc/bash.bashrc
