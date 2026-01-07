@@ -122,7 +122,7 @@ def start_robot():
                    f'namespace:=ec_robot_{id}',
                    f'gripper:={type}',
                    f'ip:={settings.get("ip_address", "10.0.2.27")}',
-                   f'port:={settings.get("port", 502)}',
+                   f'port:={settings.get("port", 41414)}',
                    f'changer_addr:={settings.get("changer_address", 5)}'
         ]
     print(f"Attempting to start robot")
@@ -233,15 +233,10 @@ def update_robot(id):
             'tool_inner': len(request.json.get('tool_index', [])) > 0,
         }
 
-
-    if 'can_port' in request.json:
-        can_port = request.json.get('can_port', 'can0')
-        if isinstance(can_port, str) and can_port.startswith('can_'):
-            can_port = 'can' + can_port[4:]
-        settings['can_port'] = can_port
-
-    if 'ip_address' in request.json:
-        settings['ip_address'] = request.json.get('ip_address', '')
+    custom_fields = ['can_port', 'ip_address', 'port', 'changer_address']
+    for field in custom_fields:
+        if field in request.json:
+            settings[field] = request.json.get(field)
 
     robot.settings = settings
     robot.save()

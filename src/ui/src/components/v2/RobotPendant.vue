@@ -8,7 +8,7 @@
                         flat
                         color="white"
                         icon="remove"
-                        @click="moveOneJoint(i, -0.01)"
+                        @click="moveOneJoint(i, -robotStepSize)"
                     ></q-btn>
                     <q-space></q-space>
                     <div class="q-mx-sm">
@@ -23,7 +23,7 @@
                         flat
                         color="white"
                         icon="add"
-                        @click="moveOneJoint(i, 0.01)"
+                        @click="moveOneJoint(i, robotStepSize)"
                     ></q-btn>
                 </div>
             </div>
@@ -37,7 +37,7 @@
                             flat
                             color="primary"
                             icon="remove"
-                            @click="moveOneEE(i, j, -0.01)"
+                            @click="moveOneEE(i, j, -robotStepSize)"
                         ></q-btn>
                         <q-space></q-space>
                         <div class="q-mx-sm">
@@ -52,7 +52,7 @@
                             flat
                             color="primary"
                             icon="add"
-                            @click="moveOneEE(i, j, +0.01)"
+                            @click="moveOneEE(i, j, +robotStepSize)"
                         ></q-btn>
                     </div>
                 </div>
@@ -62,7 +62,7 @@
     
 </template>
 <script setup>
-import { defineProps } from 'vue';
+import { defineProps, ref } from 'vue';
 const props = defineProps({
     robot: {
         type: Object,
@@ -88,5 +88,7 @@ function moveOneEE(tool_index, p_index, delta) {
     }
     props.robot.handler.moveRobotEE(eePosDict);
 }
+
+const robotStepSize = ref(0.01);
 
 </script>
