@@ -209,5 +209,6 @@ export function useRobot(robot, robotOnCallback=() => {}) {
     goOriginPos,
     subscribeRobot,
     unSubscribeRobot,
+    checkRobotTopic,
   };
 }
