@@ -48,10 +48,10 @@ socketio = SocketIO(
     app,
     cors_allowed_origins="*",
     async_mode='threading',
-    logger=False,
-    engineio_logger=False,
-    allow_upgrades=False,  # disable websocket upgrade (Werkzeug can't serve websockets)
-    transports=["polling"],  # force long-polling for compatibility
+    # logger=False,
+    # engineio_logger=False,
+    # allow_upgrades=False,  # disable websocket upgrade (Werkzeug can't serve websockets)
+    # transports=["polling"],  # force long-polling for compatibility
 )
 
 pm = ProcessManager(socketio, debug=debug)  # 프로세스 관리 객체 생성

@@ -63,7 +63,7 @@ class Robot(Model, SoftDeletes):
     def get_robot_type_info(self):
         return next(
             (robot for robot in SUPPORT_ROBOTS if robot.get('name') == self.type), 
-            None
+            {}
         )
     
 
