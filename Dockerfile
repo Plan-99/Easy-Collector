@@ -41,6 +41,7 @@ RUN curl -sSL "http://keyserver.ubuntu.com/pks/lookup?op=get&search=0xF6E65AC044
     echo "deb [signed-by=/usr/share/keyrings/intel-librealsense.gpg] https://librealsense.intel.com/Debian/apt-repo $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/librealsense.list > /dev/null
 
 # 4. ROS 2 Humble 및 관련 종속성 설치
+# ROS 2 Humble (Desktop-Full) 및 관련 패키지 설치
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-desktop-full \
     ros-humble-realsense2-camera \
@@ -48,11 +49,35 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-usb-cam \
     ros-humble-image-transport-plugins \
     v4l-utils ethtool can-utils iproute2 libyaml-cpp-dev \
-    ros-humble-moveit \
+    ros-humble-ruckig \
+    ros-humble-eigen-stl-containers \
+    ros-humble-geometric-shapes \
+    ros-humble-pybind11-vendor \
+    ros-humble-moveit-resources-panda-moveit-config \
+    ros-humble-ompl \
+    ros-humble-warehouse-ros \
+    ros-humble-eigenpy \
+    ros-humble-moveit-msgs \
+    ros-humble-srdfdom \
+    ros-humble-rosbridge-server \
     ros-humble-ros2-control \
     ros-humble-ros2-controllers \
-    python3-pip python3-rosdep python3-colcon-common-extensions \
-    build-essential cmake git tmux nodejs \
+    ros-humble-controller-manager \
+    ros-humble-rmw-cyclonedds-cpp \
+    ros-humble-rosidl-generator-dds-idl \
+    ros-humble-ament-cmake \
+    ros-humble-joint-state-publisher \
+    ros-humble-moveit \
+    ros-humble-pluginlib \
+    ros-humble-robot-state-publisher \
+    ros-humble-urdf-launch \
+    ros-humble-xacro \
+    python3-pip \
+    python3-rosdep \
+    python3-colcon-common-extensions \
+    python3-pykdl \
+    build-essential \
+    cmake \
     && apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*
 
 # Node.js 최신 LTS 버전 설치
@@ -125,6 +150,10 @@ RUN bash -c "source /opt/ros/humble/setup.bash && \
 RUN python3 -m pip install --no-cache-dir --ignore-installed \
     --index-url https://download.pytorch.org/whl/nightly/cu124 \
     torch torchvision torchaudio
+
+RUN rm -rf /usr/local/lib/python3.10/dist-packages/numpy* && \
+    rm -rf /usr/lib/python3/dist-packages/numpy* && \
+    python3 -m pip install --no-cache-dir numpy==1.26.4
     
 # 최종 환경 설정
 WORKDIR /root
