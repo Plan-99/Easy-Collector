@@ -1,9 +1,10 @@
 from geometry_msgs.msg import Pose
 
-from rosidl_runtime_py.utilities import get_message, get_service
+from rosidl_runtime_py.utilities import get_message, get_service, get_action
 
 import rclpy
 from rclpy.node import Node
+import rclpy.action
 import threading
 from collections import deque
 import time
@@ -11,6 +12,8 @@ from ..ik_solver.pinocchio_solver.common_arm_ik import Common_ArmIK
 import numpy as np
 
 from ..configs.global_configs import get_robot_by_name
+
+from trajectory_msgs.msg import JointTrajectoryPoint
 
 class Agent:
     def __init__(self, node: Node, robot):
@@ -58,6 +61,12 @@ class Agent:
             if not self.move_robot_client.wait_for_service(timeout_sec=5.0):
                 print(f'Service {robot["write_topic"]} not available. Please check the connection.')
 
+        elif self.write_type == 'action':
+            self.write_action_goal_cls = get_action(robot['write_topic_msg']).Goal
+            self.move_robot_client = rclpy.action.ActionClient(node, get_action(robot['write_topic_msg']), robot['write_topic'])
+            if not self.move_robot_client.wait_for_server(timeout_sec=5.0):
+                print(f'Action server {robot["write_topic"]} not available. Please check the connection.')
+
         self.ee_pos_cmd = None
             
         time.sleep(0.1)  # Wait for subscriber to be ready
@@ -94,6 +103,8 @@ class Agent:
             self.move_joint_step_by_topic(action)
         elif self.write_type == 'service':
             self.move_joint_step_by_service(action)
+        elif self.write_type == 'action':
+            self.move_joint_step_by_action(action)
         
     def move_joint_step_by_topic(self, action):
         msg = self.write_topic_msg_cls()
@@ -105,6 +116,14 @@ class Agent:
             msg.position = action
             msg.velocity = [0.0] * self.joint_len
             msg.velocity[-1] = 100
+            self.move_robot_pub.publish(msg)
+        elif self.write_topic_msg == 'trajectory_msgs/JointTrajectory':
+            msg.joint_names = self.joint_names
+            point = JointTrajectoryPoint()
+            point.positions = action
+            point.velocities = [0.0] * self.joint_len
+            point.time_from_start = rclpy.duration.Duration(seconds=0.01).to_msg()
+            msg.points = [point]
             self.move_robot_pub.publish(msg)
         else:
             print("Unsupported write topic message type for move_joint_step_by_topic.")
@@ -121,6 +140,18 @@ class Agent:
             req.command = int(action[0])
             
             self.move_robot_client.call_async(req)
+
+    def move_joint_step_by_action(self, action):
+        msg = self.write_action_goal_cls()
+        action = [float(a) for a in action]
+        if self.write_topic_msg == 'control_msgs/action/GripperCommand':
+            msg.command.position = action[0]
+            msg.command.max_effort = 50.0  # Set a default max effort; adjust as needed
+        send_goal_future = self.move_robot_client.send_goal_async(msg)
+
+        
+
+
             
     # def move_step(self, action):
     #     action = [float(a) for a in action]
@@ -178,6 +209,10 @@ class Agent:
                 for i, joint_name in enumerate(self.joint_names):
                     topic_index = self.joint_states.name.index(joint_name)
                     joint_positions.append(self.joint_states.position[topic_index])
+            elif self.read_topic_msg == 'control_msgs/JointTrajectoryControllerState':
+                for i, joint_name in enumerate(self.joint_names):
+                    topic_index = self.joint_states.joint_names.index(joint_name)
+                    joint_positions.append(self.joint_states.actual.positions[topic_index])
             else:
                 for i in range(self.joint_len):
                     joint_positions.append(self.joint_states.data[i])
@@ -193,6 +228,10 @@ class Agent:
                 joint_actions.append(self.joint_actions.position[topic_index])
         elif self.write_topic_msg == 'std_msgs/Float64MultiArray':
             joint_actions = list(self.joint_actions.data)
+        elif self.write_topic_msg == 'control_msgs/JointTrajectoryControllerState':
+            for i, joint_name in enumerate(self.joint_names):
+                topic_index = self.joint_actions.joint_names.index(joint_name)
+                joint_actions.append(self.joint_actions.actual.positions[topic_index])
         return joint_actions
 
     def get_ee_position(self):
