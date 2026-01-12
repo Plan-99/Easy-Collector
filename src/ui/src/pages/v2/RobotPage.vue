@@ -318,6 +318,7 @@ const robotForm = ref([
         options: [
             { label: 'Topic', value: 'topic' },
             { label: 'Service', value: 'service' },
+            { label: 'Action', value: 'action' },
         ],
         show: (form) => form.find((e) => e.key === 'type').value === 'custom' 
     },
@@ -325,6 +326,7 @@ const robotForm = ref([
     { label: 'Write Topic Message Type', key: 'write_topic_msg', type: 'select', value: '', default: 'sensor_msgs/JointState', 
         options: [
             { label: 'sensor_msgs/JointState', value: 'sensor_msgs/JointState' },
+            { label: 'control_msgs/action/GripperCommand', value: 'control_msgs/action/GripperCommand' },
         ],
         show: (form) => form.find((e) => e.key === 'type').value === 'custom' 
     },

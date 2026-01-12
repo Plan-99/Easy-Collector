@@ -125,6 +125,14 @@ def start_robot():
                    f'port:={settings.get("port", 41414)}',
                    f'changer_addr:={settings.get("changer_address", 5)}'
         ]
+
+    if company == "Kinova":
+        command = ['ros2', 'launch', f'{type}_moveit_config', 'robot.launch.py',
+                f'namespace:=ec_robot_{id}',
+                f'robot_ip:={settings.get("ip_address", "192.168.1.10")}',
+                'launch_rviz:=false'
+        ]
+
     print(f"Attempting to start robot")
 
     process = current_app.pm.start_process(

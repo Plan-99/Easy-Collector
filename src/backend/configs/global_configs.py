@@ -67,8 +67,8 @@ SUPPORT_ROBOTS = [
         'tool_inner': False,
         'tool_index': [],
         'custom_fields': ['ip_address'],
-        'urdf_path': '/ros2_ws/src/rbpodo_ros2/rbpodo_description/robots/rb3_730es_u.urdf',
-        'urdf_package_dir': '/ros2_ws/src/rbpodo_ros2/rbpodo_description/',
+        'urdf_path': '/root/ros2_ws/src/rbpodo_ros2/rbpodo_description/robots/rb3_730es_u.urdf',
+        'urdf_package_dir': '/root/ros2_ws/src/rbpodo_ros2/rbpodo_description/',
         'ik_setting': {
             'joints_to_lock': [],
             'ee_definitions': [('ee', 'tcp_joint', None)],
@@ -140,10 +140,23 @@ SUPPORT_ROBOTS = [
         'custom_fields': ['ip_address', 'port'],
     },
     {
-        'name': 'robotiq_2f_85',
-        'role': 'tool',
-        'company': 'Robotiq',
-    },
+        'name': 'kinova_gen3_7dof_robotiq_2f_85',
+        'role': 'single_arm',
+        'company': 'Kinova',
+        'joint_dim': 7,
+        'joint_names': ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7"],
+        'joint_lower_bounds': [-3.14, -3.14, -3.14, -3.14, -3.14, -3.14, -3.14],
+        'joint_upper_bounds': [3.14, 3.14, 3.14, 3.14, 3.14, 3.14, 3.14],
+        'read_topic': '/joint_trajectory_controller/state',
+        'read_topic_msg': 'control_msgs/JointTrajectoryControllerState',
+        'write_topic': '/joint_trajectory_controller/joint_trajectory',
+        'write_topic_msg': 'trajectory_msgs/JointTrajectory',
+        'tool_inner': False,
+        'tool_index': [],
+        'custom_fields': ['ip_address'],
+        'urdf_path': '/root/ros2_ws/src/ros2_kortex/kortex_description/robots/gen3_2f85.urdf',
+        'urdf_package_dir': '/root/ros2_ws/src/ros2_kortex/kortex_description/',
+    }
 ]
 
 def get_robot_by_name(name):
