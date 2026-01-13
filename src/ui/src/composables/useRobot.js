@@ -144,6 +144,20 @@ export function useRobot(robot, robotOnCallback=() => {}) {
     });
   }
 
+  function moveRobotEEDelta(delta_pos) {
+    socket.emit('move_robot_ee_delta', {
+      robot,
+      delta_pos
+    });
+  }
+
+  function moveRobotJointDelta(delta_pos) {
+    socket.emit('move_robot_joint_delta', {
+      robot,
+      delta_pos
+    });
+  }
+
   function goOriginPos() {
     api.post(`/robot/${robot.id}/:move_to`, {
       goal_pos: robot.homepose
@@ -206,6 +220,8 @@ export function useRobot(robot, robotOnCallback=() => {}) {
     status,
     moveRobotJoint,
     moveRobotEE,
+    moveRobotEEDelta,
+    moveRobotJointDelta,
     goOriginPos,
     subscribeRobot,
     unSubscribeRobot,

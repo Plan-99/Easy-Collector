@@ -260,6 +260,9 @@ function startDataCollection() {
         });
         return;
     }
+    if (teleType.value === 'keyboard') {
+        addKeyboardListener();
+    }
     showProcessConsole.value = true;
     collectingProgress.value = 0;
     api.post(`/dataset/${selectedDatasetId.value}/:start_collection`, {
@@ -277,7 +280,53 @@ function startDataCollection() {
     });
 }
 
+const eeStepSize = ref(0.01);
+
+const keyboardHandler = (event) => {
+    if (focused.value?.device_type !== 'robot') return;
+    if (focused.value.role === 'dual_arm') return;
+
+    // [중요] focused 객체의 복사본이 아닌, props의 최신 로봇 데이터를 조회
+    const currentRobot = props.robots.find(r => r.id === focused.value.id);
+    if (!currentRobot || !currentRobot.eePos) return;
+
+    const eeDelta = [0, 0, 0, 0, 0, 0, 0]; // [x, y, z, roll, pitch, yaw, tool]
+    if (event.key === 'w') eeDelta[0] += eeStepSize.value;
+    else if (event.key === 's') eeDelta[0] -= eeStepSize.value;
+    else if (event.key === 'a') eeDelta[1] += eeStepSize.value;
+    else if (event.key === 'd') eeDelta[1] -= eeStepSize.value;
+    else if (event.key === 'e') eeDelta[2] += eeStepSize.value;
+    else if (event.key === 'z') eeDelta[2] -= eeStepSize.value;
+    else if (event.key === '[') eeDelta[3] += eeStepSize.value;
+    else if (event.key === '.') eeDelta[3] -= eeStepSize.value;
+    else if (event.key === 'p') eeDelta[4] += eeStepSize.value;
+    else if (event.key === ';') eeDelta[4] -= eeStepSize.value;
+    else if (event.key === 'l') eeDelta[5] += eeStepSize.value;
+    else if (event.key === ',') eeDelta[5] -= eeStepSize.value;
+    else if (event.key === 'b') eeDelta[6] += eeStepSize.value;
+    else if (event.key === 'n') eeDelta[6] -= eeStepSize.value;
+    else return;
+
+    // 백엔드로 전송
+    currentRobot.handler.moveRobotEEDelta({
+        ee: eeDelta
+    });
+};
+
+function addKeyboardListener() {
+    // 중복 등록 방지를 위해 먼저 제거 후 등록
+    window.removeEventListener('keydown', keyboardHandler);
+    window.addEventListener('keydown', keyboardHandler);
+}
+
+function removeKeyboardListener() {
+    window.removeEventListener('keydown', keyboardHandler);
+}
+
 function stopDataCollection() {
+    if (teleType.value === 'keyboard') {
+        removeKeyboardListener();
+    }
     api.post(`/dataset/${selectedDatasetId.value}/:stop_collection`).then(() => {
         collectingProgress.value = 0;
     })

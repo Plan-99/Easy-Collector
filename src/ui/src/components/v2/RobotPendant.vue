@@ -71,24 +71,32 @@ const props = defineProps({
 });
 
 function moveOneJoint(index, delta) {
-    const jointState = props.robot.jointState;
-    jointState[index] += delta;
-    props.robot.handler.moveRobotJoint(jointState);
+    // const jointState = props.robot.jointState;
+    // jointState[index] += delta;
+    // props.robot.handler.moveRobotJoint(jointState);
+    const deltaAction = new Array(props.robot.joint_names.length).fill(0);
+    deltaAction[index] = delta;
+    props.robot.handler.moveRobotJointDelta(deltaAction);
 }
 
 function moveOneEE(tool_index, p_index, delta) {
-    const eePos = Object.values(props.robot.eePos)[tool_index]
-    eePos[p_index] += delta;
-    const eePosDict = {};
-    if (props.robot.role === 'dual_arm') {
-        eePosDict['left'] = tool_index === 0 ? eePos : Object.values(props.robot.eePos)[0];
-        eePosDict['right'] = tool_index === 1 ? eePos : Object.values(props.robot.eePos)[1];
-    } else {
-        eePosDict['ee'] = eePos;
-    }
-    props.robot.handler.moveRobotEE(eePosDict);
+    // const eePos = Object.values(props.robot.eePos)[tool_index]
+    // eePos[p_index] += delta;
+    // const eePosDict = {};
+    // if (props.robot.role === 'dual_arm') {
+    //     eePosDict['left'] = tool_index === 0 ? eePos : Object.values(props.robot.eePos)[0];
+    //     eePosDict['right'] = tool_index === 1 ? eePos : Object.values(props.robot.eePos)[1];
+    // } else {
+    //     eePosDict['ee'] = eePos;
+    // }
+    // props.robot.handler.moveRobotEE(eePosDict);
+    const deltaPos = {};
+    const toolName = props.robot.role === 'dual_arm' ? (tool_index === 0 ? 'L_ee' : 'R_ee') : 'ee';
+    deltaPos[toolName] = Array(7).fill(0); // x, y, z, roll, pitch, yaw, tool
+    deltaPos[toolName][p_index] = delta;
+    props.robot.handler.moveRobotEEDelta(deltaPos);
 }
 
-const robotStepSize = ref(0.01);
+const robotStepSize = ref(0.03);
 
 </script>

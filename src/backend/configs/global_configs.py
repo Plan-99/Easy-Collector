@@ -154,8 +154,14 @@ SUPPORT_ROBOTS = [
         'tool_inner': False,
         'tool_index': [],
         'custom_fields': ['ip_address'],
-        'urdf_path': '/root/ros2_ws/src/ros2_kortex/kortex_description/robots/gen3_2f85.urdf',
+        'urdf_path': '/root/ros2_ws/src/ros2_kortex/kortex_description/robots/gen3_7dof.urdf',
         'urdf_package_dir': '/root/ros2_ws/src/ros2_kortex/kortex_description/',
+        'ik_setting': {
+            'joints_to_lock': [],
+            'ee_definitions': [
+                ('ee', 'end_effector_link', None)
+            ],
+        },
     }
 ]
 

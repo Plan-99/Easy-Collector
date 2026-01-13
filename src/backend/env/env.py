@@ -63,10 +63,19 @@ class Env:
     def get_robot_states(self):
         robot_state_dict = dict()
         for agent in self.agents:
+            qpos = agent.get_joint_states()
+            qaction = agent.get_joint_actions()
+            eepos = agent.get_ee_position()
+            eetarget = agent.get_ee_target()
+            qaction_delta = [qaction[i] - qpos[i] for i in range(len(qpos))]
+            eetarget_delta = {key: [eetarget[key][i] - eepos[key][i] for i in range(6)] for key in eetarget} if eetarget is not None else None
             robot_state_dict[agent.id] = {
                 'qpos': agent.get_joint_states(),
                 'qaction': agent.get_joint_actions(),
                 'eepos': agent.get_ee_position(),
+                'eetarget': agent.get_ee_target(),
+                'qaction_delta': qaction_delta,
+                'eetarget_delta': eetarget_delta,
             }
         return robot_state_dict
     

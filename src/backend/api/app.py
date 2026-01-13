@@ -186,12 +186,38 @@ def handle_offer_event(sid, data):
 @socketio.on('move_robot_joint')
 def handle_move_robot_joint_event(data):
     agent = app.agents[data['robot']['id']]
+    agent.moved_by_ui = True
+    if agent.move_lock:
+        print("Move locked, ignoring EE move command.")
+        return
     agent.move_joint_step(data['goal_pos'])
 
 @socketio.on('move_robot_ee')
 def handle_move_robot_ee_event(data):
     agent = app.agents[data['robot']['id']]
+    agent.moved_by_ui = True
+    if agent.move_lock:
+        print("Move locked, ignoring EE move command.")
+        return
     agent.move_ee_step(data['goal_pos'])
+
+@socketio.on('move_robot_joint_delta')
+def handle_move_robot_joint_delta_event(data):
+    agent = app.agents[data['robot']['id']]
+    agent.moved_by_ui = True
+    if agent.move_lock:
+        print("Move locked, ignoring joint delta move command.")
+        return
+    agent.move_joint_delta_step(data['delta_pos'])
+
+@socketio.on('move_robot_ee_delta')
+def handle_move_robot_ee_delta_event(data):
+    agent = app.agents[data['robot']['id']]
+    agent.moved_by_ui = True
+    if agent.move_lock:
+        print("Move locked, ignoring EE delta move command.")
+        return
+    agent.move_ee_delta_step(data['delta_pos'])
 
 
 def main():

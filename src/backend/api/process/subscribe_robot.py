@@ -2,6 +2,7 @@ import time
 from flask import current_app, request
 from ...env.agent import Agent
 import json
+import traceback
 
 
 def subscribe_robot_topic(agent: Agent, node, socketio_instance, task_control):
@@ -27,5 +28,6 @@ def subscribe_robot_topic(agent: Agent, node, socketio_instance, task_control):
             })
             time.sleep(0.1)
         except Exception as e:
-            print(f"[ERROR] subscribe_robot_topic: {str(e)}")
+            error_msg = traceback.format_exc()
+            print(f"[ERROR] subscribe_robot_topic:\n{error_msg}")
             break

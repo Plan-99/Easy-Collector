@@ -307,5 +307,22 @@ class IK_Solver:
             poses[name] = se3_to_xyzrpy(se3_pose)
             
         return poses
+    
+    def reset_state(self, current_q):
+        """IK Solver의 필터와 최적화기 내부 파라미터를 현재 상태로 강제 동기화"""
+        # 1. 데이터를 넘파이 배열로 변환
+        q_target = np.array(current_q).flatten()
+        self.init_data = q_target
 
+        # 2. [가장 중요] CasADi 파라미터 및 초기값 리셋
+        # = 가 아니라 set_value와 set_initial을 사용해야 합니다.
+        self.opti.set_value(self.var_q_last, q_target) # 이전 위치를 현재 위치로 세팅 (smooth_cost 기준점)
+        self.opti.set_initial(self.var_q, q_target)    # 솔버의 계산 시작점을 현재 위치로 세팅
+
+        # 3. 필터 큐 비우기 및 현재 값으로 채우기
+        self.smooth_filter._data_queue = []
+        for _ in range(self.smooth_filter._window_size):
+            self.smooth_filter.add_data(q_target)
+            
+        logger_mp.info(f"IK Solver state reset complete. Q: {q_target.tolist()}")
 
