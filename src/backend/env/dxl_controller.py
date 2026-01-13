@@ -5,7 +5,9 @@ import time
 
 
 class DxlController:
-    def __init__(self, serial_port, dxl_ids, gripper_dxl_ids=[], baudrate=57600):
+    def __init__(self, serial_port, dxl_ids, gripper_dxl_ids=[], baudrate=4000000):
+        print(f"Initializing DxlController on port {serial_port} with IDs {dxl_ids}")
+        print(baudrate)
         self.portHandler = dxl.PortHandler(serial_port)  # 다이나믹셀 포트
         self.packetHandler = dxl.PacketHandler(2.0)         # 프로토콜 2.0 사용
         self.port_lock = threading.Lock()
@@ -79,33 +81,39 @@ class DxlController:
         return position
     
     def read_all_dynamixel(self):
-            """ GroupSyncRead를 사용해 모든 다이나믹셀 위치를 한 번에 읽어옵니다. """
-            with self.port_lock:
+        max_retries = 10
+        
+        with self.port_lock:
+            for attempt in range(max_retries):
                 positions = []
-                
-                dxl_comm_result = self.syncRead.txRxPacket()
-                if dxl_comm_result != COMM_SUCCESS:
-                    print(f"SyncRead txRxPacket error: {self.packetHandler.getTxRxResult(dxl_comm_result)}")
-                    return [0] * len(self.dxl_ids)
-
-                for dxl_id in self.dxl_ids:
-                    if self.syncRead.isAvailable(dxl_id, self.ADDR_PRESENT_POSITION, self.LEN_PRESENT_POSITION):
-                        position = self.syncRead.getData(dxl_id, self.ADDR_PRESENT_POSITION, self.LEN_PRESENT_POSITION)
-                        # 32비트 부호있는 정수 처리 (음수값 보정)
-                        if position > 2147483647:
-                            position -= 4294967296
-                        positions.append({
-                            'id': dxl_id,
-                            'position': position
-                        })
-                    else:
-                        print(f"[ID:{dxl_id}] SyncRead data not available")
-                        positions.append({
-                            'id': dxl_id,
-                            'position': 0
-                        })
+                try:
+                    dxl_comm_result = self.syncRead.txRxPacket()
+                    
+                    if dxl_comm_result == COMM_SUCCESS:
+                        all_data_available = True
+                        for dxl_id in self.dxl_ids:
+                            # getData 호출 전에 안전하게 검사
+                            if self.syncRead.isAvailable(dxl_id, self.ADDR_PRESENT_POSITION, self.LEN_PRESENT_POSITION):
+                                # 여기서 에러가 날 가능성이 큼
+                                position = self.syncRead.getData(dxl_id, self.ADDR_PRESENT_POSITION, self.LEN_PRESENT_POSITION)
                                 
-                return positions
+                                if position > 2147483647:
+                                    position -= 4294967296
+                                positions.append({'id': dxl_id, 'position': position})
+                            else:
+                                all_data_available = False
+                                break
+                        
+                        if all_data_available:
+                            return positions
+                except Exception as e:
+                    # 여기서 에러가 잡히면 어떤 ID 읽다가 죽었는지 알 수 있음
+                    print(f"[SDK Error] ID 읽기 중 예외 발생: {e} (시도 {attempt+1})")
+                
+                time.sleep(0.005) # 0.001보다 조금 더 여유를 줌
+
+            # 실패 시 마지막으로 읽었던 값이나 안전한 기본값 반환
+            return [{'id': dxl_id, 'position': 0} for dxl_id in self.dxl_ids]
 
     def close(self):
         self.portHandler.closePort()

@@ -68,7 +68,7 @@ def start_leader_teleoperation():
     current_app.pm.stop_process(name='start_leader_robot')
     agent = current_app.agents[robot['id']]
     
-    leader = Leader(agent, current_app.pm.socketio, preset)
+    leader = Leader(current_app.node, agent, current_app.pm.socketio, preset)
 # 2. 전체 워크플로우를 start_function으로 실행
     current_app.pm.start_function(
         name='leader_teleoperation', # 프로세스 이름

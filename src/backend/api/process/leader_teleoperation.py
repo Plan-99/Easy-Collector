@@ -1,4 +1,5 @@
 # #!/usr/bin/env python
+
 from concurrent.futures import thread
 import rclpy
 from rclpy.node import Node
@@ -14,8 +15,9 @@ import sys
 
 
 class Leader():
-    def __init__(self, agents, socketio_instance, teleop_setting) -> None:
+    def __init__(self, node: Node, agents, socketio_instance, teleop_setting) -> None:
         # ROS 노드 초기화ur5e/ur5e_scaled_pos_joint_traj_controller/command
+        self.node = node
         self.socketio_instance = socketio_instance
         # self.origin = leader_robot_preset['origin']  # 다이나믹셀의 원점 위치
         # self.gripper_dxl_range = leader_robot_preset['gripper_dxl_range']  # 다이나믹셀의 원점 위치
@@ -38,6 +40,9 @@ class Leader():
         self.grouped_by_port = defaultdict(list)
         self.joint_map = teleop_setting['joint_map']
 
+        # 각 에이전트에 맞게 joint_map 업데이트
+        self.udpate_joint_map_with_agent_info()
+
         grouped_by_port = self.group_joints_by_port()
         self.dxl_controllers = {}
         for port, joints in grouped_by_port.items():
@@ -49,6 +54,17 @@ class Leader():
 
         self.ema = float(teleop_setting.get('ema', 0.0)) # EMA 필터 값
 
+
+    def udpate_joint_map_with_agent_info(self):
+        for joint_info in self.joint_map:
+            for agent in self.agents:
+                if agent.id == joint_info['robot_id']:
+                    try:
+                        j_idx = agent.joint_names.index(joint_info['joint_name'])
+                        joint_info['joint_upper_bound'] = agent.joint_upper_bounds[j_idx]
+                        joint_info['joint_lower_bound'] = agent.joint_lower_bounds[j_idx]
+                    except ValueError:
+                        continue
 
 
     def read_dxl_and_write_to_joint_map(self):
@@ -202,7 +218,11 @@ class Leader():
     def get_gripper_pos(self, joint):
         gripper_pos_low = joint['joint_lower_bound']
         gripper_pos_high = joint['joint_upper_bound']
-        gripper_pos = (joint['dxl_position'] - joint['gripper_dxl_range'][1]) / (joint['gripper_dxl_range'][0] - joint['gripper_dxl_range'][1]) * (gripper_pos_high - gripper_pos_low) + gripper_pos_low
+        sign = joint['sign']
+        if sign < 0:
+            gripper_pos = gripper_pos_high - (joint['dxl_position'] - joint['gripper_dxl_range'][1]) / (joint['gripper_dxl_range'][0] - joint['gripper_dxl_range'][1]) * (gripper_pos_high - gripper_pos_low)
+        else:
+            gripper_pos = (joint['dxl_position'] - joint['gripper_dxl_range'][1]) / (joint['gripper_dxl_range'][0] - joint['gripper_dxl_range'][1]) * (gripper_pos_high - gripper_pos_low) + gripper_pos_low
         if gripper_pos < gripper_pos_low:
             return gripper_pos_low
         elif gripper_pos > gripper_pos_high:
@@ -213,7 +233,17 @@ class Leader():
 
     def position_pub(self, task_control):
         try:
-            while not task_control['stop']:
+            is_joint_trajectory = False
+            for agent in self.agents:
+                if agent.write_topic_msg == 'trajectory_msgs/JointTrajectory':
+                    is_joint_trajectory = True
+                    break
+            if is_joint_trajectory:
+                rate = self.node.create_rate(3)  # 50Hz
+            else:
+                rate = self.node.create_rate(50)  # 10Hz
+            while rclpy.ok() and not task_control['stop']:
+                
                 start = time.time()
 
                 # 1. 하드웨어 읽기 작업 (여기서 SerialException 등이 발생할 확률이 높음)
@@ -237,7 +267,6 @@ class Leader():
                         position = joint['dxl_position']
                         if joint.get('is_gripper', True):
                             joint['target_agent_position'] = self.get_gripper_pos(joint)
-
                         else:
                             target_pos = self.get_rad_pos(joint)
 
@@ -258,9 +287,8 @@ class Leader():
 
 
                 # 그리퍼를 벌리면 정지하도록 하는 코드--------------
-
-                should_pause = [False] * len(self.agents)
-                should_resume = [False] * len(self.agents)
+                should_pause = [False]
+                should_resume = [False]
                 dxl_contoller_index = 0
                 for port, dxl_controller in self.dxl_controllers.items():
                     gripper_dxl_ids = dxl_controller.gripper_dxl_ids
@@ -282,15 +310,17 @@ class Leader():
                     self.is_paused = True
                     for dxl_controller in self.dxl_controllers.values():
                         dxl_controller.enable_torque()
-
+                    time.sleep(0.1)  # 토크가 걸릴 시간을 약간 줌
                     print("Teleoperation Paused")
 
                 elif self.is_paused and all(should_resume):
                     self.is_paused = False
                     for dxl_controller in self.dxl_controllers.values():
                         dxl_controller.remove_torque()
-
+                    time.sleep(0.1) 
                     print("Teleoperation Resumed")
+
+                rate.sleep()
 
         except Exception as e:
             # 예상치 못한 전체 루프 에러 처리

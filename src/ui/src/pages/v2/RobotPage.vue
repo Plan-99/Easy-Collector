@@ -343,6 +343,9 @@ function listRobots() {
             robot.loading = false;
             robot.handler = useRobot(robot, () => {
             });
+            if (robot.type === 'custom') {
+                robot.handler.checkRobotTopic();
+            }
             robot.joint_pos = []
             robot.joint_names.forEach((joint, i) => {
                 robot.joint_pos[i] = 0

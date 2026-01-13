@@ -61,8 +61,8 @@ def record_episode(node, dataset_id, agents, assembly_id, sensors, task, languag
                 print(f'[ERROR]: No leader robot preset for assembly {assembly_id}')
                 tele_control['stop'] = True
                 return
-            
-            leader = Leader(agents, socketio_instance, teleop.settings)
+
+            leader = Leader(node, agents, socketio_instance, teleop.settings)
 
             socketio_instance.start_background_task(
                 target=leader.leader_teleop_workflow,
