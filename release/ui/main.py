@@ -1364,6 +1364,17 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
+    def _copy_file_best_effort(self, src: Path, dest: Path, context: str):
+        try:
+            shutil.copy2(src, dest)
+            return
+        except OSError as e:
+            try:
+                shutil.copyfile(src, dest)
+            except Exception:
+                raise
+            self.append_log(f"[{context}][INFO] 메타데이터 복사 실패로 기본 복사로 진행: {e}")
+
     def _unique_import_path(self, dest: Path) -> Path:
         if not dest.exists():
             return dest
@@ -1657,7 +1668,7 @@ class MainWindow(QMainWindow):
                 if src.is_dir():
                     raise ValueError("DB 파일이 디렉터리입니다.")
                 self._cleanup_sqlite_sidecars(dest)
-                shutil.copy2(src, dest)
+                self._copy_file_best_effort(src, dest, "IMPORT")
                 self._cleanup_sqlite_sidecars(dest)
                 self.append_log(f"[IMPORT] {choice} -> {dest}")
                 if docker_compose_available() and self._is_valid_project_root(self.project_root):
@@ -4818,6 +4829,17 @@ class MainWindow(QMainWindow):
         base = Path(program).name
         if base in ("firefox", "firefox-bin"):
             return ["-new-tab", *args]
+        if base in (
+            "google-chrome",
+            "google-chrome-stable",
+            "chromium",
+            "chromium-browser",
+            "microsoft-edge",
+            "microsoft-edge-stable",
+            "brave-browser",
+            "brave",
+        ):
+            return ["--new-tab", *args]
         return args
 
     def _parse_browser_env(self, value: str) -> tuple[str, list[str]] | None:
