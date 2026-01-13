@@ -81,6 +81,7 @@ class Agent:
             self.move_robot_client = rclpy.action.ActionClient(node, get_action(robot['write_topic_msg']), robot['write_topic'])
             if not self.move_robot_client.wait_for_server(timeout_sec=5.0):
                 print(f'Action server {robot["write_topic"]} not available. Please check the connection.')
+            self.is_waiting_for_goal = False
 
         self.ee_pos_cmd = None
 
@@ -164,14 +165,34 @@ class Agent:
             self.move_robot_client.call_async(req)
 
     def move_joint_step_by_action(self, action):
+        # 1. 이전 Goal 전송 후 응답(Accepted)을 아직 못 받았다면 스킵
+        if self.is_waiting_for_goal:
+            return
+
         action = [float(a) for a in action]
         if self.write_topic_msg == 'control_msgs/action/GripperCommand':
             self.write_action_goal_data.command.position = action[0]
-            self.write_action_goal_data.command.max_effort = 50.0  # Set a default max effort; adjust as needed
-            
-        send_goal_future = self.move_robot_client.send_goal_async(self.write_action_goal_data)
+            self.write_action_goal_data.command.max_effort = 50.0 
+
+        self.is_waiting_for_goal = True
         
-            
+        # send_goal_async를 호출하고 응답 콜백만 연결
+        send_goal_future = self.move_robot_client.send_goal_async(self.write_action_goal_data)
+        send_goal_future.add_done_callback(self.goal_response_callback)
+
+    def goal_response_callback(self, future):
+        # 서버가 Goal 수락 여부를 결정하면 즉시 플래그 해제
+        self.is_waiting_for_goal = False
+        
+        try:
+            goal_handle = future.result()
+            if not goal_handle.accepted:
+                # Rejection 사유 확인을 위해 로그 출력
+                pass 
+        except Exception as e:
+            print(f"Goal call failed: {e}")
+
+        
     # def move_step(self, action):
     #     action = [float(a) for a in action]
     #     js = JointState()
