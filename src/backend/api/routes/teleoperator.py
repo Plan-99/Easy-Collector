@@ -103,7 +103,7 @@ def start_leader_teleoperation():
     
     try:
         # 2. Leader 객체 초기화 (이 과정은 짧으므로 메인에서 수행)
-        leader = Leader(agents, current_app.pm.socketio, teleop_setting=teleoperator.settings)
+        leader = Leader(current_app.node, agents, current_app.pm.socketio, teleop_setting=teleoperator.settings)
         
         # 3. 전체 워크플로우를 백그라운드로 실행
         # pm.start_function이 내부적으로 thread/background task를 생성함

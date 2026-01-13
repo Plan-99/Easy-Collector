@@ -12,7 +12,7 @@ def get_available_ports():
     target_ports = [p.device for p in ports if "ttyUSB" in p.device or "ttyACM" in p.device or "COM" in p.device]
     return target_ports
 
-def scan_ids_on_port(port_name, baudrate=57600, protocol_ver=2.0):
+def scan_ids_on_port(port_name, baudrate=4000000, protocol_ver=2.0):
     """ 특정 포트에서 연결된 다이나믹셀 ID들을 찾아서 리스트로 반환합니다. """
     found_ids = []
     
@@ -27,7 +27,7 @@ def scan_ids_on_port(port_name, baudrate=57600, protocol_ver=2.0):
             portHandler.closePort()
             return []
         
-        print(f"Scanning port: {port_name} ...")
+        print(f"Scanning port: {port_name} ..., baudrate: {baudrate}")
         
         # ID 0부터 20까지만 스캔 (필요시 252까지 늘리세요)
         for dxl_id in range(0, 20): 
@@ -47,17 +47,20 @@ def scan_ids_on_port(port_name, baudrate=57600, protocol_ver=2.0):
 # [Main Execution]
 # ==========================================
 
-def subscribe_dynamixel(socketio_instance, task_control, baudrate=57600):
+def subscribe_dynamixel(socketio_instance, task_control, baudrate=4000000):
     # 1. 모든 포트 검색
     ports = get_available_ports()
     print(f"Detected Ports: {ports}")
 
     controllers = []
 
+
     # 2. 각 포트별로 ID 스캔 및 컨트롤러 생성
     for port in ports:
         # 해당 포트의 다이나믹셀 ID 스캔
         connected_ids = scan_ids_on_port(port, baudrate=baudrate)
+
+        print(connected_ids)
         
         if len(connected_ids) > 0:
             print(f'Connected Dynamixel IDs on {port}: {connected_ids}')

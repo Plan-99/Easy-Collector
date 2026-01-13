@@ -15,8 +15,11 @@ from ..configs.global_configs import get_robot_by_name
 
 from trajectory_msgs.msg import JointTrajectoryPoint
 
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+
 class Agent:
     def __init__(self, node: Node, robot):
+        self.node = node
         self.id = robot['id']
         self.leader_robot_preset = robot.get('leader_robot_preset', None)    
         self.js_mutex = threading.Lock()
@@ -37,6 +40,13 @@ class Agent:
         
         self.tool_inner = robot.get('tool_inner', False)
 
+
+        self.qos_profile = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT, # Hz 향상을 위해 권장
+            history=HistoryPolicy.KEEP_LAST,
+            depth=30 # 여기서 큐 사이즈를 결정합니다.
+        )
+
         self.ik_solver = None
         robot_info = get_robot_by_name(self.robot_type)
         if robot_info is not None and 'ik_setting' in robot_info:
@@ -45,29 +55,35 @@ class Agent:
             ik_setting = robot_info['ik_setting']
             self.ik_solver = Common_ArmIK(urdf_path=urdf_path, urdf_package_dir=urdf_package_dir, **ik_setting)
 
-        read_topic_msg_cls = get_message(robot['read_topic_msg'])
-        node.create_subscription(read_topic_msg_cls, robot['read_topic'], self.joint_state_cb, 10)
+        self.read_topic_msg_cls = get_message(robot['read_topic_msg'])
+        self.read_topic_sub = node.create_subscription(self.read_topic_msg_cls, robot['read_topic'], self.joint_state_cb, self.qos_profile)
+        self.read_topic_msg_data = self.read_topic_msg_cls()
 
 
         self.write_type = robot.get('write_type', 'topic')  
         if self.write_type == 'topic':
             self.write_topic_msg_cls = get_message(robot['write_topic_msg'])
-            node.create_subscription(self.write_topic_msg_cls, robot['write_topic'], self.joint_action_cb, 10)
-            self.move_robot_pub = node.create_publisher(self.write_topic_msg_cls, robot['write_topic'], 10)
-
+            self.write_topic_msg_data = self.write_topic_msg_cls()
+            self.write_topic_sub = node.create_subscription(self.write_topic_msg_cls, robot['write_topic'], self.joint_action_cb, self.qos_profile)
+            self.move_robot_pub = node.create_publisher(self.write_topic_msg_cls, robot['write_topic'], self.qos_profile)
+            
         elif self.write_type == 'service':
             self.write_service_srv_cls = get_service(robot['write_topic_msg'])
+            self.write_service_srv_data = self.write_service_srv_cls()
             self.move_robot_client = node.create_client(self.write_service_srv_cls, robot['write_topic'])
             if not self.move_robot_client.wait_for_service(timeout_sec=5.0):
                 print(f'Service {robot["write_topic"]} not available. Please check the connection.')
 
         elif self.write_type == 'action':
             self.write_action_goal_cls = get_action(robot['write_topic_msg']).Goal
+            self.write_action_goal_data = self.write_action_goal_cls()
             self.move_robot_client = rclpy.action.ActionClient(node, get_action(robot['write_topic_msg']), robot['write_topic'])
             if not self.move_robot_client.wait_for_server(timeout_sec=5.0):
                 print(f'Action server {robot["write_topic"]} not available. Please check the connection.')
 
         self.ee_pos_cmd = None
+
+        self.joint_trajectory_point = JointTrajectoryPoint()
             
         time.sleep(0.1)  # Wait for subscriber to be ready
 
@@ -107,24 +123,27 @@ class Agent:
             self.move_joint_step_by_action(action)
         
     def move_joint_step_by_topic(self, action):
-        msg = self.write_topic_msg_cls()
         if self.write_topic_msg == 'std_msgs/Float64MultiArray':
-            msg.data = action
-            self.move_robot_pub.publish(msg)
+            self.write_topic_msg_data.data = action
+            self.move_robot_pub.publish(self.write_topic_msg_data)
         elif self.write_topic_msg == 'sensor_msgs/JointState':
-            msg.name = self.joint_names
-            msg.position = action
-            msg.velocity = [0.0] * self.joint_len
-            msg.velocity[-1] = 100
-            self.move_robot_pub.publish(msg)
+            self.write_topic_msg_data.name = self.joint_names
+            self.write_topic_msg_data.position = action
+            self.write_topic_msg_data.velocity = [0.0] * self.joint_len
+            self.write_topic_msg_data.velocity[-1] = 100
+            self.move_robot_pub.publish(self.write_topic_msg_data)
         elif self.write_topic_msg == 'trajectory_msgs/JointTrajectory':
-            msg.joint_names = self.joint_names
-            point = JointTrajectoryPoint()
-            point.positions = action
-            point.velocities = [0.0] * self.joint_len
-            point.time_from_start = rclpy.duration.Duration(seconds=0.01).to_msg()
-            msg.points = [point]
-            self.move_robot_pub.publish(msg)
+            self.write_topic_msg_data.joint_names = self.joint_names
+            self.joint_trajectory_point.positions = action
+             # velocities를 목적지 - 현재 위치 차이의 절반으로 설정
+            current_pos = self.get_joint_states()
+            if current_pos is None:
+                print("Current joint states are None, cannot move.")
+                return
+            self.joint_trajectory_point.velocities = [(abs(t - c) / 2) for t, c in zip(action, current_pos)]
+            self.joint_trajectory_point.time_from_start = rclpy.duration.Duration(seconds=0.7).to_msg()
+            self.write_topic_msg_data.points = [self.joint_trajectory_point]
+            self.move_robot_pub.publish(self.write_topic_msg_data)
         else:
             print("Unsupported write topic message type for move_joint_step_by_topic.")
             return
@@ -142,16 +161,11 @@ class Agent:
             self.move_robot_client.call_async(req)
 
     def move_joint_step_by_action(self, action):
-        msg = self.write_action_goal_cls()
         action = [float(a) for a in action]
         if self.write_topic_msg == 'control_msgs/action/GripperCommand':
-            msg.command.position = action[0]
-            msg.command.max_effort = 50.0  # Set a default max effort; adjust as needed
-        send_goal_future = self.move_robot_client.send_goal_async(msg)
-
-        
-
-
+            self.write_action_goal_data.command.position = action[0]
+            self.write_action_goal_data.command.max_effort = 50.0  # Set a default max effort; adjust as needed
+        send_goal_future = self.move_robot_client.send_goal_async(self.write_action_goal_data)
             
     # def move_step(self, action):
     #     action = [float(a) for a in action]
@@ -270,6 +284,15 @@ class Agent:
     def move_to(self, target_pos, step_size=0.1):
         if self.robot_company == 'Piper':
             self.move_joint_step(target_pos)
+        elif self.robot_company == 'Kinova':
+            self.write_topic_msg_data.joint_names = self.joint_names
+            print("Moving to target position:", target_pos)
+            self.joint_trajectory_point.positions = [float(x) for x in target_pos]
+            # velocities를  0으로 설정
+            self.joint_trajectory_point.velocities = [0.0] * self.joint_len
+            self.joint_trajectory_point.time_from_start = rclpy.duration.Duration(seconds=5.0).to_msg()
+            self.write_topic_msg_data.points = [self.joint_trajectory_point]
+            self.move_robot_pub.publish(self.write_topic_msg_data)
         else:
             while True:
                 current_pos = self.get_joint_states()
@@ -287,3 +310,48 @@ class Agent:
                 # 이동 명령을 발행
                 self.move_joint_step(next_pos)
                 time.sleep(0.01)  # 짧은 대기 시간 추가
+
+    def cleanup(self):
+        """ROS 2 리소스를 안전하게 파괴합니다. 중복 호출 방지 로직 포함."""
+        print(f"[CLEANUP] Agent {self.id} 리소스 해제 중...")
+        
+        # 1. Subscription 해제
+        if hasattr(self, 'read_topic_sub') and self.read_topic_sub:
+            try:
+                self.node.destroy_subscription(self.read_topic_sub)
+            except Exception: pass
+            self.read_topic_sub = None # 중복 실행 방지
+        if hasattr(self, 'write_topic_sub') and self.write_topic_sub:
+            try:
+                self.node.destroy_subscription(self.write_topic_sub)
+            except Exception: pass
+            self.write_topic_sub = None
+        # 2. Publisher 해제
+        if hasattr(self, 'move_robot_pub') and self.move_robot_pub:
+            try:
+                self.node.destroy_publisher(self.move_robot_pub)
+            except Exception: pass
+            self.move_robot_pub = None
+
+        # 3. Service Client 해제
+        if self.write_type == 'service' and self.move_robot_client:
+            try:
+                self.node.destroy_client(self.move_robot_client)
+            except Exception: pass
+            self.move_robot_client = None
+
+        # 4. Action Client 해제 (가장 빈번한 에러 발생 지점)
+        if self.write_type == 'action' and self.move_robot_client:
+            try:
+                # 로컬 변수에 저장 후 전역 변수 초기화로 레이스 컨디션 방지
+                client = self.move_robot_client
+                self.move_robot_client = None 
+                client.destroy()
+            except ValueError as e:
+                # "list.remove(x): x not in list" 에러 무시
+                print(f"[DEBUG] ActionClient 이미 제거됨: {e}")
+            except Exception as e:
+                print(f"[DEBUG] ActionClient 제거 중 오류: {e}")
+
+        print(f"[CLEANUP] Agent {self.id} 리소스 정리 완료.")
+

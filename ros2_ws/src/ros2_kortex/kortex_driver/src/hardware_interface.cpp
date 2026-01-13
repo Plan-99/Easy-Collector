@@ -906,7 +906,7 @@ return_type KortexMultiInterfaceHardware::write(
       {
         // Keep alive mode - no controller active
         feedback_ = base_cyclic_.RefreshFeedback();
-        RCLCPP_DEBUG(LOGGER, "No controller active in LOW_LEVEL_SERVOING mode !");
+        // RCLCPP_DEBUG(LOGGER, "No controller active in LOW_LEVEL_SERVOING mode !");
       }
     }
     else

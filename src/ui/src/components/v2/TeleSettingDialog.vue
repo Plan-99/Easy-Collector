@@ -75,7 +75,7 @@
                                                 @dragover="onDragOver"
                                                 @drop="() => onDrop(i)"
                                             >
-                                                <div class="text-center q-pa-sm col">
+                                                <div class="text-center q-pa-sm col text-caption" style="max-width: 100%;">
                                                     <span class="text-primary">{{ j.robot_name }}</span> {{ j.joint_name }}
                                                 </div>
                                                 <q-input
@@ -98,7 +98,6 @@
                                                             @click="j.port = '/dev/ttyUSB' + (Number(j.port[j.port.length-1]) + 1) % 5"
                                                         >ttyUSB{{ j.port[j.port.length-1] }}</q-btn>
                                                         <q-badge color="grey-7" floating class="cursor-pointer" @click="removeDxlFromJointMap(i)">x</q-badge>
-
                                                     </template>
                                                 </q-input>
                                                 <q-checkbox size="xs" dark v-model="j.is_gripper" val="xs" label="Tool Joint" />
