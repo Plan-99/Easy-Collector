@@ -280,7 +280,7 @@ function startDataCollection() {
     });
 }
 
-const eeStepSize = ref(0.01);
+const eeStepSize = ref(0.003);
 
 const keyboardHandler = (event) => {
     if (focused.value?.device_type !== 'robot') return;
@@ -297,14 +297,14 @@ const keyboardHandler = (event) => {
     else if (event.key === 'd') eeDelta[1] -= eeStepSize.value;
     else if (event.key === 'e') eeDelta[2] += eeStepSize.value;
     else if (event.key === 'z') eeDelta[2] -= eeStepSize.value;
-    else if (event.key === '[') eeDelta[3] += eeStepSize.value;
-    else if (event.key === '.') eeDelta[3] -= eeStepSize.value;
-    else if (event.key === 'p') eeDelta[4] += eeStepSize.value;
-    else if (event.key === ';') eeDelta[4] -= eeStepSize.value;
-    else if (event.key === 'l') eeDelta[5] += eeStepSize.value;
-    else if (event.key === ',') eeDelta[5] -= eeStepSize.value;
-    else if (event.key === 'b') eeDelta[6] += eeStepSize.value;
-    else if (event.key === 'n') eeDelta[6] -= eeStepSize.value;
+    else if (event.key === '[') eeDelta[3] += eeStepSize.value*4;
+    else if (event.key === '.') eeDelta[3] -= eeStepSize.value*4;
+    else if (event.key === 'p') eeDelta[4] += eeStepSize.value*4;
+    else if (event.key === ';') eeDelta[4] -= eeStepSize.value*4;
+    else if (event.key === 'l') eeDelta[5] += eeStepSize.value*4;
+    else if (event.key === ',') eeDelta[5] -= eeStepSize.value*4;
+    else if (event.key === 'b') eeDelta[6] += eeStepSize.value*30;
+    else if (event.key === 'n') eeDelta[6] -= eeStepSize.value*30;
     else return;
 
     // 백엔드로 전송

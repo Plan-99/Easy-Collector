@@ -36,11 +36,10 @@ class Common_ArmIK(IK_Solver):
         
         # 3. 비용함수 가중치 정의
         cost_weights = {
-            'trans': 50,
-            'rot': 1.0,
-            'reg': 0.02,
-            'smooth': 0.1,
-            'viz_axis_width': 20
+            'trans': 10000.0,  # 매우 높음
+            'rot': 5000.0,    # 높음
+            'reg': 0.01,       # 매우 낮음 (0은 아니되, 방해 안 될 정도)
+            'smooth': 1.0     # 낮음
         }
 
         # 4. 부모 클래스 생성자 호출

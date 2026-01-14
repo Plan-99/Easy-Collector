@@ -198,14 +198,23 @@ class IK_Solver:
         )
         w = cost_weights
         self.opti.minimize(
-            w['trans'] * (self.translational_cost / 3.0) + 
-            w['rot'] * (self.rotation_cost / 3.0) + 
-            w['reg'] * (self.regularization_cost / self.reduced_robot.model.nq) + 
+            w['trans'] * self.translational_cost + 
+            w['rot'] * self.rotation_cost + # rotation_cost 변수명 확인
+            w['reg'] * self.regularization_cost + 
             w['smooth'] * self.smooth_cost
         )
 
         # 9. 솔버 설정
-        opts = { 'ipopt':{ 'print_level':0, 'max_iter':50, 'tol':1e-6 }, 'print_time':False, 'calc_lam_p':False }
+        opts = {
+            'ipopt': {
+                'print_level': 0,
+                'max_iter': 50,       # 반복 횟수를 과감히 줄임 (Warm start 믿고 가기)
+                'tol': 1e-7,          # 현실적인 오차 허용
+                'warm_start_init_point': 'yes',
+                'mu_strategy': 'adaptive', # 수렴 속도 향상
+            },
+            'print_time': False
+        }
         self.opti.solver("ipopt", opts)
 
         # 10. 필터 및 시각화 초기화
@@ -264,8 +273,8 @@ class IK_Solver:
         try:
             sol = self.opti.solve()
             sol_q = self.opti.value(self.var_q)
-            self.smooth_filter.add_data(sol_q)
-            sol_q = self.smooth_filter.filtered_data
+            # self.smooth_filter.add_data(sol_q)
+            # sol_q = self.smooth_filter.filtered_data
 
             if current_lr_arm_motor_dq is not None: v = current_lr_arm_motor_dq * 0.0
             else: v = (sol_q - self.init_data) * 0.0

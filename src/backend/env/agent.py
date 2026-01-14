@@ -238,13 +238,12 @@ class Agent:
                     # tool 값이 포함되지 않은 경우 기존 로직 유지
                     ik_targets[name] = val_list
                     target_tool_values[name] = None
-
-        print("IK Targets:", ik_targets)
         # 2. IK 풀기 (모든 팔을 한 번에 계산)
         # current_lr_arm_motor_q에 현재 조인트 상태를 전달하여 연속성 확보
         sol_q, _ = self.ik_solver.solve_ik(ik_targets, current_lr_arm_motor_q=np.array(arm_js))
 
-        print("IK Solution:", sol_q)
+        sol_q_fk = self.ik_solver.get_ee_position(sol_q)
+
 
         if sol_q is not None:
             # 3. 조인트 합치기 (IK 결과 + 툴 포즈)
@@ -476,7 +475,7 @@ class Agent:
             self.joint_trajectory_point.positions = [float(x) for x in target_pos]
             # velocities를  0으로 설정
             self.joint_trajectory_point.velocities = [0.0] * self.joint_len
-            self.joint_trajectory_point.time_from_start = rclpy.duration.Duration(seconds=5.0).to_msg()
+            self.joint_trajectory_point.time_from_start = rclpy.duration.Duration(seconds=10.0).to_msg()
             self.write_topic_msg_data.points = [self.joint_trajectory_point]
             self.move_robot_pub.publish(self.write_topic_msg_data)
         else:
