@@ -1,23 +1,24 @@
 from orator import Model, accessor, SoftDeletes
+from ...configs.global_configs import SUPPORT_SENSORS, get_sensor_by_name
 import json
 
-SENSOR_CONFIGS = {
-    'realsense_camera': {
-        'serial_number': '00000000'
-    },
-    'custom_sensor': {
-        'process_cmd': 'rosrun my_package my_sensor_node',
-        'topic_name': 'custom_sensor_topic'
-    }
-}
+# SENSOR_CONFIGS = {
+#     'realsense_camera': {
+#         'serial_number': '00000000'
+#     },
+#     'custom_sensor': {
+#         'process_cmd': 'rosrun my_package my_sensor_node',
+#         'topic_name': 'custom_sensor_topic'
+#     }
+# }
 
 
 class SensorObserver:
     def creating(self, sensor):
         if not getattr(sensor, 'settings', None):
             sensor_type = sensor.type
-            if sensor_type in SENSOR_CONFIGS:
-                sensor.settings = SENSOR_CONFIGS[sensor_type]
+            if get_sensor_by_name(sensor_type) is not None:
+                sensor.settings = get_sensor_by_name(sensor_type)
             else:
                 sensor.settings = {}
                 
@@ -34,24 +35,53 @@ class Sensor(Model, SoftDeletes):
         'settings': 'json',
     }
 
-    __appends__ = ['serial_no', 'topic']
+    __appends__ = [
+        'company',
+        'serial_no', 
+        'ip_address',
+        'read_topic',
+        'read_topic_msg'
+    ]
 
+    def get_sensor_type_info(self):
+        return next(
+            (sensor for sensor in SUPPORT_SENSORS if sensor.get('name') == self.type), 
+            {}
+        )
+    
+    @accessor
+    def company(self):
+        sensor_info = self.get_sensor_type_info()
+        return sensor_info.get('company', 'Unknown')
+    
+    @accessor
+    def read_topic(self):
+        if self.type != 'custom':
+            return f'/ec_sensor_{self.id}' + self.get_sensor_type_info().get('read_topic', '')
+        
+        return self.settings['read_topic']
+
+    @accessor
+    def read_topic_msg(self):
+        if self.type != 'custom':
+            return self.get_sensor_type_info().get('read_topic_msg', '')
+        
+        return self.settings['read_topic_msg']
     
     @accessor
     def serial_no(self):
         settings = json.loads(self.get_raw_attribute('settings'))
         if 'serial_number' in settings:
             return settings['serial_number']
-        
         return None
     
-
     @accessor
-    def topic(self):
-        if self.type == 'realsense_camera':
-            return f'/ec_sensor_{self.id}/camera/color/image_raw/compressed'
-        
+    def ip_address(self):
+        settings = json.loads(self.get_raw_attribute('settings'))
+        if 'ip_address' in settings:
+            return settings['ip_address']
         return None
+    
     
 
     @staticmethod

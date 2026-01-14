@@ -13,6 +13,7 @@ export default {
   sensorName: 'Sensor Name',
   sensorType: 'Sensor Type',
   serialNUmber: 'Serial Number',
+  ipAddress: 'IP Address',
   noSensorTitle: 'No Sensors Added Yet',
   noSensorBody: "Click the add button to add a new sensor.",
 

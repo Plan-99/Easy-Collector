@@ -38,7 +38,7 @@ export function useSensor(sensor, sensorOnCallback=() => {}) {
     sensorTopicChecker = setInterval(() => {
       api.get(`/topics`)
       .then((res) => {
-        const isPublished = Boolean(res.data.topics.find(topic => topic.name === sensor.topic));
+        const isPublished = Boolean(res.data.topics.find(topic => topic.name === sensor.read_topic));
         if (isPublished) {
           sensor.status = 'on';
           sensorOnCallback();
