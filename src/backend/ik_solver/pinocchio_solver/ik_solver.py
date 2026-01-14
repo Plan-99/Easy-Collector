@@ -198,9 +198,9 @@ class IK_Solver:
         )
         w = cost_weights
         self.opti.minimize(
-            w['trans'] * self.translational_cost + 
-            w['rot'] * self.rotation_cost + 
-            w['reg'] * self.regularization_cost + 
+            w['trans'] * (self.translational_cost / 3.0) + 
+            w['rot'] * (self.rotation_cost / 3.0) + 
+            w['reg'] * (self.regularization_cost / self.reduced_robot.model.nq) + 
             w['smooth'] * self.smooth_cost
         )
 

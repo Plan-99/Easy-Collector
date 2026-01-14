@@ -214,6 +214,7 @@ class Agent:
         """
         입력 규격: target_ee_dict = {'L_ee': [x, y, z, r, p, y, tool], 'R_ee': [x, y, z, r, p, y, tool]}
         """
+        print("move_ee_step called with:", target_ee_dict)
         if self.role == 'tool' or self.ik_solver is None:
             return
 
@@ -238,9 +239,12 @@ class Agent:
                     ik_targets[name] = val_list
                     target_tool_values[name] = None
 
+        print("IK Targets:", ik_targets)
         # 2. IK 풀기 (모든 팔을 한 번에 계산)
         # current_lr_arm_motor_q에 현재 조인트 상태를 전달하여 연속성 확보
         sol_q, _ = self.ik_solver.solve_ik(ik_targets, current_lr_arm_motor_q=np.array(arm_js))
+
+        print("IK Solution:", sol_q)
 
         if sol_q is not None:
             # 3. 조인트 합치기 (IK 결과 + 툴 포즈)

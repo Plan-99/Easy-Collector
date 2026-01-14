@@ -581,6 +581,9 @@ const robots = computed(() => {
     return selectedWorkspace.value.assembly.robots.map((robot) => {
         const handler = useRobot(robot);
         robot.handler = handler;
+        if (robot.type === 'custom') {
+            robot.handler.checkRobotTopic();
+        }   
         return robot;
     })
 });

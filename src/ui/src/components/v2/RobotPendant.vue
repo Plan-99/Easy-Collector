@@ -92,11 +92,11 @@ function moveOneEE(tool_index, p_index, delta) {
     // props.robot.handler.moveRobotEE(eePosDict);
     const deltaPos = {};
     const toolName = props.robot.role === 'dual_arm' ? (tool_index === 0 ? 'L_ee' : 'R_ee') : 'ee';
-    deltaPos[toolName] = Array(7).fill(0); // x, y, z, roll, pitch, yaw, tool
+    deltaPos[toolName] = Array(props.robot.tool_inner ? 7 : 6).fill(0); // x, y, z, roll, pitch, yaw, tool
     deltaPos[toolName][p_index] = delta;
     props.robot.handler.moveRobotEEDelta(deltaPos);
 }
 
-const robotStepSize = ref(0.03);
+const robotStepSize = ref(0.1);
 
 </script>
