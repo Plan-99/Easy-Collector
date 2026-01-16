@@ -55,15 +55,16 @@ def start_sensor():
     process_id = data.get('process_id')
     id = data.get('id')
     type = data.get('type')
+    company = data.get('company')
 
     command = []
     
-    if type == 'realsense_d435_color':
+    if company == 'Intel':
         serial_no = data.get('serial_no', None)
         if serial_no is None:
             return {'status': 'error', 'message': 'serial_no is required'}, 400
         command = ['ros2', 'launch', 'realsense2_camera', 'rs_launch.py', f'camera_namespace:=ec_sensor_{id}', f'serial_no:="{serial_no}"']
-    elif type == 'kinova_vision_color':
+    elif company == 'Kinova':
         ip_address = data.get('ip_address', None)
         if ip_address is None:
             return {'status': 'error', 'message': 'ip_address is required'}, 400
