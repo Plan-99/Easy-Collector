@@ -407,14 +407,10 @@
                     style="background-color: #00000099;"
                     @click="deselectEpisode"
                 ></q-btn>
-                <div class="row flex felx-center">
-                    <hdf5-viewer
-                        :path="`${selectedDatasetId}/${selectedEpisode.name}`"
-                        style="width: 100%; height: 100%;"
-                        image-class="border-rounded border-white"
-                        @update:robot-states="selectedEpisode.robotStates = $event"
-                    ></hdf5-viewer>
-                </div>
+                <hdf5-viewer
+                    :path="`${selectedDatasetId}/${selectedEpisode.name}`"
+                    @update:robot-states="selectedEpisode.robotStates = $event"
+                ></hdf5-viewer>
                 <div class="flex flex-center col-5 row" v-if="selectedEpisode.robotStates">
                     <div v-for="(val, robotId) in selectedEpisode.robotStates" :key="robotId" class="col column q-pa-md relative-position border-rounded border-white text-white cursor-pointer">
                         <div v-for="(j, i) in val.qpos.length" :key="i" class="col flex flex-center q-gutter-x-md">
@@ -913,6 +909,11 @@ const openCheckpointInfoDialog = (checkpoint) => {
 
 
 onUnmounted(() => {
+    robots.value.forEach(robot => {
+        if (robot.handler) {
+            robot.handler.unSubscribeRobot();
+        }
+    });
     if (processStore.isRunning('failure_detection') && selectedCheckpointId.value) {
         api.post(`/checkpoint/${selectedCheckpointId.value}/:stop_failure_detection`)
           .catch(err => console.error('Failed to stop failure detection on unmount:', err));

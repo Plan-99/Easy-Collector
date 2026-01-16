@@ -74,6 +74,9 @@ function moveOneJoint(index, delta) {
     // const jointState = props.robot.jointState;
     // jointState[index] += delta;
     // props.robot.handler.moveRobotJoint(jointState);
+    if (props.robot.role === 'tool') {
+        delta = delta * 30; // tool
+    }
     const deltaAction = new Array(props.robot.joint_names.length).fill(0);
     deltaAction[index] = delta;
     props.robot.handler.moveRobotJointDelta(deltaAction);

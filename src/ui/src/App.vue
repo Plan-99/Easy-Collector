@@ -17,6 +17,9 @@ function cleanup() {
     if (processId.includes('leader_teleoperation')) {
       api.post('/stop_process', { name: processId })
     }
+    if (processId.includes('record_episode')) {
+      api.post('/stop_process', { name: processId })
+    }
   });
 }
 

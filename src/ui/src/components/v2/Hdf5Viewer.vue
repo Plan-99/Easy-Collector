@@ -1,6 +1,6 @@
 <template>
-    <div class="row q-pt-md q-gutter-md">
-        <img :src="image" alt="" v-for="(image, name) in images" :key="name" class="col" style="width: 100%; height: 100%; object-fit: contain; max-width: 400px;"
+    <div class="row q-py-md q-gutter-md flex flex-center">
+        <img :src="image" alt="" v-for="(image, name) in images" :key="name" class="col" style="max-width: 40%; height: auto;"
             :class="imageClass"
         >
     </div>

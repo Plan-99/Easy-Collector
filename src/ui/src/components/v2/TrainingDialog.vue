@@ -135,11 +135,13 @@ function addLoss(epoch, trainLoss, valLoss) {
 }
 
 const onLogTrainTask = (logData) => {
-    if (logData.log.includes('[TRAIN_LOG]')) {
-        const trainLogStr = logData.log.replace('[TRAIN_LOG] ', '');
-        const trainLogJson = JSON.parse(trainLogStr);
-        trainingProgress.value = trainLogJson.epoch / trainLogJson.total_epoch;
-        addLoss(trainLogJson.epoch, trainLogJson.train_loss, trainLogJson.val_loss);
+    if (logData.id === 'train_task') {
+        if (logData.message.includes('[TRAIN_LOG]')) {
+          const trainLogStr = logData.message.replace('[TRAIN_LOG] ', '');
+          const trainLogJson = JSON.parse(trainLogStr);
+          trainingProgress.value = trainLogJson.epoch / trainLogJson.total_epoch;
+          addLoss(trainLogJson.epoch, trainLogJson.train_loss, trainLogJson.val_loss);
+      }
     }
 };
 // const { trainingProgress, data, options } = useTraining();
@@ -167,11 +169,11 @@ function cancelTraing() {
 }
 
 onMounted(() => {
-    socket.on('log_train_task', onLogTrainTask);
+    socket.on('task_log', onLogTrainTask);
 });
 
 onUnmounted(() => {
-    socket.off('log_train_task', onLogTrainTask);
+    socket.off('taks_log', onLogTrainTask);
 });
 
 </script>

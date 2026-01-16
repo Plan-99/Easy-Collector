@@ -244,7 +244,10 @@ class ProcessManager:
             return
             
         for name in list(self.processes.keys()):
-            self.stop_process(name)
+            if self.processes.get(name) == 'function':
+                self.stop_function(name)
+            else:
+                self.stop_process(name)
         print("All processes terminated.")
 
     def __enter__(self):

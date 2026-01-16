@@ -38,7 +38,7 @@
                 class="border-white border-rounded q-mt-lg bg-secondary col"
             >
                 <div class="text-h6 q-mb-md">Select datasets for training</div>
-                <q-scroll-area style="height: 500px">                
+                <q-scroll-area style="height: 420px">                
                     <div class="row q-col-gutter-md">
                         <div class="col-6 col-sm-4 col-md-3 col-lg-2" v-for="dataset in availableDatasets" :key="dataset.id">
                             <q-card
@@ -83,7 +83,7 @@
             >
                 <div class="text-h6 q-mb-md">Configure Policy</div>
                 <div class="row">
-                    <q-scroll-area class="col-12" style="height: 500px">                
+                    <q-scroll-area class="col-12" style="height: 420px">                
                         <div class="row q-col-gutter-md">
                             <div class="col-6">
                                 <q-select
@@ -239,7 +239,7 @@
 
             >
                 <div class="text-h6 q-mb-md">Training Configuration</div>
-                <q-scroll-area class="col-12" style="height: 500px">
+                <q-scroll-area class="col-12" style="height: 420px">
                     <div class="q-gutter-y-md">
                         <q-form class="q-col-gutter-md row">
                             <div class="col-12">
