@@ -132,7 +132,8 @@ def failure_detection(node, checkpoint, robots, sensors, task_obj, task_control,
                     if image is not None:
 
                         image = fetch_image_with_config(image, {
-                            'resize': task_obj['sensor_img_size'],
+                            'resize': task_obj['sensor_settings'][sensor['id']]['img_size'],
+                            'cropped_area': task_obj['sensor_settings'][sensor['id']].get('cropped_area', None)
                         })
 
                         rollout_dict['observations']['images'][f"sensor_{sensor['id']}"] = np.array([image])

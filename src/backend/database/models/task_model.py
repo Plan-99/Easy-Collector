@@ -13,7 +13,7 @@ class Task(Model, SoftDeletes):
         'end_pose',
         'image',
         'episode_len',
-        'sensor_img_size',
+        'sensor_settings',
         'settings',
         'assembly_id',
     ]
@@ -22,7 +22,7 @@ class Task(Model, SoftDeletes):
         'sensor_ids': 'json',
         'home_pose': 'json',
         'end_pose': 'json',
-        'sensor_img_size': 'json',
+        'sensor_settings': 'json',
         'settings': 'json',
     }
 

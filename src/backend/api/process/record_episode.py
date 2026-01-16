@@ -143,7 +143,10 @@ def record_episode(node, dataset_id, agents, assembly_id, sensors, task, languag
                 img_data = []
                 for t_step in timesteps:
                     img = t_step.observation['images'][f'sensor_{s_id}']
-                    img_data.append(fetch_image_with_config(img, {'resize': task['sensor_img_size']}))
+                    img_data.append(fetch_image_with_config(img, {
+                        'resize': task['sensor_settings'][s_id]['img_size'],
+                        'cropped_area': task['sensor_settings'][s_id].get('cropped_area', None)
+                    }))
                 image_group.create_dataset(f"sensor_{s_id}", data=np.array(img_data), dtype='uint8')
 
             # 2. 로봇 데이터 저장 (성격에 따라 경로 분기)

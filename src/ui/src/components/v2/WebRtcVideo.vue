@@ -24,6 +24,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  cropped_area: {
+    type: Object,
+    default: () => ({}),
+  }
 });
 
 const videoElement = ref(null);
@@ -34,6 +38,7 @@ let stream_id = '';
 const setupWebRTC = () => {
   connect(props.topic, {
     resize: props.resize.length ? props.resize : null,
+    cropped_area: props.cropped_area.length ? props.cropped_area : null,
   }, (event) => {
     if (videoElement.value) {
       const newStream = new MediaStream();
@@ -61,6 +66,17 @@ watch(() => props.resize, (newResize, oldResize) => {
   }
   addConfig(stream_id, {
     resize: newResize.length ? newResize : null,
+    cropped_area: props.cropped_area.length ? props.cropped_area : null,
+  });
+});
+
+watch(() => props.cropped_area, (newCroppedArea, oldCroppedArea) => {
+  if (JSON.stringify(newCroppedArea) === JSON.stringify(oldCroppedArea)) {
+    return;
+  }
+  addConfig(stream_id, {
+    resize: props.resize.length ? props.resize : null,
+    cropped_area: newCroppedArea,
   });
 });
 

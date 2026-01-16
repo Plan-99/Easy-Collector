@@ -13,7 +13,8 @@
                         'border-primary': focused.id === sensor.id && focused.device_type === 'sensor',
                     }"
                     @click="focusSensorRobot(sensor, 'sensor')"
-                    :resize="[workspace.sensor_img_size[0], workspace.sensor_img_size[1]]"
+                    :resize="workspace.sensor_settings?.[sensor.id]?.img_size || [640, 480]"
+                    :cropped_area="workspace.sensor_settings?.[sensor.id]?.cropped_area || {}"
                 ></web-rtc-video>
                 <div class="full-height border-white bg-dark border-rounded flex flex-center" v-else>
                     <q-btn round flat icon="play_arrow" text-color="white" size="xl" @click="sensor.handler.startSensor(sensor)"></q-btn>
@@ -360,6 +361,8 @@ function stopInference() {
 }
 
 onMounted(() => {
+
+    console.log(props.workspace);
 
     socket.on('stop_process', (data) => {
         if (data.id === 'record_episode') {

@@ -174,7 +174,10 @@ def checkpoint_test(
                 policy_input_t = {'observation.state': qpos_t}
                 for sensor in sensors:
                     image = obs_t['images'][f'sensor_{sensor["id"]}']
-                    image = fetch_image_with_config(image, {'resize': task['sensor_img_size']})
+                    image = fetch_image_with_config(image, {
+                        'resize': task['sensor_settings'][sensor['id']]['img_size'],
+                        'cropped_area': task['sensor_settings'][sensor['id']].get('cropped_area', None)
+                        })
                     image = process_image(image, vision_backbone, to_cuda=True)
                     policy_input_t[f'observation.images.sensor_{sensor["id"]}'] = image.unsqueeze(0)
 
@@ -233,7 +236,10 @@ def checkpoint_test(
                     policy_input_t1 = {'observation.state': qpos_t1}
                     for sensor in sensors:
                         image = obs_t1['images'][f'sensor_{sensor["id"]}']
-                        image = fetch_image_with_config(image, {'resize': task['sensor_img_size']})
+                        image = fetch_image_with_config(image, {
+                            'resize': task['sensor_settings'][sensor['id']]['img_size'],
+                            'cropped_area': task['sensor_settings'][sensor['id']].get('cropped_area', None)
+                        })
                         image = process_image(image, vision_backbone, to_cuda=True)
                         policy_input_t1[f'observation.images.sensor_{sensor["id"]}'] = image.unsqueeze(0)
                     state_t1 = policy.select_action(policy_input_t1).squeeze(0).cpu().numpy()

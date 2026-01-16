@@ -154,7 +154,7 @@ def update_task(id):
     task.home_pose = data.get('home_pose', task.home_pose)
     task.image = data.get('image', task.image)
     task.episode_len = data.get('episode_len', task.episode_len)
-    task.sensor_img_size = data.get('sensor_img_size', task.sensor_img_size)
+    task.sensor_settings = data.get('sensor_settings', task.sensor_settings)
     task.settings = data.get('settings', task.settings)
 
     task.save()

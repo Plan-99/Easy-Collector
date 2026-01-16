@@ -33,6 +33,7 @@ class Sensor(Model, SoftDeletes):
 
     __casts__ = {
         'settings': 'json',
+        'resolution': 'json',
     }
 
     __appends__ = [
@@ -40,7 +41,8 @@ class Sensor(Model, SoftDeletes):
         'serial_no', 
         'ip_address',
         'read_topic',
-        'read_topic_msg'
+        'read_topic_msg',
+        'resolution',
     ]
 
     def get_sensor_type_info(self):
@@ -74,6 +76,16 @@ class Sensor(Model, SoftDeletes):
         if 'serial_number' in settings:
             return settings['serial_number']
         return None
+    
+    @accessor
+    def resolution(self):
+        if self.type == 'custom':
+            settings = json.loads(self.get_raw_attribute('settings'))
+            if 'resolution' in settings:
+                return settings['resolution']
+            return [640, 480]
+
+        return self.get_sensor_type_info().get('resolution', [640, 480])
     
     @accessor
     def ip_address(self):

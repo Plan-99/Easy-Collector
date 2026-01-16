@@ -174,6 +174,7 @@ SUPPORT_SENSORS = [
         'read_topic': '/camera/color/image_raw/compressed',
         'read_topic_msg': 'sensor_msgs/CompressedImage',
         'custom_fields': ['serial_no'],
+        'resolution': [640, 480]
     },
     {
         'name': 'realsense_d405_color',
@@ -183,6 +184,7 @@ SUPPORT_SENSORS = [
         'read_topic': '/camera/color/image_rect_raw/compressed',
         'read_topic_msg': 'sensor_msgs/CompressedImage',
         'custom_fields': ['serial_no'],
+        'resolution': [848, 480]
     },
     {
         'name': 'kinova_vision_color',
@@ -192,6 +194,7 @@ SUPPORT_SENSORS = [
         'read_topic': '/color/image_raw/compressed',
         'read_topic_msg': 'sensor_msgs/CompressedImage',
         'custom_fields': ['ip_address'],
+        'resolution': [1980, 1080]
     }
 ]
 
