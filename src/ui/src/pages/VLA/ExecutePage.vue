@@ -49,7 +49,7 @@
                 <web-rtc-video
                     :process-id="`sensor_${sensor.id}`"
                     style="width: 400px; height: 300px;"
-                    :topic="sensor.topic"
+                    :topic="sensor.read_topic"
                     class="full-width"
                     v-if="sensor.handler.status() !== 'off'"
                     :resize="[vlaSettings.image_width, vlaSettings.image_height]"

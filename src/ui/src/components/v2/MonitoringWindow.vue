@@ -4,7 +4,7 @@
             <div v-for="sensor in sensors" :key="sensor.id" class="col q-py-sm q-px-xs relative-position">
                 <web-rtc-video
                     :process-id="`sensor_${sensor.id}`"
-                    :topic="sensor.topic"
+                    :topic="sensor.read_topic"
                     class="full-height border-rounded cursor-pointer"
                     :key="sensor.id"
                     :loading="sensor.status !== 'on'"

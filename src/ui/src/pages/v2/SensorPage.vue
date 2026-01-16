@@ -34,6 +34,7 @@
                     <q-card-section class="q-pa-none q-mt-sm">
                         <div class="text-bold">{{ sensor.name }}</div>
                         <div class="text-grey-6 text-caption" v-if="sensor.serial_no">Serial No. {{ sensor.serial_no }}</div>
+                        <div class="text-grey-6 text-caption" v-if="sensor.ip_address">IP Address: {{ sensor.ip_address }}</div>
                     </q-card-section>
                     <q-card-section class="q-pa-none q-mt-sm row">
                         <div class="text-primary text-caption" v-if="sensor.status === 'on'">ONLINE</div>
@@ -78,7 +79,7 @@
                 <div class="row q-gutter-x-md">
                     <web-rtc-video
                         :process-id="`sensor_${sensor.id}`"
-                        :topic="sensor.topic"
+                        :topic="sensor.read_topic"
                         ref="sensorVideo"
                         :loading="sensor.status !== 'on'"
                         style="height: 300px"
@@ -103,7 +104,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref} from 'vue';
+import { onMounted, ref, computed } from 'vue';
 
 import { api } from 'src/boot/axios';
 import ProcessConsole from 'src/components/v2/ProcessConsole.vue';
@@ -122,17 +123,21 @@ const sensors = ref([]);
 const sensorForm = ref([
     { key: 'id', value: null },
     { key: 'name', label: t('sensorName'), value: '', default: '', type: 'text' },
-    { key: 'type', label: t('sensorType'), value: '', default: '', type: 'select', options: [
-        { label: 'Realsense Camera', value: 'realsense_camera' }
-    ] },
-    { key: 'serial_no', label: t('serialNUmber'), value: '', default: '', type: 'text', show: (form) => form.find(f => f.key === 'type').value === 'realsense_camera' }
+    { key: 'type', label: t('sensorType'), value: '', default: '', type: 'select', options: computed(() => supportingSensors.value.map((sensor) => ({
+        label: sensor.name + (sensor.company ? ` (${sensor.company})` : ''),
+        value: sensor.name
+    }))) },
+    { key: 'serial_no', label: t('serialNUmber'), value: '', default: '', type: 'text', show: (form) => getFormSensorInfo(form) && getFormSensorInfo(form).custom_fields && getFormSensorInfo(form).custom_fields.includes('serial_no') },
+    { key: 'ip_address', label: t('ipAddress'), value: '', default: '192.168.50.10', type: 'text', show: (form) => getFormSensorInfo(form) && getFormSensorInfo(form).custom_fields && getFormSensorInfo(form).custom_fields.includes('ip_address') },
 ]);
 const showSensorForm = ref(false);
 const watchingSensor = ref(null);
 
+const supportingSensors = ref([]);
+
 // const sensorTypeOptions = [
 //     { label: 'Realsense Camera', value: 'realsense_camera' }
-// ]
+// };
 
 function listSensors() {                                                                                                     
     return api.get('/sensors').then((response) => {
@@ -146,6 +151,24 @@ function listSensors() {
     }).catch((error) => {
         console.error('Error fetching sensors:', error);
     });
+}
+
+function getSupportingSensors() {
+    return api.get('/sensors:supporting').then((response) => {
+        supportingSensors.value = [
+            ...response.data.sensors,
+            {
+                name: 'custom',
+                company: null,
+            }
+        ]
+    }).catch((error) => {
+        console.error('Error fetching supporting robots:', error);
+    });
+}
+
+function getFormSensorInfo(form) {
+    return supportingSensors.value.find(s => s.name === form.find((e) => e.key === 'type').value);
 }
 
 function openAddSensorForm() {
@@ -210,9 +233,13 @@ function watchSensor(sensor) {
     watchingSensor.value = sensor; // Start watching the selected sensor
 }
 
+function initialize() {
+    listSensors();
+    getSupportingSensors();
+}
 
 onMounted(() => {
-    listSensors()
+    initialize();
 })
 
 

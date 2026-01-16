@@ -165,5 +165,38 @@ SUPPORT_ROBOTS = [
     }
 ]
 
+SUPPORT_SENSORS = [
+    {
+        'name': 'realsense_d435_color',
+        'company': 'Intel',
+        'role': 'rgb_camera',
+        'topic_type': 'color',
+        'read_topic': '/camera/color/image_raw/compressed',
+        'read_topic_msg': 'sensor_msgs/CompressedImage',
+        'custom_fields': ['serial_no'],
+    },
+    {
+        'name': 'realsense_d405_color',
+        'company': 'Intel',
+        'role': 'rgb_camera',
+        'topic_type': 'color',
+        'read_topic': '/camera/color/image_rect_raw/compressed',
+        'read_topic_msg': 'sensor_msgs/CompressedImage',
+        'custom_fields': ['serial_no'],
+    },
+    {
+        'name': 'kinova_vision_color',
+        'company': 'Kinova',
+        'role': 'rgb_camera',
+        'topic_type': 'color',
+        'read_topic': '/color/image_raw/compressed',
+        'read_topic_msg': 'sensor_msgs/CompressedImage',
+        'custom_fields': ['ip_address'],
+    }
+]
+
 def get_robot_by_name(name):
     return next((robot for robot in SUPPORT_ROBOTS if robot.get('name') == name), None)
+
+def get_sensor_by_name(name):
+    return next((sensor for sensor in SUPPORT_SENSORS if sensor.get('name') == name), None)

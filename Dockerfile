@@ -151,9 +151,24 @@ RUN python3 -m pip install --no-cache-dir --ignore-installed \
     --index-url https://download.pytorch.org/whl/nightly/cu124 \
     torch torchvision torchaudio
 
+# 6. GStreamer 설치 (ROS 2 이미지 토픽 처리를 위해 필요)
+RUN apt-get update && apt-get install -y gstreamer1.0-tools \
+    gstreamer1.0-libav libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+    libgstreamer-plugins-good1.0-dev gstreamer1.0-plugins-good gstreamer1.0-plugins-base
+
+# OpenCV 재설치 (GStreamer 지원 강제 활성화)
+RUN python3 -m pip uninstall -y opencv-python opencv-contrib-python opencv-python-headless
+RUN apt-get update && apt-get install -y python3-opencv
 RUN rm -rf /usr/local/lib/python3.10/dist-packages/numpy* && \
     rm -rf /usr/lib/python3/dist-packages/numpy* && \
     python3 -m pip install --no-cache-dir numpy==1.26.4
+
+# 7. 소프트웨어 렌더링 강제 설정 (OpenGL 문제 해결용)
+RUN export LIBGL_ALWAYS_SOFTWARE=1
+
+
+
+
     
 # 최종 환경 설정
 WORKDIR /root
