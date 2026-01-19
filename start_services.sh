@@ -507,6 +507,14 @@ PY
   bash migration.sh || true
 }
 
+log_status "[DB] Ensuring database path is writable for host-side imports"
+if [ -d "${DATA_ROOT}/database" ]; then
+  chmod 777 "${DATA_ROOT}/database" 2>/dev/null || true
+fi
+if [ -f "${DATA_ROOT}/database/main.db" ]; then
+  chmod 666 "${DATA_ROOT}/database/main.db" 2>/dev/null || true
+fi
+
 # 3) Start backend API
 cd /root/src
 log_status "[BACKEND] Starting Flask-SocketIO API on 0.0.0.0:5000"

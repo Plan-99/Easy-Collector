@@ -76,6 +76,100 @@ copy_tree() {
   echo "[quick-apply] 디렉터리 동기화 완료: $rel"
 }
 
+sync_deb_ui() {
+  local src="$DEV_SRC/release/ui"
+  if [ ! -d "$src" ]; then
+    echo "[quick-apply] 경고: DEB UI 경로가 없어 건너뜀: $src" >&2
+    return 0
+  fi
+  local install_root=""
+  if [ -n "$PROJECT_ROOT" ]; then
+    install_root="$(dirname "$PROJECT_ROOT")"
+  fi
+  local dst=""
+  if [ -n "$install_root" ] && [ -d "$install_root/ui" ]; then
+    dst="$install_root/ui"
+  elif [ -d "/opt/easytrainer/ui" ]; then
+    dst="/opt/easytrainer/ui"
+  else
+    return 0
+  fi
+  if ! mkdir -p "$dst"; then
+    echo "[quick-apply][WARN] DEB UI 경로 생성 실패: $dst" >&2
+    return 0
+  fi
+  if [ -n "$RSYNC_BIN" ]; then
+    if "$RSYNC_BIN" -a \
+      --exclude='__pycache__/' \
+      --exclude='*.pyc' \
+      "$src/" "$dst/"
+    then
+      echo "[quick-apply] DEB UI 동기화 완료: $dst"
+    else
+      echo "[quick-apply][WARN] DEB UI 동기화 실패: $dst" >&2
+    fi
+  else
+    if (
+      cd "$src"
+      tar -cf - .
+    ) | (
+      cd "$dst"
+      tar -xf -
+    ); then
+      echo "[quick-apply] DEB UI 동기화 완료: $dst"
+    else
+      echo "[quick-apply][WARN] DEB UI 동기화 실패: $dst" >&2
+    fi
+  fi
+}
+
+sync_deb_scripts() {
+  local src="$DEV_SRC/scripts"
+  if [ ! -d "$src" ]; then
+    echo "[quick-apply] 경고: DEB scripts 경로가 없어 건너뜀: $src" >&2
+    return 0
+  fi
+  local install_root=""
+  if [ -n "$PROJECT_ROOT" ]; then
+    install_root="$(dirname "$PROJECT_ROOT")"
+  fi
+  local dst=""
+  if [ -n "$install_root" ]; then
+    dst="$install_root/scripts"
+  elif [ -d "/opt/easytrainer" ]; then
+    dst="/opt/easytrainer/scripts"
+  else
+    return 0
+  fi
+  if ! mkdir -p "$dst"; then
+    echo "[quick-apply][WARN] DEB scripts 경로 생성 실패: $dst" >&2
+    return 0
+  fi
+  if [ -n "$RSYNC_BIN" ]; then
+    if "$RSYNC_BIN" -a \
+      --exclude='__pycache__/' \
+      --exclude='*.pyc' \
+      "$src/" "$dst/"
+    then
+      echo "[quick-apply] DEB scripts 동기화 완료: $dst"
+    else
+      echo "[quick-apply][WARN] DEB scripts 동기화 실패: $dst" >&2
+    fi
+  else
+    if (
+      cd "$src"
+      tar -cf - .
+    ) | (
+      cd "$dst"
+      tar -xf -
+    ); then
+      echo "[quick-apply] DEB scripts 동기화 완료: $dst"
+    else
+      echo "[quick-apply][WARN] DEB scripts 동기화 실패: $dst" >&2
+    fi
+  fi
+}
+
 copy_file() {
   local rel="$1"
   local mode="${2:-644}"
@@ -103,6 +197,10 @@ copy_file "Dockerfile"
 copy_file ".dockerignore"
 copy_file "requirements.txt"
 copy_file "requirements.min.txt"
+copy_file "scripts/quick_apply.sh" 755
 copy_file "scripts/install_nvidia_runtime.sh" 755
+
+sync_deb_ui
+sync_deb_scripts
 
 echo "[quick-apply] 동기화가 완료되었습니다."

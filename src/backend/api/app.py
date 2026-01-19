@@ -97,6 +97,39 @@ def healthz():
         'ros_ok': bool(rclpy.ok()),
     }, 200
 
+@app.route('/api/db/path', methods=['GET'])
+def db_path():
+    try:
+        path = DATABASES.get('sqlite', {}).get('database')
+        return {
+            'status': 'success',
+            'path': path,
+        }, 200
+    except Exception as e:
+        return {
+            'status': 'error',
+            'message': str(e),
+        }, 500
+
+@app.route('/api/db/reload', methods=['POST'])
+def db_reload():
+    global db
+    try:
+        try:
+            db.disconnect()
+        except Exception:
+            pass
+        db = DatabaseManager(DATABASES)
+        Model.set_connection_resolver(db)
+        return {
+            'status': 'success',
+        }, 200
+    except Exception as e:
+        return {
+            'status': 'error',
+            'message': str(e),
+        }, 500
+
 @app.route('/api/processes', methods=['GET'])
 def list_processes():
     processes = pm.list_processes()

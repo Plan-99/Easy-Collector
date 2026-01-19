@@ -9,18 +9,32 @@ import subprocess
 import time
 import pwd
 import grp
+import sqlite3
 from pathlib import Path
 
+# Quiet noisy GTK module warnings inherited from some environments
+_gtk_modules = os.environ.get("GTK_MODULES", "")
+if _gtk_modules:
+    _filtered = [m for m in _gtk_modules.split(":") if m not in ("atk-bridge", "atkbridge")]
+    if _filtered != _gtk_modules.split(":"):
+        if _filtered:
+            os.environ["GTK_MODULES"] = ":".join(_filtered)
+        else:
+            os.environ.pop("GTK_MODULES", None)
+
 # Apply safe Qt WebEngine defaults BEFORE importing Qt modules
-_force_external = os.environ.get("EASYCOLLECTOR_FORCE_EXTERNAL_BROWSER", "0") == "1"
+_force_external_env = os.environ.get("EASYCOLLECTOR_FORCE_EXTERNAL_BROWSER")
+# Default to using an external browser (no embedded WebView) unless explicitly disabled
+_force_external = True if _force_external_env is None else (_force_external_env == "1")
+# On Wayland, default to X11/xcb to avoid noisy activation token warnings
+if os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland" and not os.environ.get("QT_QPA_PLATFORM"):
+    os.environ["QT_QPA_PLATFORM"] = "xcb"
 if not _force_external:
     # Disable sandbox and GPU to avoid common crashes
     os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")
     os.environ.setdefault("QT_OPENGL", "software")
     os.environ.setdefault("LIBGL_ALWAYS_SOFTWARE", "1")
     # Force X11 on Wayland sessions
-    if os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland":
-        os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
     # Chromium flags for WebEngine (avoid single-process/in-process-gpu which can crash)
     _chromium_flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "").strip()
     _safe_flags = "--disable-gpu --disable-gpu-compositing"
@@ -44,43 +58,64 @@ FRONTEND_URL = os.environ.get("EASYCOLLECTOR_FRONTEND_URL", "http://localhost:51
 
 # Try PySide6 first, then PyQt6, and adapt minor API differences
 HAS_WEBENGINE = False
+QWebEngineView = None  # type: ignore
+QWebEngineProfile = None  # type: ignore
+QWebEnginePage = None  # type: ignore
 
 try:
-    from PySide6.QtCore import Qt, QUrl, QProcess, QTimer, QPoint, QEvent
+    from PySide6.QtCore import Qt, QUrl, QProcess, QTimer, QPoint, QEvent, QVariantAnimation, QEasingCurve
     from PySide6.QtWidgets import (
         QApplication, QMainWindow, QWidget, QPushButton, QTextEdit, QLabel,
         QVBoxLayout, QHBoxLayout, QMessageBox, QTabWidget, QFileDialog, QLineEdit,
         QDialog, QFrame, QListWidget, QListWidgetItem, QProgressBar, QToolButton,
-        QMenu, QPlainTextEdit, QSizePolicy, QRadioButton, QCheckBox
+        QMenu, QPlainTextEdit, QSizePolicy, QRadioButton, QCheckBox, QStackedLayout, QButtonGroup, QInputDialog
     )
-    try:
-        from PySide6.QtWebEngineWidgets import QWebEngineView  # optional
-        from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
-        HAS_WEBENGINE = not _force_external
-    except Exception:
-        QWebEngineView = None  # type: ignore
-        QWebEngineProfile = None  # type: ignore
-        QWebEnginePage = None  # type: ignore
-        HAS_WEBENGINE = False
-    from PySide6.QtGui import QDesktopServices, QIcon, QPixmap, QFont
+    if not _force_external:
+        try:
+            from PySide6.QtWebEngineWidgets import QWebEngineView  # optional
+            from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
+            HAS_WEBENGINE = True
+        except Exception:
+            HAS_WEBENGINE = False
+    from PySide6.QtGui import (
+        QDesktopServices,
+        QIcon,
+        QPixmap,
+        QFont,
+        QCursor,
+        QPainterPath,
+        QRegion,
+        QPainter,
+        QColor,
+        QPen,
+    )
 except Exception:
-    from PyQt6.QtCore import Qt, QUrl, QProcess, QTimer, QPoint, QEvent
+    from PyQt6.QtCore import Qt, QUrl, QProcess, QTimer, QPoint, QEvent, QVariantAnimation, QEasingCurve
     from PyQt6.QtWidgets import (
         QApplication, QMainWindow, QWidget, QPushButton, QTextEdit, QLabel,
         QVBoxLayout, QHBoxLayout, QMessageBox, QTabWidget, QFileDialog, QLineEdit,
         QDialog, QFrame, QListWidget, QListWidgetItem, QProgressBar, QToolButton,
-        QMenu, QPlainTextEdit, QSizePolicy, QRadioButton, QCheckBox
+        QMenu, QPlainTextEdit, QSizePolicy, QRadioButton, QCheckBox, QStackedLayout, QButtonGroup, QInputDialog
     )
-    try:
-        from PyQt6.QtWebEngineWidgets import QWebEngineView  # optional
-        from PyQt6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
-        HAS_WEBENGINE = not _force_external
-    except Exception:
-        QWebEngineView = None  # type: ignore
-        QWebEngineProfile = None  # type: ignore
-        QWebEnginePage = None  # type: ignore
-        HAS_WEBENGINE = False
-    from PyQt6.QtGui import QDesktopServices, QIcon, QPixmap, QFont
+    if not _force_external:
+        try:
+            from PyQt6.QtWebEngineWidgets import QWebEngineView  # optional
+            from PyQt6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
+            HAS_WEBENGINE = True
+        except Exception:
+            HAS_WEBENGINE = False
+    from PyQt6.QtGui import (
+        QDesktopServices,
+        QIcon,
+        QPixmap,
+        QFont,
+        QCursor,
+        QPainterPath,
+        QRegion,
+        QPainter,
+        QColor,
+        QPen,
+    )
 
 
 APP_HOME = DATA_ROOT
@@ -132,7 +167,7 @@ class ServiceSplash(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 2, 6, 4)
         layout.setSpacing(2)
-        self.message_label = QLabel("서비스 준비중...", self)
+        self.message_label = QLabel("Easy Trainer 준비중...", self)
         self.message_label.setAlignment(Qt.AlignCenter)
         self.message_label.setStyleSheet("font-weight: 600; margin: 0; padding: 0;")
         layout.addWidget(self.message_label)
@@ -194,6 +229,66 @@ class ServiceSplash(QDialog):
     def show_restart(self, show: bool, enabled: bool = True):
         self.restart_button.setVisible(show)
         self.restart_button.setEnabled(enabled)
+
+
+class PillLoadingRing(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._dash_offset = 0.0
+        self._timer = QTimer(self)
+        self._timer.setInterval(30)
+        self._timer.timeout.connect(self._tick)
+        try:
+            self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+            self.setAttribute(Qt.WA_TranslucentBackground, True)
+        except Exception:
+            pass
+        self.hide()
+
+    def start(self):
+        if not self._timer.isActive():
+            self._timer.start()
+        self.show()
+        try:
+            self.raise_()
+        except Exception:
+            pass
+
+    def stop(self):
+        if self._timer.isActive():
+            self._timer.stop()
+        self.hide()
+
+    def _tick(self):
+        self._dash_offset = (self._dash_offset + 1.8) % 200.0
+        self.update()
+
+    def paintEvent(self, event):
+        rect = self.rect()
+        if rect.width() <= 2 or rect.height() <= 2:
+            return
+        painter = QPainter(self)
+        try:
+            painter.setRenderHint(QPainter.Antialiasing, True)
+        except Exception:
+            pass
+        pen_width = 2.0
+        pen = QPen(QColor("#7dd3fc"), pen_width)
+        try:
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
+            pen.setDashPattern([6.0, 6.0])
+            pen.setDashOffset(self._dash_offset)
+        except Exception:
+            pass
+        painter.setPen(pen)
+        try:
+            inset = int(pen_width / 2) + 1
+            inner = rect.adjusted(inset, inset, -inset, -inset)
+            radius = min(24.0, inner.width() / 2.0, inner.height() / 2.0)
+            painter.drawRoundedRect(inner, radius, radius)
+        finally:
+            painter.end()
 
 
 def _app_icon_path() -> str | None:
@@ -300,7 +395,9 @@ def save_config(cfg: dict):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.setObjectName("LauncherWindow")
         self.install_variant = "gpu"
+        self.project_root: Path = DEFAULT_PROJECT_PATH
         self._update_window_title()
         try:
             icon = _window_icon()
@@ -308,7 +405,7 @@ class MainWindow(QMainWindow):
                 self.setWindowIcon(icon)
         except Exception:
             pass
-        self.resize(1000, 700)
+        self.resize(240, 480)
 
         self.process: QProcess | None = None
         self._preload_dialog: ServiceSplash | None = None
@@ -326,111 +423,340 @@ class MainWindow(QMainWindow):
         self._auto_launch_after_install = True
         self._devtools_view: QWebEngineView | None = None
         self._devtools_dialog: QDialog | None = None
+        self._floating_user_moved = False
+        self._dragging = False
+        self._drag_offset = QPoint(0, 0)
+        self._anchor_left: int | None = None  # screen-left anchor for animations
+        self._pill_anim: QVariantAnimation | None = None
+        self._pill_expanded: bool = False
+        self._pill_loading: bool = False
+        self._pill_loading_ring: PillLoadingRing | None = None
+        self._pad_loading_panel: QWidget | None = None
+        self._pad_loading_front_label: QLabel | None = None
+        self._pad_loading_back_label: QLabel | None = None
+        self._pad_loading_title: QLabel | None = None
+        self._pad_status_front_label: QLabel | None = None
+        self._pad_status_back_label: QLabel | None = None
+        self._pad_status_front_dot: QLabel | None = None
+        self._pad_status_back_dot: QLabel | None = None
+        self._preload_message: str = ""
+        self._preload_detail: str = ""
+        self._preload_auto_open_new: bool = True
+        self._restart_in_progress: bool = False
+        self._restart_phase: str = ""
+        self._app_home_writable_fixed = False
+        self._collapse_timer = QTimer(self)
+        self._collapse_timer.setSingleShot(True)
+        self._collapse_timer.timeout.connect(self._collapse_if_needed)
+        self._hover_watch_timer = QTimer(self)
+        self._hover_watch_timer.setInterval(50)
+        self._hover_watch_timer.timeout.connect(self._sync_hover_state)
+        self._hover_watch_timer.start()
+        self._pad_desc_timer = QTimer(self)
+        self._pad_desc_timer.setSingleShot(True)
+        self._pad_desc_timer.timeout.connect(self._on_pad_desc_timeout)
+        self._pad_desc_window_active = False
+        self._pill_hover_timer = QTimer(self)
+        self._pill_hover_timer.setSingleShot(True)
+        self._pill_hover_timer.timeout.connect(self._on_pill_hover_timeout)
+        self._pill_hover_target = None
+        self._pill_hover_target_index: int | None = None
+        self._pad_force_mode_index: int | None = None
+        self._pad_notice_timer = QTimer(self)
+        self._pad_notice_timer.setSingleShot(True)
+        self._pad_notice_timer.timeout.connect(self._clear_pad_notice)
+        self._pad_notice_overrides: dict[int, tuple[str, str]] = {}
+        self._dev_src_prompt_timer = QTimer(self)
+        self._dev_src_prompt_timer.setSingleShot(True)
+        self._dev_src_prompt_timer.timeout.connect(self._prompt_dev_src_then_apply)
+        self._pad_import_choice = "DB"
+        self._pad_export_choice = "DB"
+        self._exit_action = "EXIT"
+        self._open_ui_mode = "NEW"
+        self._disable_circle_tooltips = True
+        self._pad_width = 300
+        self._button_size = 60
+        self._pad_item_height = self._button_size
+        self.dev_src_root: Path | None = None
 
         # UI elements
         self.status_label = QLabel(self)
-        # PyQt6 moved flags under TextInteractionFlag
-        try:
-            self.status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        except AttributeError:
-            self.status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.status_label.setAlignment(Qt.AlignCenter)
+        self.status_label.setWordWrap(True)
+        self.status_label.setStyleSheet("color: #cfd8dc; font-size: 11px; font-weight: 600;")
         self.status_label.hide()
-
 
         # Hidden log buffer for append_log helper
         self.log = QTextEdit(self)
         self.log.setReadOnly(True)
         self.log.setVisible(False)
 
-        # Minimal dev controls (icon buttons)
-        # Web view (fills remaining area)
-        if HAS_WEBENGINE:
-            self.web_view = QWebEngineView(self)
+        # No embedded web view; always prefer external browser
+        self.web_view = None
+
+        # Floating pill bar UI
+        self.pill = QFrame(self)
+        self.pill.setObjectName("FloatingBar")
+        pill_layout = QVBoxLayout(self.pill)
+        pill_layout.setContentsMargins(7, 8, 7, 8)
+        pill_layout.setSpacing(6)
+        pill_layout.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.pill.installEventFilter(self)
+        self.pill.setStyleSheet("QFrame#FloatingBar { background: rgb(30,30,30); border-radius: 24px; }")
+
+        self._frontend_light = QLabel(self.pill)
+        self._backend_light = QLabel(self.pill)
+        for light in (self._frontend_light, self._backend_light):
+            light.setFixedSize(8, 8)
             try:
-                self.web_view.urlChanged.connect(lambda *_: self._update_nav_buttons())
+                light.setAttribute(Qt.WA_TransparentForMouseEvents, True)
             except Exception:
                 pass
-            _configure_webengine_profile()
-        else:
-            self.web_view = None
-        self.web_container = QWidget(self)
-        web_layout = QVBoxLayout(self.web_container)
-        web_layout.setContentsMargins(0, 0, 0, 0)
-        web_layout.setSpacing(0)
-        if self.web_view:
-            web_layout.addWidget(self.web_view)
-        else:
-            placeholder = QLabel("Qt WebEngine을 사용할 수 없어 UI를 표시할 수 없습니다.")
-            placeholder.setAlignment(Qt.AlignCenter)
-            web_layout.addWidget(placeholder)
+        self._position_status_lights()
+        self._pill_loading_ring = PillLoadingRing(self.pill)
+        self._position_loading_ring()
 
-        # Navigation bar
-        nav = QWidget(self)
-        nav_layout = QHBoxLayout(nav)
-        nav_layout.setContentsMargins(8, 4, 8, 4)
-        nav_layout.setSpacing(8)
-        self._nav_button_size = 34
-        def _mk_btn(text: str, tooltip: str):
-            b = QPushButton(text)
-            b.setToolTip(tooltip)
-            size = self._nav_button_size
-            b.setFixedSize(size, size)
-            try:
-                b.setMinimumSize(size, size)
-                b.setMaximumSize(size, size)
-                b.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-            except Exception:
-                pass
-            try:
-                b.setStyleSheet(f"QPushButton {{ padding: 0px; min-width: {size}px; max-width: {size}px; min-height: {size}px; max-height: {size}px; }}")
-            except Exception:
-                pass
-            return b
-        self.btn_nav_back = _mk_btn("←", "뒤로가기")
-        self.btn_nav_forward = _mk_btn("→", "앞으로가기")
-        self.btn_nav_back.clicked.connect(lambda: self._nav_action("back"))
-        self.btn_nav_forward.clicked.connect(lambda: self._nav_action("forward"))
-        nav_layout.addWidget(self.btn_nav_back)
-        nav_layout.addWidget(self.btn_nav_forward)
+        # Hidden labels kept for compatibility with existing update methods
+        self.title_label = QLabel("", self.pill)
+        self.title_label.hide()
+        self.path_hint_label = QLabel("", self.pill)
+        self.path_hint_label.hide()
 
-        self.btn_nav_refresh = _mk_btn("↻", "페이지 새로고침")
-        self.btn_nav_refresh.clicked.connect(lambda: self._nav_action("reload"))
-        nav_layout.addWidget(self.btn_nav_refresh)
+        circle_icons = self._circle_icon_paths()
+        self.btn_open_browser = self._create_circle_button(
+            "↗",
+            "UI 열기",
+            circle_icons[0] if len(circle_icons) > 0 else None,
+        )
+        self.btn_open_browser.clicked.connect(self.on_open_ui)
+        pill_layout.addWidget(self.btn_open_browser, 0, Qt.AlignHCenter)
 
-        self.project_path_display = QLineEdit(self)
-        self.project_path_display.setReadOnly(True)
-        self.project_path_display.setPlaceholderText("원본 프로젝트 경로 (클릭하여 변경)")
-        self.project_path_display.setFixedHeight(self._nav_button_size)
-        self.project_path_display.installEventFilter(self)
-        self.project_path_display.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.project_path_display.customContextMenuRequested.connect(self._show_path_menu)
-        try:
-            self.project_path_display.setCursor(Qt.PointingHandCursor)
-        except AttributeError:
-            try:
-                self.project_path_display.setCursor(Qt.CursorShape.PointingHandCursor)  # type: ignore[attr-defined]
-            except Exception:
-                pass
-        nav_layout.addWidget(self.project_path_display, 1)
-
-        self.btn_quick_apply = _mk_btn("⇆", "빠른 동기화 및 새로고침")
+        self.btn_quick_apply = self._create_circle_button(
+            "⇆",
+            "빠른 동기화",
+            circle_icons[1] if len(circle_icons) > 1 else None,
+        )
         self.btn_quick_apply.clicked.connect(self._on_quick_apply_clicked)
-        nav_layout.addWidget(self.btn_quick_apply)
+        pill_layout.addWidget(self.btn_quick_apply, 0, Qt.AlignHCenter)
 
-        self.btn_logs = _mk_btn("⚙︎", "서비스 로그/DevTools 보기")
-        self.btn_logs.clicked.connect(self.open_logs_window)
-        nav_layout.addWidget(self.btn_logs)
+        self.btn_folder = self._create_circle_button(
+            "📁",
+            "불러오기",
+            circle_icons[2] if len(circle_icons) > 2 else None,
+        )
+        self.btn_folder.clicked.connect(self._on_import_clicked)
+        pill_layout.addWidget(self.btn_folder, 0, Qt.AlignHCenter)
 
-        # Main layout
-        main = QWidget(self)
-        v = QVBoxLayout()
-        v.setContentsMargins(0, 0, 0, 0)
-        v.setSpacing(4)
-        v.addWidget(nav)
-        v.addWidget(self.web_container, 1)
-        main.setLayout(v)
-        self.setCentralWidget(main)
-        self._update_nav_buttons()
+        self.btn_logs = self._create_circle_button(
+            "🧾",
+            "내보내기",
+            circle_icons[3] if len(circle_icons) > 3 else None,
+        )
+        self.btn_logs.clicked.connect(self._on_export_clicked)
+        pill_layout.addWidget(self.btn_logs, 0, Qt.AlignHCenter)
+
+        self.btn_settings = self._create_circle_button(
+            "⚙",
+            "로그",
+            circle_icons[4] if len(circle_icons) > 4 else None,
+        )
+        self.btn_settings.clicked.connect(self.open_logs_window)
+        pill_layout.addWidget(self.btn_settings, 0, Qt.AlignHCenter)
+
+        self.btn_exit = self._create_circle_button(
+            "✕",
+            "서비스 종료",
+            circle_icons[5] if len(circle_icons) > 5 else None,
+        )
+        self.btn_exit.clicked.connect(self._on_exit_action)
+        pill_layout.addWidget(self.btn_exit, 0, Qt.AlignHCenter)
+
+        self.state_label = QLabel("", self.pill)
+        self.state_label.hide()
+
+        wrapper = QWidget(self)
+        wrapper.setObjectName("PillWrapper")
+        wrapper_layout = QHBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        wrapper_layout.setSpacing(0)
+        wrapper_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        # Pad grows right from the pill center
+        self._pad_bridge = QFrame(wrapper)
+        self._pad_bridge.setObjectName("FloatingBarBridge")
+        self._pad_bridge.setVisible(False)
+        try:
+            self._pad_bridge.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        except Exception:
+            pass
+        self._bridge_segments: list[QFrame] = []
+        for _ in range(6):
+            seg = QFrame(self._pad_bridge)
+            seg.setObjectName("FloatingBarBridgeSegment")
+            seg.setVisible(False)
+            try:
+                seg.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+            except Exception:
+                pass
+            self._bridge_segments.append(seg)
+        self._right_pad = QFrame(wrapper)
+        self._right_pad.setObjectName("FloatingBarPad")
+        try:
+            # Allow clicks inside the pad (e.g., "변경" button)
+            self._right_pad.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+        except Exception:
+            pass
+        self._right_pad.setFixedWidth(0)
+        self._right_pad.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        try:
+            self._frontend_light.setParent(self._right_pad)
+            self._backend_light.setParent(self._right_pad)
+            self._position_status_lights()
+            self._frontend_light.hide()
+            self._backend_light.hide()
+        except Exception:
+            pass
+        pad_layout = QVBoxLayout(self._right_pad)
+        pad_layout.setContentsMargins(46, 15, 15, 15)
+        pad_layout.setSpacing(6)  # match pill button spacing
+        pad_layout.setAlignment(Qt.AlignTop)
+        (
+            self.pad_box_open_ui,
+            self.pad_label_open_ui,
+            self.pad_stack_open_ui,
+            self._open_ui_buttons,
+        ) = self._create_pad_open_mode_box(
+            "1. UI 열기",
+            self._open_ui_mode,
+            self._set_open_ui_mode,
+        )
+        (
+            self.pad_box_sync,
+            self.pad_label_sync,
+            self.pad_stack_sync,
+            self.pad_path_label,
+            self.pad_path_change_btn,
+        ) = self._create_pad_path_box("2. 코드 동기화")
+        (
+            self.pad_box_folder,
+            self.pad_label_folder,
+            self.pad_stack_folder,
+            self.pad_import_buttons,
+        ) = self._create_pad_choice_box("3. 불러오기", self._pad_import_choice, self._set_import_choice)
+        (
+        self.pad_box_logs,
+        self.pad_label_logs,
+        self.pad_stack_logs,
+        self.pad_export_buttons,
+        ) = self._create_pad_choice_box("4. 내보내기", self._pad_export_choice, self._set_export_choice)
+        self.pad_box_settings, self.pad_label_settings, self.pad_stack_settings = self._create_pad_simple_box("5. 로그")
+        (
+            self.pad_box_exit,
+            self.pad_label_exit,
+            self.pad_stack_exit,
+            self._exit_action_buttons,
+        ) = self._create_pad_exit_action_box("6. 종료", self._exit_action, self._set_exit_action)
+        self._pad_boxes = [
+            self.pad_box_open_ui,
+            self.pad_box_sync,
+            self.pad_box_folder,
+            self.pad_box_logs,
+            self.pad_box_settings,
+            self.pad_box_exit,
+        ]
+        self._pad_loading_panel = self._create_pad_loading_panel()
+        self._setup_settings_status_mode()
+        self._pad_desc_labels = [
+            self.pad_label_open_ui,
+            self.pad_label_sync,
+            self.pad_label_folder,
+            self.pad_label_logs,
+            self.pad_label_settings,
+            self.pad_label_exit,
+        ]
+        self._pad_desc_stacks = [
+            self.pad_stack_open_ui,
+            self.pad_stack_sync,
+            self.pad_stack_folder,
+            self.pad_stack_logs,
+            self.pad_stack_settings,
+            self.pad_stack_exit,
+        ]
+        self._update_pad_choice_labels()
+        self._update_pad_choice_tooltips()
+        self._update_exit_label()
+        self._set_pad_description_indices(set(range(len(self._pad_desc_labels))))
+        pad_layout.addWidget(self.pad_box_open_ui)
+        pad_layout.addWidget(self.pad_box_sync)
+        pad_layout.addWidget(self.pad_box_folder)
+        pad_layout.addWidget(self.pad_box_logs)
+        pad_layout.addWidget(self.pad_box_settings)
+        pad_layout.addWidget(self.pad_box_exit)
+        try:
+            self._right_pad.lower()  # keep the pad behind the pill so pill corners stay round
+        except Exception:
+            pass
+        wrapper_layout.addWidget(self.pill, 0, Qt.AlignLeft | Qt.AlignVCenter)
+        wrapper_layout.addStretch(1)  # space for pad to overlap into
+        # pad is positioned manually; keep it out of the layout to allow overlap
+        self.setCentralWidget(wrapper)
+        try:
+            # z-order: pad (bottom) -> bridge -> pill (top)
+            self._pad_bridge.raise_()
+            self.pill.raise_()
+        except Exception:
+            pass
+        self._register_drag_targets(self, wrapper, self.pill, self._right_pad)
+
+        # Use a normal window type (not Qt.Tool) so the icon shows in the taskbar even when floating
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Window)
+        try:
+            self.setAttribute(Qt.WA_TranslucentBackground, True)
+            self.setAttribute(Qt.WA_Hover, True)
+        except Exception:
+            pass
+        self.setStyleSheet("""
+            QWidget#LauncherWindow { background: transparent; }
+            QPushButton#CircleButton {
+                background: #000;
+                color: #fff;
+                border: none;
+                border-radius: 30px;
+                font-weight: 700;
+            }
+            QPushButton#CircleButton:hover { border: none; }
+            QPushButton#CircleButton:disabled { background: #3a3a3a; color: #9e9e9e; }
+        """)
+        self.adjustSize()
+        try:
+            bar_height = self.pill.sizeHint().height() or self.pill.height() or self.height()
+        except Exception:
+            bar_height = self.height()
+        self._bar_height = max(1, bar_height)
+        try:
+            self.pill.setFixedHeight(self._bar_height)
+            self._right_pad.setFixedHeight(self._bar_height)
+            self.setMinimumHeight(self._bar_height)
+            self.setMaximumHeight(self._bar_height)
+            self.resize(self.width(), self._bar_height)
+        except Exception:
+            pass
+        try:
+            collapsed = self.pill.sizeHint().width() or self.pill.width() or self.width()
+        except Exception:
+            collapsed = self.width()
+        self._pill_collapsed_width = max(1, collapsed)
+        self.pill.setFixedWidth(self._pill_collapsed_width)
+        total_width = self._pill_collapsed_width + self._pad_width
+        try:
+            self.setMinimumWidth(self._pill_collapsed_width)
+            self.setMaximumWidth(total_width)
+            self.resize(self._pill_collapsed_width, self.height())
+        except Exception:
+            pass
+        self._apply_pill_width(0, keep_right=False)
+        self._position_floating_bar(force=True)
+        self._position_loading_panel()
+        self._position_loading_ring()
 
         # state init
         try:
@@ -471,10 +797,10 @@ class MainWindow(QMainWindow):
             cfg["project_root"] = str(self.project_root)
             save_config(cfg)
 
-        # Always request auth on startup, then ensure the project root is writable.
-        if not self._ensure_project_root_writable(force_auth=True):
+        # Always request auth on startup, then ensure app data/project roots are writable.
+        if not self._ensure_app_and_project_writable(force_auth=True):
             try:
-                QMessageBox.critical(self, "권한 필요", "프로젝트 경로 권한을 획득하지 못해 종료합니다.")
+                QMessageBox.critical(self, "권한 필요", "데이터/프로젝트 경로 권한을 획득하지 못해 종료합니다.")
             except Exception:
                 pass
             try:
@@ -507,6 +833,12 @@ class MainWindow(QMainWindow):
         self.update_buttons()
         self.update_project_label()
 
+        self._status_timer = QTimer(self)
+        self._status_timer.setInterval(1000)
+        self._status_timer.timeout.connect(self._update_status_lights)
+        self._status_timer.start()
+        self._update_status_lights()
+
         # Periodic status update
         self.timer = QTimer(self)
         self.timer.setInterval(3000)
@@ -515,47 +847,2054 @@ class MainWindow(QMainWindow):
 
         self.hide()
 
-    def set_display_mode(self, fullscreen: bool):
-        self._fullscreen_pref = fullscreen
-
-    def eventFilter(self, obj, event):
-        if obj is self.project_path_display and event is not None:
+    def _cursor_over_pill(self, strict: bool = False) -> bool:
+        try:
+            from PySide6.QtGui import QCursor
+        except Exception:
             try:
-                etype = event.type()
+                from PyQt6.QtGui import QCursor
             except Exception:
-                etype = None
-            if etype == QEvent.MouseButtonPress:
-                try:
-                    button = event.button()
-                except Exception:
-                    button = None
-                if button == Qt.LeftButton:
-                    self.on_select_dev_src()
+                return False
+        try:
+            global_pos = QCursor.pos()
+            if not self._cursor_over_window(global_pos):
+                return False
+            if strict:
+                bounds = self._content_hover_bounds()
+                if not bounds:
+                    return False
+                x = int(global_pos.x())
+                y = int(global_pos.y())
+                left, top, right, bottom = bounds
+                return left <= x < right and top <= y < bottom
+            local = self.pill.mapFromGlobal(global_pos)
+            if self.pill.rect().contains(local):
+                return True
+            pad = getattr(self, "_right_pad", None)
+            if pad is not None and pad.isVisible() and pad.width() > 0:
+                pad_local = pad.mapFromGlobal(global_pos)
+                if pad.rect().contains(pad_local):
                     return True
-        return super().eventFilter(obj, event)
+            return False
+        except Exception:
+            return False
 
-    def _show_path_menu(self, pos):
-        menu = QMenu(self.project_path_display)
-        change_action = menu.addAction("원본 경로 변경...")
-        open_action = None
-        if self.dev_src_root and self.dev_src_root.exists():
-            open_action = menu.addAction("폴더 열기")
-        action = menu.exec(self.project_path_display.mapToGlobal(pos))
-        if action == change_action:
-            self.on_select_dev_src()
-        elif action == open_action and self.dev_src_root:
+    def _cursor_over_window(self, global_pos) -> bool:
+        try:
+            local = self.mapFromGlobal(global_pos)
+            if not self.rect().contains(local):
+                return False
+        except Exception:
             try:
-                QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.dev_src_root)))
+                if not self.frameGeometry().contains(global_pos):
+                    return False
+            except Exception:
+                pass
+        widget = None
+        try:
+            widget = QApplication.widgetAt(global_pos)
+        except Exception:
+            try:
+                app = QApplication.instance()
+                if app is not None:
+                    widget = app.widgetAt(global_pos)
+            except Exception:
+                widget = None
+        if widget is None:
+            return False
+        try:
+            if widget is self or self.isAncestorOf(widget):
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _content_hover_bounds(self) -> list[int] | None:
+        widgets = [
+            getattr(self, "btn_open_browser", None),
+            getattr(self, "btn_quick_apply", None),
+            getattr(self, "btn_folder", None),
+            getattr(self, "btn_logs", None),
+            getattr(self, "btn_settings", None),
+            getattr(self, "btn_exit", None),
+            getattr(self, "pad_box_open_ui", None),
+            getattr(self, "pad_box_sync", None),
+            getattr(self, "pad_box_folder", None),
+            getattr(self, "pad_box_logs", None),
+            getattr(self, "pad_box_settings", None),
+            getattr(self, "pad_box_exit", None),
+        ]
+        bounds = None
+        for w in widgets:
+            if w is None:
+                continue
+            try:
+                if not w.isVisible():
+                    continue
+            except Exception:
+                pass
+            try:
+                pos = w.mapToGlobal(QPoint(0, 0))
+                x1 = int(pos.x())
+                y1 = int(pos.y())
+                x2 = x1 + int(w.width())
+                y2 = y1 + int(w.height())
+            except Exception:
+                continue
+            if x2 <= x1 or y2 <= y1:
+                continue
+            if bounds is None:
+                bounds = [x1, y1, x2, y2]
+            else:
+                if x1 < bounds[0]:
+                    bounds[0] = x1
+                if y1 < bounds[1]:
+                    bounds[1] = y1
+                if x2 > bounds[2]:
+                    bounds[2] = x2
+                if y2 > bounds[3]:
+                    bounds[3] = y2
+        return bounds
+
+    def _hovered_pad_box_index(self) -> int | None:
+        try:
+            from PySide6.QtGui import QCursor
+        except Exception:
+            try:
+                from PyQt6.QtGui import QCursor
+            except Exception:
+                return None
+        try:
+            global_pos = QCursor.pos()
+            pad = getattr(self, "_right_pad", None)
+            if pad is None or not pad.isVisible() or pad.width() <= 0:
+                return None
+            boxes = [
+                getattr(self, "pad_box_open_ui", None),
+                getattr(self, "pad_box_sync", None),
+                getattr(self, "pad_box_folder", None),
+                getattr(self, "pad_box_logs", None),
+                getattr(self, "pad_box_settings", None),
+                getattr(self, "pad_box_exit", None),
+            ]
+            for idx, box in enumerate(boxes):
+                if box is None or not box.isVisible():
+                    continue
+                local = box.mapFromGlobal(global_pos)
+                if box.rect().contains(local):
+                    return idx
+            return None
+        except Exception:
+            return None
+
+    def _cursor_in_pad_box_column(self) -> bool:
+        try:
+            from PySide6.QtGui import QCursor
+        except Exception:
+            try:
+                from PyQt6.QtGui import QCursor
+            except Exception:
+                return False
+        try:
+            global_pos = QCursor.pos()
+            pad = getattr(self, "_right_pad", None)
+            if pad is None or not pad.isVisible() or pad.width() <= 0:
+                return False
+            pad_pos = pad.mapToGlobal(QPoint(0, 0))
+            pad_x1 = int(pad_pos.x())
+            pad_y1 = int(pad_pos.y())
+            pad_x2 = pad_x1 + int(pad.width())
+            pad_y2 = pad_y1 + int(pad.height())
+            gx = int(global_pos.x())
+            gy = int(global_pos.y())
+            if gx < pad_x1 or gx >= pad_x2 or gy < pad_y1 or gy >= pad_y2:
+                return False
+            boxes = [
+                getattr(self, "pad_box_open_ui", None),
+                getattr(self, "pad_box_sync", None),
+                getattr(self, "pad_box_folder", None),
+                getattr(self, "pad_box_logs", None),
+                getattr(self, "pad_box_settings", None),
+                getattr(self, "pad_box_exit", None),
+            ]
+            x_min = None
+            x_max = None
+            for box in boxes:
+                if box is None:
+                    continue
+                try:
+                    if not box.isVisible():
+                        continue
+                except Exception:
+                    continue
+                try:
+                    pos = box.mapToGlobal(QPoint(0, 0))
+                    bx1 = int(pos.x())
+                    bx2 = bx1 + int(box.width())
+                except Exception:
+                    continue
+                if x_min is None or bx1 < x_min:
+                    x_min = bx1
+                if x_max is None or bx2 > x_max:
+                    x_max = bx2
+            if x_min is None or x_max is None:
+                return False
+            return x_min <= gx < x_max
+        except Exception:
+            return False
+
+    def _cursor_over_pad_area(self) -> bool:
+        try:
+            from PySide6.QtGui import QCursor
+        except Exception:
+            try:
+                from PyQt6.QtGui import QCursor
+            except Exception:
+                return False
+        try:
+            global_pos = QCursor.pos()
+            pad = getattr(self, "_right_pad", None)
+            if pad is None or not pad.isVisible() or pad.width() <= 0:
+                return False
+            local = pad.mapFromGlobal(global_pos)
+            return pad.rect().contains(local)
+        except Exception:
+            return False
+
+    def _set_pad_description_indices(self, indices: set[int]):
+        stacks = getattr(self, "_pad_desc_stacks", [])
+        for idx, stack in enumerate(stacks):
+            try:
+                if stack is not None:
+                    stack.setCurrentIndex(0 if idx in indices else 1)
             except Exception:
                 pass
 
+    def _start_pad_description_window(self):
+        self._pad_desc_window_active = True
+        try:
+            self._pad_desc_timer.stop()
+        except Exception:
+            pass
+        self._pad_desc_timer.start(500)
+        self._update_pad_description_mode()
+
+    def _on_pad_desc_timeout(self):
+        self._pad_desc_window_active = False
+        self._update_pad_description_mode()
+
+    def _update_pad_description_mode(self):
+        labels = getattr(self, "_pad_desc_labels", [])
+        all_indices = set(range(len(labels)))
+        if getattr(self, "_pad_desc_window_active", False):
+            self._set_pad_description_indices(all_indices)
+            return
+        idx = self._hovered_pad_box_index()
+        if idx is not None:
+            self._set_pad_description_indices(all_indices - {idx})
+            return
+        if self._cursor_in_pad_box_column():
+            if self._pad_force_mode_index is not None:
+                self._pad_force_mode_index = None
+            self._set_pad_description_indices(all_indices)
+            return
+        forced_idx = getattr(self, "_pad_force_mode_index", None)
+        if forced_idx is not None and forced_idx in all_indices:
+            self._set_pad_description_indices(all_indices - {forced_idx})
+            return
+        self._set_pad_description_indices(all_indices)
+
+    def _pill_button_entry(self, obj) -> tuple[int, QPushButton] | None:
+        buttons = [
+            getattr(self, "btn_open_browser", None),
+            getattr(self, "btn_quick_apply", None),
+            getattr(self, "btn_folder", None),
+            getattr(self, "btn_logs", None),
+            getattr(self, "btn_settings", None),
+            getattr(self, "btn_exit", None),
+        ]
+        for idx, btn in enumerate(buttons):
+            if btn is None:
+                continue
+            try:
+                if obj is btn or btn.isAncestorOf(obj):
+                    return idx, btn
+            except Exception:
+                continue
+        return None
+
+    def _start_pill_hover_timer(self, idx: int, target):
+        try:
+            if self._pill_hover_target is target:
+                return
+        except Exception:
+            pass
+        try:
+            self._pill_hover_timer.stop()
+        except Exception:
+            pass
+        self._pill_hover_target = target
+        self._pill_hover_target_index = idx
+        self._on_pill_hover_timeout()
+
+    def _clear_pill_hover(self, target=None):
+        try:
+            if target is not None and self._pill_hover_target is not target:
+                return
+        except Exception:
+            pass
+        try:
+            self._pill_hover_timer.stop()
+        except Exception:
+            pass
+        keep_forced = False
+        try:
+            keep_forced = self._cursor_over_pill(strict=False)
+        except Exception:
+            keep_forced = False
+        self._pill_hover_target = None
+        self._pill_hover_target_index = None
+        if keep_forced:
+            return
+        if self._pad_force_mode_index is not None:
+            self._pad_force_mode_index = None
+            self._update_pad_description_mode()
+
+    def _on_pill_hover_timeout(self):
+        idx = getattr(self, "_pill_hover_target_index", None)
+        target = getattr(self, "_pill_hover_target", None)
+        if idx is None or target is None:
+            return
+        try:
+            from PySide6.QtGui import QCursor
+        except Exception:
+            try:
+                from PyQt6.QtGui import QCursor
+            except Exception:
+                QCursor = None  # type: ignore
+        if QCursor is not None:
+            try:
+                gp = QCursor.pos()
+                local = target.mapFromGlobal(gp)
+                if not target.rect().contains(local):
+                    return
+            except Exception:
+                pass
+        self._pad_force_mode_index = idx
+        self._update_pad_description_mode()
+
+    def _set_import_choice(self, choice: str):
+        if choice not in ("DB", "DATASET", "MODEL"):
+            return
+        self._pad_import_choice = choice
+        self._update_pad_choice_labels()
+        self._update_pad_choice_tooltips()
+        self._style_choice_buttons(getattr(self, "pad_import_buttons", {}))
+
+    def _set_export_choice(self, choice: str):
+        if choice not in ("DB", "DATASET", "MODEL"):
+            return
+        self._pad_export_choice = choice
+        self._update_pad_choice_labels()
+        self._update_pad_choice_tooltips()
+        self._style_choice_buttons(getattr(self, "pad_export_buttons", {}))
+
+    def _set_exit_action(self, action: str):
+        if action not in ("EXIT", "RESTART"):
+            return
+        self._exit_action = action
+        self._update_exit_label()
+        self._style_choice_buttons(getattr(self, "_exit_action_buttons", {}))
+
+    def _set_open_ui_mode(self, mode: str):
+        if mode not in ("NEW", "CURRENT"):
+            return
+        self._open_ui_mode = mode
+        self._update_open_ui_tooltip()
+        self._style_choice_buttons(getattr(self, "_open_ui_buttons", {}))
+
+    def _update_pad_choice_labels(self):
+        try:
+            self.pad_label_folder.setText(f"3. {self._pad_import_choice} 불러오기")
+        except Exception:
+            pass
+        try:
+            self.pad_label_logs.setText(f"4. {self._pad_export_choice} 내보내기")
+        except Exception:
+            pass
+
+    def _update_pad_choice_tooltips(self):
+        if getattr(self, "_disable_circle_tooltips", False):
+            return
+        try:
+            self.btn_folder.setToolTip(f"{self._pad_import_choice} 불러오기")
+        except Exception:
+            pass
+        try:
+            self.btn_logs.setToolTip(f"{self._pad_export_choice} 내보내기")
+        except Exception:
+            pass
+
+    def _open_ui_mode_tooltip(self, mode: str) -> str:
+        if mode == "NEW":
+            return "새 창으로 UI 열기"
+        return "새 탭으로 UI 열기"
+
+    def _open_ui_mode_label(self, mode: str) -> str:
+        if mode == "NEW":
+            return "1. 새 창으로 UI 열기"
+        return "1. 새 탭으로 UI 열기"
+
+    def _exit_action_label(self, action: str) -> str:
+        if action == "RESTART":
+            return "6. 재실행"
+        return "6. 종료"
+
+    def _update_open_ui_tooltip(self):
+        mode = getattr(self, "_open_ui_mode", "NEW")
+        try:
+            self.pad_label_open_ui.setText(self._open_ui_mode_label(mode))
+        except Exception:
+            pass
+        if getattr(self, "_disable_circle_tooltips", False):
+            return
+        try:
+            self.btn_open_browser.setToolTip(self._open_ui_mode_tooltip(mode))
+        except Exception:
+            pass
+
+    def _update_exit_label(self):
+        action = getattr(self, "_exit_action", "EXIT")
+        try:
+            self.pad_label_exit.setText(self._exit_action_label(action))
+        except Exception:
+            pass
+
+    def _current_choice_from_buttons(self, buttons: dict[str, QPushButton], fallback: str) -> str:
+        if not buttons:
+            return fallback
+        for key, btn in buttons.items():
+            try:
+                if btn.isChecked():
+                    return key
+            except Exception:
+                continue
+        return fallback
+
+    def _on_import_clicked(self):
+        choice = self._current_choice_from_buttons(
+            getattr(self, "pad_import_buttons", {}),
+            self._pad_import_choice,
+        )
+        self._run_import_selected(choice)
+
+    def _on_export_clicked(self):
+        choice = self._current_choice_from_buttons(
+            getattr(self, "pad_export_buttons", {}),
+            self._pad_export_choice,
+        )
+        self._run_export_selected(choice)
+
+    def _map_backend_db_path(self, raw_path: str) -> Path | None:
+        try:
+            path = Path(raw_path)
+        except Exception:
+            return None
+        if not path.is_absolute():
+            return None
+        if path == Path("/root/src") or str(path).startswith("/root/src/"):
+            try:
+                rel = path.relative_to("/root/src")
+            except Exception:
+                return None
+            for base in (getattr(self, "project_root", None), getattr(self, "dev_src_root", None)):
+                if isinstance(base, Path):
+                    return base / "src" / rel
+        return path
+
+    def _fetch_backend_db_path(self) -> Path | None:
+        try:
+            from urllib import request
+            req = request.Request("http://127.0.0.1:5000/api/db/path", method="GET")
+            with request.urlopen(req, timeout=0.8) as resp:
+                payload = json.loads(resp.read().decode("utf-8") or "{}")
+            raw_path = payload.get("path")
+            if not raw_path:
+                return None
+            return self._map_backend_db_path(str(raw_path))
+        except Exception:
+            return None
+
+    def _db_main_path(self) -> Path:
+        data_db = DATA_ROOT / "database" / "main.db"
+        backend_path = self._fetch_backend_db_path()
+        if backend_path is not None:
+            return backend_path
+        running = False
+        try:
+            running = "service" in self._get_running_services()
+        except Exception:
+            running = False
+        if running:
+            return data_db
+        project_under_data = False
+        try:
+            if isinstance(self.project_root, Path):
+                pr = self.project_root.resolve()
+                dr = DATA_ROOT.resolve()
+                project_under_data = pr == dr or dr in pr.parents
+        except Exception:
+            project_under_data = False
+        if self._is_valid_dev_src(self.dev_src_root) and not project_under_data:
+            return self.dev_src_root / "src" / "backend" / "database" / "main.db"
+        if self._is_valid_project_root(self.project_root) and not project_under_data:
+            return self.project_root / "src" / "backend" / "database" / "main.db"
+        if docker_compose_available() and self._is_valid_project_root(self.project_root):
+            return data_db
+        if self._is_valid_project_root(self.project_root):
+            return self.project_root / "src" / "backend" / "database" / "main.db"
+        return data_db
+
+    def _cleanup_sqlite_sidecars(self, db_path: Path):
+        for suffix in ("-wal", "-shm"):
+            sidecar = db_path.with_name(db_path.name + suffix)
+            try:
+                if sidecar.exists():
+                    sidecar.unlink()
+            except Exception:
+                pass
+
+    def _copy_file_best_effort(self, src: Path, dest: Path, context: str):
+        try:
+            shutil.copy2(src, dest)
+            return
+        except OSError as e:
+            try:
+                shutil.copyfile(src, dest)
+            except Exception:
+                raise
+            self.append_log(f"[{context}][INFO] 메타데이터 복사 실패로 기본 복사로 진행: {e}")
+
+    def _unique_import_path(self, dest: Path) -> Path:
+        if not dest.exists():
+            return dest
+        parent = dest.parent
+        suffix = dest.suffix
+        stem = dest.stem if suffix else dest.name
+        for i in range(1, 1000):
+            candidate = parent / f"{stem}_{i}{suffix}"
+            if not candidate.exists():
+                return candidate
+        return parent / f"{stem}_{int(time.time())}{suffix}"
+
+    def _reload_backend_db(self) -> bool:
+        try:
+            from urllib import request
+            req = request.Request("http://127.0.0.1:5000/api/db/reload", method="POST")
+            with request.urlopen(req, timeout=2.0) as resp:
+                payload = json.loads(resp.read().decode("utf-8") or "{}")
+            return payload.get("status") == "success"
+        except Exception as e:
+            self.append_log(f"[IMPORT][WARN] DB 갱신 요청 실패: {e}")
+            return False
+
+    def _resolve_backend_subdir(self, name: str) -> Path | None:
+        roots: list[Path] = []
+        root = getattr(self, "project_root", None)
+        dev_root = getattr(self, "dev_src_root", None)
+        prefer_dev = False
+        project_under_data = False
+        try:
+            if isinstance(root, Path):
+                pr = root.resolve()
+                dr = DATA_ROOT.resolve()
+                project_under_data = pr == dr or dr in pr.parents
+        except Exception:
+            project_under_data = False
+        try:
+            prefer_dev = ("service" not in self._get_running_services()) and not project_under_data
+        except Exception:
+            prefer_dev = False
+        ordered_roots = [dev_root, root] if prefer_dev else [root, dev_root]
+        for candidate in ordered_roots:
+            if isinstance(candidate, Path) and candidate not in roots:
+                roots.append(candidate)
+        for base in roots:
+            try:
+                if base.exists():
+                    return base / "src" / "backend" / name
+            except Exception:
+                continue
+        return None
+
+    def _db_table_columns(self, conn, table: str) -> set[str]:
+        try:
+            cur = conn.execute(f"PRAGMA table_info({table})")
+            return {row[1] for row in cur.fetchall()}
+        except Exception:
+            return set()
+
+    def _fetch_tasks_from_db(self) -> list[tuple[int, str]]:
+        db_path = self._db_main_path()
+        if not db_path.exists():
+            return []
+        conn = None
+        try:
+            conn = sqlite3.connect(str(db_path))
+            cur = conn.execute("SELECT id, name FROM tasks WHERE deleted_at IS NULL ORDER BY id")
+            tasks = []
+            for row in cur.fetchall():
+                try:
+                    tid = int(row[0])
+                except Exception:
+                    continue
+                name = row[1] or f"Task {tid}"
+                tasks.append((tid, name))
+            return tasks
+        except Exception:
+            return []
+        finally:
+            try:
+                if conn is not None:
+                    conn.close()
+            except Exception:
+                pass
+
+    def _select_task_id(self) -> int | None:
+        tasks = self._fetch_tasks_from_db()
+        if not tasks:
+            return None
+        if len(tasks) == 1:
+            return tasks[0][0]
+        items = [f"{tid}: {name}" for tid, name in tasks]
+        choice, ok = QInputDialog.getItem(
+            self,
+            "작업 선택",
+            "연결할 작업을 선택하세요.",
+            items,
+            0,
+            False,
+        )
+        if not ok or not choice:
+            return None
+        try:
+            return int(str(choice).split(":", 1)[0].strip())
+        except Exception:
+            return None
+
+    def _fetch_policies_from_db(self) -> list[tuple[int, str]]:
+        db_path = self._db_main_path()
+        if not db_path.exists():
+            return []
+        conn = None
+        try:
+            conn = sqlite3.connect(str(db_path))
+            cur = conn.execute("SELECT id, name, type FROM policies WHERE deleted_at IS NULL ORDER BY id")
+            policies = []
+            for row in cur.fetchall():
+                try:
+                    pid = int(row[0])
+                except Exception:
+                    continue
+                name = row[1] or f"Policy {pid}"
+                ptype = row[2] or ""
+                label = f"{name} ({ptype})" if ptype else name
+                policies.append((pid, label))
+            return policies
+        except Exception:
+            return []
+        finally:
+            try:
+                if conn is not None:
+                    conn.close()
+            except Exception:
+                pass
+
+    def _select_policy_id(self) -> int | None:
+        policies = self._fetch_policies_from_db()
+        if not policies:
+            return None
+        if len(policies) == 1:
+            return policies[0][0]
+        items = [f"{pid}: {label}" for pid, label in policies]
+        choice, ok = QInputDialog.getItem(
+            self,
+            "정책 선택",
+            "연결할 정책을 선택하세요.",
+            items,
+            0,
+            False,
+        )
+        if not ok or not choice:
+            return None
+        try:
+            return int(str(choice).split(":", 1)[0].strip())
+        except Exception:
+            return None
+
+    def _insert_dataset_record(self, name: str, task_id: int | None) -> int | None:
+        db_path = self._db_main_path()
+        if not db_path.exists():
+            return None
+        conn = None
+        try:
+            conn = sqlite3.connect(str(db_path))
+            columns = self._db_table_columns(conn, "datasets")
+            if not columns:
+                return None
+            fields = []
+            values = []
+            if "name" in columns:
+                fields.append("name")
+                values.append(name)
+            if "task_id" in columns:
+                fields.append("task_id")
+                values.append(task_id)
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            if "created_at" in columns:
+                fields.append("created_at")
+                values.append(timestamp)
+            if "updated_at" in columns:
+                fields.append("updated_at")
+                values.append(timestamp)
+            if "deleted_at" in columns:
+                fields.append("deleted_at")
+                values.append(None)
+            if not fields:
+                return None
+            placeholders = ", ".join(["?"] * len(fields))
+            sql = f"INSERT INTO datasets ({', '.join(fields)}) VALUES ({placeholders})"
+            cur = conn.execute(sql, values)
+            conn.commit()
+            return cur.lastrowid
+        except Exception:
+            return None
+        finally:
+            try:
+                if conn is not None:
+                    conn.close()
+            except Exception:
+                pass
+
+    def _insert_checkpoint_record(
+        self,
+        name: str,
+        policy_id: int | None,
+        task_id: int | None = None,
+        is_base_model: bool = True,
+    ) -> int | None:
+        if policy_id is None:
+            return None
+        db_path = self._db_main_path()
+        if not db_path.exists():
+            return None
+        conn = None
+        try:
+            conn = sqlite3.connect(str(db_path))
+            columns = self._db_table_columns(conn, "checkpoints")
+            if not columns:
+                return None
+            fields = []
+            values = []
+            if "name" in columns:
+                fields.append("name")
+                values.append(name)
+            if "policy_id" in columns:
+                fields.append("policy_id")
+                values.append(policy_id)
+            if "task_id" in columns:
+                fields.append("task_id")
+                values.append(task_id)
+            if "dataset_info" in columns:
+                fields.append("dataset_info")
+                values.append(json.dumps({}))
+            if "status" in columns:
+                fields.append("status")
+                values.append("finished")
+            if "is_base_model" in columns:
+                fields.append("is_base_model")
+                values.append(1 if is_base_model else 0)
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            if "created_at" in columns:
+                fields.append("created_at")
+                values.append(timestamp)
+            if "updated_at" in columns:
+                fields.append("updated_at")
+                values.append(timestamp)
+            if "deleted_at" in columns:
+                fields.append("deleted_at")
+                values.append(None)
+            if not fields:
+                return None
+            placeholders = ", ".join(["?"] * len(fields))
+            sql = f"INSERT INTO checkpoints ({', '.join(fields)}) VALUES ({placeholders})"
+            cur = conn.execute(sql, values)
+            conn.commit()
+            return cur.lastrowid
+        except Exception:
+            return None
+        finally:
+            try:
+                if conn is not None:
+                    conn.close()
+            except Exception:
+                pass
+
+    def _run_import_selected(self, choice: str):
+        try:
+            if choice == "DB":
+                result = QFileDialog.getOpenFileName(
+                    self,
+                    "DB 불러오기",
+                    str(Path.home()),
+                    "DB Files (*.db *.sqlite *.sqlite3);;All Files (*)",
+                )
+                src_path = result[0] if isinstance(result, (tuple, list)) else result
+            else:
+                src_path = QFileDialog.getExistingDirectory(
+                    self,
+                    f"{choice} 불러오기",
+                    str(Path.home()),
+                )
+        except Exception:
+            return
+        if not src_path:
+            return
+        src = Path(src_path)
+        try:
+            if choice == "DB":
+                dest = self._db_main_path()
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                if src.is_dir():
+                    raise ValueError("DB 파일이 디렉터리입니다.")
+                self._cleanup_sqlite_sidecars(dest)
+                self._copy_file_best_effort(src, dest, "IMPORT")
+                self._cleanup_sqlite_sidecars(dest)
+                self.append_log(f"[IMPORT] {choice} -> {dest}")
+                if docker_compose_available() and self._is_valid_project_root(self.project_root):
+                    running = False
+                    try:
+                        running = "service" in self._get_running_services()
+                    except Exception:
+                        running = False
+                    if running:
+                        if self._reload_backend_db():
+                            self.append_log("[IMPORT] DB 연결을 갱신했습니다.")
+                        else:
+                            self.append_log("[IMPORT][WARN] DB 갱신에 실패했습니다. UI만 새로고침합니다.")
+                    else:
+                        self.append_log("[IMPORT][INFO] 서비스가 실행 중이 아니어서 UI만 새로고침합니다.")
+                    self.load_ui(open_mode="CURRENT", force_refresh=True)
+                else:
+                    if self._reload_backend_db():
+                        self.append_log("[IMPORT] DB 연결을 갱신했습니다.")
+                    self.load_ui(open_mode="CURRENT", force_refresh=True)
+                return
+            elif choice == "DATASET":
+                dest_root = self._resolve_backend_subdir("datasets")
+                if dest_root is None:
+                    self.append_log("[IMPORT][WARN] DATASET 경로를 찾을 수 없습니다.")
+                    return
+                dest_root.mkdir(parents=True, exist_ok=True)
+                tasks = self._fetch_tasks_from_db()
+                if not tasks:
+                    self.append_log("[IMPORT][WARN] 작업이 없어 DATASET을 적용할 수 없습니다. 작업을 먼저 생성하세요.")
+                    return
+                task_id = tasks[0][0] if len(tasks) == 1 else self._select_task_id()
+                if task_id is None:
+                    self.append_log("[IMPORT][INFO] DATASET 불러오기를 취소했습니다.")
+                    return
+                dataset_name = src.stem if src.is_file() else src.name
+                dataset_id = self._insert_dataset_record(dataset_name, task_id)
+                if dataset_id is None:
+                    self.append_log("[IMPORT][WARN] DB 등록 실패로 파일만 복사합니다.")
+                    dest = self._unique_import_path(dest_root / src.name)
+                    if src.is_dir():
+                        shutil.copytree(src, dest, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(src, dest)
+                else:
+                    dest = dest_root / str(dataset_id)
+                    if src.is_dir():
+                        shutil.copytree(src, dest, dirs_exist_ok=True)
+                    else:
+                        dest.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(src, dest / src.name)
+            elif choice == "MODEL":
+                dest_root = self._resolve_backend_subdir("checkpoints") or self._resolve_backend_subdir("models")
+                if dest_root is None:
+                    self.append_log("[IMPORT][WARN] MODEL 경로를 찾을 수 없습니다.")
+                    return
+                dest_root.mkdir(parents=True, exist_ok=True)
+                policies = self._fetch_policies_from_db()
+                if not policies:
+                    self.append_log("[IMPORT][WARN] 정책이 없어 MODEL을 적용할 수 없습니다. 정책을 먼저 생성하세요.")
+                    return
+                policy_id = policies[0][0] if len(policies) == 1 else self._select_policy_id()
+                if policy_id is None:
+                    self.append_log("[IMPORT][INFO] MODEL 불러오기를 취소했습니다.")
+                    return
+                tasks = self._fetch_tasks_from_db()
+                task_id = None
+                if tasks:
+                    task_id = tasks[0][0] if len(tasks) == 1 else self._select_task_id()
+                is_base_model = task_id is None
+                model_name = src.stem if src.is_file() else src.name
+                checkpoint_id = self._insert_checkpoint_record(
+                    model_name,
+                    policy_id,
+                    task_id=task_id,
+                    is_base_model=is_base_model,
+                )
+                if checkpoint_id is None:
+                    self.append_log("[IMPORT][WARN] DB 등록 실패로 파일만 복사합니다.")
+                    dest = self._unique_import_path(dest_root / src.name)
+                    if src.is_dir():
+                        shutil.copytree(src, dest, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(src, dest)
+                else:
+                    dest = dest_root / str(checkpoint_id)
+                    if src.is_dir():
+                        shutil.copytree(src, dest, dirs_exist_ok=True)
+                    else:
+                        dest.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(src, dest / src.name)
+            else:
+                return
+            self.append_log(f"[IMPORT] {choice} -> {dest}")
+            self.load_ui(open_mode="CURRENT", force_refresh=True)
+        except Exception as e:
+            self.append_log(f"[IMPORT][ERROR] {choice} 불러오기 실패: {e}")
+
+    def _resolve_export_source(self, choice: str) -> Path | None:
+        if choice == "DB":
+            db_path = self._db_main_path()
+            try:
+                return db_path if db_path.exists() else None
+            except Exception:
+                return None
+        if choice == "DATASET":
+            root = self._resolve_backend_subdir("datasets")
+            try:
+                return root if root and root.exists() else None
+            except Exception:
+                return None
+        if choice == "MODEL":
+            for name in ("checkpoints", "models"):
+                root = self._resolve_backend_subdir(name)
+                try:
+                    if root and root.exists():
+                        return root
+                except Exception:
+                    continue
+        return None
+
+    def _run_export_selected(self, choice: str):
+        src = self._resolve_export_source(choice)
+        if not src:
+            self.append_log(f"[EXPORT][WARN] {choice} 내보낼 항목을 찾지 못했습니다.")
+            return
+        try:
+            if choice == "DB":
+                default_name = src.name if src.name else "main.db"
+                result = QFileDialog.getSaveFileName(
+                    self,
+                    "DB 저장 위치 선택",
+                    str(Path.home() / default_name),
+                    "DB Files (*.db *.sqlite *.sqlite3);;All Files (*)",
+                )
+                dest_path = result[0] if isinstance(result, (tuple, list)) else result
+                if not dest_path:
+                    return
+                dest = Path(dest_path)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dest)
+            else:
+                dest_dir = QFileDialog.getExistingDirectory(
+                    self,
+                    f"{choice} 저장 위치 선택",
+                    str(Path.home()),
+                )
+                if not dest_dir:
+                    return
+                dest = Path(dest_dir) / src.name
+                if src.is_dir():
+                    shutil.copytree(src, dest, dirs_exist_ok=True)
+                else:
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src, dest)
+            self.append_log(f"[EXPORT] {choice} -> {dest}")
+        except Exception as e:
+            self.append_log(f"[EXPORT][ERROR] {choice} 내보내기 실패: {e}")
+
+    def _show_pad_notice(self, index: int, text: str, duration_ms: int = 1000, color: str | None = None):
+        labels = getattr(self, "_pad_desc_labels", [])
+        if index < 0 or index >= len(labels):
+            return
+        label = labels[index]
+        if label is None:
+            return
+        if index not in self._pad_notice_overrides:
+            try:
+                self._pad_notice_overrides[index] = (label.text(), label.styleSheet())
+            except Exception:
+                self._pad_notice_overrides[index] = ("", "")
+        try:
+            label.setText(text)
+        except Exception:
+            return
+        if color:
+            try:
+                base_style = label.styleSheet() or ""
+                label.setStyleSheet(f"{base_style} color: {color};")
+            except Exception:
+                pass
+        if not self._pill_expanded:
+            self._animate_pill(True)
+        else:
+            self._start_pad_description_window()
+        try:
+            self._pad_notice_timer.stop()
+        except Exception:
+            pass
+        self._pad_notice_timer.start(duration_ms)
+
+    def _clear_pad_notice(self):
+        labels = getattr(self, "_pad_desc_labels", [])
+        for idx, original in list(self._pad_notice_overrides.items()):
+            if idx < 0 or idx >= len(labels):
+                continue
+            lbl = labels[idx]
+            if lbl is None:
+                continue
+            try:
+                original_text, original_style = original
+                lbl.setText(original_text)
+                if original_style:
+                    lbl.setStyleSheet(original_style)
+            except Exception:
+                pass
+        self._pad_notice_overrides.clear()
+
+    def _prompt_dev_src_then_apply(self):
+        if self._is_valid_dev_src(self.dev_src_root):
+            return
+        self.on_select_dev_src()
+        if self._is_valid_dev_src(self.dev_src_root):
+            self._quick_apply_from_dev_src()
+
+    def _collapse_if_needed(self):
+        if getattr(self, "_pill_loading", False):
+            return
+        if self._cursor_over_pill(strict=True):
+            return
+        self._animate_pill(False)
+
+    def _sync_hover_state(self):
+        if self._dragging or not self.isVisible():
+            return
+        if getattr(self, "_pill_loading", False):
+            return
+        hovered = self._cursor_over_pill(strict=True)
+        if hovered and not self._pill_expanded:
+            self._animate_pill(True)
+        elif not hovered and self._pill_expanded:
+            self._animate_pill(False)
+
+    def _place_pad(self, width: int | None = None):
+        pad = getattr(self, "_right_pad", None)
+        if pad is None:
+            return
+        if width is None:
+            width = pad.width()
+        try:
+            pill_geom = self.pill.geometry()
+            w = max(0, int(width))
+            h = pill_geom.height()
+            # Anchor the pad's left edge to the pill center and grow only rightwards
+            center_x = pill_geom.x() + pill_geom.width() // 2
+            x = center_x
+            y = pill_geom.y()
+            pad.setGeometry(x, y, w, h)
+            pad.setVisible(w > 0)
+            bridge = getattr(self, "_pad_bridge", None)
+            if bridge is not None:
+                bridge.setVisible(False)
+                for seg in getattr(self, "_bridge_segments", []):
+                    seg.setVisible(False)
+            self._position_loading_panel()
+            self._position_status_lights()
+        except Exception:
+            pass
+
+    def set_display_mode(self, fullscreen: bool):
+        self._fullscreen_pref = fullscreen
+
+    def _circle_icon_paths(self) -> list[Path]:
+        img_dir = Path(__file__).resolve().parent / "img"
+        icons = [img_dir / f"Plugin icon - {idx}.png" for idx in range(1, 7)]
+        if all(p.is_file() for p in icons):
+            return icons
+        return []
+
+    def _create_circle_button(self, text: str, tooltip: str, icon_path: Path | str | None = None) -> QPushButton:
+        btn = QPushButton(text, self.pill)
+        btn.setObjectName("CircleButton")
+        if getattr(self, "_disable_circle_tooltips", False):
+            btn.setToolTip("")
+        else:
+            btn.setToolTip(tooltip)
+        btn.setFixedSize(self._button_size, self._button_size)
+        if icon_path:
+            try:
+                pm = QPixmap(str(icon_path))
+                if not pm.isNull():
+                    base_icon_size = int(self._button_size * 0.5)
+                    icon_size = max(18, int(base_icon_size * (2 / 3)))
+                    pm = pm.scaled(icon_size, icon_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    btn.setIcon(QIcon(pm))
+                    btn.setIconSize(pm.size())
+                    btn.setText("")
+            except Exception:
+                pass
+        try:
+            btn.setCursor(Qt.PointingHandCursor)
+        except Exception:
+            pass
+        return btn
+
+    def _create_pad_simple_box(self, text: str, mode2_text: str | None = None) -> tuple[QFrame, QLabel, QStackedLayout]:
+        box = QFrame(self._right_pad)
+        box.setObjectName("PadInfoBox")
+        box.setMinimumHeight(self._pad_item_height)
+        box.setMaximumHeight(self._pad_item_height)
+        box.setStyleSheet("background-color: #2d2d2d; border: none; border-radius: 12px;")
+        stack = QStackedLayout(box)
+        stack.setContentsMargins(0, 0, 0, 0)
+        stack.setSpacing(0)
+
+        desc_page = QWidget(box)
+        desc_layout = QHBoxLayout(desc_page)
+        desc_layout.setContentsMargins(12, 0, 12, 0)
+        desc_layout.setSpacing(0)
+        desc_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        label = QLabel(text, desc_page)
+        label.setObjectName("PadInfoLabel")
+        label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        label.setStyleSheet("color: #f5f5f5; font-weight: 800; font-size: 16px; background-color: transparent; border: none;")
+        desc_layout.addWidget(label, 1, Qt.AlignLeft | Qt.AlignVCenter)
+        stack.addWidget(desc_page)
+
+        mode2_page = QWidget(box)
+        mode2_layout = QHBoxLayout(mode2_page)
+        mode2_layout.setContentsMargins(12, 0, 12, 0)
+        mode2_layout.setSpacing(0)
+        mode2_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        if mode2_text is not None:
+            mode2_label = QLabel(mode2_text, mode2_page)
+            mode2_label.setObjectName("PadMode2Label")
+            mode2_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            mode2_layout.addWidget(mode2_label, 1, Qt.AlignLeft | Qt.AlignVCenter)
+        stack.addWidget(mode2_page)
+        stack.setCurrentIndex(0)
+        return box, label, stack
+
+    def _create_pad_open_mode_box(
+        self,
+        text: str,
+        default_choice: str,
+        on_change,
+    ) -> tuple[QFrame, QLabel, QStackedLayout, dict[str, QPushButton]]:
+        box = QFrame(self._right_pad)
+        box.setObjectName("PadInfoBox")
+        box.setMinimumHeight(self._pad_item_height)
+        box.setMaximumHeight(self._pad_item_height)
+        box.setStyleSheet("background-color: #2d2d2d; border: none; border-radius: 12px;")
+        stack = QStackedLayout(box)
+        stack.setContentsMargins(0, 0, 0, 0)
+        stack.setSpacing(0)
+
+        desc_page = QWidget(box)
+        desc_layout = QHBoxLayout(desc_page)
+        desc_layout.setContentsMargins(12, 0, 12, 0)
+        desc_layout.setSpacing(0)
+        desc_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        desc_label = QLabel(text, desc_page)
+        desc_label.setObjectName("PadInfoLabel")
+        desc_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        desc_label.setStyleSheet("color: #f5f5f5; font-weight: 800; font-size: 16px; background-color: transparent; border: none;")
+        desc_layout.addWidget(desc_label, 1, Qt.AlignLeft | Qt.AlignVCenter)
+        stack.addWidget(desc_page)
+
+        mode2_page = QWidget(box)
+        mode2_layout = QHBoxLayout(mode2_page)
+        mode2_layout.setContentsMargins(5, 5, 5, 5)
+        mode2_layout.setSpacing(5)
+        mode2_layout.setAlignment(Qt.AlignVCenter)
+        group = QButtonGroup(mode2_page)
+        group.setExclusive(True)
+        buttons: dict[str, QPushButton] = {}
+        choices = [
+            ("NEW", "새 브라우저", "새 창으로 UI 열기"),
+            ("CURRENT", "현재 브라우저", "새 탭으로 UI 열기"),
+        ]
+        for key, label, tooltip in choices:
+            btn = QPushButton(label, mode2_page)
+            btn.setObjectName("PadChoiceButton")
+            btn.setCheckable(True)
+            btn.setChecked(key == default_choice)
+            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            try:
+                btn.setAutoFillBackground(True)
+            except Exception:
+                pass
+            btn.setToolTip(tooltip)
+            btn.clicked.connect(lambda _=False, c=key: on_change(c))
+            btn._choice_indicator_hide_text = True
+            group.addButton(btn)
+            buttons[key] = btn
+            mode2_layout.addWidget(btn, 1)
+        self._style_choice_buttons(buttons)
+        stack.addWidget(mode2_page)
+        stack.setCurrentIndex(0)
+        return box, desc_label, stack, buttons
+
+    def _create_pad_exit_action_box(
+        self,
+        text: str,
+        default_choice: str,
+        on_change,
+    ) -> tuple[QFrame, QLabel, QStackedLayout, dict[str, QPushButton]]:
+        box = QFrame(self._right_pad)
+        box.setObjectName("PadInfoBox")
+        box.setMinimumHeight(self._pad_item_height)
+        box.setMaximumHeight(self._pad_item_height)
+        box.setStyleSheet("background-color: #2d2d2d; border: none; border-radius: 12px;")
+        stack = QStackedLayout(box)
+        stack.setContentsMargins(0, 0, 0, 0)
+        stack.setSpacing(0)
+
+        desc_page = QWidget(box)
+        desc_layout = QHBoxLayout(desc_page)
+        desc_layout.setContentsMargins(12, 0, 12, 0)
+        desc_layout.setSpacing(0)
+        desc_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        desc_label = QLabel(text, desc_page)
+        desc_label.setObjectName("PadInfoLabel")
+        desc_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        desc_label.setStyleSheet("color: #f5f5f5; font-weight: 800; font-size: 16px; background-color: transparent; border: none;")
+        desc_layout.addWidget(desc_label, 1, Qt.AlignLeft | Qt.AlignVCenter)
+        stack.addWidget(desc_page)
+
+        mode2_page = QWidget(box)
+        mode2_layout = QHBoxLayout(mode2_page)
+        mode2_layout.setContentsMargins(5, 5, 5, 5)
+        mode2_layout.setSpacing(5)
+        mode2_layout.setAlignment(Qt.AlignVCenter)
+        group = QButtonGroup(mode2_page)
+        group.setExclusive(True)
+        buttons: dict[str, QPushButton] = {}
+        choices = [
+            ("EXIT", "종료"),
+            ("RESTART", "재실행"),
+        ]
+        for key, label in choices:
+            btn = QPushButton(label, mode2_page)
+            btn.setObjectName("PadChoiceButton")
+            btn.setCheckable(True)
+            btn.setChecked(key == default_choice)
+            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            try:
+                btn.setAutoFillBackground(True)
+            except Exception:
+                pass
+            btn.clicked.connect(lambda _=False, c=key: on_change(c))
+            btn._choice_indicator_hide_text = True
+            group.addButton(btn)
+            buttons[key] = btn
+            mode2_layout.addWidget(btn, 1)
+        stack.addWidget(mode2_page)
+        self._style_choice_buttons(buttons)
+        stack.setCurrentIndex(0)
+        return box, desc_label, stack, buttons
+
+    def _create_pad_path_box(self, text: str) -> tuple[QFrame, QLabel, QStackedLayout, QLabel, QPushButton]:
+        box = QFrame(self._right_pad)
+        box.setObjectName("PadInfoBox")
+        box.setMinimumHeight(self._pad_item_height)
+        box.setMaximumHeight(self._pad_item_height)
+        box.setStyleSheet("background-color: #2d2d2d; border: none; border-radius: 12px;")
+        stack = QStackedLayout(box)
+        stack.setContentsMargins(0, 0, 0, 0)
+        stack.setSpacing(0)
+
+        desc_page = QWidget(box)
+        desc_layout = QHBoxLayout(desc_page)
+        desc_layout.setContentsMargins(12, 0, 12, 0)
+        desc_layout.setSpacing(0)
+        desc_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        desc_label = QLabel(text, desc_page)
+        desc_label.setObjectName("PadInfoLabel")
+        desc_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        desc_label.setStyleSheet("color: #f5f5f5; font-weight: 800; font-size: 16px; background-color: transparent; border: none;")
+        desc_layout.addWidget(desc_label, 1, Qt.AlignLeft | Qt.AlignVCenter)
+        stack.addWidget(desc_page)
+
+        mode2_page = QWidget(box)
+        mode2_layout = QHBoxLayout(mode2_page)
+        mode2_layout.setContentsMargins(12, 0, 0, 0)
+        mode2_layout.setSpacing(6)
+        mode2_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        path_label = QLabel("", mode2_page)
+        path_label.setObjectName("PadPathLabel")
+        path_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        path_label.setWordWrap(False)
+        path_label.setStyleSheet("color: #cfd8dc; font-size: 12px; font-weight: 700; background-color: transparent; border: none;")
+        try:
+            flag = getattr(Qt, "TextSelectableByMouse", None)
+            if flag is None:
+                interaction_flags = getattr(Qt, "TextInteractionFlag", None)
+                if interaction_flags is not None:
+                    flag = getattr(interaction_flags, "TextSelectableByMouse", None)
+            if flag is not None:
+                path_label.setTextInteractionFlags(flag)
+        except Exception:
+            pass
+        change_btn = QPushButton("변경", mode2_page)
+        change_btn.setObjectName("PadPathChangeButton")
+        btn_size = max(10, self._pad_item_height - 10)
+        change_btn.setFixedSize(btn_size, btn_size)
+        try:
+            change_btn.setCursor(Qt.PointingHandCursor)
+        except Exception:
+            pass
+        try:
+            change_btn.setAutoFillBackground(True)
+        except Exception:
+            pass
+        change_btn.setStyleSheet(
+            "background-color: rgb(30,30,30); color: #eaeaea; border: none; border-radius: 6px;"
+        )
+        change_btn.clicked.connect(self.on_select_dev_src)
+        btn_wrap = QWidget(mode2_page)
+        btn_wrap.setFixedSize(self._pad_item_height, self._pad_item_height)
+        btn_layout = QHBoxLayout(btn_wrap)
+        btn_layout.setContentsMargins(5, 5, 5, 5)
+        btn_layout.setSpacing(0)
+        btn_layout.setAlignment(Qt.AlignCenter)
+        btn_layout.addWidget(change_btn)
+        mode2_layout.addWidget(path_label, 1, Qt.AlignLeft | Qt.AlignVCenter)
+        mode2_layout.addWidget(btn_wrap, 0, Qt.AlignRight | Qt.AlignVCenter)
+        stack.addWidget(mode2_page)
+        stack.setCurrentIndex(0)
+        return box, desc_label, stack, path_label, change_btn
+
+    def _create_pad_choice_box(
+        self,
+        desc_text: str,
+        default_choice: str,
+        on_change,
+    ) -> tuple[QFrame, QLabel, QStackedLayout, dict[str, QPushButton]]:
+        box = QFrame(self._right_pad)
+        box.setObjectName("PadInfoBox")
+        box.setMinimumHeight(self._pad_item_height)
+        box.setMaximumHeight(self._pad_item_height)
+        box.setStyleSheet("background-color: #2d2d2d; border: none; border-radius: 12px;")
+        stack = QStackedLayout(box)
+        stack.setContentsMargins(0, 0, 0, 0)
+        stack.setSpacing(0)
+
+        desc_page = QWidget(box)
+        desc_layout = QHBoxLayout(desc_page)
+        desc_layout.setContentsMargins(12, 0, 12, 0)
+        desc_layout.setSpacing(0)
+        desc_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        desc_label = QLabel(desc_text, desc_page)
+        desc_label.setObjectName("PadInfoLabel")
+        desc_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        desc_label.setStyleSheet("color: #f5f5f5; font-weight: 800; font-size: 16px; background-color: transparent; border: none;")
+        desc_layout.addWidget(desc_label, 1, Qt.AlignLeft | Qt.AlignVCenter)
+        stack.addWidget(desc_page)
+
+        mode2_page = QWidget(box)
+        mode2_layout = QHBoxLayout(mode2_page)
+        mode2_layout.setContentsMargins(5, 5, 5, 5)
+        mode2_layout.setSpacing(5)
+        mode2_layout.setAlignment(Qt.AlignVCenter)
+        group = QButtonGroup(mode2_page)
+        group.setExclusive(True)
+        buttons: dict[str, QPushButton] = {}
+        for choice in ("DB", "DATASET", "MODEL"):
+            btn = QPushButton(choice, mode2_page)
+            btn.setObjectName("PadChoiceButton")
+            btn.setCheckable(True)
+            btn.setChecked(choice == default_choice)
+            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            try:
+                btn.setAutoFillBackground(True)
+            except Exception:
+                pass
+            btn.clicked.connect(lambda _=False, c=choice: on_change(c))
+            btn._choice_indicator_hide_text = True
+            group.addButton(btn)
+            buttons[choice] = btn
+            mode2_layout.addWidget(btn, 1)
+        self._style_choice_buttons(buttons)
+        stack.addWidget(mode2_page)
+        stack.setCurrentIndex(0)
+        return box, desc_label, stack, buttons
+
+    def _create_pad_loading_panel(self) -> QWidget:
+        panel = QWidget(self._right_pad)
+        panel.setObjectName("PadLoadingPanel")
+        panel.setStyleSheet(
+            "background-color: rgb(30,30,30); border: none;"
+            "border-top-left-radius: 0px; border-bottom-left-radius: 0px;"
+            "border-top-right-radius: 24px; border-bottom-right-radius: 24px;"
+        )
+        try:
+            panel.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        except Exception:
+            pass
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(45, 13, 13, 13)
+        layout.setSpacing(4)
+        layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
+
+        icon_label = QLabel(panel)
+        icon_label.setAlignment(Qt.AlignCenter)
+        try:
+            ip = _app_icon_path()
+            if ip:
+                pm = QPixmap(ip)
+                if not pm.isNull():
+                    icon_label.setPixmap(pm.scaled(132, 132, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        except Exception:
+            pass
+
+        title = QLabel("Easy Trainer 준비중...", panel)
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("color: #f5f5f5; font-size: 12px; font-weight: 700;")
+
+        bar = QProgressBar(panel)
+        bar.setObjectName("PadLoadingBar")
+        bar.setRange(0, 0)
+        bar.setTextVisible(False)
+        bar.setFixedHeight(8)
+        bar.setStyleSheet(
+            "QProgressBar { background-color: #2b2b2b; border: 1px solid #3a3a3a; border-radius: 4px; }"
+            "QProgressBar::chunk { background-color: #7dd3fc; }"
+        )
+
+        status_row = QHBoxLayout()
+        status_row.setContentsMargins(0, 0, 0, 0)
+        status_row.setSpacing(10)
+        front = QLabel("프론트엔드: 대기중", panel)
+        back = QLabel("백엔드: 대기중", panel)
+        for lbl in (front, back):
+            lbl.setStyleSheet("color: #e0e0e0; font-size: 11px; font-weight: 700;")
+            lbl.setAlignment(Qt.AlignVCenter)
+        status_row.addWidget(front, 0, Qt.AlignLeft | Qt.AlignVCenter)
+        status_row.addStretch(1)
+        status_row.addWidget(back, 0, Qt.AlignRight | Qt.AlignVCenter)
+
+        layout.addWidget(icon_label)
+        layout.addWidget(title)
+        layout.addStretch(1)
+        layout.addLayout(status_row)
+        layout.addWidget(bar)
+
+        self._pad_loading_front_label = front
+        self._pad_loading_back_label = back
+        self._pad_loading_title = title
+        panel.hide()
+        return panel
+
+    def _setup_settings_status_mode(self):
+        stack = getattr(self, "pad_stack_settings", None)
+        if stack is None:
+            return
+        mode2_page = None
+        try:
+            mode2_page = stack.widget(1)
+        except Exception:
+            try:
+                item = stack.itemAt(1)
+                if item is not None:
+                    mode2_page = item.widget()
+            except Exception:
+                mode2_page = None
+        if mode2_page is None:
+            return
+        mode2_layout = mode2_page.layout()
+        if mode2_layout is None:
+            mode2_layout = QHBoxLayout(mode2_page)
+            mode2_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        mode2_layout.setContentsMargins(5, 5, 5, 5)
+        mode2_layout.setSpacing(5)
+        container = QWidget(mode2_page)
+        vlayout = QVBoxLayout(container)
+        vlayout.setContentsMargins(0, 0, 0, 0)
+        vlayout.setSpacing(5)
+
+        def _row(text: str):
+            row = QWidget(container)
+            row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(5, 0, 0, 0)
+            row_layout.setSpacing(5)
+            label = QLabel(text, row)
+            label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            label.setStyleSheet("color: #e0e0e0; font-size: 11px; font-weight: 700;")
+            dot = QLabel(row)
+            dot.setFixedSize(10, 10)
+            dot.setStyleSheet("background-color: #e74c3c; border: none; border-radius: 5px;")
+            row_layout.addWidget(dot, 0, Qt.AlignVCenter)
+            row_layout.addWidget(label, 1, Qt.AlignLeft | Qt.AlignVCenter)
+            return row, label, dot
+
+        row_front, front_label, front_dot = _row("프론트엔드")
+        row_back, back_label, back_dot = _row("백엔드")
+        vlayout.addWidget(row_front, 1)
+        vlayout.addWidget(row_back, 1)
+        mode2_layout.addWidget(container, 1)
+
+        self._pad_status_front_label = front_label
+        self._pad_status_back_label = back_label
+        self._pad_status_front_dot = front_dot
+        self._pad_status_back_dot = back_dot
+
+    def _ensure_choice_indicator(self, btn: QPushButton):
+        indicator = getattr(btn, "_choice_indicator", None)
+        if indicator is not None:
+            try:
+                self._apply_choice_indicator_text_visibility(btn, indicator)
+            except Exception:
+                pass
+            return indicator
+        indicator = QWidget(btn)
+        indicator.setObjectName("PadChoiceIndicator")
+        try:
+            indicator.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        except Exception:
+            pass
+        layout = QHBoxLayout(indicator)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+        dot = QLabel("✓", indicator)
+        dot.setObjectName("PadChoiceIndicatorDot")
+        dot.setAlignment(Qt.AlignCenter)
+        dot.setFixedSize(10, 10)
+        dot.setStyleSheet(
+            "background-color: #2ecc71; color: #ffffff; border-radius: 5px; font-size: 8px; font-weight: 700;"
+        )
+        text = QLabel("선택됨", indicator)
+        text.setObjectName("PadChoiceIndicatorText")
+        text.setStyleSheet("color: #2ecc71; font-size: 8px; font-weight: 600;")
+        layout.addWidget(text, 0, Qt.AlignVCenter)
+        layout.addWidget(dot, 0, Qt.AlignVCenter)
+        try:
+            dot.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+            text.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        except Exception:
+            pass
+        indicator.adjustSize()
+        btn._choice_indicator = indicator
+        self._apply_choice_indicator_text_visibility(btn, indicator, text)
+        return indicator
+
+    def _apply_choice_indicator_text_visibility(
+        self,
+        btn: QPushButton,
+        indicator: QWidget,
+        text_label: QLabel | None = None,
+    ):
+        hide_text = bool(getattr(btn, "_choice_indicator_hide_text", False))
+        label = text_label
+        if label is None:
+            try:
+                label = indicator.findChild(QLabel, "PadChoiceIndicatorText")
+            except Exception:
+                label = None
+        if label is not None:
+            try:
+                label.setVisible(not hide_text)
+            except Exception:
+                pass
+        try:
+            layout = indicator.layout()
+            if layout is not None:
+                layout.setSpacing(0 if hide_text else 2)
+        except Exception:
+            pass
+        try:
+            indicator.adjustSize()
+        except Exception:
+            pass
+
+    def _position_choice_indicator(self, btn: QPushButton):
+        indicator = self._ensure_choice_indicator(btn)
+        try:
+            indicator.adjustSize()
+        except Exception:
+            pass
+        margin = 3
+        try:
+            x = max(0, btn.width() - indicator.width() - margin)
+            y = max(0, btn.height() - indicator.height() - margin)
+            indicator.move(x, y)
+        except Exception:
+            pass
+
+    def _style_choice_buttons(self, buttons: dict[str, QPushButton]):
+        if not buttons:
+            return
+        for btn in buttons.values():
+            try:
+                btn.setAttribute(Qt.WA_StyledBackground, True)
+            except Exception:
+                pass
+            try:
+                checked = btn.isChecked()
+            except Exception:
+                checked = False
+            bg = "rgb(230,230,230)" if checked else "rgb(30,30,30)"
+            fg = "#000000" if checked else "rgb(230,230,230)"
+            btn.setStyleSheet(
+                "background-color: "
+                + bg
+                + "; color: "
+                + fg
+                + "; border: none; border-radius: 8px; font-weight: 700; font-size: 11px; padding: 0px;"
+            )
+            indicator = self._ensure_choice_indicator(btn)
+            try:
+                indicator.setVisible(bool(checked))
+            except Exception:
+                pass
+            self._position_choice_indicator(btn)
+
+    def _position_floating_bar(self, force: bool = False):
+        if self._floating_user_moved and not force:
+            return
+        try:
+            screen = QApplication.primaryScreen()
+            geo = screen.availableGeometry() if screen else None
+            if not geo:
+                return
+            margin = 12
+            if force or self._anchor_left is None:
+                self._anchor_left = geo.x() + margin
+            anchor_left = self._anchor_left
+            x = anchor_left
+            y = geo.y() + geo.height() - self.height() - margin
+            self.move(x, y)
+            if force:
+                self._floating_user_moved = False
+        except Exception:
+            pass
+
+    def _apply_pill_width(self, width: int, keep_right: bool = False):
+        try:
+            pad = getattr(self, "_right_pad", None)
+            if pad is None:
+                return
+            new_width = max(0, int(width))
+            pad.setFixedWidth(new_width)
+            total_width = max(1, int(getattr(self, "_pill_collapsed_width", 0)) + new_width)
+            right_edge = None
+            if keep_right:
+                try:
+                    right_edge = self.x() + self.width()
+                except Exception:
+                    right_edge = None
+            try:
+                if self.width() != total_width:
+                    self.resize(total_width, self.height())
+            except Exception:
+                pass
+            if right_edge is not None:
+                try:
+                    self.move(right_edge - total_width, self.y())
+                except Exception:
+                    pass
+            try:
+                self._anchor_left = self.x()
+            except Exception:
+                pass
+            self._place_pad(new_width)
+        except Exception:
+            pass
+
+    def _animate_pill(self, expand: bool):
+        if getattr(self, "_pill_loading", False):
+            return
+        target = self._pad_width if expand else 0
+        prev_expanded = self._pill_expanded
+        if expand == prev_expanded and self._pill_anim:
+            return
+        self._pill_expanded = expand
+        if expand and not prev_expanded:
+            self._start_pad_description_window()
+        elif not expand:
+            try:
+                self._pad_desc_timer.stop()
+            except Exception:
+                pass
+            self._pad_desc_window_active = False
+            labels = getattr(self, "_pad_desc_labels", [])
+            self._set_pad_description_indices(set(range(len(labels))))
+        try:
+            current = max(0, getattr(self, "_right_pad", self.pill).width())
+        except Exception:
+            current = 0
+        if self._pill_anim:
+            try:
+                self._pill_anim.stop()
+            except Exception:
+                pass
+        anim = QVariantAnimation(self)
+        anim.setDuration(200)
+        anim.setStartValue(current)
+        anim.setEndValue(target)
+        try:
+            anim.setEasingCurve(QEasingCurve.InOutCubic)
+        except Exception:
+            pass
+        anim.valueChanged.connect(lambda v: self._apply_pill_width(int(v), keep_right=False))
+        def _finish():
+            self._apply_pill_width(target, keep_right=False)
+        anim.finished.connect(_finish)
+        self._pill_anim = anim
+        anim.start()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        try:
+            pad = getattr(self, "_right_pad", None)
+            if pad:
+                self._place_pad(pad.width())
+        except Exception:
+            pass
+        self._position_loading_ring()
+        self._position_loading_panel()
+        self._position_status_lights()
+
+    def _set_status_light(self, light: QLabel, ok: bool):
+        color = "#2ecc71" if ok else "#e74c3c"
+        radius = 4
+        try:
+            radius = max(1, min(int(light.width()), int(light.height())) // 2)
+        except Exception:
+            radius = 4
+        light.setStyleSheet(
+            f"background-color: {color}; border: none; border-radius: {radius}px;"
+        )
+
+    def _position_status_lights(self):
+        for light in (self._frontend_light, self._backend_light):
+            try:
+                light.hide()
+            except Exception:
+                pass
+        return
+
+    def _position_loading_ring(self):
+        ring = getattr(self, "_pill_loading_ring", None)
+        pill = getattr(self, "pill", None)
+        if ring is None or pill is None:
+            return
+        try:
+            ring.setGeometry(pill.rect())
+            ring.raise_()
+        except Exception:
+            pass
+
+    def _position_loading_panel(self):
+        panel = getattr(self, "_pad_loading_panel", None)
+        pad = getattr(self, "_right_pad", None)
+        if panel is None or pad is None:
+            return
+        try:
+            panel.setGeometry(pad.rect())
+            panel.raise_()
+        except Exception:
+            pass
+
+    def _set_pad_boxes_visible(self, visible: bool):
+        for box in getattr(self, "_pad_boxes", []):
+            if box is None:
+                continue
+            try:
+                box.setVisible(visible)
+            except Exception:
+                pass
+
+    def _update_loading_panel_status(self, frontend_ok: bool, backend_ok: bool):
+        stopping = bool(getattr(self, "_restart_in_progress", False)) and getattr(self, "_restart_phase", "") == "stopping"
+        front = getattr(self, "_pad_loading_front_label", None)
+        back = getattr(self, "_pad_loading_back_label", None)
+        if front is not None:
+            if stopping:
+                state = "종료중"
+            else:
+                state = "준비완료" if frontend_ok else "대기중"
+            text = f"프론트엔드: {state}"
+            color = "#2ecc71" if state == "준비완료" else "#e74c3c"
+            front.setText(text)
+            front.setStyleSheet(f"color: {color}; font-size: 11px; font-weight: 700;")
+        if back is not None:
+            if stopping:
+                state = "종료중"
+            else:
+                state = "준비완료" if backend_ok else "대기중"
+            text = f"백엔드: {state}"
+            color = "#2ecc71" if state == "준비완료" else "#e74c3c"
+            back.setText(text)
+            back.setStyleSheet(f"color: {color}; font-size: 11px; font-weight: 700;")
+
+    def _update_pad_status_indicators(self, frontend_ok: bool, backend_ok: bool):
+        front_label = getattr(self, "_pad_status_front_label", None)
+        back_label = getattr(self, "_pad_status_back_label", None)
+        front_dot = getattr(self, "_pad_status_front_dot", None)
+        back_dot = getattr(self, "_pad_status_back_dot", None)
+        if front_dot is not None:
+            self._set_status_light(front_dot, frontend_ok)
+        if back_dot is not None:
+            self._set_status_light(back_dot, backend_ok)
+        if front_label is not None:
+            front_label.setStyleSheet("color: #e0e0e0; font-size: 11px; font-weight: 700;")
+        if back_label is not None:
+            back_label.setStyleSheet("color: #e0e0e0; font-size: 11px; font-weight: 700;")
+
+    def _update_status_lights(self):
+        try:
+            frontend_ok = self._is_frontend_up(timeout=0.3)
+        except Exception:
+            frontend_ok = False
+        try:
+            backend_ok = self._check_backend_ready(timeout=0.4)
+        except Exception:
+            backend_ok = False
+        try:
+            self._set_status_light(self._frontend_light, frontend_ok)
+            self._set_status_light(self._backend_light, backend_ok)
+        except Exception:
+            pass
+        self._update_loading_panel_status(frontend_ok, backend_ok)
+        self._update_pad_status_indicators(frontend_ok, backend_ok)
+
+    def _set_pill_buttons_enabled(self, enabled: bool):
+        for btn in (
+            getattr(self, "btn_open_browser", None),
+            getattr(self, "btn_quick_apply", None),
+            getattr(self, "btn_folder", None),
+            getattr(self, "btn_logs", None),
+            getattr(self, "btn_settings", None),
+            getattr(self, "btn_exit", None),
+        ):
+            if btn is None:
+                continue
+            try:
+                btn.setEnabled(enabled)
+            except Exception:
+                pass
+
+    def _set_pill_loading(self, loading: bool):
+        if loading == getattr(self, "_pill_loading", False):
+            return
+        self._pill_loading = loading
+        self._set_pill_buttons_enabled(not loading)
+        if loading:
+            exit_btn = getattr(self, "btn_exit", None)
+            if exit_btn is not None:
+                try:
+                    exit_btn.setEnabled(True)
+                except Exception:
+                    pass
+        if loading:
+            try:
+                if self._pill_anim:
+                    self._pill_anim.stop()
+            except Exception:
+                pass
+            try:
+                self._pad_desc_timer.stop()
+            except Exception:
+                pass
+            self._pad_desc_window_active = False
+            self._pill_expanded = True
+            self._apply_pill_width(self._pad_width, keep_right=False)
+            self._set_pad_boxes_visible(False)
+            panel = getattr(self, "_pad_loading_panel", None)
+            if panel is not None:
+                panel.setVisible(True)
+                self._position_loading_panel()
+            self._update_loading_panel_status(
+                self._is_frontend_up(timeout=0.3),
+                self._check_backend_ready(timeout=0.4),
+            )
+        else:
+            self._set_pad_boxes_visible(True)
+            panel = getattr(self, "_pad_loading_panel", None)
+            if panel is not None:
+                panel.setVisible(False)
+            self._pill_expanded = False
+            self._apply_pill_width(0, keep_right=False)
+        ring = getattr(self, "_pill_loading_ring", None)
+        if ring is not None:
+            ring.stop()
+
+    def _apply_pill_mask(self):
+        try:
+            pill = getattr(self, "pill", None)
+            if pill is None:
+                return
+            rect = pill.rect()
+            if rect.width() <= 0 or rect.height() <= 0:
+                return
+            radius = max(1, min(rect.width(), rect.height()) // 2)
+            path = QPainterPath()
+            path.addRoundedRect(rect, float(radius), float(radius))
+            region = QRegion(path.toFillPolygon().toPolygon())
+            pill.setMask(region)
+            origin = pill.mapTo(self, QPoint(0, 0))
+            self.setMask(region.translated(origin.x(), origin.y()))
+        except Exception:
+            pass
+
+    def _global_pos_from_event(self, event):
+        try:
+            return event.globalPosition().toPoint()
+        except Exception:
+            try:
+                return event.globalPos()
+            except Exception:
+                return None
+
+    def _register_drag_targets(self, *widgets):
+        for w in widgets:
+            if not w:
+                continue
+            try:
+                w.installEventFilter(self)
+            except Exception:
+                pass
+            try:
+                for child in w.findChildren(QWidget):
+                    child.installEventFilter(self)
+            except Exception:
+                pass
+
+    def _is_drag_target(self, obj) -> bool:
+        try:
+            for btn in (
+                getattr(self, "btn_folder", None),
+                getattr(self, "btn_logs", None),
+            ):
+                if btn is not None:
+                    try:
+                        if obj is btn or btn.isAncestorOf(obj):
+                            return False
+                    except Exception:
+                        pass
+            if obj is self or obj is getattr(self, "pill", None):
+                return True
+            pill = getattr(self, "pill", None)
+            if pill is not None:
+                try:
+                    if pill.isAncestorOf(obj):
+                        return True
+                except Exception:
+                    pass
+            cw = self.centralWidget()
+            if cw is not None and cw is obj:
+                return True
+        except Exception:
+            pass
+        return False
+
+    def eventFilter(self, obj, event):
+        try:
+            etype = event.type()
+        except Exception:
+            etype = None
+        if etype == QEvent.Resize:
+            try:
+                if isinstance(obj, QPushButton) and hasattr(obj, "_choice_indicator"):
+                    self._position_choice_indicator(obj)
+            except Exception:
+                pass
+        if etype in (QEvent.Enter, QEvent.HoverEnter, QEvent.Leave, QEvent.HoverLeave):
+            btn_entry = self._pill_button_entry(obj)
+            if btn_entry is not None:
+                idx, btn = btn_entry
+                if etype in (QEvent.Enter, QEvent.HoverEnter):
+                    self._start_pill_hover_timer(idx, btn)
+                else:
+                    self._clear_pill_hover(btn)
+            self._update_pad_description_mode()
+            if etype in (QEvent.Enter, QEvent.HoverEnter):
+                if self._cursor_over_pill(strict=True):
+                    self._animate_pill(True)
+            else:
+                if not self._cursor_over_pill(strict=True):
+                    self._animate_pill(False)
+        if self._is_drag_target(obj):
+            if etype == QEvent.MouseButtonPress:
+                try:
+                    if event.button() == Qt.LeftButton:
+                        gp = self._global_pos_from_event(event)
+                        if gp:
+                            self._dragging = True
+                            self._drag_offset = gp - self.pos()
+                            self._floating_user_moved = True
+                            return False  # allow clicks to propagate
+                except Exception:
+                    pass
+            elif etype == QEvent.MouseMove:
+                if self._dragging:
+                    gp = self._global_pos_from_event(event)
+                    if gp:
+                        self.move(gp - self._drag_offset)
+                        return True
+            elif etype in (QEvent.MouseButtonRelease, QEvent.MouseButtonDblClick):
+                if self._dragging:
+                    self._dragging = False
+                    try:
+                        self._anchor_left = self.x()
+                    except Exception:
+                        pass
+                    return False
+            elif etype in (QEvent.Enter, QEvent.HoverEnter):
+                try:
+                    self._collapse_timer.stop()
+                except Exception:
+                    pass
+                if self._cursor_over_pill(strict=True):
+                    self._animate_pill(True)
+            elif etype in (QEvent.Leave, QEvent.HoverLeave):
+                try:
+                    self._collapse_timer.stop()
+                except Exception:
+                    pass
+                if not self._cursor_over_pill(strict=True):
+                    self._animate_pill(False)
+        return super().eventFilter(obj, event)
+
     def _ensure_main_window_visible(self):
         if self._main_visible:
+            self._position_floating_bar()
+            if not self.isVisible():
+                self.show()
             return
-        if self._fullscreen_pref:
-            self.showFullScreen()
-        else:
-            self.showMaximized()
+        self._position_floating_bar()
+        self.show()
+        try:
+            self.raise_()
+        except Exception:
+            pass
         self._main_visible = True
 
     def _close_log_windows(self):
@@ -586,13 +2925,24 @@ class MainWindow(QMainWindow):
         self.hide()
         self._close_log_windows()
         self._stop_inline_logs()
+        self._restart_in_progress = True
+        self._restart_phase = "stopping"
+        self._show_preload_dialog("Easy Trainer 종료중...", auto_open_new=False)
+        try:
+            self._update_loading_panel_status(
+                self._is_frontend_up(timeout=0.3),
+                self._check_backend_ready(timeout=0.4),
+            )
+        except Exception:
+            pass
         if not docker_compose_available() or not self._is_valid_project_root(self.project_root):
             QApplication.instance().quit()
             return
-        def _after_stop(_code: int, *_):
+        def _after_down(_code: int, *_):
             QApplication.instance().quit()
-        self.append_log("[EXIT] docker compose stop service ...")
-        self.run_compose(["stop", "service"], on_finish=_after_stop)
+        self._run_backend_kill()
+        self.append_log("[EXIT] docker compose down --remove-orphans --volumes ...")
+        self.run_compose(["down", "--remove-orphans", "--volumes"], on_finish=_after_down)
 
     def run_compose_blocking(self, args: list[str]) -> int:
         program, prefix = get_compose_cmd()
@@ -678,13 +3028,11 @@ class MainWindow(QMainWindow):
         page_install = QWidget(); v3 = QVBoxLayout()
         log = QTextEdit(); log.setReadOnly(True)
         bar = QProgressBar(); bar.setRange(0, 100); bar.setValue(0); bar.setTextVisible(True); bar.setFormat("0.00%")
-        # 설치 상태: 왼쪽은 고정 문구, 오른쪽은 단계 설명 + (N/7)
+        # 설치 상태: 왼쪽 문구만 표시
         status_row = QHBoxLayout(); status_row.setContentsMargins(0,0,0,0); status_row.setSpacing(6)
         lbl_status_left = QLabel("설치 중...")
-        lbl_status_right = QLabel("시스템을 준비하는 중입니다 (1/7)")
         status_row.addWidget(lbl_status_left)
         status_row.addStretch(1)
-        status_row.addWidget(lbl_status_right)
         progress_row = QHBoxLayout(); progress_row.setContentsMargins(0,0,0,0); progress_row.setSpacing(6)
         lbl_elapsed = QLabel("경과 00:00")
         lbl_remaining = QLabel("잔여 --:--")
@@ -826,26 +3174,6 @@ class MainWindow(QMainWindow):
                 return f"{h:02d}:{m:02d}:{s:02d}"
             return f"{m:02d}:{s:02d}"
 
-        # Right-side status messages in "~하는 중입니다" style
-        stage_messages = [
-            "시스템을 준비하는 중입니다",
-            "로봇 기능을 구성하는 중입니다",
-            "인터페이스를 설치하는 중입니다",
-            "AI 실행 환경을 구성하는 중입니다",
-            "최적화된 실행 환경을 구성하는 중입니다",
-            "하드웨어 장치를 구성하는 중입니다",
-            "프로그램 구성을 마무리하는 중입니다",
-        ]
-        current_stage = {"idx": 1}
-
-        def _advance_stage(new_stage: int):
-            if new_stage > current_stage["idx"] and 1 <= new_stage <= len(stage_messages):
-                current_stage["idx"] = new_stage
-                try:
-                    lbl_status_right.setText(f"{stage_messages[new_stage-1]} ({new_stage}/7)")
-                except Exception:
-                    pass
-
         def _current_percent(force_complete: bool = False) -> float:
             if force_complete or progress_state["complete"]:
                 return 100.0
@@ -885,6 +3213,10 @@ class MainWindow(QMainWindow):
             progress_state["lines"] = progress_state["target"]
             _update_progress_display(force_complete=True)
             try:
+                lbl_status_left.setText("설치 완료")
+            except Exception:
+                pass
+            try:
                 progress_timer.stop()
             except Exception:
                 pass
@@ -894,7 +3226,6 @@ class MainWindow(QMainWindow):
         def on_build_finished(code: int):
             progress_state["tracking"] = False
             if code == 0:
-                _advance_stage(6)
                 run_post_install_steps()
             else:
                 try:
@@ -918,12 +3249,6 @@ class MainWindow(QMainWindow):
                         log.append(text.rstrip("\n"))
                         line_count = len(text.splitlines())
                         _increment_progress(line_count)
-                        import re
-                        m = re.search(r"Step\s+(\d+)\s*/\s*(\d+)", text)
-                        if m:
-                            cur = int(m.group(1)); total = max(1, int(m.group(2)))
-                            est_stage = max(1, min(6, int((cur - 1) * 6 / total) + 1))
-                            _advance_stage(est_stage)
                 except Exception:
                     pass
             proc.readyReadStandardOutput.connect(lambda: _append(False))
@@ -1007,9 +3332,8 @@ class MainWindow(QMainWindow):
                 progress_timer.start()
             except Exception:
                 pass
-            current_stage["idx"] = 1
             try:
-                lbl_status_right.setText(f"{stage_messages[0]} (1/7)")
+                lbl_status_left.setText("설치 중...")
             except Exception:
                 pass
 
@@ -1020,8 +3344,7 @@ class MainWindow(QMainWindow):
                 _start_docker_build()
 
         def run_post_install_steps():
-            # Move to stage 7 (100% cap) and run post steps in a single container session
-            _advance_stage(7)
+            # Run post steps in a single container session
 
             # Post-install strategy:
             # 1) Run migrations in an ephemeral container (no concurrent backend).
@@ -1215,51 +3538,73 @@ class MainWindow(QMainWindow):
             return False
 
     def update_buttons(self):
-        has_root = self._is_valid_project_root(self.project_root)
+        if getattr(self, "_pill_loading", False):
+            try:
+                self.btn_quick_apply.setEnabled(False)
+            except Exception:
+                pass
+            return
         valid_src = self._is_valid_dev_src(self.dev_src_root)
-        if not has_root:
-            placeholder = "프로젝트 루트를 먼저 설정하세요"
-        elif not valid_src:
-            placeholder = "원본 프로젝트 경로 (클릭하여 선택)"
-        else:
-            placeholder = ""
         try:
-            self.project_path_display.setPlaceholderText(placeholder)
+            self.btn_quick_apply.setEnabled(True)
+            if not valid_src:
+                self.btn_quick_apply.setToolTip("원본 프로젝트 경로를 먼저 선택하세요.")
         except Exception:
             pass
-        try:
-            self.btn_quick_apply.setEnabled(valid_src)
-        except Exception:
-            pass
+        self._update_open_ui_tooltip()
+        self._update_pad_choice_tooltips()
 
     def update_state_label(self):
-        parts = []
-        if self.is_installed():
-            parts.append("설치 상태: 설치됨")
-        else:
-            parts.append("설치 상태: 미설치")
-
+        installed = self.is_installed()
         running = self._get_running_services()
-        if running:
-            parts.append("실행 중: " + ", ".join(running))
-        else:
-            parts.append("실행 중: 없음")
-
+        loading = getattr(self, "_pill_loading", False)
+        status_parts = []
+        status_parts.append("설치됨" if installed else "미설치")
+        status_parts.append("실행 중" if running else "중지됨")
+        text = " · ".join(status_parts)
+        try:
+            self.state_label.setText(text)
+        except Exception:
+            pass
+        try:
+            self.btn_open_browser.setEnabled(bool(running) and not loading)
+        except Exception:
+            pass
+        if loading:
+            try:
+                self.btn_quick_apply.setEnabled(False)
+            except Exception:
+                pass
         if self.status_label.isVisible():
-            self.status_label.setText(" | ".join(parts))
-        self.update_buttons()
+            self.status_label.setText(text)
+        if not loading:
+            self.update_buttons()
+        self._position_floating_bar()
 
     def update_dev_src_label(self):
         self.update_project_label()
 
     def update_project_label(self):
-        text = str(self.dev_src_root) if self.dev_src_root else ""
+        full_text = str(self.dev_src_root) if self.dev_src_root else ""
+        display = full_text
+        if not display:
+            display = "원본 경로 미설정"
+        elif len(display) > 28:
+            display = "..." + display[-25:]
         try:
-            self.project_path_display.setText(text)
-            tooltip = text or "원본 경로 미설정 - 더블클릭하여 선택하세요."
-            self.project_path_display.setToolTip(tooltip)
+            self.path_hint_label.setText(display)
+            self.path_hint_label.setToolTip(full_text or "원본 경로 미설정 - 클릭하여 선택하세요.")
         except Exception:
             pass
+        pad_label = getattr(self, "pad_path_label", None)
+        if pad_label is not None:
+            try:
+                pad_display = str(self.dev_src_root) if self.dev_src_root else "미정"
+                pad_label.setText(pad_display if pad_display else "미정")
+                pad_label.setToolTip(full_text or "원본 경로 미설정 - 클릭하여 선택하세요.")
+            except Exception:
+                pass
+        self._position_floating_bar()
 
     def _is_valid_project_root(self, path: Path) -> bool:
         try:
@@ -1454,14 +3799,14 @@ class MainWindow(QMainWindow):
                 pass
             return False
 
-    def _ensure_project_root_writable(self, force_auth: bool = False) -> bool:
+    def _ensure_project_root_writable(self, force_auth: bool = False, allow_auth: bool = True) -> bool:
         if not force_auth and getattr(self, "_project_root_writable_fixed", False):
             return True
         path = getattr(self, "project_root", None)
         if not path:
             return False
         if force_auth:
-            if self._run_pkexec_chown(path):
+            if allow_auth and self._run_pkexec_chown(path):
                 self._project_root_writable_fixed = True
                 return True
             return False
@@ -1482,8 +3827,42 @@ class MainWindow(QMainWindow):
         if not needs_escalation:
             self._project_root_writable_fixed = True
             return True
-        if self._run_pkexec_chown(path):
+        if allow_auth and self._run_pkexec_chown(path):
             self._project_root_writable_fixed = True
+            return True
+        return False
+
+    def _ensure_app_home_writable(self, force_auth: bool = False, allow_auth: bool = True) -> bool:
+        if not force_auth and getattr(self, "_app_home_writable_fixed", False):
+            return True
+        path = APP_HOME
+        if force_auth:
+            if allow_auth and self._run_pkexec_chown(path):
+                self._app_home_writable_fixed = True
+                return True
+            return False
+        needs_escalation = False
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            test_file = path / ".ec_write_test"
+            test_file.write_text("ok")
+            try:
+                test_file.unlink()
+            except Exception:
+                pass
+        except Exception:
+            needs_escalation = True
+        try:
+            cfg_path = CONFIG_FILE
+            if cfg_path.exists() and not os.access(cfg_path, os.W_OK):
+                needs_escalation = True
+        except Exception:
+            needs_escalation = True
+        if not needs_escalation:
+            self._app_home_writable_fixed = True
+            return True
+        if allow_auth and self._run_pkexec_chown(path):
+            self._app_home_writable_fixed = True
             return True
         return False
 
@@ -1508,6 +3887,50 @@ class MainWindow(QMainWindow):
             return res.returncode == 0
         except Exception:
             return False
+
+    def _run_pkexec_chown_paths(self, paths: list[Path | None]) -> bool:
+        if not shutil.which("pkexec"):
+            return False
+        try:
+            user = pwd.getpwuid(os.getuid()).pw_name
+            group = grp.getgrgid(os.getgid()).gr_name
+            uniq: list[Path] = []
+            for path in paths:
+                if not path:
+                    continue
+                if path not in uniq:
+                    uniq.append(path)
+            if not uniq:
+                return True
+            quoted = " ".join(shlex.quote(str(p)) for p in uniq)
+            cmd = "mkdir -p %s && chown -R %s:%s %s" % (
+                quoted,
+                shlex.quote(user),
+                shlex.quote(group),
+                quoted,
+            )
+            res = subprocess.run(
+                ["pkexec", "/bin/sh", "-c", cmd],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            return res.returncode == 0
+        except Exception:
+            return False
+
+    def _ensure_app_and_project_writable(self, force_auth: bool = False) -> bool:
+        app_ok = self._ensure_app_home_writable(force_auth=False, allow_auth=False)
+        proj_ok = self._ensure_project_root_writable(force_auth=False, allow_auth=False)
+        if app_ok and proj_ok:
+            return True
+        if not force_auth:
+            return False
+        if self._run_pkexec_chown_paths([APP_HOME, getattr(self, "project_root", None)]):
+            self._app_home_writable_fixed = True
+            self._project_root_writable_fixed = True
+            return True
+        return False
 
     def _auto_sync_on_start(self):
         if not self._is_valid_dev_src(self.dev_src_root):
@@ -1726,7 +4149,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "오류", "선택한 설치 옵션에 맞는 docker-compose 템플릿을 찾을 수 없습니다.")
             return
         self._clear_conflicting_containers()
-        self._show_preload_dialog("서비스 준비중...")
+        self._show_preload_dialog("Easy Trainer 준비중...")
         self._ensure_service_running("START", restart_if_running=False, on_finish=self._on_start_finished)
 
     def _on_start_finished(self, exit_code: int, *_):
@@ -1745,6 +4168,7 @@ class MainWindow(QMainWindow):
         if not docker_compose_available():
             QMessageBox.critical(self, "오류", self._compose_help_text())
             return
+        self._run_backend_kill()
         self.append_log("[STOP] docker compose stop service ...")
         self.run_compose(["stop", "service"], on_finish=self._on_stop_finished)
 
@@ -1759,7 +4183,14 @@ class MainWindow(QMainWindow):
         if not self._is_valid_project_root(self.project_root):
             QMessageBox.warning(self, "프로젝트 필요", "프로젝트가 아직 준비되지 않았습니다. 설치를 먼저 진행하세요.")
             return
-        self.load_ui()
+        self.load_ui(open_mode=self._open_ui_mode)
+
+    def _on_exit_action(self):
+        action = getattr(self, "_exit_action", "EXIT")
+        if action == "RESTART":
+            self._restart_service_container()
+            return
+        self.close()
 
     def on_select_dev_src(self):
         folder = QFileDialog.getExistingDirectory(self, "원본 프로젝트 루트 선택 (src/backend, src/ui 포함)", str(self.dev_src_root or Path.home()))
@@ -1784,7 +4215,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "오류", "선택한 설치 옵션에 맞는 docker-compose 템플릿을 찾을 수 없습니다.")
             return
         self.append_log("[SYNC] 완료. 서비스 재시작 중...")
-        self._show_preload_dialog("서비스 준비중...")
+        self._show_preload_dialog("Easy Trainer 준비중...")
         def _after_restart(exit_code: int, *_):
             self.append_log("[RESTART] 완료")
             if exit_code == 0:
@@ -1900,32 +4331,34 @@ class MainWindow(QMainWindow):
                 self.append_log(f"[SYNC][ERROR] {e}")
             return False
 
-    def _show_preload_dialog(self, message: str):
-        if self._preload_dialog is None:
-            self._preload_dialog = ServiceSplash(self)
-            self._preload_dialog.set_restart_handler(self._on_restart_button_clicked)
-        text = message or "서비스 준비중..."
-        self._preload_dialog.set_message(text)
-        self._preload_dialog.set_detail("프론트엔드: 대기중 | 백엔드: 대기중")
-        self._preload_dialog.show_restart(False)
-        self._preload_dialog.show()
-        self._preload_dialog.raise_()
+    def _show_preload_dialog(self, message: str, auto_open_new: bool | None = None):
+        text = message or "Easy Trainer 준비중..."
+        self._preload_message = text
+        self._preload_detail = "프론트엔드: 대기중 | 백엔드: 대기중"
+        if auto_open_new is None:
+            auto_open_new = True
+        self._preload_auto_open_new = auto_open_new
+        title = getattr(self, "_pad_loading_title", None)
+        if title is not None:
+            title.setText(text)
+        self._set_pill_loading(True)
+        self._ensure_main_window_visible()
         self._start_inline_logs()
 
     def _set_preload_detail(self, text: str):
-        if self._preload_dialog:
-            self._preload_dialog.set_detail(text)
-            # Show restart button if waiting long (timer handles when to enable)
-            if self._restart_btn_timer is None:
-                self._start_restart_timer()
+        self._preload_detail = text
+        # Show restart button if waiting long (timer handles when to enable)
+        if self._restart_btn_timer is None:
+            self._start_restart_timer()
 
     def _hide_preload_dialog(self, ready: bool = False):
         self._stop_ready_timer()
         self._stop_ready_timeout()
         self._stop_restart_timer()
         self._stop_inline_logs()
-        if self._preload_dialog:
-            self._preload_dialog.hide()
+        self._restart_in_progress = False
+        self._restart_phase = ""
+        self._set_pill_loading(False)
         if ready:
             self._ensure_main_window_visible()
 
@@ -2015,7 +4448,6 @@ class MainWindow(QMainWindow):
                 pass
             return
         if self.process is not None and self.process.state() != QProcess.NotRunning:
-            self.append_log("[RESTART][INFO] 다른 작업이 실행 중입니다. 완료 후 다시 시도하세요.")
             return
         try:
             if self._preload_dialog:
@@ -2029,12 +4461,21 @@ class MainWindow(QMainWindow):
         self._show_preload_dialog("서비스 재시작 중...")
         self._set_preload_detail("서비스 재시작 중...")
         self._clear_conflicting_containers()
-        seq = [
-            ["stop", "service"],
-            ["rm", "-f", "service"],
-            ["up", "-d", "service"],
-        ]
-        def _after(ec: int, *_):
+        self._restart_in_progress = True
+        self._restart_phase = "stopping"
+        self._run_backend_kill()
+
+        def _after_down(ec: int, *_):
+            if ec != 0:
+                self.append_log(f"[RESTART][ERROR] 종료 실패 (code={ec})")
+                self._enable_restart_button()
+                self._hide_preload_dialog()
+                return
+            self._restart_phase = "starting"
+            self.append_log("[RESTART] 컨테이너를 다시 시작합니다...")
+            self.run_compose(["up", "-d", "service"], on_finish=_after_up)
+
+        def _after_up(ec: int, *_):
             if ec == 0:
                 self.append_log("[RESTART] 완료. 준비 상태를 확인합니다.")
                 self._wait_for_services_ready(self.load_ui)
@@ -2042,7 +4483,9 @@ class MainWindow(QMainWindow):
                 self.append_log(f"[RESTART][ERROR] 재시작 실패 (code={ec})")
                 self._enable_restart_button()
                 self._hide_preload_dialog()
-        self._run_compose_sequence(seq, on_finish=_after)
+
+        self.append_log("[RESTART] docker compose down --remove-orphans --volumes ...")
+        self.run_compose(["down", "--remove-orphans", "--volumes"], on_finish=_after_down)
 
     def _resolve_ready_timeout_ms(self) -> int:
         # Allow multiple env keys; treat small numbers as seconds for convenience
@@ -2066,25 +4509,29 @@ class MainWindow(QMainWindow):
                 continue
         return 120000  # default 120s for slower cold starts
 
-    def _wait_for_services_ready(self, on_ready=None):
-        if on_ready is None:
+    def _wait_for_services_ready(self, on_ready=None, auto_open_new: bool | None = None):
+        if auto_open_new is None:
+            auto_open_new = getattr(self, "_preload_auto_open_new", True)
+        if on_ready is None and auto_open_new:
             on_ready = self.load_ui
         self._stop_ready_timer()
         self._stop_ready_timeout()
-        self._show_preload_dialog("서비스 준비중...")
+        self._show_preload_dialog("Easy Trainer 준비중...", auto_open_new=auto_open_new)
 
         def poll():
             backend_ok = self._check_backend_ready()
-            frontend_ok = self._is_frontend_up()
+            frontend_ok = self._is_frontend_ready()
             detail = f"프론트엔드: {'준비완료' if frontend_ok else '대기중'} | 백엔드: {'준비완료' if backend_ok else '대기중'}"
             self._set_preload_detail(detail)
-            if backend_ok:
+            if backend_ok and frontend_ok:
                 self._stop_ready_timer()
                 self._stop_ready_timeout()
-                self._stop_inline_logs()
                 self._hide_preload_dialog(ready=True)
                 try:
-                    on_ready()
+                    if auto_open_new:
+                        self.load_ui(open_mode="NEW")
+                    elif on_ready is not None:
+                        on_ready()
                 except Exception:
                     pass
 
@@ -2104,26 +4551,110 @@ class MainWindow(QMainWindow):
             self._ready_timeout_timer.timeout.connect(self._on_ready_timeout)
             self._ready_timeout_timer.start()
 
-    def _check_backend_ready(self) -> bool:
+    def _check_backend_ready(self, timeout: float = 1.0) -> bool:
         try:
             from urllib import request
             req = request.Request("http://127.0.0.1:5000/api/healthz", method="GET")
-            with request.urlopen(req, timeout=1.0):
+            with request.urlopen(req, timeout=timeout):
                 return True
         except Exception:
             return False
 
-    def _is_frontend_up(self) -> bool:
+    def _is_frontend_up(self, timeout: float = 0.5) -> bool:
         try:
             from urllib.parse import urlparse
             import socket
             u = urlparse(FRONTEND_URL)
             host = u.hostname or "localhost"
             port = u.port or (443 if (u.scheme or "http").lower() == "https" else 80)
-            with socket.create_connection((host, port), timeout=0.5):
+            with socket.create_connection((host, port), timeout=timeout):
                 return True
         except Exception:
             return False
+
+    def _is_frontend_ready(self, timeout: float = 0.8) -> bool:
+        try:
+            from urllib import request
+            from urllib.parse import urljoin
+            import re
+            req = request.Request(
+                FRONTEND_URL,
+                method="GET",
+                headers={"Cache-Control": "no-cache"},
+            )
+            with request.urlopen(req, timeout=timeout) as resp:
+                status = getattr(resp, "status", 200)
+                if status >= 400:
+                    return False
+                body = resp.read(65536)
+        except Exception:
+            return False
+        if not body:
+            return False
+        text = body.decode("utf-8", errors="ignore")
+        lower = text.lower()
+        if "<html" not in lower:
+            return False
+        sources: list[str] = []
+        for match in re.finditer(r"<script[^>]+src=[\"']([^\"']+)[\"']", text, re.IGNORECASE):
+            src = match.group(1).strip()
+            if not src or src.startswith("data:"):
+                continue
+            if src not in sources:
+                sources.append(src)
+        if not sources:
+            if "q-app" in lower or "quasar" in lower or "@vite" in lower or "type=\"module\"" in lower:
+                return True
+            return len(lower.strip()) > 200
+        for src in sources[:2]:
+            url = urljoin(FRONTEND_URL, src)
+            try:
+                req = request.Request(
+                    url,
+                    method="GET",
+                    headers={"Cache-Control": "no-cache", "Range": "bytes=0-1024"},
+                )
+                with request.urlopen(req, timeout=timeout) as resp:
+                    status = getattr(resp, "status", 200)
+                    if status >= 400:
+                        return False
+                    chunk = resp.read(64)
+                    if not chunk:
+                        return False
+            except Exception:
+                return False
+        return True
+
+    def _is_ui_ready(self, frontend_timeout: float = 0.8, backend_timeout: float = 0.4) -> bool:
+        if not self._is_frontend_ready(timeout=frontend_timeout):
+            return False
+        return self._check_backend_ready(timeout=backend_timeout)
+
+    def _run_backend_kill(self):
+        """Best-effort: run kill.sh inside the service container to clean ROS/backend processes."""
+        container = "easy_collector_service"
+        if "service" not in self._get_running_services():
+            return
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["docker", "exec", "-T", container, "bash", "-lc", "/root/src/kill.sh"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            msg = result.stdout.strip() if result.stdout else ""
+            if result.returncode == 0:
+                self.append_log("[STOP] kill.sh executed inside container.")
+                if msg:
+                    self.append_log(f"[STOP][kill.sh] {msg}")
+            else:
+                err = result.stderr.strip() if result.stderr else ""
+                self.append_log(f"[STOP][WARN] kill.sh returned {result.returncode}: {err or 'no output'}")
+        except FileNotFoundError:
+            self.append_log("[STOP][WARN] Docker not found; skip kill.sh.")
+        except Exception as e:
+            self.append_log(f"[STOP][WARN] kill.sh failed: {e}")
 
     def _collect_docker_logs(self, container: str, tail: int = 200) -> str:
         try:
@@ -2234,45 +4765,456 @@ class MainWindow(QMainWindow):
             self.append_log("[STOP] docker compose stop service ...")
             self.run_compose(["stop", "service"], on_finish=self._on_stop_finished)
 
-    def load_ui(self):
-        url = QUrl(FRONTEND_URL)
-
-        def _open():
-            if HAS_WEBENGINE and self.web_view is not None:
-                self.web_view.setUrl(url)
-            else:
-                QDesktopServices.openUrl(url)
-            self.append_log(f"[WEB] Open {url.toString()}")
-
-        if self._is_frontend_up():
-            _open()
+    def _spawn_browser(self, program: str, args: list[str]) -> bool:
+        try:
+            proc = subprocess.Popen(
+                [program, *args],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
             try:
-                self._update_nav_buttons()
+                proc.wait(timeout=0.2)
+            except subprocess.TimeoutExpired:
+                return True
+            if proc.returncode == 0:
+                return True
+            try:
+                self.append_log(f"[WEB][ERROR] Browser exited ({proc.returncode}): {program}")
             except Exception:
                 pass
+            return False
+        except Exception as e:
+            try:
+                self.append_log(f"[WEB][ERROR] Browser spawn failed: {program} ({e})")
+            except Exception:
+                pass
+            return False
+
+    def _strip_browser_placeholders(self, args: list[str]) -> list[str]:
+        placeholders = ("%u", "%U", "%f", "%F", "%s", "%S", "%i", "%c", "%k")
+        cleaned: list[str] = []
+        for arg in args:
+            if any(ph in arg for ph in placeholders):
+                continue
+            cleaned.append(arg)
+        return cleaned
+
+    def _strip_new_window_args(self, args: list[str]) -> list[str]:
+        return [arg for arg in args if arg not in ("--new-window", "-new-window")]
+
+    def _with_new_window_args(self, program: str, args: list[str]) -> list[str]:
+        for flag in ("--new-window", "-new-window"):
+            if flag in args:
+                return args
+        base = Path(program).name
+        known = {
+            "google-chrome",
+            "google-chrome-stable",
+            "chromium",
+            "chromium-browser",
+            "microsoft-edge",
+            "microsoft-edge-stable",
+            "brave-browser",
+            "firefox",
+        }
+        if base in known:
+            return ["--new-window", *args]
+        return args
+
+    def _with_new_tab_args(self, program: str, args: list[str]) -> list[str]:
+        for flag in ("--new-tab", "-new-tab"):
+            if flag in args:
+                return args
+        base = Path(program).name
+        if base in ("firefox", "firefox-bin"):
+            return ["-new-tab", *args]
+        if base in (
+            "google-chrome",
+            "google-chrome-stable",
+            "chromium",
+            "chromium-browser",
+            "microsoft-edge",
+            "microsoft-edge-stable",
+            "brave-browser",
+            "brave",
+        ):
+            return ["--new-tab", *args]
+        return args
+
+    def _parse_browser_env(self, value: str) -> tuple[str, list[str]] | None:
+        if not value:
+            return None
+        for entry in value.split(":"):
+            entry = entry.strip()
+            if not entry:
+                continue
+            try:
+                parts = shlex.split(entry)
+            except Exception:
+                parts = entry.split()
+            if not parts:
+                continue
+            cmd = parts[0]
+            args = self._strip_browser_placeholders(parts[1:])
+            if shutil.which(cmd) or Path(cmd).is_file():
+                return cmd, args
+        return None
+
+    def _read_desktop_exec(self, desktop_id: str) -> tuple[str, list[str]] | None:
+        if not desktop_id.endswith(".desktop"):
+            return None
+        candidates = [
+            Path.home() / ".local" / "share" / "applications" / desktop_id,
+            Path("/usr/share/applications") / desktop_id,
+        ]
+        for path in candidates:
+            try:
+                if not path.exists():
+                    continue
+                for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                    if not line.startswith("Exec="):
+                        continue
+                    cmdline = line[len("Exec="):].strip()
+                    if not cmdline:
+                        continue
+                    parts = shlex.split(cmdline)
+                    if not parts:
+                        continue
+                    cmd = parts[0]
+                    args = self._strip_browser_placeholders(parts[1:])
+                    return cmd, args
+            except Exception:
+                continue
+        return None
+
+    def _resolve_default_browser_cmd(self) -> tuple[str, list[str]] | None:
+        env_browser = os.environ.get("BROWSER", "").strip()
+        parsed = self._parse_browser_env(env_browser)
+        if parsed:
+            return parsed
+        desktop_id = ""
+        try:
+            if shutil.which("xdg-settings"):
+                res = subprocess.run(
+                    ["xdg-settings", "get", "default-web-browser"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                desktop_id = (res.stdout or "").strip()
+        except Exception:
+            desktop_id = ""
+        if not desktop_id:
+            try:
+                if shutil.which("xdg-mime"):
+                    res = subprocess.run(
+                        ["xdg-mime", "query", "default", "x-scheme-handler/http"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    desktop_id = (res.stdout or "").strip()
+            except Exception:
+                desktop_id = ""
+        if desktop_id:
+            resolved = self._read_desktop_exec(desktop_id)
+            if resolved:
+                cmd, args = resolved
+                if shutil.which(cmd) or Path(cmd).is_file():
+                    return cmd, args
+        return None
+
+    def _browser_process_candidates(self, program: str) -> list[str]:
+        base = Path(program).name
+        aliases = {
+            "google-chrome": ["chrome", "google-chrome", "google-chrome-stable"],
+            "google-chrome-stable": ["chrome", "google-chrome", "google-chrome-stable"],
+            "chromium": ["chromium", "chromium-browser"],
+            "chromium-browser": ["chromium", "chromium-browser"],
+            "microsoft-edge": ["msedge", "microsoft-edge", "microsoft-edge-stable"],
+            "microsoft-edge-stable": ["msedge", "microsoft-edge", "microsoft-edge-stable"],
+            "brave-browser": ["brave", "brave-browser"],
+            "firefox": ["firefox"],
+        }
+        return aliases.get(base, [base])
+
+    def _fallback_browser_programs(self) -> list[str]:
+        candidates = [
+            "google-chrome",
+            "google-chrome-stable",
+            "chromium",
+            "chromium-browser",
+            "microsoft-edge",
+            "microsoft-edge-stable",
+            "brave-browser",
+            "firefox",
+        ]
+        return [c for c in candidates if shutil.which(c)]
+
+    def _open_url_fallback_browser(self, url: QUrl, new_window: bool) -> bool:
+        url_str = url.toString()
+        for program in self._fallback_browser_programs():
+            args: list[str] = []
+            if new_window:
+                args = self._with_new_window_args(program, args)
+            else:
+                args = self._with_new_tab_args(program, args)
+            if self._spawn_browser(program, args + [url_str]):
+                return True
+        return False
+
+    def _running_browser_cmd(self) -> tuple[str, list[str]] | None:
+        cmd_env = os.environ.get("EASYCOLLECTOR_BROWSER_CMD", "").strip()
+        args_env = os.environ.get("EASYCOLLECTOR_BROWSER_ARGS", "").strip()
+        if cmd_env and self._is_any_process_running(self._browser_process_candidates(cmd_env)):
+            args = shlex.split(args_env) if args_env else []
+            args = self._strip_browser_placeholders(args)
+            args = self._strip_new_window_args(args)
+            args = self._with_new_tab_args(cmd_env, args)
+            return cmd_env, args
+        resolved = self._resolve_default_browser_cmd()
+        if resolved:
+            program, args = resolved
+            if self._is_any_process_running(self._browser_process_candidates(program)):
+                args = self._strip_new_window_args(args)
+                args = self._with_new_tab_args(program, args)
+                return program, args
+        for program in self._fallback_browser_programs():
+            if self._is_any_process_running(self._browser_process_candidates(program)):
+                args = self._with_new_tab_args(program, [])
+                return program, args
+        return None
+
+    def _is_any_process_running(self, names: list[str]) -> bool:
+        if not names:
+            return False
+        if shutil.which("pgrep"):
+            for name in names:
+                try:
+                    res = subprocess.run(
+                        ["pgrep", "-x", name],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        check=False,
+                    )
+                    if res.returncode == 0:
+                        return True
+                except Exception:
+                    continue
+        try:
+            proc_root = Path("/proc")
+            for pid in proc_root.iterdir():
+                if not pid.name.isdigit():
+                    continue
+                try:
+                    comm = (pid / "comm").read_text(encoding="utf-8", errors="ignore").strip()
+                except Exception:
+                    continue
+                if comm in names:
+                    return True
+        except Exception:
+            pass
+        return False
+
+    def _is_primary_browser_running(self) -> bool:
+        cmd_env = os.environ.get("EASYCOLLECTOR_BROWSER_CMD", "").strip()
+        if cmd_env:
+            names = self._browser_process_candidates(cmd_env)
+            return self._is_any_process_running(names)
+        resolved = self._resolve_default_browser_cmd()
+        if not resolved:
+            return False
+        program, _args = resolved
+        return self._is_any_process_running(self._browser_process_candidates(program))
+
+    def _open_url_smart(self, url: QUrl) -> bool:
+        url_str = url.toString()
+        cmd_env = os.environ.get("EASYCOLLECTOR_BROWSER_CMD", "").strip()
+        args_env = os.environ.get("EASYCOLLECTOR_BROWSER_ARGS", "").strip()
+        running = self._is_primary_browser_running()
+        if cmd_env:
+            args = shlex.split(args_env) if args_env else []
+            args = self._strip_browser_placeholders(args)
+            if running:
+                args = self._strip_new_window_args(args)
+            else:
+                args = self._with_new_window_args(cmd_env, args)
+            if self._spawn_browser(cmd_env, args + [url_str]):
+                return True
+        resolved = self._resolve_default_browser_cmd()
+        if resolved:
+            program, args = resolved
+            if running:
+                args = self._strip_new_window_args(args)
+            else:
+                args = self._with_new_window_args(program, args)
+            if self._spawn_browser(program, args + [url_str]):
+                return True
+        if running:
+            return self._open_url_current_window(url)
+        return self._open_url_new_window(url)
+
+    def _open_url_new_window(self, url: QUrl) -> bool:
+        url_str = url.toString()
+        cmd_env = os.environ.get("EASYCOLLECTOR_BROWSER_CMD", "").strip()
+        args_env = os.environ.get("EASYCOLLECTOR_BROWSER_ARGS", "").strip()
+        if cmd_env:
+            args = shlex.split(args_env) if args_env else []
+            args = self._strip_browser_placeholders(args)
+            args = self._with_new_window_args(cmd_env, args)
+            if self._spawn_browser(cmd_env, args + [url_str]):
+                return True
+        resolved = self._resolve_default_browser_cmd()
+        if resolved:
+            program, args = resolved
+            args = self._with_new_window_args(program, args)
+            if self._spawn_browser(program, args + [url_str]):
+                return True
+        if self._open_url_fallback_browser(url, new_window=True):
+            return True
+        return self._open_url_current_window(url)
+
+    def _open_url_current_window(self, url: QUrl) -> bool:
+        url_str = url.toString()
+        running = self._running_browser_cmd()
+        if running:
+            program, args = running
+            if self._spawn_browser(program, args + [url_str]):
+                return True
+        cmd_env = os.environ.get("EASYCOLLECTOR_BROWSER_CMD", "").strip()
+        args_env = os.environ.get("EASYCOLLECTOR_BROWSER_ARGS", "").strip()
+        if cmd_env:
+            args = shlex.split(args_env) if args_env else []
+            args = self._strip_browser_placeholders(args)
+            args = self._strip_new_window_args(args)
+            args = self._with_new_tab_args(cmd_env, args)
+            if self._spawn_browser(cmd_env, args + [url_str]):
+                return True
+        resolved = self._resolve_default_browser_cmd()
+        if resolved:
+            program, args = resolved
+            args = self._strip_new_window_args(args)
+            args = self._with_new_tab_args(program, args)
+            if self._spawn_browser(program, args + [url_str]):
+                return True
+        if self._open_url_fallback_browser(url, new_window=False):
+            return True
+        try:
+            return QDesktopServices.openUrl(url)
+        except Exception:
+            return False
+
+    def _open_url_with_mode(self, url: QUrl, mode: str) -> bool:
+        if mode == "CURRENT":
+            return self._open_url_current_window(url)
+        if self._open_url_new_window(url):
+            return True
+        return self._open_url_current_window(url)
+
+    def _ensure_ui_wait_page(self, target_url: str) -> QUrl | None:
+        try:
+            UI_LOG_DIR.mkdir(parents=True, exist_ok=True)
+            wait_path = UI_LOG_DIR / "ui_wait.html"
+            target_js = json.dumps(target_url)
+            html = (
+                "<!doctype html>\n"
+                "<html>\n"
+                "<head>\n"
+                "  <meta charset=\"utf-8\"/>\n"
+                "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>\n"
+                "  <title>EasyCollector UI</title>\n"
+                "  <style>\n"
+                "    body { margin: 0; padding: 0; background: #0f1113; color: #f5f5f5; }\n"
+                "    .wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; }\n"
+                "    .card { background: #1b1f23; border-radius: 12px; padding: 24px 28px; max-width: 420px; }\n"
+                "    .title { font-size: 18px; font-weight: 700; margin-bottom: 8px; }\n"
+                "    .hint { font-size: 13px; color: #b0b6bb; }\n"
+                "    .link { margin-top: 16px; font-size: 13px; }\n"
+                "    a { color: #8ab4f8; text-decoration: none; }\n"
+                "    a:hover { text-decoration: underline; }\n"
+                "  </style>\n"
+                "</head>\n"
+                "<body>\n"
+                "  <div class=\"wrap\">\n"
+                "    <div class=\"card\">\n"
+                "      <div class=\"title\">UI is starting...</div>\n"
+                "      <div class=\"hint\">The app will open when it is ready.</div>\n"
+                "      <div class=\"link\"><a id=\"open-link\" href=\"#\">Open now</a></div>\n"
+                "    </div>\n"
+                "  </div>\n"
+                "  <script>\n"
+                f"    const target = {target_js};\n"
+                "    const link = document.getElementById(\"open-link\");\n"
+                "    if (link) link.href = target;\n"
+                "    // The launcher will open the UI once it is fully ready.\n"
+                "  </script>\n"
+                "</body>\n"
+                "</html>\n"
+            )
+            wait_path.write_text(html, encoding="utf-8")
+            return QUrl.fromLocalFile(str(wait_path))
+        except Exception:
+            return None
+
+    def load_ui(self, open_mode: str | None = None, force_refresh: bool = False):
+        url_str = FRONTEND_URL
+        if force_refresh:
+            try:
+                from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+                parts = urlsplit(url_str)
+                query = dict(parse_qsl(parts.query, keep_blank_values=True))
+                query["_ts"] = str(int(time.time() * 1000))
+                url_str = urlunsplit(
+                    (parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment)
+                )
+            except Exception:
+                sep = "&" if "?" in url_str else "?"
+                url_str = f"{url_str}{sep}_ts={int(time.time() * 1000)}"
+        url = QUrl(url_str)
+        mode = open_mode or getattr(self, "_open_ui_mode", "NEW")
+        if mode not in ("NEW", "CURRENT"):
+            mode = "NEW"
+
+        def _open():
+            if self._open_url_with_mode(url, mode):
+                if mode == "CURRENT":
+                    self.append_log(f"[WEB] Open current {url.toString()}")
+                else:
+                    self.append_log(f"[WEB] Open UI {url.toString()}")
+                return
+            self.append_log(f"[WEB][ERROR] Failed to open {url.toString()}")
+
+        if self._is_ui_ready():
+            _open()
             return
+
+        wait_url = self._ensure_ui_wait_page(url_str)
+        if wait_url and self._open_url_with_mode(wait_url, mode):
+            self.append_log("[WEB] Frontend not ready. Opened waiting page.")
 
         self.append_log(f"[WEB] Frontend not ready. Waiting for {FRONTEND_URL} ...")
         # Poll until server is up, then open once
+        try:
+            if getattr(self, "_frontend_timer", None) is not None:
+                self._frontend_timer.stop()
+        except Exception:
+            pass
         self._frontend_timer = QTimer(self)
         self._frontend_timer.setInterval(1000)
         def _poll():
-            if self._is_frontend_up():
+            if self._is_ui_ready():
                 try:
                     self._frontend_timer.stop()
                 except Exception:
                     pass
                 _open()
-                try:
-                    self._update_nav_buttons()
-                except Exception:
-                    pass
         self._frontend_timer.timeout.connect(_poll)
         self._frontend_timer.start()
 
     def _quick_apply_from_dev_src(self):
         if not self._is_valid_dev_src(self.dev_src_root):
-            self.load_ui()
+            self.load_ui(open_mode="CURRENT")
             return
         self.append_log("[SYNC] 원본에서 빠른 적용 중...")
         if not self._sync_dev_files(show_errors=False):
@@ -2300,10 +5242,10 @@ class MainWindow(QMainWindow):
             if running:
                 if fast_backend_reload:
                     self.append_log("[SYNC] 빠른 적용 완료. 컨테이너는 유지하고 autoreload/HMR로 바로 반영합니다.")
-                    self.load_ui()
+                    self.load_ui(open_mode="CURRENT")
                     return
                 self.append_log("[SYNC][INFO] 컨테이너 유지 (autreload=off). 필요하면 수동 재시작해 주세요.")
-                self.load_ui()
+                self.load_ui(open_mode="CURRENT")
                 return
             self.append_log("[SYNC] 빠른 적용 완료. 서비스 시작 중...")
             self._show_preload_dialog("서비스 시작 중...")
@@ -2311,64 +5253,29 @@ class MainWindow(QMainWindow):
             def _after_restart(exit_code: int, *_):
                 if exit_code == 0:
                     self.append_log("[START] 완료, UI 새로고침 중...")
-                    self._wait_for_services_ready(self.load_ui)
+                    self._wait_for_services_ready(lambda: self.load_ui(open_mode="CURRENT"))
                 else:
                     self.append_log(f"[START][ERROR] 시작 실패 (code={exit_code})")
                     self._hide_preload_dialog()
             self._ensure_service_running("SYNC", restart_if_running=False, on_finish=_after_restart)
             return
         self.append_log("[SYNC] 빠른 적용 완료. UI 새로고침 중...")
-        self.load_ui()
+        self.load_ui(open_mode="CURRENT")
 
     def _nav_action(self, action: str):
-        try:
-            if not HAS_WEBENGINE or self.web_view is None:
-                return
-            if action == "back":
-                try:
-                    self.web_view.back()
-                except Exception:
-                    self.web_view.history().back()
-            elif action == "forward":
-                try:
-                    self.web_view.forward()
-                except Exception:
-                    self.web_view.history().forward()
-            elif action == "reload":
-                try:
-                    self.web_view.reload()
-                except Exception:
-                    try:
-                        self.web_view.setUrl(self.web_view.url())
-                    except Exception:
-                        pass
-        finally:
-            try:
-                self._update_nav_buttons()
-            except Exception:
-                pass
+        return
 
     def keyPressEvent(self, event):
         try:
             key = event.key()
         except Exception:
             key = None
-        handled = False
-        if key == Qt.Key_F5:
-            self._nav_action("reload")
-            handled = True
-        elif key == Qt.Key_F12:
-            if self._devtools_dialog and self._devtools_dialog.isVisible():
-                self._close_devtools()
-            else:
-                self._open_devtools()
-            handled = True
-        if handled:
+        if key == Qt.Key_Escape:
             try:
-                event.accept()
+                self.close()
+                return
             except Exception:
                 pass
-            return
         try:
             super().keyPressEvent(event)
         except Exception:
@@ -2376,30 +5283,25 @@ class MainWindow(QMainWindow):
 
     def _on_quick_apply_clicked(self):
         if not self._is_valid_dev_src(self.dev_src_root):
-            QMessageBox.information(self, "원본 필요", "먼저 원본 프로젝트 경로를 선택하세요.")
-            self.on_select_dev_src()
-            if not self._is_valid_dev_src(self.dev_src_root):
-                return
+            self._show_pad_notice(1, "프로젝트 경로 지정", color="#ff6b6b", duration_ms=1000)
+            try:
+                self._dev_src_prompt_timer.stop()
+            except Exception:
+                pass
+            self._dev_src_prompt_timer.start(1000)
+            return
         self._quick_apply_from_dev_src()
 
     def _update_nav_buttons(self):
-        try:
-            if not HAS_WEBENGINE or self.web_view is None:
-                for b in (self.btn_nav_back, self.btn_nav_forward):
-                    b.setEnabled(False)
-                return
-            hist = self.web_view.history()
-            self.btn_nav_back.setEnabled(hist.canGoBack())
-            self.btn_nav_forward.setEnabled(hist.canGoForward())
-        except Exception:
-            pass
+        # Navigation buttons removed with floating bar UI
+        return
 
     def _dev_apply_and_restart_and_reload(self):
         self.append_log("[SYNC] 개발 원본에서 backend/ui/compose 반영...")
         if not self._sync_dev_files():
             return
         self.append_log("[SYNC] 완료. 서비스 재시작 중...")
-        self._show_preload_dialog("서비스 준비중...")
+        self._show_preload_dialog("Easy Trainer 준비중...")
         def _after_restart(exit_code: int, *_):
             self.append_log("[RESTART] 완료")
             if exit_code == 0:
@@ -2409,57 +5311,123 @@ class MainWindow(QMainWindow):
         self._clear_conflicting_containers()
         self._ensure_service_running("RESTART", restart_if_running=True, on_finish=_after_restart)
 
-    def open_logs_window(self):
-        menu = QMenu(self)
-        act_launcher = menu.addAction("Launcher Log")
-        act_frontend = menu.addAction("Frontend Log")
-        act_backend = menu.addAction("Backend Log")
-        act_devtools = menu.addAction("DevTools")
+    def open_settings_dialog(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("설정")
+        dlg.resize(380, 260)
+        layout = QVBoxLayout(dlg)
+        layout.setSpacing(10)
 
+        project_text = str(self.project_root) if getattr(self, "project_root", None) else "미설정"
+        dev_text = str(self.dev_src_root) if self.dev_src_root else "미설정"
+        mode_label = "GPU" if self._current_variant() == "gpu" else "CPU"
+
+        info = QLabel(f"프로젝트: {project_text}\n원본 경로: {dev_text}\n모드: {mode_label}", dlg)
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        btn_logs = QPushButton("로그 보기", dlg)
+        btn_restart = QPushButton("서비스 재시작", dlg)
+        btn_stop = QPushButton("서비스 중지", dlg)
+        btn_open_project = QPushButton("프로젝트 폴더 열기", dlg)
+
+        row1 = QHBoxLayout()
+        row1.setSpacing(8)
+        row1.addWidget(btn_logs)
+        row1.addWidget(btn_open_project)
+        layout.addLayout(row1)
+
+        row2 = QHBoxLayout()
+        row2.setSpacing(8)
+        row2.addWidget(btn_restart)
+        row2.addWidget(btn_stop)
+        layout.addLayout(row2)
+
+        layout.addStretch(1)
+        btn_close = QPushButton("닫기", dlg)
+        row_close = QHBoxLayout()
+        row_close.addStretch(1)
+        row_close.addWidget(btn_close)
+        layout.addLayout(row_close)
+
+        btn_close.clicked.connect(dlg.accept)
+        btn_logs.clicked.connect(self.open_logs_window)
+        btn_restart.clicked.connect(self._restart_service_container)
+        btn_stop.clicked.connect(self.on_stop)
+        def _open_project():
+            try:
+                if self.project_root:
+                    QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.project_root)))
+            except Exception:
+                pass
+        btn_open_project.clicked.connect(_open_project)
+
+        dlg.exec()
+
+    def open_logs_window(self):
         svc = "service"
         backend_log = shlex.quote(str(SERVICE_LOG_DIR / "backend.log"))
         frontend_log = shlex.quote(str(SERVICE_LOG_DIR / "frontend.log"))
         tail_backend = ["exec", "-T", svc, "bash", "-lc", f"tail -n 200 -F {backend_log}"]
         tail_frontend = ["exec", "-T", svc, "bash", "-lc", f"tail -n 200 -F {frontend_log}"]
+        self._close_log_windows()
+        dialogs: list[QDialog] = []
 
-        def _open_backend():
-            self._close_log_windows()
-            dlg = self._create_log_dialog("Backend Logs", tail_backend)
-            if dlg:
-                self._register_log_window(dlg)
-                dlg.show()
+        dlg_launcher = self._create_ui_log_dialog("Launcher Logs", UI_LOG_FILE)
+        if dlg_launcher:
+            self._register_log_window_append(dlg_launcher)
+            dlg_launcher.show()
+            dialogs.append(dlg_launcher)
 
-        def _open_frontend():
-            self._close_log_windows()
-            dlg = self._create_log_dialog("Frontend Logs", tail_frontend)
-            if dlg:
-                self._register_log_window(dlg)
-                dlg.show()
+        dlg_front = self._create_log_dialog("Frontend Logs", tail_frontend)
+        if dlg_front:
+            self._register_log_window_append(dlg_front)
+            dlg_front.show()
+            dialogs.append(dlg_front)
 
-        def _open_launcher():
-            self._close_log_windows()
-            dlg = self._create_ui_log_dialog("Launcher Logs", UI_LOG_FILE)
-            if dlg:
-                self._register_log_window(dlg)
-                dlg.show()
+        dlg_back = self._create_log_dialog("Backend Logs", tail_backend)
+        if dlg_back:
+            self._register_log_window_append(dlg_back)
+            dlg_back.show()
+            dialogs.append(dlg_back)
 
-        def _open_dev():
-            self._close_log_windows()
-            self._open_devtools()
+        self._arrange_log_windows_side_by_side(dialogs)
 
-        act_launcher.triggered.connect(_open_launcher)
-        act_frontend.triggered.connect(_open_frontend)
-        act_backend.triggered.connect(_open_backend)
-        act_devtools.triggered.connect(_open_dev)
+    def _open_service_log_dialog(self, title: str, log_path: Path):
+        svc = "service"
+        log_path = shlex.quote(str(log_path))
+        tail_args = ["exec", "-T", svc, "bash", "-lc", f"tail -n 200 -F {log_path}"]
+        self._close_log_windows()
+        dlg = self._create_log_dialog(title, tail_args)
+        if dlg:
+            self._register_log_window(dlg)
+            dlg.show()
 
-        try:
-            pos = self.btn_logs.mapToGlobal(self.btn_logs.rect().bottomLeft())
-        except Exception:
-            pos = None
-        if pos:
-            menu.exec(pos)
-        else:
-            menu.exec(QCursor.pos())
+    def _open_frontend_logs(self):
+        self._open_service_log_dialog("Frontend Logs", SERVICE_LOG_DIR / "frontend.log")
+
+    def _open_backend_logs(self):
+        self._open_service_log_dialog("Backend Logs", SERVICE_LOG_DIR / "backend.log")
+
+    def _open_frontend_backend_logs_side_by_side(self):
+        svc = "service"
+        backend_log = shlex.quote(str(SERVICE_LOG_DIR / "backend.log"))
+        frontend_log = shlex.quote(str(SERVICE_LOG_DIR / "frontend.log"))
+        tail_backend = ["exec", "-T", svc, "bash", "-lc", f"tail -n 200 -F {backend_log}"]
+        tail_frontend = ["exec", "-T", svc, "bash", "-lc", f"tail -n 200 -F {frontend_log}"]
+        self._close_log_windows()
+        dlg_front = self._create_log_dialog("Frontend Logs", tail_frontend)
+        dlg_back = self._create_log_dialog("Backend Logs", tail_backend)
+        dialogs: list[QDialog] = []
+        if dlg_front:
+            self._register_log_window_append(dlg_front)
+            dlg_front.show()
+            dialogs.append(dlg_front)
+        if dlg_back:
+            self._register_log_window_append(dlg_back)
+            dlg_back.show()
+            dialogs.append(dlg_back)
+        self._arrange_log_windows_side_by_side(dialogs)
 
     def _create_log_dialog(self, title: str, compose_args: list[str]) -> QDialog | None:
         dlg = QDialog(self)
@@ -2475,6 +5443,19 @@ class MainWindow(QMainWindow):
 
     def _register_log_window(self, dlg: QDialog):
         self._close_log_windows()
+        self._log_windows.append(dlg)
+        def _cleanup(*_):
+            try:
+                self._log_windows.remove(dlg)
+            except ValueError:
+                pass
+        try:
+            dlg.finished.connect(_cleanup)
+        except Exception:
+            pass
+        dlg.destroyed.connect(_cleanup)
+
+    def _register_log_window_append(self, dlg: QDialog):
         self._log_windows.append(dlg)
         def _cleanup(*_):
             try:
@@ -2574,45 +5555,8 @@ class MainWindow(QMainWindow):
             start_x += dlg.width() + spacing
 
     def _open_devtools(self):
-        """Open WebEngine DevTools window when available."""
-        if not HAS_WEBENGINE or self.web_view is None:
-            return None
-        try:
-            page = self.web_view.page()
-            prof = page.profile() if page else None
-        except Exception:
-            return None
-        if page is None or prof is None or QWebEnginePage is None:
-            return None
-        try:
-            dev_page = QWebEnginePage(prof, self)
-            dev_page.setInspectedPage(page)
-        except Exception:
-            return None
-        try:
-            if self._devtools_dialog is None:
-                dlg = QDialog(self)
-                dlg.setWindowTitle("DevTools")
-                dlg.resize(1100, 800)
-                layout = QVBoxLayout(dlg)
-                layout.setContentsMargins(0, 0, 0, 0)
-                layout.setSpacing(0)
-                view = QWebEngineView(dlg)
-                layout.addWidget(view)
-                self._devtools_dialog = dlg
-                self._devtools_view = view
-                try:
-                    dlg.destroyed.connect(lambda *_: self._close_devtools())
-                except Exception:
-                    pass
-            if self._devtools_view:
-                self._devtools_view.setPage(dev_page)
-            if self._devtools_dialog:
-                self._devtools_dialog.show()
-                self._devtools_dialog.raise_()
-            return self._devtools_dialog
-        except Exception:
-            return None
+        """DevTools are not available when using the external browser."""
+        return None
 
     def _close_devtools(self):
         if self._devtools_dialog:
@@ -2626,7 +5570,6 @@ class MainWindow(QMainWindow):
     # ------------------------ Process helpers ------------------------
     def run_compose(self, args: list[str], on_finish=None):
         if self.process is not None and self.process.state() != QProcess.NotRunning:
-            QMessageBox.information(self, "실행중", "다른 작업이 실행 중입니다. 잠시만 기다려 주세요.")
             return
 
         program, prefix = get_compose_cmd()
@@ -2675,7 +5618,6 @@ class MainWindow(QMainWindow):
 
     def run_compose_with_files(self, compose_files: list[str], args: list[str], on_finish=None):
         if self.process is not None and self.process.state() != QProcess.NotRunning:
-            QMessageBox.information(self, "실행중", "다른 작업이 실행 중입니다. 잠시만 기다려 주세요.")
             return
         program, prefix = get_compose_cmd()
         if not program:
@@ -2822,12 +5764,81 @@ def main():
     # Dark theme ~ rgb(30,30,30) with white accents
     app.setStyleSheet(
         """
+        QMainWindow#LauncherWindow, QWidget#PillWrapper { background-color: transparent; }
         QWidget { background-color: #1E1E1E; color: #EEEEEE; }
         QFrame#Divider { background-color: #FFFFFF; max-height: 1px; }
         QFrame#ContentBox { border: 1px solid #FFFFFF; border-radius: 6px; }
+        QFrame#FloatingBar { background-color: rgb(30,30,30); border: none; border-radius: 24px; padding: 7px; }
+        QFrame#FloatingBarPad {
+            background-color: rgb(30,30,30);
+            border: none;
+            border-top-left-radius: 0px;
+            border-bottom-left-radius: 0px;
+            border-top-right-radius: 24px;
+            border-bottom-right-radius: 24px;
+        }
+        QFrame#PadInfoBox {
+            background-color: #2d2d2d;
+            border: none;
+            border-radius: 12px;
+        }
+        QLabel#PadInfoLabel {
+            color: #f5f5f5;
+            font-weight: 800;
+            font-size: 16px;
+            letter-spacing: 0.2px;
+            background-color: transparent;
+            border: none;
+        }
+        QLabel#PadPathLabel {
+            color: #cfd8dc;
+            font-size: 11px;
+            font-weight: 600;
+            background-color: transparent;
+            border: none;
+        }
+        QLabel#PadMode2Label {
+            color: #cfd8dc;
+            font-size: 14px;
+            font-weight: 700;
+            background-color: transparent;
+            border: none;
+        }
+        QPushButton#PadChoiceButton {
+            background-color: rgb(30,30,30);
+            color: rgb(230,230,230);
+            border: none;
+            border-radius: 8px;
+            font-weight: 700;
+            font-size: 11px;
+        }
+        QPushButton#PadChoiceButton:hover { background-color: rgb(36,36,36); }
+        QPushButton#PadChoiceButton:checked { background-color: rgb(230,230,230); color: #000000; }
+        QPushButton#PadPathChangeButton {
+            background-color: rgb(30,30,30);
+            color: #eaeaea;
+            border: none;
+            border-radius: 6px;
+            font-weight: 700;
+            font-size: 11px;
+            padding: 0px;
+            margin: 0px;
+            min-width: 50px;
+            max-width: 50px;
+            min-height: 50px;
+            max-height: 50px;
+        }
+        QPushButton#PadPathChangeButton:hover { background-color: rgb(36,36,36); }
+        QPushButton#PadPathChangeButton:pressed { background-color: rgb(24,24,24); }
+        QFrame#FloatingBarBridge { background-color: transparent; border: none; }
+        QFrame#FloatingBarBridgeSegment { background-color: rgb(45,45,45); border: none; border-radius: 12px; }
         QListWidget { background-color: #232323; border: 1px solid #333333; padding: 8px; }
         QLineEdit, QTextEdit { background-color: #232323; color: #EEEEEE; border: 1px solid #3A3A3A; border-radius: 4px; }
-        QPushButton { background-color: #2A2A2A; color: #EEEEEE; border: 1px solid #555555; border-radius: 4px; padding: 4px 10px; min-width: 60px; min-height: 24px; }
+        QPushButton { background-color: #2A2A2A; color: #EEEEEE; border: 1px solid #555555; border-radius: 8px; padding: 6px 12px; min-width: 60px; min-height: 26px; }
+        QPushButton#CircleButton { background-color: #000000; color: #f5f5f5; border-radius: 30px; border: none; font-weight: 700; font-size: 18px; min-width: 60px; min-height: 60px; padding: 0px; }
+        QPushButton#CircleButton:hover { border: none; }
+        QPushButton#CircleButton:pressed { background-color: #0d0d0d; }
+        QPushButton#CircleButton:disabled { background-color: #3a3a3a; color: #9e9e9e; }
         QPushButton:disabled { color: #888888; border-color: #333333; }
         QProgressBar { background-color: #232323; border: 1px solid #333333; color: #EEEEEE; text-align: center; }
         QProgressBar::chunk { background-color: #4a90e2; }
@@ -2852,6 +5863,8 @@ def main():
     win.set_display_mode(fullscreen)
     if not win.auto_launch_enabled():
         return 0
+    # Show preload immediately while services start
+    win._show_preload_dialog("Easy Trainer 준비중...")
     QTimer.singleShot(0, win.on_start)
     return app.exec()
 
