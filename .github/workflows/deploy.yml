@@ -83,7 +83,7 @@ jobs:
       - name: Release to Public Repo
         uses: softprops/action-gh-release@v1
         with:
-          repository: my-id/my-public-repo
+          repository: Plan-99/Easy-Collector-Release
           token: ${{ secrets.PUBLIC_REPO_TOKEN }}
           tag_name: ${{ github.ref_name }}
           files: |
