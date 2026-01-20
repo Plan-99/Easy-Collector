@@ -108,7 +108,20 @@ jobs:
       # ▼▼▼ [빌드] 경로 설정이 아주 심플해짐! ▼▼▼
       - name: Build with PyInstaller
         run: |
-          echo "빌드 시작..."
+          echo "1. PyArmor Runtime 폴더 이름 찾기"
+          # 앞 단계에서 release/ui/ 안으로 이동시켰으므로 거기서 찾습니다.
+          RUNTIME_DIR_NAME=$(ls release/ui | grep "pyarmor_runtime_" | head -n 1)
+          
+          if [ -z "$RUNTIME_DIR_NAME" ]; then
+              echo "ERROR: release/ui 폴더 안에서 PyArmor Runtime을 찾을 수 없습니다!"
+              ls -R release/ui
+              exit 1
+          fi
+          
+          FULL_RUNTIME_PATH="release/ui/$RUNTIME_DIR_NAME"
+          echo "Found Runtime: $FULL_RUNTIME_PATH"
+
+          echo "2. 빌드 시작"
           
           pyinstaller --noconfirm --onefile --noconsole --name EasyLauncher \
             --paths "." \
