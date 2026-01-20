@@ -29,7 +29,7 @@ jobs:
           # 제외할 파일은 --exclude로 지정 (체험판 용량 제한 회피)
           pyarmor gen -O temp_obf \
             -r release/ui src \
-            --exclude "src/backend/lerobot"
+            --exclude "src/backend/lerobot" \
             --exclude "release/ui/launcher.py"
 
           echo "2. 난독화된 파일을 원본 폴더에 강제 덮어쓰기"
