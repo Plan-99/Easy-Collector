@@ -32,6 +32,20 @@ jobs:
             --exclude "src/backend/lerobot" \
             --exclude "release/ui/launcher.py"
 
+          echo "2. [중요] Docker 마운트를 위해 Runtime 폴더를 src 안으로 이동"
+          # temp_obf 안에 생성된 pyarmor_runtime_xxxx 폴더를 찾아서
+          # temp_obf/src/ 안으로 이동시킵니다.
+            
+          # 런타임 폴더 이름 찾기 (랜덤이라 찾아서 변수에 넣음)
+          RUNTIME_DIR=$(find temp_obf -maxdepth 1 -type d -name "pyarmor_runtime_*" -printf "%f\n")
+            
+          if [ -n "$RUNTIME_DIR" ]; then
+              echo "Runtime folder found: $RUNTIME_DIR -> Moving to src/"
+              mv "temp_obf/$RUNTIME_DIR" "temp_obf/src/"
+          else
+              echo "WARNING: Runtime folder not found!"
+          fi
+
           echo "2. 난독화된 파일을 원본 폴더에 강제 덮어쓰기"
           # -r: 재귀적, -f: 강제(묻지 않고 덮어씀)
           # temp_obf 안의 구조가 이미 release/ui, src/... 로 되어있어서 그대로 덮임
@@ -60,10 +74,10 @@ jobs:
       - name: Build Debian Package
         run: |
           # 스크립트에 실행 권한 주기
-          chmod +x build_deb_lite.sh
+          chmod +x .github/workflows/build_deb.sh
           
           # 스크립트 실행 (dist/EasyLauncher 파일을 가져다 씀)
-          ./build_deb_lite.sh
+          ./.github/workflows/build_deb.sh
 
       # [변경] 결과물 업로드 (zip 대신 deb)
       - name: Release to Public Repo
