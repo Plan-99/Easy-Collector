@@ -124,6 +124,7 @@ jobs:
             --hidden-import "service" \
             --hidden-import "installer" \
             --hidden-import "license_validator" \
+            --hidden-import "launcher" \
             --hidden-import "update" \
             --hidden-import "tools" \
             --hidden-import "src" \
