@@ -123,13 +123,22 @@ jobs:
             --hidden-import "app_context" \
             --hidden-import "service" \
             --hidden-import "installer" \
-            --hidden-import "launcher" \
             --hidden-import "license_validator" \
             --hidden-import "update" \
             --hidden-import "tools" \
             --hidden-import "src" \
             --hidden-import "sqlite3" \
             --hidden-import "json" \
+            --hidden-import "os" \
+            --hidden-import "sys" \
+            --hidden-import "shutil" \
+            --hidden-import "subprocess" \
+            --hidden-import "time" \
+            --hidden-import "pathlib" \
+            --hidden-import "platform" \
+            --hidden-import "threading" \
+            --hidden-import "typing" \
+            --hidden-import "shlex" \
             release/ui/main.py
 
       # [변경] zip 대신 deb 만들기
