@@ -30,7 +30,7 @@ jobs:
             libxcb-xinerama0 \
             libxkbcommon-x11-0 \
             libpulse0 \
-            libasound2 \
+            libasound2t64 \
             libegl1 \
             libopengl0 \
             libnss3
