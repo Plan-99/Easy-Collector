@@ -1,6 +1,8 @@
-name: [TEST] PyArmor Obfuscation Only
+name: "TEST PyArmor Obfuscation Only"
 
-on: workflow_dispatch
+# 수동 실행 버튼 활성화
+on: 
+  workflow_dispatch:
 
 jobs:
   test-obfuscate-linux:
@@ -19,19 +21,25 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyarmor
 
+      # ▼▼▼ [여기서 테스트할 파일을 지정하세요] ▼▼▼
       - name: Test Obfuscation on Specific File
         run: |
+          # 테스트할 타겟 파일 지정
           TARGET_FILE="release/ui/main.py"
           
           echo "난독화 테스트 시작: $TARGET_FILE"
           
+          # 출력 폴더 생성
           mkdir -p dist/test_output
           
+          # PyArmor 실행
+          # -O: 출력 폴더 지정
           pyarmor gen -O dist/test_output "$TARGET_FILE"
           
           echo "=== 난독화 결과 폴더 내용 ==="
           ls -R dist/test_output
 
+      # 결과물 업로드
       - name: Upload Obfuscated Result
         uses: actions/upload-artifact@v4
         with:
