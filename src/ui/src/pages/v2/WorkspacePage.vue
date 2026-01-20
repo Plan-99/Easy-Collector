@@ -234,15 +234,15 @@
                                     :style="cropAreaStyle"
                                     v-if="cropAreaStyle.width"
                                 ></div>
+                            </div>
+                            <div>
+                                <div class="text-caption q-mt-sm">Cropped Area</div>
                                 <div>
-                                    <div class="text-caption q-mt-sm">Cropped Area</div>
-                                    <div>
-                                        {{ selectedWorkspace.sensor_settings?.[focused.id]?.cropped_area || 'Not Set' }}
-                                    </div>
-                                    <div class="text-caption q-mt-sm">Cropped Size</div>
-                                    <div>
-                                        {{ selectedWorkspace.sensor_settings?.[focused.id]?.cropped_area ? `${selectedWorkspace.sensor_settings?.[focused.id]?.cropped_area[2] - selectedWorkspace.sensor_settings?.[focused.id]?.cropped_area[0]} x ${selectedWorkspace.sensor_settings?.[focused.id]?.cropped_area[3] - selectedWorkspace.sensor_settings?.[focused.id]?.cropped_area[1]}` : 'Not Set' }}
-                                    </div>
+                                    {{ selectedWorkspace.sensor_settings?.[focused.id]?.cropped_area || 'Not Set' }}
+                                </div>
+                                <div class="text-caption q-mt-sm">Cropped Size</div>
+                                <div>
+                                    {{ selectedWorkspace.sensor_settings?.[focused.id]?.cropped_area ? `${selectedWorkspace.sensor_settings?.[focused.id]?.cropped_area[2] - selectedWorkspace.sensor_settings?.[focused.id]?.cropped_area[0]} x ${selectedWorkspace.sensor_settings?.[focused.id]?.cropped_area[3] - selectedWorkspace.sensor_settings?.[focused.id]?.cropped_area[1]}` : 'Not Set' }}
                                 </div>
                             </div>
                         </div>

@@ -16,7 +16,7 @@ class Env:
 
         for sensor in sensors:
             setattr(self, f'sensor_{sensor["id"]}', None)
-            node.create_subscription(CompressedImage, sensor['topic'], lambda msg, sid=sensor['id']: self.image_raw_cb(msg, sid), 10)
+            node.create_subscription(CompressedImage, sensor['read_topic'], lambda msg, sid=sensor['id']: self.image_raw_cb(msg, sid), 10)
 
     def image_raw_cb(self, data, sensor_id):
         image = ros_image_to_numpy(data)
@@ -65,10 +65,15 @@ class Env:
         for agent in self.agents:
             qpos = agent.get_joint_states()
             qaction = agent.get_joint_actions()
-            eepos = agent.get_ee_position()
-            eetarget = agent.get_ee_target()
             qaction_delta = [qaction[i] - qpos[i] for i in range(len(qpos))]
-            eetarget_delta = {key: [eetarget[key][i] - eepos[key][i] for i in range(6)] for key in eetarget} if eetarget is not None else None
+            if agent.ik_solver is None:
+                eepos = None
+                eetarget = None
+                eetarget_delta = None
+            else:
+                eepos = agent.get_ee_position()
+                eetarget = agent.get_ee_target()
+                eetarget_delta = {key: [eetarget[key][i] - eepos[key][i] for i in range(6)] for key in eetarget} if eetarget is not None else None
             robot_state_dict[agent.id] = {
                 'qpos': agent.get_joint_states(),
                 'qaction': agent.get_joint_actions(),
