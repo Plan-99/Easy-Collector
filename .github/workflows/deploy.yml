@@ -50,7 +50,7 @@ jobs:
         run: |
           echo "1. 난독화 시작 (결과물은 임시폴더 temp_obf에 저장)"
           
-          # 제외할 파일은 --exclude로 지정 (체험판 용량 제한 회피)
+          # 제외할 파일은 --exclude로 지정
           pyarmor gen -O temp_obf \
             -r release/ui src \
             --exclude "src/backend/lerobot" \
@@ -66,29 +66,43 @@ jobs:
               mv temp_obf/ui temp_obf/release/
           fi
 
-          echo "2. [중요] Docker 마운트를 위해 Runtime 폴더를 src 안으로 이동"
-          # temp_obf 안에 생성된 pyarmor_runtime_xxxx 폴더를 찾아서
-          # temp_obf/src/ 안으로 이동시킵니다.
-            
-          # 런타임 폴더 이름 찾기 (랜덤이라 찾아서 변수에 넣음)
+          echo "3. [핵심] Runtime 폴더 배포 (Docker용 + Launcher용)"
+          # temp_obf 안에 생성된 pyarmor_runtime_xxxx 폴더를 찾습니다.
           RUNTIME_DIR=$(find temp_obf -maxdepth 1 -type d -name "pyarmor_runtime_*" -printf "%f\n")
             
           if [ -n "$RUNTIME_DIR" ]; then
-              echo "Runtime folder found: $RUNTIME_DIR -> Moving to src/"
-              mv "temp_obf/$RUNTIME_DIR" "temp_obf/src/"
+              echo "Runtime folder found: $RUNTIME_DIR"
+
+              # [Step A] Docker를 위해 src 안으로 '복사' (Copy)
+              # Docker 컨테이너가 src를 마운트할 때 런타임도 같이 가져가야 함
+              if [ -d "temp_obf/src" ]; then
+                  echo " -> Copying to src/ for Docker"
+                  cp -r "temp_obf/$RUNTIME_DIR" "temp_obf/src/"
+              fi
+
+              # [Step B] Launcher 실행을 위해 release/ui 안으로 '이동' (Move)
+              # main.py 바로 옆에 런타임이 있어야 PyInstaller가 같이 포장하고, 실행 시 찾을 수 있음
+              if [ -d "temp_obf/release/ui" ]; then
+                  echo " -> Moving to release/ui/ for PyInstaller/Launcher"
+                  mv "temp_obf/$RUNTIME_DIR" "temp_obf/release/ui/"
+              else
+                  echo "WARNING: release/ui folder missing in temp_obf!"
+              fi
           else
               echo "WARNING: Runtime folder not found!"
           fi
 
-          echo "2. 난독화된 파일을 원본 폴더에 강제 덮어쓰기"
-          # -r: 재귀적, -f: 강제(묻지 않고 덮어씀)
-          # temp_obf 안의 구조가 이미 release/ui, src/... 로 되어있어서 그대로 덮임
+          echo "4. 난독화된 파일을 원본 폴더에 강제 덮어쓰기"
+          # 이제 구조가 완벽합니다.
+          # - src/ 안에는 runtime 복사본이 있음
+          # - release/ui/ 안에는 runtime 원본이 이동됨
           cp -rf temp_obf/* .
           
-          echo "3. 덮어쓰기 완료. 임시폴더 삭제"
+          echo "5. 덮어쓰기 완료. 임시폴더 삭제"
           rm -rf temp_obf
           
-          echo "=== 파일 상태 확인 (main.py가 난독화 되었는지) ==="
+          echo "=== 파일 상태 확인 ==="
+          ls -F release/ui/ | grep pyarmor_runtime
           head -n 5 release/ui/main.py
 
       # ▼▼▼ [빌드] 경로 설정이 아주 심플해짐! ▼▼▼
