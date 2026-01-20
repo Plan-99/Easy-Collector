@@ -1,5 +1,7 @@
 name: "Obfuscate In-Place and Build"
 
+run-name: Deploying Version ${{ github.ref_name }} (by @${{ github.actor }})
+
 on:
   push:
     tags:
