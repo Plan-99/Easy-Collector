@@ -6,7 +6,7 @@ import sys
 from app_context import QApplication, QMessageBox, QTimer, _window_icon
 from installer import run_setup_wizard
 from launcher import MainWindow
-from service import docker_compose_available
+from service import check_license_gui, docker_compose_available
 
 
 _APP_STYLE = """
@@ -107,6 +107,10 @@ def main() -> int:
     os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")
     app = QApplication(sys.argv)
     _apply_app_style(app)
+    if not check_license_gui():
+        QMessageBox.critical(None, "라이선스 오류", "라이선스 인증에 실패했습니다. 프로그램을 종료합니다.")
+        return 1
+
     if not docker_compose_available():
         QMessageBox.critical(None, "오류", "Docker가 설치되어 있지 않거나 PATH에 없습니다.")
         return 1
