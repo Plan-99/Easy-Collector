@@ -159,7 +159,7 @@ jobs:
             --hidden-import "typing" \
             --hidden-import "shlex" \
             --collect-all pinocchio \
-            --collect-all casadi \            
+            --collect-all casadi \
             release/ui/main.py
 
       # [변경] zip 대신 deb 만들기
