@@ -4,3 +4,5 @@ src/backend/database/*.db
 /.venv
 
 .cache/
+__pycache__/
+*.pyc

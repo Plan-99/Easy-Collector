@@ -35,7 +35,24 @@ mkdir -p \
   "$STAGE${PAYLOAD_DIR}"
 
 echo "[deb] Copying launcher UI (release/ui -> ${INSTALL_ROOT}/ui)..."
-rsync -a "$RELEASE_DIR/ui/" "$STAGE${INSTALL_ROOT}/ui/"
+rsync -a \
+  --exclude='__pycache__/' \
+  --exclude='*.pyc' \
+  "$RELEASE_DIR/ui/" "$STAGE${INSTALL_ROOT}/ui/"
+required_ui_files=(
+  "main.py"
+  "launcher.py"
+  "installer.py"
+  "service.py"
+  "app_context.py"
+  "tools.py"
+)
+for f in "${required_ui_files[@]}"; do
+  if [ ! -f "$STAGE${INSTALL_ROOT}/ui/$f" ]; then
+    echo "[deb][ERROR] Missing UI file: $f" >&2
+    exit 1
+  fi
+done
 if [ -f "$ROOT_DIR/app_icon.png" ]; then
   cp "$ROOT_DIR/app_icon.png" "$STAGE${INSTALL_ROOT}/app_icon.png"
 fi
