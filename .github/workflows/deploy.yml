@@ -1,12 +1,11 @@
-name: "TEST PyArmor Obfuscation Only"
+name: "Obfuscate In-Place and Build"
 
-# 수동 실행 버튼 활성화
-on: 
-    push:
-    workflow_dispatch:
+on:
+  push:
+  workflow_dispatch:
 
 jobs:
-  test-obfuscate-linux:
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -17,32 +16,55 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install PyArmor
+      - name: Install Dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install pyarmor
+          pip install pyarmor pyinstaller
+          if [ -f requirements.launcher.txt ]; then pip install -r requirements.launcher.txt; fi
 
-      # ▼▼▼ [여기서 테스트할 파일을 지정하세요] ▼▼▼
-      - name: Test Obfuscation on Specific File
+      # ▼▼▼ [핵심] 난독화 후 원본에 덮어씌우기 ▼▼▼
+      - name: Obfuscate and Overwrite
         run: |
-          # 테스트할 타겟 파일 지정
-          TARGET_FILE="release/ui/main.py"
+          echo "1. 난독화 시작 (결과물은 임시폴더 temp_obf에 저장)"
           
-          echo "난독화 테스트 시작: $TARGET_FILE"
-          
-          # 출력 폴더 생성
-          mkdir -p dist/test_output
-          
-          # PyArmor 실행
-          # -O: 출력 폴더 지정
-          pyarmor gen -O dist/test_output "$TARGET_FILE"
-          
-          echo "=== 난독화 결과 폴더 내용 ==="
-          ls -R dist/test_output
+          # 제외할 파일은 --exclude로 지정 (체험판 용량 제한 회피)
+          pyarmor gen -O temp_obf \
+            -r release/ui src \
+            --exclude "src/backend/lerobot"
 
-      # 결과물 업로드
-      - name: Upload Obfuscated Result
-        uses: actions/upload-artifact@v4
+          echo "2. 난독화된 파일을 원본 폴더에 강제 덮어쓰기"
+          # -r: 재귀적, -f: 강제(묻지 않고 덮어씀)
+          # temp_obf 안의 구조가 이미 release/ui, src/... 로 되어있어서 그대로 덮임
+          cp -rf temp_obf/* .
+          
+          echo "3. 덮어쓰기 완료. 임시폴더 삭제"
+          rm -rf temp_obf
+          
+          echo "=== 파일 상태 확인 (main.py가 난독화 되었는지) ==="
+          head -n 5 release/ui/main.py
+
+      # ▼▼▼ [빌드] 경로 설정이 아주 심플해짐! ▼▼▼
+      - name: Build with PyInstaller
+        run: |
+          echo "빌드 시작..."
+          
+          # --paths 지정할 필요 없음 (현재 폴더가 곧 소스니까)
+          # --hidden-import src 도 필요 없을 수 있음 (자동 인식) 하지만 안전하게 둠
+          
+          pyinstaller --onefile --noconsole --name EasyLauncher \
+            --add-data "release/ui/img:release/ui/img" \
+            --hidden-import "src" \
+            release/ui/main.py
+
+      # 결과물 압축 및 배포
+      - name: Zip and Upload
+        run: |
+          chmod +x dist/EasyLauncher
+          zip -j update.zip dist/EasyLauncher
+
+      - name: Release to Public Repo
+        uses: softprops/action-gh-release@v1
         with:
-          name: pyarmor-test-result
-          path: dist/test_output/
+          repository: my-id/my-public-repo
+          token: ${{ secrets.PUBLIC_REPO_TOKEN }}
+          tag_name: ${{ github.ref_name }}
+          files: update.zip
