@@ -2,7 +2,8 @@ name: "TEST PyArmor Obfuscation Only"
 
 # 수동 실행 버튼 활성화
 on: 
-  workflow_dispatch:
+    push:
+    workflow_dispatch:
 
 jobs:
   test-obfuscate-linux:
