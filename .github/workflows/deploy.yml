@@ -123,6 +123,7 @@ jobs:
             --hidden-import "app_context" \
             --hidden-import "service" \
             --hidden-import "installer" \
+            --hidden-import "launcher" \
             --hidden-import "license_validator" \
             --hidden-import "update" \
             --hidden-import "tools" \
