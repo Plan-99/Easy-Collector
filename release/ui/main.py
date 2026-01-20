@@ -3,10 +3,11 @@ from __future__ import annotations
 import os
 import sys
 
-from app_context import QApplication, QMessageBox, QTimer, _window_icon
+from app_context import QApplication, QMessageBox, QTimer, _window_icon, load_config
 from installer import run_setup_wizard
 from launcher import MainWindow
 from service import docker_compose_available
+from update import CONFIG_UPGRADE_KEY
 
 
 _APP_STYLE = """
@@ -78,6 +79,33 @@ _APP_STYLE = """
     QPushButton#PadPathChangeButton:pressed { background-color: rgb(24,24,24); }
     QFrame#FloatingBarBridge { background-color: transparent; border: none; }
     QFrame#FloatingBarBridgeSegment { background-color: rgb(45,45,45); border: none; border-radius: 12px; }
+    QWidget#PadUpdatePanel {
+        background-color: rgb(30,30,30);
+        border: none;
+        border-top-left-radius: 0px;
+        border-bottom-left-radius: 0px;
+        border-top-right-radius: 24px;
+        border-bottom-right-radius: 24px;
+    }
+    QLabel#PadUpdateTitle { color: #f5f5f5; font-size: 13px; font-weight: 800; }
+    QLabel#PadUpdateVersionLabel { color: #e0e0e0; font-size: 11px; font-weight: 700; }
+    QLabel#PadUpdateDetail { color: #cfd8dc; font-size: 11px; font-weight: 600; }
+    QLabel#PadUpdateProgressLabel { color: #f5f5f5; font-size: 11px; font-weight: 700; }
+    QLabel#PadUpdateEtaLabel { color: #f5f5f5; font-size: 11px; font-weight: 700; }
+    QPlainTextEdit#PadUpdateLog { background-color: #1f1f1f; color: #eaeaea; border: 1px solid #3A3A3A; border-radius: 6px; font-size: 10px; }
+    QPlainTextEdit#PadUpdateLog QScrollBar { width: 0px; height: 0px; }
+    QProgressBar#PadUpdateBar { background-color: #2b2b2b; border: 1px solid #3a3a3a; border-radius: 4px; }
+    QProgressBar#PadUpdateBar::chunk { background-color: #7dd3fc; }
+    QPushButton#PadUpdatePrimaryButton { background-color: #2A2A2A; color: #FFFFFF; border: 1px solid #FFFFFF; border-radius: 8px; font-weight: 800; font-size: 11px; }
+    QPushButton#PadUpdatePrimaryButton:pressed { background-color: #222222; }
+    QPushButton#PadUpdateSecondaryButton, QPushButton#PadUpdateTertiaryButton {
+        background-color: #2A2A2A;
+        color: #EEEEEE;
+        border: 1px solid #FFFFFF;
+        border-radius: 8px;
+        font-weight: 700;
+        font-size: 11px;
+    }
     QListWidget { background-color: #232323; border: 1px solid #333333; padding: 8px; }
     QLineEdit, QTextEdit { background-color: #232323; color: #EEEEEE; border: 1px solid #3A3A3A; border-radius: 4px; }
     QPushButton { background-color: #2A2A2A; color: #EEEEEE; border: 1px solid #555555; border-radius: 8px; padding: 6px 12px; min-width: 60px; min-height: 26px; }
@@ -116,10 +144,30 @@ def main() -> int:
         return 0
     fullscreen = os.environ.get("EASYCOLLECTOR_FULLSCREEN", "0") == "1"
     win.set_display_mode(fullscreen)
+    try:
+        cfg = load_config()
+        pending_upgrade = cfg.get(CONFIG_UPGRADE_KEY)
+    except Exception:
+        pending_upgrade = None
+    if pending_upgrade:
+        try:
+            win.start_upgrade_flow(str(pending_upgrade))
+        except Exception:
+            pass
+        return app.exec()
+    try:
+        def _auto_start():
+            if not win.auto_launch_enabled():
+                return
+            win._show_preload_dialog("Easy Trainer 준비중...")
+            QTimer.singleShot(0, win.on_start)
+        if win.auto_launch_enabled():
+            win._update_manager.set_continue_handler(_auto_start)
+        win._update_manager.schedule_check(delay_ms=0)
+    except Exception:
+        pass
     if not win.auto_launch_enabled():
         return 0
-    win._show_preload_dialog("Easy Trainer 준비중...")
-    QTimer.singleShot(0, win.on_start)
     return app.exec()
 
 

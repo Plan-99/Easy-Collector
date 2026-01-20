@@ -65,6 +65,7 @@ from app_context import (
 )
 from service import ComposeServiceMixin, HealthServiceMixin, RuntimeServiceMixin, docker_compose_available
 from tools import ToolingMixin
+from update import UpdateManager, CONFIG_UPGRADE_KEY
 
 
 class ServiceSplash(QDialog):
@@ -238,6 +239,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self._drag_offset = QPoint(0, 0)
         self._anchor_left: int | None = None  # screen-left anchor for animations
         self._pill_anim: QVariantAnimation | None = None
+        self._skip_shutdown_on_exit = False
         self._pill_expanded: bool = False
         self._pill_loading: bool = False
         self._pill_loading_ring: PillLoadingRing | None = None
@@ -245,6 +247,24 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self._pad_loading_front_label: QLabel | None = None
         self._pad_loading_back_label: QLabel | None = None
         self._pad_loading_title: QLabel | None = None
+        self._pad_update_panel: QWidget | None = None
+        self._pad_update_title: QLabel | None = None
+        self._pad_update_header_row: QWidget | None = None
+        self._pad_update_version_row: QWidget | None = None
+        self._pad_update_current_label: QLabel | None = None
+        self._pad_update_latest_label: QLabel | None = None
+        self._pad_update_eta_label: QLabel | None = None
+        self._pad_update_detail: QLabel | None = None
+        self._pad_update_bar: QProgressBar | None = None
+        self._pad_update_progress_label: QLabel | None = None
+        self._pad_update_log_view: QPlainTextEdit | None = None
+        self._pad_update_primary_btn: QPushButton | None = None
+        self._pad_update_secondary_btn: QPushButton | None = None
+        self._pad_update_tertiary_btn: QPushButton | None = None
+        self._update_panel_actions: dict[str, callable] = {}
+        self._update_panel_visible = False
+        self._upgrade_in_progress = False
+        self._update_log_lines: list[str] = []
         self._pad_status_front_label: QLabel | None = None
         self._pad_status_back_label: QLabel | None = None
         self._pad_status_front_dot: QLabel | None = None
@@ -474,6 +494,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             self.pad_box_exit,
         ]
         self._pad_loading_panel = self._create_pad_loading_panel()
+        self._pad_update_panel = self._create_pad_update_panel()
         self._setup_settings_status_mode()
         self._pad_desc_labels = [
             self.pad_label_open_ui,
@@ -654,6 +675,8 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self.timer.setInterval(3000)
         self.timer.timeout.connect(self.update_state_label)
         self.timer.start()
+
+        self._update_manager = UpdateManager(self)
 
         self.hide()
 
@@ -1127,6 +1150,8 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
     def _collapse_if_needed(self):
         if getattr(self, "_pill_loading", False):
             return
+        if getattr(self, "_update_panel_visible", False):
+            return
         if self._cursor_over_pill(strict=True):
             return
         self._animate_pill(False)
@@ -1135,6 +1160,8 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         if self._dragging or not self.isVisible():
             return
         if getattr(self, "_pill_loading", False):
+            return
+        if getattr(self, "_update_panel_visible", False):
             return
         hovered = self._cursor_over_pill(strict=True)
         if hovered and not self._pill_expanded:
@@ -1164,6 +1191,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                 for seg in getattr(self, "_bridge_segments", []):
                     seg.setVisible(False)
             self._position_loading_panel()
+            self._position_update_panel()
             self._position_status_lights()
         except Exception:
             pass
@@ -1551,6 +1579,149 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         panel.hide()
         return panel
 
+    def _create_pad_update_panel(self) -> QWidget:
+        panel = QWidget(self._right_pad)
+        panel.setObjectName("PadUpdatePanel")
+        panel.setStyleSheet(
+            "background-color: rgb(30,30,30); border: none;"
+            "border-top-left-radius: 0px; border-bottom-left-radius: 0px;"
+            "border-top-right-radius: 24px; border-bottom-right-radius: 24px;"
+        )
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(45, 13, 13, 13)
+        layout.setSpacing(6)
+        layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
+
+        icon_label = QLabel(panel)
+        icon_label.setAlignment(Qt.AlignCenter)
+        try:
+            ip = _app_icon_path()
+            if ip:
+                pm = QPixmap(ip)
+                if not pm.isNull():
+                    icon_label.setPixmap(pm.scaled(120, 120, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        except Exception:
+            pass
+
+        title = QLabel("업데이트 확인 중...", panel)
+        title.setObjectName("PadUpdateTitle")
+        title.setAlignment(Qt.AlignCenter)
+
+        version_row = QWidget(panel)
+        version_row_layout = QHBoxLayout(version_row)
+        version_row_layout.setContentsMargins(0, 0, 0, 0)
+        version_row_layout.setSpacing(10)
+        version_row_layout.setAlignment(Qt.AlignVCenter)
+        current_label = QLabel("현재 버전: -", panel)
+        current_label.setObjectName("PadUpdateVersionLabel")
+        current_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        latest_label = QLabel("최신 버전: -", panel)
+        latest_label.setObjectName("PadUpdateVersionLabel")
+        latest_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        version_row_layout.addWidget(current_label, 1)
+        version_row_layout.addWidget(latest_label, 1)
+        version_row.setVisible(False)
+
+        eta_label = QLabel("", panel)
+        eta_label.setObjectName("PadUpdateEtaLabel")
+        eta_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        eta_label.setVisible(False)
+
+        header_row = QWidget(panel)
+        header_layout = QHBoxLayout(header_row)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(10)
+        header_layout.addWidget(version_row, 1)
+        header_layout.addWidget(eta_label, 0, Qt.AlignRight | Qt.AlignVCenter)
+        header_layout.setStretch(0, 1)
+        header_row.setVisible(False)
+
+        detail = QLabel("", panel)
+        detail.setObjectName("PadUpdateDetail")
+        detail.setAlignment(Qt.AlignCenter)
+        detail.setWordWrap(True)
+
+        log_view = QPlainTextEdit(panel)
+        log_view.setObjectName("PadUpdateLog")
+        log_view.setReadOnly(True)
+        try:
+            log_view.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+        except Exception:
+            pass
+        try:
+            log_view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            log_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        except Exception:
+            try:
+                log_view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+                log_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            except Exception:
+                pass
+        try:
+            line_height = log_view.fontMetrics().lineSpacing()
+            log_view.setFixedHeight(int(line_height * 3 + 6))
+        except Exception:
+            log_view.setFixedHeight(54)
+        log_view.setVisible(False)
+
+        bar = QProgressBar(panel)
+        bar.setObjectName("PadUpdateBar")
+        bar.setRange(0, 0)
+        bar.setTextVisible(False)
+        bar.setFixedHeight(8)
+
+        progress_label = QLabel("", panel)
+        progress_label.setObjectName("PadUpdateProgressLabel")
+        progress_label.setAlignment(Qt.AlignCenter)
+        progress_label.setVisible(False)
+
+        button_col = QVBoxLayout()
+        button_col.setContentsMargins(0, 0, 0, 0)
+        button_col.setSpacing(6)
+
+        btn_primary = QPushButton("설치하기", panel)
+        btn_primary.setObjectName("PadUpdatePrimaryButton")
+        btn_secondary = QPushButton("해당 버전 건너뛰기", panel)
+        btn_secondary.setObjectName("PadUpdateSecondaryButton")
+        btn_tertiary = QPushButton("나중에 하기", panel)
+        btn_tertiary.setObjectName("PadUpdateTertiaryButton")
+
+        for btn in (btn_tertiary, btn_secondary, btn_primary):
+            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            btn.setMinimumHeight(26)
+            button_col.addWidget(btn)
+
+        layout.addWidget(header_row)
+        layout.addWidget(icon_label)
+        layout.addWidget(title)
+        layout.addWidget(detail)
+        layout.addStretch(1)
+        layout.addWidget(log_view)
+        layout.addWidget(progress_label)
+        layout.addWidget(bar)
+        layout.addLayout(button_col)
+
+        btn_primary.clicked.connect(lambda: self._on_update_panel_action("primary"))
+        btn_secondary.clicked.connect(lambda: self._on_update_panel_action("secondary"))
+        btn_tertiary.clicked.connect(lambda: self._on_update_panel_action("tertiary"))
+
+        self._pad_update_title = title
+        self._pad_update_header_row = header_row
+        self._pad_update_version_row = version_row
+        self._pad_update_current_label = current_label
+        self._pad_update_latest_label = latest_label
+        self._pad_update_eta_label = eta_label
+        self._pad_update_detail = detail
+        self._pad_update_bar = bar
+        self._pad_update_progress_label = progress_label
+        self._pad_update_log_view = log_view
+        self._pad_update_primary_btn = btn_primary
+        self._pad_update_secondary_btn = btn_secondary
+        self._pad_update_tertiary_btn = btn_tertiary
+
+        panel.hide()
+        return panel
+
     def _setup_settings_status_mode(self):
         stack = getattr(self, "pad_stack_settings", None)
         if stack is None:
@@ -1770,6 +1941,8 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
     def _animate_pill(self, expand: bool):
         if getattr(self, "_pill_loading", False):
             return
+        if getattr(self, "_update_panel_visible", False):
+            return
         target = self._pad_width if expand else 0
         prev_expanded = self._pill_expanded
         if expand == prev_expanded and self._pill_anim:
@@ -1819,6 +1992,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             pass
         self._position_loading_ring()
         self._position_loading_panel()
+        self._position_update_panel()
         self._position_status_lights()
 
     def _set_status_light(self, light: QLabel, ok: bool):
@@ -1853,6 +2027,17 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
     def _position_loading_panel(self):
         panel = getattr(self, "_pad_loading_panel", None)
+        pad = getattr(self, "_right_pad", None)
+        if panel is None or pad is None:
+            return
+        try:
+            panel.setGeometry(pad.rect())
+            panel.raise_()
+        except Exception:
+            pass
+
+    def _position_update_panel(self):
+        panel = getattr(self, "_pad_update_panel", None)
         pad = getattr(self, "_right_pad", None)
         if panel is None or pad is None:
             return
@@ -1947,6 +2132,8 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self._pill_loading = loading
         self._set_pill_buttons_enabled(not loading)
         if loading:
+            if getattr(self, "_update_panel_visible", False):
+                self._set_update_panel_visible(False)
             exit_btn = getattr(self, "btn_exit", None)
             if exit_btn is not None:
                 try:
@@ -1985,6 +2172,378 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         ring = getattr(self, "_pill_loading_ring", None)
         if ring is not None:
             ring.stop()
+
+    def _on_update_panel_action(self, key: str):
+        handler = self._update_panel_actions.get(key)
+        if not handler:
+            return
+        try:
+            self._set_update_panel_buttons_enabled(False)
+        except Exception:
+            pass
+        try:
+            handler()
+        except Exception:
+            pass
+
+    def _set_update_panel_buttons_enabled(self, enabled: bool):
+        for btn in (
+            getattr(self, "_pad_update_primary_btn", None),
+            getattr(self, "_pad_update_secondary_btn", None),
+            getattr(self, "_pad_update_tertiary_btn", None),
+        ):
+            if btn is None:
+                continue
+            try:
+                btn.setEnabled(enabled)
+            except Exception:
+                pass
+
+    def _set_update_panel_visible(self, visible: bool):
+        if visible == getattr(self, "_update_panel_visible", False):
+            return
+        self._update_panel_visible = visible
+        if visible:
+            try:
+                if self._pill_anim:
+                    self._pill_anim.stop()
+            except Exception:
+                pass
+            try:
+                self._pad_desc_timer.stop()
+            except Exception:
+                pass
+            self._pad_desc_window_active = False
+            self._pill_expanded = True
+            self._apply_pill_width(self._pad_width, keep_right=False)
+            self._set_pad_boxes_visible(False)
+            self._set_pill_buttons_enabled(False)
+            exit_btn = getattr(self, "btn_exit", None)
+            if exit_btn is not None:
+                try:
+                    exit_btn.setEnabled(True)
+                except Exception:
+                    pass
+            panel = getattr(self, "_pad_update_panel", None)
+            if panel is not None:
+                panel.setVisible(True)
+                self._position_update_panel()
+            self._ensure_main_window_visible()
+        else:
+            panel = getattr(self, "_pad_update_panel", None)
+            if panel is not None:
+                panel.setVisible(False)
+            self._set_pad_boxes_visible(True)
+            self._set_pill_buttons_enabled(True)
+            self._pill_expanded = False
+            self._apply_pill_width(0, keep_right=False)
+
+    def _configure_update_panel(
+        self,
+        title: str,
+        detail: str,
+        show_progress: bool,
+        current_version: str | None = None,
+        latest_version: str | None = None,
+    ):
+        title_label = getattr(self, "_pad_update_title", None)
+        detail_label = getattr(self, "_pad_update_detail", None)
+        bar = getattr(self, "_pad_update_bar", None)
+        version_row = getattr(self, "_pad_update_version_row", None)
+        current_label = getattr(self, "_pad_update_current_label", None)
+        latest_label = getattr(self, "_pad_update_latest_label", None)
+        if title_label is not None:
+            title_label.setText(title)
+        if detail_label is not None:
+            detail_label.setText(detail)
+        if bar is not None:
+            bar.setVisible(show_progress)
+            if show_progress:
+                bar.setRange(0, 0)
+                bar.setValue(0)
+                bar.setTextVisible(False)
+        progress_label = getattr(self, "_pad_update_progress_label", None)
+        if progress_label is not None and not show_progress:
+            progress_label.setVisible(False)
+        if version_row is not None:
+            if current_version and latest_version:
+                if current_label is not None:
+                    current_label.setText(f"현재 버전: {current_version}")
+                if latest_label is not None:
+                    latest_label.setText(f"최신 버전: {latest_version}")
+                version_row.setVisible(True)
+            else:
+                version_row.setVisible(False)
+        self._update_update_header_row_visibility()
+        self._set_update_panel_buttons_enabled(True)
+
+    def _set_update_progress(self, percent: int | None, text: str | None = None):
+        bar = getattr(self, "_pad_update_bar", None)
+        label = getattr(self, "_pad_update_progress_label", None)
+        if bar is None:
+            return
+        if percent is None:
+            bar.setRange(0, 0)
+            bar.setValue(0)
+            bar.setTextVisible(False)
+            if label is not None:
+                label.setVisible(bool(text))
+                if text:
+                    label.setText(text)
+            return
+        value = max(0, min(100, int(percent)))
+        bar.setRange(0, 100)
+        bar.setValue(value)
+        bar.setTextVisible(False)
+        if label is not None:
+            label.setText(text or f"{value}%")
+            label.setVisible(True)
+
+    def _set_update_eta(self, text: str | None):
+        label = getattr(self, "_pad_update_eta_label", None)
+        if label is None:
+            return
+        if text:
+            label.setText(text)
+            label.setVisible(True)
+        else:
+            label.setVisible(False)
+        self._update_update_header_row_visibility()
+
+    def _update_update_header_row_visibility(self):
+        header_row = getattr(self, "_pad_update_header_row", None)
+        version_row = getattr(self, "_pad_update_version_row", None)
+        eta_label = getattr(self, "_pad_update_eta_label", None)
+        if header_row is None:
+            return
+        show = False
+        try:
+            show = (version_row is not None and version_row.isVisible()) or (
+                eta_label is not None and eta_label.isVisible()
+            )
+        except Exception:
+            show = False
+        header_row.setVisible(show)
+
+    def _set_update_log_visible(self, visible: bool):
+        log_view = getattr(self, "_pad_update_log_view", None)
+        if log_view is None:
+            return
+        log_view.setVisible(visible)
+        if not visible:
+            self._update_log_lines.clear()
+            log_view.setPlainText("")
+
+    def _append_update_log_line(self, msg: str):
+        log_view = getattr(self, "_pad_update_log_view", None)
+        if log_view is None or not log_view.isVisible():
+            return
+        for line in msg.splitlines():
+            if not line:
+                continue
+            self._update_log_lines.append(line)
+        max_lines = 3
+        if len(self._update_log_lines) > max_lines:
+            self._update_log_lines = self._update_log_lines[-max_lines:]
+        log_view.setPlainText("\n".join(self._update_log_lines))
+
+    def _set_update_panel_button(self, key: str, text: str | None, visible: bool, handler=None):
+        btn = None
+        if key == "primary":
+            btn = getattr(self, "_pad_update_primary_btn", None)
+        elif key == "secondary":
+            btn = getattr(self, "_pad_update_secondary_btn", None)
+        elif key == "tertiary":
+            btn = getattr(self, "_pad_update_tertiary_btn", None)
+        if btn is None:
+            return
+        if text is not None:
+            btn.setText(text)
+        btn.setVisible(visible)
+        if handler:
+            self._update_panel_actions[key] = handler
+        else:
+            self._update_panel_actions.pop(key, None)
+
+    def show_update_check_panel(self, detail: str = "GitHub 릴리즈를 확인합니다."):
+        self._update_panel_actions.clear()
+        self._set_update_eta(None)
+        self._configure_update_panel("업데이트 확인 중...", detail, True)
+        self._set_update_log_visible(False)
+        self._set_update_panel_button("primary", None, False)
+        self._set_update_panel_button("secondary", None, False)
+        self._set_update_panel_button("tertiary", None, False)
+        self._set_update_panel_visible(True)
+
+    def show_update_prompt_panel(self, current_version: str, latest_version: str, detail: str, on_install, on_skip, on_later):
+        self._update_panel_actions.clear()
+        self._set_update_eta(None)
+        self._configure_update_panel("업데이트가 있습니다", detail, False, current_version, latest_version)
+        self._set_update_log_visible(False)
+        self._set_update_panel_button("primary", "설치하기", True, on_install)
+        self._set_update_panel_button("secondary", "해당 버전 건너뛰기", True, on_skip)
+        self._set_update_panel_button("tertiary", "나중에 하기", True, on_later)
+        self._set_update_panel_visible(True)
+
+    def show_update_progress_panel(self, detail: str):
+        self._update_panel_actions.clear()
+        if not getattr(self, "_upgrade_in_progress", False):
+            self._set_update_eta(None)
+        self._configure_update_panel("업데이트 진행 중...", detail, True)
+        self._set_update_progress(None, None)
+        if not getattr(self, "_upgrade_in_progress", False):
+            self._set_update_log_visible(False)
+        self._set_update_panel_button("primary", None, False)
+        self._set_update_panel_button("secondary", None, False)
+        self._set_update_panel_button("tertiary", None, False)
+        self._set_update_panel_visible(True)
+        self._update_update_header_row_visibility()
+
+    def set_update_progress(self, percent: int | None, text: str | None = None):
+        self._set_update_progress(percent, text)
+
+    def show_update_done_panel(self, detail: str, on_restart):
+        self._update_panel_actions.clear()
+        self._set_update_eta(None)
+        self._configure_update_panel("업데이트 완료", detail, False)
+        self._set_update_log_visible(False)
+        self._set_update_panel_button("primary", "프로그램 재시작", True, on_restart)
+        self._set_update_panel_button("secondary", None, False)
+        self._set_update_panel_button("tertiary", None, False)
+        self._set_update_panel_visible(True)
+
+    def show_update_error_panel(self, detail: str, on_continue, on_later):
+        self._update_panel_actions.clear()
+        if not getattr(self, "_upgrade_in_progress", False):
+            self._set_update_eta(None)
+        self._configure_update_panel("업데이트 실패", detail, False)
+        self._set_update_panel_button("primary", "서비스 시작", True, on_continue)
+        self._set_update_panel_button("secondary", None, False)
+        self._set_update_panel_button("tertiary", "나중에", True, on_later)
+        self._set_update_panel_visible(True)
+
+    def hide_update_panel(self):
+        self._update_panel_actions.clear()
+        self._set_update_log_visible(False)
+        self._set_update_eta(None)
+        self._set_update_panel_visible(False)
+
+    def start_upgrade_flow(self, version: str | None = None):
+        if getattr(self, "_upgrade_in_progress", False):
+            return
+        self._upgrade_in_progress = True
+        ver = str(version or "").strip() or "?"
+        self._update_log_lines.clear()
+        self._set_update_log_visible(True)
+        self._set_update_eta("예상 소요: 약 30분")
+        self._ensure_main_window_visible()
+        self.show_update_progress_panel(f"업그레이드 준비 중... (v{ver})")
+        if not docker_compose_available():
+            self._show_upgrade_error("Docker 또는 Compose를 찾을 수 없습니다.")
+            return
+        if not self._is_valid_project_root(self.project_root):
+            self._show_upgrade_error("프로젝트 경로가 아직 준비되지 않았습니다.")
+            return
+        if not self._apply_compose_variant(self.install_variant):
+            self._show_upgrade_error("선택한 설치 옵션에 맞는 docker-compose 템플릿을 찾을 수 없습니다.")
+            return
+
+        def _after_build(exit_code: int, *_):
+            if exit_code != 0:
+                self._show_upgrade_error(f"업그레이드 빌드 실패 (code={exit_code})")
+                return
+            self.show_update_progress_panel("DB 마이그레이션 중...")
+            cmd = self._upgrade_migration_cmd()
+            self.run_compose(
+                ["run", "--rm", "--entrypoint", "bash", "service", "-c", cmd],
+                on_finish=_after_migrate,
+            )
+
+        def _after_migrate(exit_code: int, *_):
+            if exit_code != 0:
+                self._show_upgrade_error(f"마이그레이션 실패 (code={exit_code})")
+                return
+            self.show_update_progress_panel("서비스 시작 중...")
+            self.run_compose(["up", "-d", "service"], on_finish=_after_up)
+
+        def _after_up(exit_code: int, *_):
+            if exit_code != 0:
+                self._show_upgrade_error(f"서비스 시작 실패 (code={exit_code})")
+                return
+            try:
+                cfg = load_config()
+                if CONFIG_UPGRADE_KEY in cfg:
+                    cfg.pop(CONFIG_UPGRADE_KEY, None)
+                    save_config(cfg)
+            except Exception:
+                pass
+            self.hide_update_panel()
+            self._upgrade_in_progress = False
+            self._wait_for_services_ready(self.load_ui)
+
+        self.show_update_progress_panel("Docker 이미지를 빌드하는 중입니다...")
+        self.run_compose(["build", "--no-cache"], on_finish=_after_build)
+
+    def _show_upgrade_error(self, detail: str):
+        self._upgrade_in_progress = False
+        self._set_update_log_visible(True)
+
+        def _continue():
+            try:
+                self.hide_update_panel()
+            except Exception:
+                pass
+            try:
+                self.on_start()
+            except Exception:
+                pass
+
+        def _later():
+            try:
+                self.hide_update_panel()
+            except Exception:
+                pass
+
+        try:
+            self.show_update_error_panel(detail, _continue, _later)
+        except Exception:
+            pass
+
+    def _upgrade_migration_cmd(self) -> str:
+        return (
+            "set -euxo pipefail; cd ~/src/backend/database; "
+            "python3 -m pip show orator >/dev/null 2>&1 || ("
+            "python3 -m pip install --no-deps --no-input -q "
+            "backpack==0.1 simplejson faker lazy-object-proxy cleo==0.6.8 inflection "
+            "pendulum==1.5.1 pytzdata python-dateutil && "
+            "python3 -m pip install --no-deps --no-input -q orator==0.9.9); "
+            "python3 - <<'PY'\n"
+            "import os, sys\n"
+            "sys.path.insert(0, os.getcwd())\n"
+            "try:\n"
+            "  from importlib import import_module\n"
+            "  cfg = import_module('config.database')\n"
+            "  if hasattr(cfg, 'DATABASES'):\n"
+            "    connections = {k:v for k,v in cfg.DATABASES.items() if isinstance(v, dict)}\n"
+            "  elif hasattr(cfg, 'config'):\n"
+            "    connections = cfg.config\n"
+            "  else:\n"
+            "    raise RuntimeError('No DATABASES/config mapping in config/database.py')\n"
+            "  from orator import DatabaseManager\n"
+            "  from orator.migrations import Migrator, DatabaseMigrationRepository\n"
+            "  db = DatabaseManager(connections)\n"
+            "  repo = DatabaseMigrationRepository(db, 'migrations')\n"
+            "  if not repo.repository_exists():\n"
+            "    repo.create_repository()\n"
+            "  migrator = Migrator(repo, db)\n"
+            "  path = os.path.join(os.getcwd(), 'migrations')\n"
+            "  migrator.run(path)\n"
+            "except Exception:\n"
+            "  import traceback\n"
+            "  traceback.print_exc()\n"
+            "  sys.exit(1)\n"
+            "PY\n"
+        )
 
     def _apply_pill_mask(self):
         try:
@@ -2149,6 +2708,17 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
     def closeEvent(self, event):
         """Exit and stop the service container so next launch starts cleanly."""
+        if getattr(self, "_skip_shutdown_on_exit", False):
+            try:
+                self._close_log_windows()
+                self._stop_inline_logs()
+            except Exception:
+                pass
+            try:
+                event.accept()
+            except Exception:
+                pass
+            return
         if self._closing:
             try:
                 super().closeEvent(event)
@@ -2191,6 +2761,13 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             except Exception:
                 pass
             return
+        if getattr(self, "_update_panel_visible", False):
+            try:
+                self.btn_quick_apply.setEnabled(False)
+                self.btn_quick_apply.setToolTip("업데이트 확인/진행 중에는 사용할 수 없습니다.")
+            except Exception:
+                pass
+            return
         valid_src = self._is_valid_dev_src(self.dev_src_root)
         try:
             self.btn_quick_apply.setEnabled(True)
@@ -2217,14 +2794,14 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             self.btn_open_browser.setEnabled(bool(running) and not loading)
         except Exception:
             pass
-        if loading:
+        if loading or getattr(self, "_update_panel_visible", False):
             try:
                 self.btn_quick_apply.setEnabled(False)
             except Exception:
                 pass
         if self.status_label.isVisible():
             self.status_label.setText(text)
-        if not loading:
+        if not loading and not getattr(self, "_update_panel_visible", False):
             self.update_buttons()
         self._position_floating_bar()
 
@@ -3030,6 +3607,14 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             UI_LOG_DIR.mkdir(parents=True, exist_ok=True)
             with UI_LOG_FILE.open("a", encoding="utf-8") as f:
                 f.write(msg + "\n")
+        except Exception:
+            pass
+        try:
+            if getattr(self, "_upgrade_in_progress", False) or (
+                getattr(self, "_pad_update_log_view", None) is not None
+                and getattr(self, "_pad_update_log_view").isVisible()
+            ):
+                self._append_update_log_line(msg)
         except Exception:
             pass
         # Move cursor to end (Qt5/Qt6 compatible)

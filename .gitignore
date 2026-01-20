@@ -2,3 +2,6 @@ release/*.deb
 logs/
 src/backend/database/*.db
 /.venv
+
+__pycache__/
+*.pyc
