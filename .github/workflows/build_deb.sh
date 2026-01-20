@@ -87,7 +87,7 @@ cat > "$STAGE_DIR/usr/bin/$PKG_NAME" <<EOF
 #!/bin/bash
 # 런처가 참조할 프로젝트 루트 경로
 export EASYTRAINER_ROOT="$INSTALL_DIR"
-export EASYTRAINER_DATA_DIR="$INSTALL_DIR/project"
+export EASYTRAINER_DATA_DIR="$INSTALL_DIR"
 
 # 런처 실행 시 작업 디렉토리(CWD)를 프로젝트 폴더로 이동 (Docker Compose 실행 등을 위해)
 cd "$INSTALL_DIR/project"
