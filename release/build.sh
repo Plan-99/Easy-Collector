@@ -105,6 +105,18 @@ for name in "${DIST_PACKAGES[@]}"; do
     echo "[deb][WARN] dist-info for ${name} not found under $HOST_SITE; continuing."
   fi
 done
+echo "[deb] Copying licensing package into venv..."
+if [ ! -d "$HOST_SITE/licensing" ]; then
+  echo "[deb][ERROR] Host Python is missing licensing. Install it first (e.g. python3 -m pip install --user licensing) and retry." >&2
+  exit 1
+fi
+rsync -a "$HOST_SITE/licensing" "$DST_SITE/"
+LICENSE_DIST=$(find "$HOST_SITE" -maxdepth 1 -type d -iname "licensing-*.dist-info" | head -n1 || true)
+if [ -n "$LICENSE_DIST" ] && [ -d "$LICENSE_DIST" ]; then
+  rsync -a "$LICENSE_DIST" "$DST_SITE/"
+else
+  echo "[deb][WARN] dist-info for licensing not found under $HOST_SITE; continuing."
+fi
 echo "[deb] Embedded venv ready at $VENV_DIR (copied from host PySide6)"
 
 echo "[deb] Embedding project payload for HOME deployment..."
