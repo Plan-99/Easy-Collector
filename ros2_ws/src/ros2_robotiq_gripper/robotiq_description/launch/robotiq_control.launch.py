@@ -34,48 +34,18 @@ from launch.substitutions import (
     PathJoinSubstitution,
 )
 from launch.conditions import IfCondition
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 import launch_ros
 import os
 
 
-def generate_launch_description():
+def launch_setup(context, *args, **kwargs):
+    # This function is executed at launch time
     description_pkg_share = launch_ros.substitutions.FindPackageShare(
         package="robotiq_description"
     ).find("robotiq_description")
-    default_model_path = os.path.join(
-        description_pkg_share, "urdf", "robotiq_2f_85_gripper.urdf.xacro"
-    )
-    default_rviz_config_path = os.path.join(
-        description_pkg_share, "rviz", "view_urdf.rviz"
-    )
 
-    args = []
-    args.append(
-        launch.actions.DeclareLaunchArgument(
-            name="model",
-            default_value=default_model_path,
-            description="Absolute path to gripper URDF file",
-        )
-    )
-    args.append(
-        launch.actions.DeclareLaunchArgument(
-            name="rvizconfig",
-            default_value=default_rviz_config_path,
-            description="Absolute path to rviz config file",
-        )
-    )
-    args.append(
-        launch.actions.DeclareLaunchArgument(
-            name="launch_rviz", default_value="false", description="Launch RViz?"
-        )
-    )
-    args.append(
-        launch.actions.DeclareLaunchArgument(
-            name="com_port",
-            default_value="/dev/ttyUSB0",
-            description="Port for communicating with Robotiq hardware",
-        )
-    )
+    namespace = LaunchConfiguration("namespace").perform(context)
 
     robot_description_content = Command(
         [
@@ -109,9 +79,17 @@ def generate_launch_description():
         [description_pkg_share, "config", controllers_file]
     )
 
+    # If namespace is not empty, prefix with a slash
+    controller_manager_name = "controller_manager"
+    if namespace:
+        controller_manager_name = "/" + namespace + "/" + controller_manager_name
+    else:
+        controller_manager_name = "/" + controller_manager_name
+
     control_node = launch_ros.actions.Node(
         package="controller_manager",
         executable="ros2_control_node",
+        namespace=namespace,
         parameters=[
             robot_description_param,
             update_rate_config_file,
@@ -122,6 +100,7 @@ def generate_launch_description():
     robot_state_publisher_node = launch_ros.actions.Node(
         package="robot_state_publisher",
         executable="robot_state_publisher",
+        namespace=namespace,
         parameters=[robot_description_param],
     )
 
@@ -130,6 +109,7 @@ def generate_launch_description():
         executable="rviz2",
         name="rviz2",
         output="log",
+        namespace=namespace,
         arguments=["-d", LaunchConfiguration("rvizconfig")],
         condition=IfCondition(LaunchConfiguration("launch_rviz")),
     )
@@ -137,23 +117,26 @@ def generate_launch_description():
     joint_state_broadcaster_spawner = launch_ros.actions.Node(
         package="controller_manager",
         executable="spawner",
+        namespace=namespace,
         arguments=[
             "joint_state_broadcaster",
             "--controller-manager",
-            "/controller_manager",
+            controller_manager_name,
         ],
     )
 
     robotiq_gripper_controller_spawner = launch_ros.actions.Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["robotiq_gripper_controller", "-c", "/controller_manager"],
+        namespace=namespace,
+        arguments=["robotiq_gripper_controller", "-c", controller_manager_name],
     )
 
     robotiq_activation_controller_spawner = launch_ros.actions.Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["robotiq_activation_controller", "-c", "/controller_manager"],
+        namespace=namespace,
+        arguments=["robotiq_activation_controller", "-c", controller_manager_name],
     )
 
     nodes = [
@@ -165,4 +148,53 @@ def generate_launch_description():
         rviz_node,
     ]
 
-    return launch.LaunchDescription(args + nodes)
+    return nodes
+
+
+def generate_launch_description():
+    description_pkg_share = launch_ros.substitutions.FindPackageShare(
+        package="robotiq_description"
+    ).find("robotiq_description")
+    default_model_path = os.path.join(
+        description_pkg_share, "urdf", "robotiq_2f_85_gripper.urdf.xacro"
+    )
+    default_rviz_config_path = os.path.join(
+        description_pkg_share, "rviz", "view_urdf.rviz"
+    )
+
+    args = []
+    args.append(
+        DeclareLaunchArgument(
+            name="model",
+            default_value=default_model_path,
+            description="Absolute path to gripper URDF file",
+        )
+    )
+    args.append(
+        DeclareLaunchArgument(
+            name="rvizconfig",
+            default_value=default_rviz_config_path,
+            description="Absolute path to rviz config file",
+        )
+    )
+    args.append(
+        DeclareLaunchArgument(
+            name="launch_rviz", default_value="false", description="Launch RViz?"
+        )
+    )
+    args.append(
+        DeclareLaunchArgument(
+            name="com_port",
+            default_value="/dev/ttyUSB0",
+            description="Port for communicating with Robotiq hardware",
+        )
+    )
+    args.append(
+        DeclareLaunchArgument(
+            name="namespace",
+            default_value="",
+            description="Namespace for the robot",
+        )
+    )
+
+    return launch.LaunchDescription(args + [OpaqueFunction(function=launch_setup)])

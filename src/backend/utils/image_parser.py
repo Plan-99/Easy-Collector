@@ -3,6 +3,11 @@ from sensor_msgs.msg import CompressedImage
 import numpy as np
 
 def fetch_image_with_config(image, config):
+    if 'cropped_area' in config and config['cropped_area']:
+        area = config['cropped_area']
+        xy_start = (area[0], area[1])
+        xy_end = (area[2],area[3])
+        image = image[xy_start[1]:xy_end[1], xy_start[0]:xy_end[0]]
     if 'resize' in config:
         size = config['resize']
         image = cv2.resize(image, size)

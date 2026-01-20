@@ -15,7 +15,6 @@ class Dataset(Model, SoftDeletes):
     __appends__ = [
         'robot_ids',
         'sensor_ids',
-        'sensor_img_size',
         'episode_len',
         # 'episode_num',
         'episodes',
@@ -39,10 +38,6 @@ class Dataset(Model, SoftDeletes):
     @accessor
     def sensor_ids(self):
         return self.task.sensor_ids if self.task else None
-    
-    @accessor
-    def sensor_img_size(self):
-        return self.task.sensor_img_size if self.task else None
     
     @accessor
     def episode_len(self):
