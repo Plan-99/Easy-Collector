@@ -36,19 +36,6 @@ def get_checkpoint_files(id):
     return {'status': 'success', 'files': files}, 200
 
 
-@checkpoint_bp.route('/checkpoint', methods=['POST'])
-def create_checkpoint():
-    data = request.json
-    new_checkpoint = CheckpointModel.create(
-        name=data.get('name'),
-        task_id=data.get('task_id'),
-        policy_id=data.get('policy_id'),
-        dataset_info=data.get('dataset_info', []),
-        num_epochs=data.get('num_epochs'),
-        batch_size=data.get('batch_size'),
-    )
-    return {'status': 'success', 'message': 'Checkpoint Created', 'id': new_checkpoint.id}, 200
-
 
 @checkpoint_bp.route('/checkpoint/<id>/:check_create_successed', methods=['GET'])
 def check_create_successed(id):

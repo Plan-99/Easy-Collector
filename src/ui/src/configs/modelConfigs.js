@@ -169,5 +169,7 @@ export const TRAIN_CONFIGS = {
         'num_epochs': { 'label': 'Number of Epochs', 'value': 1000, 'type': 'number' },
         'batch_size': { 'label': 'Batch Size', 'value': 32, 'type': 'number' },
         'num_workers': { 'label': 'Number of Workers', 'value': 4, 'type': 'number' },
+        'model_input': { 'label': 'Model Input Types', 'value': ['joint', 'vision'], 'type': 'multi-select', 'options': ['joint', 'vision', 'eepos'] },
+        'model_output': { 'label': 'Model Output Types', 'value': 'qaction', 'type': 'select', 'options': ['qaction', 'eetarget', 'qaction_delta', 'eetarget_delta'] },
     }
 };

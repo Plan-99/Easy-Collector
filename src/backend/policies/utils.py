@@ -18,13 +18,11 @@ from transformers import AutoImageProcessor
 from PIL import Image
 
 
-
-
 e = IPython.embed
 
 
 class EpisodicDataset(torch.utils.data.Dataset):
-    def __init__(self, episode_ids, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone='resnet18', n_obs_steps=1):
+    def __init__(self, episode_ids, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone='resnet18', n_obs_steps=1, model_input=['qpos', 'vision'], model_output=['qaction']):
         super(EpisodicDataset).__init__()
         self.episode_ids = episode_ids
         self.dataset_dir = dataset_dir
@@ -34,8 +32,22 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self.n_obs_steps = n_obs_steps
         self.policy_type = policy_type
         self.vision_backbone = vision_backbone
+        self.model_input = model_input
+        self.model_output = model_output
         self.info = None
-        self.__getitem__(0) # initialize self.is_sim
+        
+        self.key_mapping = {
+            'joint': '/observations/qpos',
+            'qpos': '/observations/qpos',
+            'qvel': '/observations/qvel',
+            'eepos': '/observations/eepos',
+            'eef_vel': '/observations/eef_vel',
+            'eetarget': '/eetarget',
+            'eetarget_delta': '/eetarget_delta',
+            'qaction': '/qaction',
+            'qaction_delta': '/qaction_delta',
+        }
+        self.__getitem__(0) # initialize self.info
 
     def __len__(self):
         return len(self.episode_ids)
@@ -46,14 +58,14 @@ class EpisodicDataset(torch.utils.data.Dataset):
         episode_id = self.episode_ids[index]
         dataset_path = os.path.join(self.dataset_dir, f'episode_{episode_id}.hdf5')
         with h5py.File(dataset_path, 'r') as root:
-            # is_sim = root.attrs['sim']
-
+            qaction_path = root.get('/qaction')
+            if qaction_path is None:
+                raise KeyError("'/qaction' group not found in HDF5 file.")
+            
             action_dim = 0
-            for key in root['qaction'].keys():
-                episode_len = root['qaction'][key].shape[0]
-                action_dim += root['qaction'][key].shape[1]
-
-            original_action_shape = (self.chunk_size, action_dim)
+            for key in qaction_path.keys():
+                episode_len = qaction_path[key].shape[0]
+                action_dim += qaction_path[key].shape[1]
 
             language_instruction = root['language_instruction'][()]
             if isinstance(language_instruction, bytes):
@@ -64,47 +76,71 @@ class EpisodicDataset(torch.utils.data.Dataset):
             else:
                 start_ts = np.random.choice(np.arange(self.n_obs_steps - 1, episode_len - self.chunk_size))
             end_ts = start_ts + self.chunk_size
-
             obs_step_start = start_ts - self.n_obs_steps + 1
-            qpos = []
+
+            # Process state inputs
+            state_parts = []
             for i in range(self.n_obs_steps):
-                qpos.append(get_concatenated_pos(root['/observations/qpos'], target_id=obs_step_start + i))
+                current_step_state_parts = []
+                for key in self.model_input:
+                    if key in self.key_mapping:
+                        hdf5_path = self.key_mapping[key]
+                        if hdf5_path in root:
+                            current_step_state_parts.append(get_concatenated_pos(root[hdf5_path], target_id=obs_step_start + i))
+                if current_step_state_parts:
+                    state_parts.append(np.concatenate(current_step_state_parts))
 
-            image_dict = dict()
-            for sensor_id in self.sensor_ids:
-                image_dict[f"sensor_{sensor_id}"] = []
-                for i in range(self.n_obs_steps):
-                    image_dict[f"sensor_{sensor_id}"].append(root[f'/observations/images/sensor_{sensor_id}'][obs_step_start + i])
-
-
-            action = get_concatenated_pos(root['qaction'], target_id=None, target_range=[start_ts, min(episode_len, end_ts)])
+            if not state_parts: # Vision-only case or no state inputs
+                for _ in range(self.n_obs_steps):
+                    state_parts.append(np.zeros(1, dtype=np.float32))
             
-            action_len = min(self.chunk_size, episode_len - start_ts) # hack, to make timesteps more aligned
+            # Process image inputs if 'vision' is in model_input
+            image_dict = dict()
+            if 'vision' in self.model_input:
+                for sensor_id in self.sensor_ids:
+                    image_dict[f"sensor_{sensor_id}"] = []
+                    for i in range(self.n_obs_steps):
+                        image_dict[f"sensor_{sensor_id}"].append(root[f'/observations/images/sensor_{sensor_id}'][obs_step_start + i])
 
-        padded_action = np.zeros(original_action_shape, dtype=np.float32)
+            # Process output actions
+            action_parts = []
+            for key in self.model_output:
+                if key in self.key_mapping:
+                    hdf5_path = self.key_mapping[key]
+                    if hdf5_path in root:
+                         action_parts.append(get_concatenated_pos(root[hdf5_path], target_id=None, target_range=[start_ts, min(episode_len, end_ts)]))
 
-        padded_action[:action_len] = action
-        is_pad = np.zeros(self.chunk_size)
-        is_pad[action_len:] = 1
+            if not action_parts:
+                raise ValueError("No valid model_output keys found in HDF5 file.")
+
+            action = np.concatenate(action_parts, axis=1)
+            
+            action_dim = action.shape[1]
+            original_action_shape = (self.chunk_size, action_dim)
+            action_len = min(self.chunk_size, episode_len - start_ts)
+
+            padded_action = np.zeros(original_action_shape, dtype=np.float32)
+            padded_action[:action_len] = action
+            is_pad = np.zeros(self.chunk_size)
+            is_pad[action_len:] = 1
 
         item = dict()
         item['language_instruction'] = language_instruction
-        for sensor_id in self.sensor_ids:
-            processed_images = []
-            for image in image_dict[f"sensor_{sensor_id}"]:
-                image = Image.fromarray(np.array(image))
-                image = process_image(image)
-                processed_images.append(image)
-            # image = torch.from_numpy(np.array(image_dict[f"sensor_{sensor_id}"]))
-            # image = torch.einsum('n h w c -> n c h w', image)  # channel last to channel first
-            # image = image / 255.0  # normalize image
+        
+        if 'vision' in self.model_input:
+            for sensor_id in self.sensor_ids:
+                processed_images = []
+                for image in image_dict[f"sensor_{sensor_id}"]:
+                    image = Image.fromarray(np.array(image))
+                    image = process_image(image)
+                    processed_images.append(image)
 
-            if self.policy_type in ['PI0']:
-                item[f"observation.images.sensor_{sensor_id}"] = torch.stack(processed_images).squeeze()  # add time dim
-                print(item[f"observation.images.sensor_{sensor_id}"].shape)
-            else:
-                item[f"observation.images.sensor_{sensor_id}"] = torch.stack(processed_images)
-                
+                if self.policy_type in ['PI0']:
+                    item[f"observation.images.sensor_{sensor_id}"] = torch.stack(processed_images).squeeze()
+                else:
+                    item[f"observation.images.sensor_{sensor_id}"] = torch.stack(processed_images)
+
+        qpos = state_parts
         if self.policy_type in ['PI0']:
             item["observation.state"] = torch.from_numpy(np.concatenate(qpos)).float()
         else:
@@ -129,117 +165,173 @@ class EpisodicDataset(torch.utils.data.Dataset):
         return item
 
 
-
 def process_image(image, vision_backbone='resnet18', to_cuda=False):
     if vision_backbone not in VISION_BACKBONE_MAP:
         tensor_transform = transforms.ToTensor()
         image = tensor_transform(image)
     else:
         image_processor = AutoImageProcessor.from_pretrained(VISION_BACKBONE_MAP[vision_backbone])
-        image = image_processor(image)['pixel_values'][0]  # Assuming the image is a PIL Image or numpy array
+        image = image_processor(image)['pixel_values'][0]
 
-    return image.cuda() if to_cuda else image  # Add batch dimension
+    return image.cuda() if to_cuda else image
 
 
-def get_norm_stats(dataset_dir, num_episodes):
-    all_qpos_data = []
+def get_norm_stats(dataset_dir, num_episodes, model_input=['qpos'], model_output=['qaction']):
+    all_state_data = []
     all_action_data = []
-    # episode 길이 관련 코드 수정
+
+    key_mapping = {
+        'joint': '/observations/qpos',
+        'qpos': '/observations/qpos',
+        'qvel': '/observations/qvel',
+        'eepos': '/observations/eepos',
+        'eef_vel': '/observations/eef_vel',
+        'eetarget': '/eetarget',
+        'eetarget_delta': '/eetarget_delta',
+        'qaction': '/qaction',
+        'qaction_delta': '/qaction_delta',
+    }
+    
     observation_image_keys = []
-    cnt = 0
+    
     for episode_idx in range(num_episodes):
         dataset_path = os.path.join(dataset_dir, f'episode_{episode_idx}.hdf5')
         with h5py.File(dataset_path, 'r') as root:
-            qpos = get_concatenated_pos(root['/observations/qpos'])
-            action = get_concatenated_pos(root['qaction'])
-            observation_image_keys = list(root['/observations/images'].keys())
+            # state data
+            state_parts = []
+            for key in model_input:
+                if key in key_mapping and key_mapping[key] in root:
+                    state_parts.append(get_concatenated_pos(root[key_mapping[key]]))
+            
+            if state_parts:
+                state = np.concatenate(state_parts, axis=1)
+                all_state_data.append(torch.from_numpy(state))
+
+            # action data
+            action_parts = []
+            for key in model_output:
+                if key in key_mapping and key_mapping[key] in root:
+                    action_parts.append(get_concatenated_pos(root[key_mapping[key]]))
+            
+            if not action_parts:
+                raise ValueError("No valid model_output keys found for stats calculation.")
+
+            action = np.concatenate(action_parts, axis=1)
+            all_action_data.append(torch.from_numpy(action))
+            
+            if 'vision' in model_input and '/observations/images' in root:
+                observation_image_keys = list(root['/observations/images'].keys())
+    
+    stats = {}
+    
+    # Action stats (calculated first to get total_steps)
+    if not all_action_data:
+        raise ValueError("No action data found to calculate stats.")
         
-        cnt += qpos.shape[0]
-        all_qpos_data.append(torch.from_numpy(qpos))
-        all_action_data.append(torch.from_numpy(action))
-    all_qpos_data = torch.stack(all_qpos_data)
-    all_action_data = torch.stack(all_action_data)
+    all_action_data_cat = torch.cat(all_action_data, dim=0)
+    action_min = all_action_data_cat.min(dim=0)[0]
+    action_max = all_action_data_cat.max(dim=0)[0]
+    action_mean = all_action_data_cat.mean(dim=0)
+    action_std = all_action_data_cat.std(dim=0)
+    action_std = torch.clip(action_std, 1e-2, np.inf)
+    total_steps = all_action_data_cat.shape[0]
 
-    # normalize action data
-    action_min = all_action_data.view(-1, action.shape[-1]).min(dim=0)[0]
-    action_max = all_action_data.view(-1, action.shape[-1]).max(dim=0)[0]
-    action_mean = all_action_data.mean(dim=[0, 1], keepdim=True)
-    action_std = all_action_data.std(dim=[0, 1], keepdim=True)
-    action_std = torch.clip(action_std, 1e-2, np.inf) # clipping
-
-    # normalize qpos data
-    qpos_min = all_qpos_data.view(-1, qpos.shape[-1]).min(dim=0)[0]
-    qpos_max = all_qpos_data.view(-1, qpos.shape[-1]).max(dim=0)[0]
-    qpos_mean = all_qpos_data.mean(dim=[0, 1], keepdim=True)
-    qpos_std = all_qpos_data.std(dim=[0, 1], keepdim=True)
-    qpos_std = torch.clip(qpos_std, 1e-2, np.inf) # clipping
-
-    stats = {
-        "action": {
-            "min": action_min.numpy(),
-            "max": action_max.numpy(),
-            "mean": action_mean.numpy().squeeze(),
-            "std": action_std.numpy().squeeze(),
-            "count": np.array([cnt]),
-        },
-        "observation.state": {
-            "min": qpos_min.numpy(),
-            "max": qpos_max.numpy(),
-            "mean": qpos_mean.numpy().squeeze(),
-            "std": qpos_std.numpy().squeeze(),
-            "count": np.array([cnt]),
-        },
+    stats["action"] = {
+        "min": action_min.numpy(),
+        "max": action_max.numpy(),
+        "mean": action_mean.numpy(),
+        "std": action_std.numpy(),
+        "count": np.array([total_steps]),
     }
 
-    for key in observation_image_keys:
-        stats[f"observation.images.{key}"] = {
-            "min": np.array([[[0.0]], [[0.0]], [[0.0]]]),  # Assuming images are normalized between 0 and 1
-            "max": np.array([[[1.0]], [[1.0]], [[1.0]]]),  # Assuming images are normalized between 0 and 1
-            "mean": np.array([[[0.5]], [[0.5]], [[0.5]]]),  # Assuming images are normalized between 0 and 1
-            "std": np.array([[[0.25]], [[0.25]], [[0.25]]]),  # Assuming images are normalized between 0 and 1
-            "count": np.array([cnt]),
-        }
-    
+    # State stats
+    if all_state_data:
+        all_state_data_cat = torch.cat(all_state_data, dim=0)
+        state_min = all_state_data_cat.min(dim=0)[0]
+        state_max = all_state_data_cat.max(dim=0)[0]
+        state_mean = all_state_data_cat.mean(dim=0)
+        state_std = all_state_data_cat.std(dim=0)
+        state_std = torch.clip(state_std, 1e-2, np.inf)
 
-    # stats = {"qaction_mean": action_mean.numpy().squeeze(), "qaction_std": action_std.numpy().squeeze(),
-    #          "qpos_mean": qpos_mean.numpy().squeeze(), "qpos_std": qpos_std.numpy().squeeze(),
-    #          "example_qpos": qpos, 'example_action': action }
+        stats["observation.state"] = {
+            "min": state_min.numpy(),
+            "max": state_max.numpy(),
+            "mean": state_mean.numpy(),
+            "std": state_std.numpy(),
+            "count": np.array([total_steps]),
+        }
+    else: # No state data, create dummy stats
+        stats["observation.state"] = {
+            "min": np.zeros(1, dtype=np.float32),
+            "max": np.zeros(1, dtype=np.float32),
+            "mean": np.zeros(1, dtype=np.float32),
+            "std": np.ones(1, dtype=np.float32),
+            "count": np.array([total_steps]),
+        }
+
+    # Image stats
+    if 'vision' in model_input:
+        for key in observation_image_keys:
+            stats[f"observation.images.{key}"] = {
+                "mean": np.array([[[0.5]], [[0.5]], [[0.5]]]),
+                "std": np.array([[[0.5]], [[0.5]], [[0.5]]]),
+                "count": np.array([total_steps]),
+            }
     
     return stats
 
 
 def get_concatenated_pos(pos_path, target_id=None, target_range=None):
+    def find_datasets_recursive(group, data_list):
+        sorted_keys = sorted(group.keys())
+        for key in sorted_keys:
+            item = group[key]
+            if isinstance(item, h5py.Dataset):
+                if target_id is None and target_range is None:
+                    data_list.append(item[()])
+                elif target_range is None:
+                    data_list.append(item[target_id])
+                else:
+                    data_list.append(item[target_range[0]:target_range[1]])
+            elif isinstance(item, h5py.Group):
+                find_datasets_recursive(item, data_list)
+
     pos_list = []
-    for key in pos_path.keys():
-        if target_id is None and target_range is None:
-            pos_list.append(pos_path[key][()])
-            if len(pos_list) > 0:
-                pos = np.concatenate(pos_list, axis=1)
-        elif target_range is None:
-            pos_list.append(pos_path[key][target_id])
-            if len(pos_list) > 0:
-                pos = np.concatenate(pos_list, axis=0)
-        else:
-            pos_list.append(pos_path[key][target_range[0]:target_range[1]])
-            if len(pos_list) > 0:
-                pos = np.concatenate(pos_list, axis=1)
-    return pos
+    find_datasets_recursive(pos_path, pos_list)
+
+    if not pos_list:
+        return np.array([])
+
+    if target_id is None and target_range is None:
+        return np.concatenate(pos_list, axis=1)
+    elif target_range is None:
+        return np.concatenate(pos_list, axis=0)
+    else:
+        return np.concatenate(pos_list, axis=1)
 
 
-def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_train, batch_size_val, chunk_size, vision_backbone='resnet18', num_workers=1, n_obs_steps=1):
+def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_train, batch_size_val, 
+              chunk_size, vision_backbone='resnet18', 
+              num_workers=1, n_obs_steps=1, 
+              model_input=['joint', 'vision'], model_output='qaction'):
+    
     print(f'\nData from: {dataset_dir}\n')
+
+    if isinstance(model_output, str):
+        model_output = [model_output]
+
     # obtain train test split
     train_ratio = 0.8
     shuffled_indices = np.random.permutation(num_episodes)
     train_indices = shuffled_indices[:int(train_ratio * num_episodes)]
     val_indices = shuffled_indices[int(train_ratio * num_episodes):]
 
-    # obtain normalization stats for qpos and action
-    norm_stats = get_norm_stats(dataset_dir, num_episodes)
+    # obtain normalization stats
+    norm_stats = get_norm_stats(dataset_dir, num_episodes, model_input, model_output)
 
     # construct dataset and dataloader
-    train_dataset = EpisodicDataset(train_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps)
-    val_dataset = EpisodicDataset(val_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps)
+    train_dataset = EpisodicDataset(train_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, model_input=model_input, model_output=model_output)
+    val_dataset = EpisodicDataset(val_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, model_input=model_input, model_output=model_output)
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train, shuffle=True, pin_memory=True, num_workers=num_workers, prefetch_factor=1)
     val_dataloader = DataLoader(val_dataset, batch_size=batch_size_val, shuffle=True, pin_memory=True, num_workers=num_workers, prefetch_factor=1)
 
@@ -252,6 +344,8 @@ def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_tra
 
 # Computes the mean of a list of dictionaries, where each dictionary represents an epoch's metrics.
 def compute_dict_mean(epoch_dicts):
+    if not epoch_dicts:
+        return {}
     result = {k: None for k in epoch_dicts[0]}
     num_items = len(epoch_dicts)
     for k in result:
@@ -303,8 +397,8 @@ def input_caching(prompt):
         cache = {}
     default = cache.get(prompt, "")
     def prefill_hook():
-        readline.insert_text(default)  # 기본값 입력
-        readline.redisplay()          # 화면에 표시
+        readline.insert_text(default)
+        readline.redisplay()
     readline.set_pre_input_hook(prefill_hook)
 
     answer = input(prompt)
@@ -319,14 +413,12 @@ def input_caching(prompt):
 
 def ros_image_to_numpy(image_msg):
     if isinstance(image_msg, CompressedImage):
-        # 압축 이미지 처리
         np_arr = np.frombuffer(image_msg.data, np.uint8)
-        image_array = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)  # 기본 BGR 형태로 디코딩됨
-        image_array = cv2.cvtColor(image_array, cv2.COLOR_BGR2RGB)  # RGB로 변환
-        image_array = image_array[:, :, ::-1]  # BGR -> RGB
+        image_array = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        image_array = cv2.cvtColor(image_array, cv2.COLOR_BGR2RGB)
+        image_array = image_array[:, :, ::-1]
         return image_array
 
-    # 일반 Image 메시지 처리
     encoding_to_dtype = {
         'rgb8': ('uint8', 3),
         'bgr8': ('uint8', 3),
@@ -344,9 +436,9 @@ def ros_image_to_numpy(image_msg):
     image_array = data.reshape((image_msg.height, image_msg.width, channels))
     
     if image_msg.encoding == 'bgr8':
-        image_array = image_array[:, :, ::-1]  # BGR -> RGB
+        image_array = image_array[:, :, ::-1]
     elif image_msg.encoding == 'bgra8':
-        image_array = image_array[:, :, [2, 1, 0, 3]]  # BGRA -> RGBA
+        image_array = image_array[:, :, [2, 1, 0, 3]]
     
     return image_array
 
@@ -364,12 +456,11 @@ def make_policy(ckpt_path, seed, learning_rate, lr_backbone, policy_obj, task, r
         args_override['seed'] = seed
         args_override['state_dim'] = robot['joint_dim']
         if gripper is not None:
-            args_override['state_dim'] += 1 # gripper state dim
+            args_override['state_dim'] += 1
         args_override['num_queries'] = int(policy_obj['settings']['chunk_size'])
         
         args_override['learning_rate'] = learning_rate
         args_override['lr_backbone'] = lr_backbone
-        # args_override[''] = int(policy_obj['settings']['lr_backbone'])
         
         
         sensor_names = [sensor['name'] for sensor in sensors]
@@ -391,22 +482,13 @@ def make_optimizer(policy_class, policy):
 def forward_pass(batch, policy):
     data = {k: (v.cuda() if isinstance(v, torch.Tensor) else v) for k, v in batch.items()}
     return policy.forward(data)
-    # image_data, qpos_data, action_data, is_pad = data
-    # image_data, qpos_data, action_data, is_pad = image_data.cuda(), qpos_data.cuda(), action_data.cuda(), is_pad.cuda()
-    # return policy(qpos_data, image_data, action_data, is_pad) # TODO remove None
 
 
 def convert_lists_to_tuples(obj):
-    """
-    딕셔너리나 리스트 내부의 모든 리스트를 재귀적으로 튜플로 변환합니다.
-    """
-    # 입력된 객체가 딕셔너리일 경우
     if isinstance(obj, dict):
         return {key: convert_lists_to_tuples(value) for key, value in obj.items()}
-    # 입력된 객체가 리스트일 경우
     elif isinstance(obj, list):
         return tuple(convert_lists_to_tuples(item) for item in obj)
-    # 딕셔너리나 리스트가 아니면 그대로 반환
     else:
         return obj
     

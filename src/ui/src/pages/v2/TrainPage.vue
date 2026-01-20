@@ -261,6 +261,19 @@
                                     class="full-height bg-dark"
                                     dark
                                 />
+                                <q-select
+                                    v-else-if="config.type === 'multi-select'"
+                                    dense
+                                    outlined
+                                    v-model="config.value"
+                                    :options="config.options"
+                                    :label="config.label"
+                                    multiple
+                                    emit-value
+                                    map-options
+                                    class="full-height bg-dark"
+                                    dark
+                                />
                                 <q-input
                                     dense
                                     outlined
