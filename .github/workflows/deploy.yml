@@ -2,6 +2,8 @@ name: "Obfuscate In-Place and Build"
 
 on:
   push:
+    tags:
+        - '[0-9]+.[0-9]+.[0-9]+'
   workflow_dispatch:
 
 jobs:
