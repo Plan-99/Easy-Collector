@@ -128,6 +128,8 @@ jobs:
             --hidden-import "update" \
             --hidden-import "tools" \
             --hidden-import "src" \
+            --hidden-import "sqlite3" \
+            --hidden-import "json" \
             release/ui/main.py
 
       # [변경] zip 대신 deb 만들기
