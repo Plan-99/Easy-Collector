@@ -65,12 +65,13 @@ jobs:
           # --paths 지정할 필요 없음 (현재 폴더가 곧 소스니까)
           # --hidden-import src 도 필요 없을 수 있음 (자동 인식) 하지만 안전하게 둠
           
-          pyinstaller --noconfirm --onefile --windowed --clean \
-            --name "EasyLauncher" \
+          pyinstaller --noconfirm --onefile --noconsole --name EasyLauncher \
+            --add-data "release/ui/img:release/ui/img" \
             --collect-all PySide6 \
             --collect-all shiboken6 \
             --collect-all licensing \
-            src/ui/main.py
+            --hidden-import "src" \
+            release/ui/main.py
 
       # [변경] zip 대신 deb 만들기
       - name: Build Debian Package
