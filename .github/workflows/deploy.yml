@@ -18,8 +18,15 @@ jobs:
 
       - name: Install Dependencies
         run: |
+          echo "패키지 설치 시작..."
+          pip install --upgrade pip
+          
+          # 1. 빌드 도구 설치
           pip install pyarmor pyinstaller
-          if [ -f requirements.launcher.txt ]; then pip install -r requirements.launcher.txt; fi
+          
+          # 2. [필수] 앱 실행에 필요한 라이브러리 직접 명시
+          # PySide6, shiboken6, licensing은 꼭 있어야 합니다.
+          pip install PySide6 shiboken6 licensing
 
       # ▼▼▼ [핵심] 난독화 후 원본에 덮어씌우기 ▼▼▼
       - name: Obfuscate and Overwrite
