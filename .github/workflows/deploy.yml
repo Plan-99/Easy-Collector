@@ -56,16 +56,21 @@ jobs:
             --hidden-import "src" \
             release/ui/main.py
 
-      # 결과물 압축 및 배포
-      - name: Zip and Upload
+      # [변경] zip 대신 deb 만들기
+      - name: Build Debian Package
         run: |
-          chmod +x dist/EasyLauncher
-          zip -j update.zip dist/EasyLauncher
+          # 스크립트에 실행 권한 주기
+          chmod +x build_deb_lite.sh
+          
+          # 스크립트 실행 (dist/EasyLauncher 파일을 가져다 씀)
+          ./build_deb_lite.sh
 
+      # [변경] 결과물 업로드 (zip 대신 deb)
       - name: Release to Public Repo
         uses: softprops/action-gh-release@v1
         with:
           repository: my-id/my-public-repo
           token: ${{ secrets.PUBLIC_REPO_TOKEN }}
           tag_name: ${{ github.ref_name }}
-          files: update.zip
+          files: |
+            *.deb
