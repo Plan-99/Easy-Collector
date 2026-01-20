@@ -11,6 +11,12 @@ log_status() {
   fi
 }
 
+export PYTHONPATH="/root/src:/opt/openrobots/lib/python3.10/site-packages:${PYTHONPATH:-}"
+export LD_LIBRARY_PATH="/opt/openrobots/lib:${LD_LIBRARY_PATH:-}"
+export PATH="/opt/openrobots/bin:${PATH}"
+
+log_status "[DEBUG] Library path forced to /opt/openrobots and /root/src"
+
 # Print environment and runtime summary for diagnostics
 env_summary() {
   echo "[ENV] Flags: EC_NO_FRONTEND=${EC_NO_FRONTEND:-0} EC_NO_SIDE_PROCESSES=${EC_NO_SIDE_PROCESSES:-0} EC_SKIP_TORCHVISION_COMPAT=${EC_SKIP_TORCHVISION_COMPAT:-0} EC_MINIMAL_API=${EC_MINIMAL_API:-0} EC_NO_ROS=${EC_NO_ROS:-0} EC_DEBUG=${EC_DEBUG:-0}"
