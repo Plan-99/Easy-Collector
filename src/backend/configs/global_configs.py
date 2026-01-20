@@ -97,6 +97,30 @@ SUPPORT_ROBOTS = [
         #     'ee_definitions': [('ee', 'tcp_joint', None)],
         # },
     },
+    {
+        'name': 'kinova_gen3_7dof_robotiq_2f_85',
+        'role': 'single_arm',
+        'company': 'Kinova',
+        'joint_dim': 7,
+        'joint_names': ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7"],
+        'joint_lower_bounds': [-3.14, -3.14, -3.14, -3.14, -3.14, -3.14, -3.14],
+        'joint_upper_bounds': [3.14, 3.14, 3.14, 3.14, 3.14, 3.14, 3.14],
+        'read_topic': '/joint_trajectory_controller/state',
+        'read_topic_msg': 'control_msgs/JointTrajectoryControllerState',
+        'write_topic': '/joint_trajectory_controller/joint_trajectory',
+        'write_topic_msg': 'trajectory_msgs/JointTrajectory',
+        'tool_inner': False,
+        'tool_index': [],
+        'custom_fields': ['ip_address'],
+        'urdf_path': '/root/ros2_ws/src/ros2_kortex/kortex_description/robots/gen3_7dof.urdf',
+        'urdf_package_dir': '/root/ros2_ws/src/ros2_kortex/kortex_description/',
+        'ik_setting': {
+            'joints_to_lock': [],
+            'ee_definitions': [
+                ('ee', 'end_effector_link', None)
+            ],
+        },
+    },
     # {
     #     'name': 'ur3',
     #     'role': 'single_arm',
@@ -123,6 +147,23 @@ SUPPORT_ROBOTS = [
     #     'company': 'Unitree',
     # },
     {
+        'name': 'robotiq_2f_85',
+        'role': 'tool',
+        'company': 'Robotiq',
+        'joint_dim': 1,
+        'joint_names': ['robotiq_85_left_knuckle_joint'],
+        'joint_lower_bounds': [0.0],
+        'joint_upper_bounds': [0.85],
+        'read_topic': '/joint_states',
+        'read_topic_msg': 'sensor_msgs/JointState',
+        'write_type': 'action',
+        'write_topic': '/robotiq_gripper_controller/gripper_cmd',
+        'write_topic_msg': 'control_msgs/action/GripperCommand',
+        'tool_inner': False,
+        'tool_index': [],
+        'custom_fields': ['serial_port'],
+    },
+    {
         'name': '2FG7',
         'role': 'tool',
         'company': 'OnRobot',
@@ -138,30 +179,6 @@ SUPPORT_ROBOTS = [
         'tool_inner': False,
         'tool_index': [],
         'custom_fields': ['ip_address', 'port'],
-    },
-    {
-        'name': 'kinova_gen3_7dof_robotiq_2f_85',
-        'role': 'single_arm',
-        'company': 'Kinova',
-        'joint_dim': 7,
-        'joint_names': ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7"],
-        'joint_lower_bounds': [-3.14, -3.14, -3.14, -3.14, -3.14, -3.14, -3.14],
-        'joint_upper_bounds': [3.14, 3.14, 3.14, 3.14, 3.14, 3.14, 3.14],
-        'read_topic': '/joint_trajectory_controller/state',
-        'read_topic_msg': 'control_msgs/JointTrajectoryControllerState',
-        'write_topic': '/joint_trajectory_controller/joint_trajectory',
-        'write_topic_msg': 'trajectory_msgs/JointTrajectory',
-        'tool_inner': False,
-        'tool_index': [],
-        'custom_fields': ['ip_address'],
-        'urdf_path': '/root/ros2_ws/src/ros2_kortex/kortex_description/robots/gen3_7dof.urdf',
-        'urdf_package_dir': '/root/ros2_ws/src/ros2_kortex/kortex_description/',
-        'ik_setting': {
-            'joints_to_lock': [],
-            'ee_definitions': [
-                ('ee', 'end_effector_link', None)
-            ],
-        },
     }
 ]
 

@@ -126,6 +126,12 @@ def start_robot():
                    f'changer_addr:={settings.get("changer_address", 5)}'
         ]
 
+    if company == 'Robotiq':
+        command = ['ros2', 'launch', 'robotiq_description', 'robotiq_control.launch.py',
+                   f'namespace:=ec_robot_{id}',
+                   f'com_port:={settings.get("port", "/dev/ttyUSB0")}'
+        ]
+
     if company == "Kinova":
         command = ['ros2', 'launch', f'{type}_moveit_config', 'robot.launch.py',
                 f'namespace:=ec_robot_{id}',
