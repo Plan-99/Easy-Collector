@@ -207,7 +207,7 @@ def create_dynamic_task_config(task_obj, chunk_size):
     cfg.name = task_id
     cfg.environment.name = f"{task_id}_Env-v0"
     cfg.environment.max_episode_steps = task_obj["episode_len"]
-    cfg.observation_space.rgb.shape = tuple(task_obj["sensor_img_size"]) + (3,)
+    cfg.observation_space.rgb.shape = tuple(task_obj["sensor_settings"][0]["img_size"]) + (3,)
     cfg.state_space.state_dim = task_obj['joint_dim']
     cfg.state_space.state_mapping.position = list(range(task_obj['joint_dim']))
     cfg.action_space.actions.dim = task_obj['joint_dim']

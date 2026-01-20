@@ -13,7 +13,8 @@
                         'border-primary': focused.id === sensor.id && focused.device_type === 'sensor',
                     }"
                     @click="focusSensorRobot(sensor, 'sensor')"
-                    :resize="[workspace.sensor_img_size[0], workspace.sensor_img_size[1]]"
+                    :resize="workspace.sensor_settings?.[sensor.id]?.img_size || [640, 480]"
+                    :cropped_area="workspace.sensor_settings?.[sensor.id]?.cropped_area || {}"
                 ></web-rtc-video>
                 <div class="full-height border-white bg-dark border-rounded flex flex-center" v-else>
                     <q-btn round flat icon="play_arrow" text-color="white" size="xl" @click="sensor.handler.startSensor(sensor)"></q-btn>
@@ -280,37 +281,50 @@ function startDataCollection() {
     });
 }
 
-const eeStepSize = ref(0.003);
+const eeStepSize = ref(0.0015);
 
 const keyboardHandler = (event) => {
     if (focused.value?.device_type !== 'robot') return;
-    if (focused.value.role === 'dual_arm') return;
 
-    // [중요] focused 객체의 복사본이 아닌, props의 최신 로봇 데이터를 조회
     const currentRobot = props.robots.find(r => r.id === focused.value.id);
-    if (!currentRobot || !currentRobot.eePos) return;
+    if (!currentRobot || !currentRobot.role === 'dual_arm') return;
 
-    const eeDelta = [0, 0, 0, 0, 0, 0, 0]; // [x, y, z, roll, pitch, yaw, tool]
-    if (event.key === 'w') eeDelta[0] += eeStepSize.value;
-    else if (event.key === 's') eeDelta[0] -= eeStepSize.value;
-    else if (event.key === 'a') eeDelta[1] += eeStepSize.value;
-    else if (event.key === 'd') eeDelta[1] -= eeStepSize.value;
-    else if (event.key === 'e') eeDelta[2] += eeStepSize.value;
-    else if (event.key === 'z') eeDelta[2] -= eeStepSize.value;
-    else if (event.key === '[') eeDelta[3] += eeStepSize.value*4;
-    else if (event.key === '.') eeDelta[3] -= eeStepSize.value*4;
-    else if (event.key === 'p') eeDelta[4] += eeStepSize.value*4;
-    else if (event.key === ';') eeDelta[4] -= eeStepSize.value*4;
-    else if (event.key === 'l') eeDelta[5] += eeStepSize.value*4;
-    else if (event.key === ',') eeDelta[5] -= eeStepSize.value*4;
-    else if (event.key === 'b') eeDelta[6] += eeStepSize.value*30;
-    else if (event.key === 'n') eeDelta[6] -= eeStepSize.value*30;
-    else return;
+    if (currentRobot.role === 'single_arm') {
+        const eeDelta = Array(currentRobot.tool_inner ? 7 : 6).fill(0); // x, y, z, roll, pitch, yaw, tool
 
-    // 백엔드로 전송
-    currentRobot.handler.moveRobotEEDelta({
-        ee: eeDelta
-    });
+        if (event.key === 'w') eeDelta[0] += eeStepSize.value;
+        else if (event.key === 's') eeDelta[0] -= eeStepSize.value;
+        else if (event.key === 'a') eeDelta[1] += eeStepSize.value;
+        else if (event.key === 'd') eeDelta[1] -= eeStepSize.value;
+        else if (event.key === 'e') eeDelta[2] += eeStepSize.value;
+        else if (event.key === 'z') eeDelta[2] -= eeStepSize.value;
+        else if (event.key === '[') eeDelta[3] += eeStepSize.value*4;
+        else if (event.key === '.') eeDelta[3] -= eeStepSize.value*4;
+        else if (event.key === 'p') eeDelta[4] += eeStepSize.value*4;
+        else if (event.key === ';') eeDelta[4] -= eeStepSize.value*4;
+        else if (event.key === 'l') eeDelta[5] += eeStepSize.value*4;
+        else if (event.key === ',') eeDelta[5] -= eeStepSize.value*4;
+        else if (event.key === 'b' && currentRobot.tool_inner) eeDelta[6] += eeStepSize.value*30;
+        else if (event.key === 'n' && currentRobot.tool_inner) eeDelta[6] -= eeStepSize.value*30;
+        else if (event.key === ' ' || event.key === 32) eeDelta.fill(0); // stop
+        else return;
+
+        // 백엔드로 전송
+        currentRobot.handler.moveRobotEEDelta({
+            ee: eeDelta
+        });
+    } else if (currentRobot.role === 'tool') {
+        console.log('tool teleop');
+        const toolDelta = Array(1).fill(0); // tool only
+
+        if (event.key === 'b') toolDelta[0] += eeStepSize.value*30;
+        else if (event.key === 'n') toolDelta[0] -= eeStepSize.value*30;
+        else return;
+        console.log('toolDelta', toolDelta);
+        // 백엔드로 전송
+        currentRobot.handler.moveRobotJointDelta(toolDelta);
+    }
+
 };
 
 function addKeyboardListener() {
@@ -360,6 +374,8 @@ function stopInference() {
 }
 
 onMounted(() => {
+
+    console.log(props.workspace);
 
     socket.on('stop_process', (data) => {
         if (data.id === 'record_episode') {

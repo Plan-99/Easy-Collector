@@ -80,13 +80,13 @@
                     <q-list dark bordered separator class="border-rounded bg-dark" >
                         <q-expansion-item
                             icon="camera"
-                            :label="`${$t('sensorSetting')} (${sensors.filter(e => selectedWorkspace.sensor_ids.includes(e.id)).length})`"
+                            :label="`${$t('sensorSetting')} (${selectedWorkspaceSensors.length})`"
                         >
                             <q-card class="bg-dark">
                                 <q-card-section>
                                     <div
                                         class="q-pa-sm q-px-md q-my-sm border-rounded row"
-                                        v-for="sensor in sensors.filter(e => selectedWorkspace.sensor_ids.includes(e.id))" 
+                                        v-for="sensor in selectedWorkspaceSensors" 
                                         :key="sensor.id"
                                         :class="sensor.status === 'on' ? 'bg-green-10' : 'bg-grey-8'"
                                     >
@@ -114,30 +114,24 @@
                                     ></q-btn>
                                     <div class="row q-gutter-x-sm q-mt-md q-mb-sm">
                                         <q-input
-                                            dense
-                                            outlined
-                                            dark
-                                            bg-color="dark"
-                                            label="Width"
+                                            dense outlined dark bg-color="dark"
+                                            label="Common Width"
                                             class="col"
-                                            v-model.number="selectedWorkspace.sensor_img_size[0]"
-                                            @change="updateWorkspace({ sensor_img_size: selectedWorkspace.sensor_img_size })"
+                                            v-model.number="commonSensorResolution.width"
+                                            @update:model-value="updateAllSensorResolutions"
                                         ></q-input>
+
                                         <q-input
-                                            dense
-                                            outlined
-                                            dark
-                                            bg-color="dark"
-                                            label="Height"
+                                            dense outlined dark bg-color="dark"
+                                            label="Common Height"
                                             class="col"
-                                            v-model.number="selectedWorkspace.sensor_img_size[1]"
-                                            @change="updateWorkspace({ sensor_img_size: selectedWorkspace.sensor_img_size })"
+                                            v-model.number="commonSensorResolution.height"
+                                            @update:model-value="updateAllSensorResolutions"
                                         ></q-input>
                                     </div>
                                 </q-card-section>
                             </q-card>
                         </q-expansion-item>
-
                         <q-expansion-item
                             icon="adb"
                             :label="`${$t('robotSetting')}`"
@@ -212,7 +206,45 @@
                             class="q-pa-sm q-px-md q-mt-sm border-rounded row border-white"
                             v-if="focused.device_type === 'sensor'"
                         >
-                            <div class="text-caption">Coming Soon!</div>
+                            <div class="text-caption col-12">
+                                You can crop the streaming here!
+                                <q-btn size="xs" outline color="pink-3" icon="sync" @click="resetCroppedArea()" class="q-ml-sm" />
+                                <!-- <q-btn size="xs" outline color="primary" icon="save" @click="saveCroppedArea" class="q-ml-sm" /> -->
+                            </div>
+                            <div
+                                class="relative-position"
+                                style="min-width: 200px; min-height: 200px; border-color: blue;"
+                                @mousedown="startCrop"
+                                @mousemove="doCrop"
+                                @mouseup="endCrop"
+                                @mouseleave="cancelCrop"
+                                ref="videoContainer"
+                            >
+                                <web-rtc-video
+                                    :process-id="`sensor_${focused.id}`"
+                                    :topic="focused.read_topic"
+                                    class="border-rounded"
+                                    :key="focused.id"
+                                    :loading="focused.status !== 'on'"
+                                    v-if="focused.status !== 'off'"
+                                    show_original_video
+                                ></web-rtc-video>
+                                <div
+                                    class="crop-area"
+                                    :style="cropAreaStyle"
+                                    v-if="cropAreaStyle.width"
+                                ></div>
+                            </div>
+                            <div>
+                                <div class="text-caption q-mt-sm">Cropped Area</div>
+                                <div>
+                                    {{ selectedWorkspace.sensor_settings?.[focused.id]?.cropped_area || 'Not Set' }}
+                                </div>
+                                <div class="text-caption q-mt-sm">Cropped Size</div>
+                                <div>
+                                    {{ selectedWorkspace.sensor_settings?.[focused.id]?.cropped_area ? `${selectedWorkspace.sensor_settings?.[focused.id]?.cropped_area[2] - selectedWorkspace.sensor_settings?.[focused.id]?.cropped_area[0]} x ${selectedWorkspace.sensor_settings?.[focused.id]?.cropped_area[3] - selectedWorkspace.sensor_settings?.[focused.id]?.cropped_area[1]}` : 'Not Set' }}
+                                </div>
+                            </div>
                         </div>
                         <div
                             class="q-pa-sm q-px-md q-mt-sm border-rounded border-white"
@@ -388,7 +420,7 @@
                 class="col"
                 :workspace="selectedWorkspace"
                 :robots="robots"
-                :sensors="sensors.filter(e => selectedWorkspace.sensor_ids.includes(e.id))"
+                :sensors="selectedWorkspaceSensors"
                 v-model:selected-dataset-id="selectedDatasetId"
                 v-model:selected-checkpoint-id="selectedCheckpointId"
                 v-model:focused="focused"
@@ -441,7 +473,7 @@
             v-model="showSensorForm"
             :title="$t('workspaceSensorFormTitle')"
             :form="sensorForm"
-            @submit="updateWorkspace"
+            @submit="saveSensorSettings"
             :ok-button-label="$t('save')"
         ></form-dialog>
         <form-dialog
@@ -508,6 +540,7 @@ import { useSocket } from 'src/composables/useSocket.js';
 import { useProcessStore } from 'src/stores/processStore';
 import MonitoringWindow from 'src/components/v2/MonitoringWindow.vue';
 import CheckpointInfo from 'src/components/v2/CheckpointInfo.vue';
+import WebRtcVideo from 'src/components/v2/WebRtcVideo.vue';
 
 const processStore = useProcessStore();
 
@@ -563,8 +596,10 @@ function listWorkspaces() {
 }
 
 const selectedWorkspace = computed(() => {
-    return workspaces.value.find(w => w.id === selectedWorkspaceId.value) || null;
+    return workspaces.value.find(w => w.id === selectedWorkspaceId.value) || {};
 });
+
+console.log('Selected Workspace:', selectedWorkspace);
 
 const sensors = ref([]);
 const robots = computed(() => {
@@ -582,6 +617,14 @@ const robots = computed(() => {
         }   
         return robot;
     })
+});
+
+const selectedWorkspaceSensors = computed(() => {
+    if (!selectedWorkspace.value || !selectedWorkspace.value.sensor_settings) {
+        return [];
+    }
+    const selectedIds = Object.keys(selectedWorkspace.value.sensor_settings);
+    return sensors.value.filter(s => selectedIds.includes(String(s.id)));
 });
 
 function listSensors() {
@@ -620,14 +663,77 @@ const sensorForm = ref([
     { key: 'sensor_ids', label: 'Sensors', type: 'multiselect_list', options: computed(() => sensors.value.map(s => ({ label: s.name, value: s.id }))), value: [] }
 ])
 
+const sensorSettingsMap = ref({});
+watch(() => selectedWorkspace.value?.sensor_settings, (newSettings) => {
+    sensorSettingsMap.value = JSON.parse(JSON.stringify(newSettings || {}));
+}, { deep: true, immediate: true });
+
+const commonSensorResolution = ref({ width: 640, height: 480 });
+
+watch(selectedWorkspace, (workspace) => {
+    if (workspace && workspace.sensor_settings) {
+        const firstSensorId = Object.keys(workspace.sensor_settings)[0];
+        if (firstSensorId) {
+            const settings = workspace.sensor_settings[firstSensorId];
+            if (settings && settings.img_size && settings.img_size.length === 2) {
+                commonSensorResolution.value = {
+                    width: settings.img_size[0],
+                    height: settings.img_size[1]
+                };
+            }
+        }
+    }
+}, { deep: true, immediate: true });
+
+function updateAllSensorResolutions() {
+    if (!sensorSettingsMap.value) return;
+
+    const newWidth = commonSensorResolution.value.width;
+    const newHeight = commonSensorResolution.value.height;
+
+    const newSettings = { ...sensorSettingsMap.value };
+
+    for (const sensorId in newSettings) {
+        if (Object.prototype.hasOwnProperty.call(newSettings, sensorId)) {
+            newSettings[sensorId].img_size = [newWidth, newHeight];
+        }
+    }
+
+    sensorSettingsMap.value = newSettings;
+
+    updateWorkspace({ sensor_settings: sensorSettingsMap.value });
+}
+
+
 function openSensorForm() {
     if (selectedWorkspace.value) {
-        sensorForm.value.find(e => e.key === 'sensor_ids').value = selectedWorkspace.value.sensor_ids;
+        sensorForm.value.find(e => e.key === 'sensor_ids').value = Object.keys(selectedWorkspace.value.sensor_settings || {}).map(id => parseInt(id, 10));
     }
     showSensorForm.value = true;
-}   
+}
+
+function saveSensorSettings(form) {
+    const newSettings = {};
+    const existingSettings = selectedWorkspace.value.sensor_settings || {};
+
+    for (const id of form.sensor_ids) {
+        newSettings[id] = existingSettings[id] || {
+            sensor_id: id,
+            img_size: [640, 480],
+            cropped_area: [0, 0, 640, 480]
+        };
+    }
+    
+    const updateForm = {
+        sensor_settings: newSettings,
+        sensor_ids: []
+    }
+    
+    return updateWorkspace(updateForm);
+}
 
 function updateWorkspace(form) {
+    console.log('Updating workspace with form:', form);
     return api.put(`/task/${selectedWorkspace.value.id}`, form).then(() => {
         listWorkspaces();
     });
@@ -881,7 +987,7 @@ function saveCheckpoint(form) {
 
 //     api.post(url, {
 //         robots: robots.value.filter(r => selectedWorkspace.value.robot_ids.includes(r.id)),
-//         sensors: sensors.value.filter(s => selectedWorkspace.value.sensor_ids.includes(s.id)),
+//         sensors: selectedWorkspaceSensors.value,
 //         task: selectedWorkspace.value
 //     }).then(() => {
 //         Notify.create({
@@ -906,6 +1012,112 @@ const openCheckpointInfoDialog = (checkpoint) => {
     showCheckpointInfo.value = true;
 }; 
 
+
+const videoContainer = ref(null);
+const isCropping = ref(false);
+const cropStartPoint = ref({ x: 0, y: 0 });
+const cropEndPoint = ref({ x: 0, y: 0 });
+
+const cropAreaStyle = computed(() => {
+    if (!isCropping.value) return {};
+    const videoEl = videoContainer.value;
+    if (!videoEl) return {};
+
+    const left = Math.min(cropStartPoint.value.x, cropEndPoint.value.x);
+    const top = Math.min(cropStartPoint.value.y, cropEndPoint.value.y);
+    const width = Math.abs(cropStartPoint.value.x - cropEndPoint.value.x);
+    const height = Math.abs(cropStartPoint.value.y - cropEndPoint.value.y);
+
+    return {
+        left: `${left}px`,
+        top: `${top}px`,
+        width: `${width}px`,
+        height: `${height}px`,
+    };
+});
+
+
+function startCrop(event) {
+    isCropping.value = true;
+    const rect = videoContainer.value.getBoundingClientRect();
+    console.log('Video Container Rect:', rect);
+    console.log('Mouse Event:', event);
+    cropStartPoint.value = {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+    };
+    cropEndPoint.value = { ...cropStartPoint.value };
+}
+
+function doCrop(event) {
+    if (isCropping.value) {
+        const rect = videoContainer.value.getBoundingClientRect();
+        cropEndPoint.value = {
+            x: event.clientX - rect.left,
+            y: event.clientY - rect.top,
+        };
+    }
+}
+
+function endCrop() {
+    isCropping.value = false;
+    saveCroppedArea();
+}
+
+function cancelCrop() {
+    if (isCropping.value) {
+        isCropping.value = false;
+        cropStartPoint.value = { x: 0, y: 0 };
+        cropEndPoint.value = { x: 0, y: 0 };
+    }
+}
+
+function saveCroppedArea() {
+    if (!focused.value.id) return;
+    const videoEl = videoContainer.value;
+    if (!videoEl) return;
+    
+    const videoRect = videoEl.querySelector('video').getBoundingClientRect();
+    const containerRect = videoEl.getBoundingClientRect();
+
+    console.log(focused.value);
+
+    const scaleX = focused.value.resolution[0] / videoRect.width;
+    const scaleY = focused.value.resolution[1] / videoRect.height;
+
+    const x1_rel = Math.min(cropStartPoint.value.x, cropEndPoint.value.x) - (videoRect.left - containerRect.left);
+    const y1_rel = Math.min(cropStartPoint.value.y, cropEndPoint.value.y) - (videoRect.top - containerRect.top);
+    const x2_rel = Math.max(cropStartPoint.value.x, cropEndPoint.value.x) - (videoRect.left - containerRect.left);
+    const y2_rel = Math.max(cropStartPoint.value.y, cropEndPoint.value.y) - (videoRect.top - containerRect.top);
+    
+    const x1 = Math.round(x1_rel * scaleX);
+    const y1 = Math.round(y1_rel * scaleY);
+    const x2 = Math.round(x2_rel * scaleX);
+    const y2 = Math.round(y2_rel * scaleY);
+
+    const x1_clamped = Math.max(0, Math.min(focused.value.resolution[0], x1));
+    const y1_clamped = Math.max(0, Math.min(focused.value.resolution[1], y1));
+    const x2_clamped = Math.max(0, Math.min(focused.value.resolution[0], x2));
+    const y2_clamped = Math.max(0, Math.min(focused.value.resolution[1], y2));
+
+    if (sensorSettingsMap.value[focused.value.id]) {
+        sensorSettingsMap.value[focused.value.id].cropped_area = [x1_clamped, y1_clamped, x2_clamped, y2_clamped];
+        updateWorkspace({ sensor_settings: sensorSettingsMap.value });
+    }
+}
+
+function resetCroppedArea() {
+    if (!focused.value.id) return;
+    if (sensorSettingsMap.value[focused.value.id]) {
+        sensorSettingsMap.value[focused.value.id].cropped_area = [
+            0,
+            0,
+            focused.value.resolution[0],
+            focused.value.resolution[1]
+        ];
+        updateWorkspace({ sensor_settings: sensorSettingsMap.value });
+    }
+}
 
 
 onUnmounted(() => {
@@ -956,3 +1168,15 @@ onMounted(() => {
     });
 });
 </script>
+<style>
+.crop-area {
+    position: absolute;
+    border: 2px dashed red;
+    pointer-events: none;
+}
+.crop-area-saved {
+    position: absolute;
+    border: 2px solid green;
+    pointer-events: none;
+}
+</style>

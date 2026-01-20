@@ -48,6 +48,11 @@ class ROSImageStreamTrack(VideoStreamTrack):
             if cv_image is None: return
 
             config = stream_config.get(self.stream_id, {})
+            if 'cropped_area' in config and config['cropped_area']:
+                area = config['cropped_area']
+                xy_start = (area[0], area[1])
+                xy_end = (area[2],area[3])
+                cv_image = cv_image[xy_start[1]:xy_end[1], xy_start[0]:xy_end[0]]
             if 'resize' in config and config['resize'] and len(config['resize']) == 2:
                 cv_image = cv2.resize(cv_image, tuple(config['resize']))
                 
@@ -115,6 +120,9 @@ async def add_config(request):
     config = params.get('config', {})
     if stream_id in stream_config and 'resize' in config:
         stream_config[stream_id]['resize'] = config['resize']
+    if stream_id in stream_config and 'cropped_area' in config:
+        stream_config[stream_id]['cropped_area'] = config['cropped_area']
+
     return web.json_response({"status": "success"})
 
 

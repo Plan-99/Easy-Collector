@@ -118,6 +118,11 @@ class Agent:
         except Exception as exc:
             print(f"[ERROR] move_joint_step received invalid action {action}: {exc}")
             return
+        
+        # clipping with joint bound
+        if self.joint_upper_bounds is not None and self.joint_lower_bounds is not None:
+            # numpy를 사용하여 각 관절의 인덱스에 맞는 범위를 한 번에 적용합니다.
+            action = np.clip(action, self.joint_lower_bounds, self.joint_upper_bounds).tolist()
 
         if self.write_type == 'topic':
             self.move_joint_step_by_topic(action)
@@ -170,9 +175,10 @@ class Agent:
             return
 
         action = [float(a) for a in action]
+        self.joint_actions = action
         if self.write_topic_msg == 'control_msgs/action/GripperCommand':
             self.write_action_goal_data.command.position = action[0]
-            self.write_action_goal_data.command.max_effort = 50.0 
+            self.write_action_goal_data.command.max_effort = 10.0 
 
         self.is_waiting_for_goal = True
         
@@ -357,22 +363,25 @@ class Agent:
     def get_joint_actions(self):
         if self.joint_actions is None:
             return None
-        joint_actions = []
-        if self.write_topic_msg == 'sensor_msgs/JointState':
-            for i, joint_name in enumerate(self.joint_names):
-                topic_index = self.joint_actions.name.index(joint_name)
-                joint_actions.append(self.joint_actions.position[topic_index])
-        elif self.write_topic_msg == 'std_msgs/Float64MultiArray':
-            joint_actions = list(self.joint_actions.data)
-        elif self.write_topic_msg == 'control_msgs/JointTrajectoryControllerState':
-            for i, joint_name in enumerate(self.joint_names):
-                topic_index = self.joint_actions.joint_names.index(joint_name)
-                joint_actions.append(self.joint_actions.actual.positions[topic_index])
-        elif self.write_topic_msg == 'trajectory_msgs/JointTrajectory':
-            if self.joint_actions.points:
-                point = self.joint_actions.points[-1]  # 가장 최근 포인트 사용
+        if self.write_type == 'topic':
+            joint_actions = []
+            if self.write_topic_msg == 'sensor_msgs/JointState':
                 for i, joint_name in enumerate(self.joint_names):
-                    joint_actions.append(point.positions[i])
+                    topic_index = self.joint_actions.name.index(joint_name)
+                    joint_actions.append(self.joint_actions.position[topic_index])
+            elif self.write_topic_msg == 'std_msgs/Float64MultiArray':
+                joint_actions = list(self.joint_actions.data)
+            elif self.write_topic_msg == 'control_msgs/JointTrajectoryControllerState':
+                for i, joint_name in enumerate(self.joint_names):
+                    topic_index = self.joint_actions.joint_names.index(joint_name)
+                    joint_actions.append(self.joint_actions.actual.positions[topic_index])
+            elif self.write_topic_msg == 'trajectory_msgs/JointTrajectory':
+                if self.joint_actions.points:
+                    point = self.joint_actions.points[-1]  # 가장 최근 포인트 사용
+                    for i, joint_name in enumerate(self.joint_names):
+                        joint_actions.append(point.positions[i])
+        elif self.write_type == 'action':
+            joint_actions = self.joint_actions
         return joint_actions
 
     def get_ee_position(self):
@@ -401,7 +410,10 @@ class Agent:
         """
         목표 End-Effector 포즈를 반환 (규격: {'L_ee': [x, y, z, r, p, y, tool]})
         """
-        if self.role == 'tool' or self.ik_solver is None:
+        if self.role == 'tool':
+            return self.get_joint_actions()
+        
+        if self.ik_solver is None:
             return None
 
         # 1. 이미 저장된 EE 명령이 있다면 그대로 반환 (이미 [x,y,z,r,p,y,tool] 형태임)
@@ -427,11 +439,10 @@ class Agent:
             if name in ee_poses_dict:
                 pose_list = ee_poses_dict[name] # [x, y, z, r, p, y]
                 
-                # 해당 팔에 대응하는 tool 값 가져오기
-                t_val = tools[i] if tools and i < len(tools) else 0.0
-                
-                # 최종 리스트 생성: [x, y, z, r, p, y, tool]
-                final_targets[name] = pose_list + [t_val]
+                if tools is not None and i < len(tools):
+                    t_val = tools[i]
+                    # 최종 리스트 생성: [x, y, z, r, p, y, tool]
+                    final_targets[name] = pose_list + [t_val]
 
         return final_targets
     
@@ -475,9 +486,11 @@ class Agent:
             self.joint_trajectory_point.positions = [float(x) for x in target_pos]
             # velocities를  0으로 설정
             self.joint_trajectory_point.velocities = [0.0] * self.joint_len
-            self.joint_trajectory_point.time_from_start = rclpy.duration.Duration(seconds=10.0).to_msg()
+            self.joint_trajectory_point.time_from_start = rclpy.duration.Duration(seconds=5.0).to_msg()
             self.write_topic_msg_data.points = [self.joint_trajectory_point]
             self.move_robot_pub.publish(self.write_topic_msg_data)
+        elif self.role == 'tool':
+            self.move_joint_step(target_pos)
         else:
             while True:
                 current_pos = self.get_joint_states()

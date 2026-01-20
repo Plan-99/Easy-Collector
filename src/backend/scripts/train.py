@@ -216,7 +216,7 @@ def main(args):
         checkpoint = checkpoint.to_dict()
 
         batch_size = checkpoint['train_settings']['batch_size']
-        sensor_ids = task['sensor_ids']
+        sensor_ids = task['sensor_settings'].keys()
         if policy['type'] in ['ACT', 'VLAsEn']:
             chunk_size = policy['settings']['chunk_size']
             vision_backbone = policy['settings']['vision_backbone']
@@ -257,9 +257,12 @@ def main(args):
         print("Training process completed successfully.")
         
     except Exception as e:
+        import traceback
+        error_msg = traceback.format_exc()
+        print(f"[ERROR] Training process failed:\n{error_msg}")
         Checkpoint.find(args.checkpoint_id).delete()
         raise e
-        
+
     finally:
         # Clean up the temporary directory
         shutil.rmtree(temp_dir)

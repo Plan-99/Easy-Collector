@@ -162,7 +162,7 @@ def checkpoint_test(
                 if home_pose is not None:
                     for agent in env.agents:
                         agent.move_to(home_pose[str(agent.id)])
-                time.sleep(3)
+                time.sleep(7)
                 ts = env.reset()
                 print('Robot moved to homepose')
                 
@@ -174,7 +174,11 @@ def checkpoint_test(
                 policy_input_t = {'observation.state': qpos_t}
                 for sensor in sensors:
                     image = obs_t['images'][f'sensor_{sensor["id"]}']
-                    image = fetch_image_with_config(image, {'resize': task['sensor_img_size']})
+                    sensor_id = str(sensor['id'])
+                    image = fetch_image_with_config(image, {
+                        'resize': task['sensor_settings'][sensor_id]['img_size'],
+                        'cropped_area': task['sensor_settings'][sensor_id].get('cropped_area', None)
+                        })
                     image = process_image(image, vision_backbone, to_cuda=True)
                     policy_input_t[f'observation.images.sensor_{sensor["id"]}'] = image.unsqueeze(0)
 
@@ -214,7 +218,7 @@ def checkpoint_test(
                 agent.move_joint_step(target_qpos)
                 start_action_id += agent.joint_len
             
-            time.sleep(0.01)
+            time.sleep(0.5)
             ts_next = env.record_step()
 
             # === d. OTI-RL 학습 ===
@@ -232,10 +236,14 @@ def checkpoint_test(
                     qpos_t1 = torch.from_numpy(np.concatenate([item['qpos'] for item in obs_t1['robot_states'].values()])).float().cuda().unsqueeze(0)
                     policy_input_t1 = {'observation.state': qpos_t1}
                     for sensor in sensors:
-                        image = obs_t1['images'][f'sensor_{sensor["id"]}']
-                        image = fetch_image_with_config(image, {'resize': task['sensor_img_size']})
+                        sensor_id = str(sensor['id'])
+                        image = obs_t1['images'][f'sensor_{sensor_id}']
+                        image = fetch_image_with_config(image, {
+                            'resize': task['sensor_settings'][sensor_id]['img_size'],
+                            'cropped_area': task['sensor_settings'][sensor_id].get('cropped_area', None)
+                        })
                         image = process_image(image, vision_backbone, to_cuda=True)
-                        policy_input_t1[f'observation.images.sensor_{sensor["id"]}'] = image.unsqueeze(0)
+                        policy_input_t1[f'observation.images.sensor_{sensor_id}'] = image.unsqueeze(0)
                     state_t1 = policy.select_action(policy_input_t1).squeeze(0).cpu().numpy()
                 
                 replay_buffer.push(state_t, noise_t, reward_t, state_t1, done=False)
