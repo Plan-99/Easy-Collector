@@ -2,3 +2,5 @@ release/*.deb
 logs/
 src/backend/database/*.db
 /.venv
+
+.cache/
