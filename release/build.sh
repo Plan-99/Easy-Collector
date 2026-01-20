@@ -80,43 +80,74 @@ echo "[deb] Using host Python $PY_VER"
 echo "[deb] Creating embedded venv with Qt..."
 VENV_DIR="$STAGE${INSTALL_ROOT}/venv"
 python3 -m venv "$VENV_DIR"
+
 # Keep default pip inside venv to avoid network upgrades
 echo "[deb] Copying existing PySide6 install into venv..."
-HOST_SITE=$(python3 - <<'PY'
-import site
-print(site.getusersitepackages())
-PY
-)
 DST_SITE="$VENV_DIR/lib/python${PY_VER}/site-packages"
 mkdir -p "$DST_SITE"
-if [ ! -d "$HOST_SITE/PySide6" ] || [ ! -d "$HOST_SITE/shiboken6" ]; then
-  echo "[deb][ERROR] Host Python is missing PySide6/shiboken6. Install them first (e.g. python3 -m pip install --user PySide6) and retry." >&2
+
+# --- [FIXED SECTION START] PySide6 & Shiboken6 Detection ---
+# 1. Find PySide6 Path dynamically
+PYSIDE_SRC=$(python3 -c "import os, PySide6; print(os.path.dirname(PySide6.__file__))" 2>/dev/null || true)
+
+if [ -z "$PYSIDE_SRC" ] || [ ! -d "$PYSIDE_SRC" ]; then
+  echo "[deb][ERROR] Host Python is missing PySide6. Install it first (e.g. python3 -m pip install PySide6) and retry." >&2
   exit 1
 fi
-for pkg in PySide6 shiboken6; do
-  rsync -a "$HOST_SITE/$pkg" "$DST_SITE/"
-done
+
+# 2. Identify the actual site-packages directory where PySide6 lives
+ACTUAL_SITE_PACKAGES=$(dirname "$PYSIDE_SRC")
+
+# 3. Copy PySide6
+rsync -a "$PYSIDE_SRC" "$DST_SITE/"
+
+# 4. Find and Copy shiboken6 (Try same folder first, then dynamic check)
+if [ -d "$ACTUAL_SITE_PACKAGES/shiboken6" ]; then
+  rsync -a "$ACTUAL_SITE_PACKAGES/shiboken6" "$DST_SITE/"
+else
+  # Fallback: check if shiboken6 is installed elsewhere
+  SHIBOKEN_SRC=$(python3 -c "import os, shiboken6; print(os.path.dirname(shiboken6.__file__))" 2>/dev/null || true)
+  if [ -n "$SHIBOKEN_SRC" ] && [ -d "$SHIBOKEN_SRC" ]; then
+    rsync -a "$SHIBOKEN_SRC" "$DST_SITE/"
+  else
+    echo "[deb][WARN] shiboken6 module not found via path check."
+  fi
+fi
+
+# 5. Copy .dist-info for PySide/Shiboken from the discovered source dir
 DIST_PACKAGES=(PySide6 shiboken6 PySide6_Addons PySide6_Essentials)
 for name in "${DIST_PACKAGES[@]}"; do
-  src=$(find "$HOST_SITE" -maxdepth 1 -type d -iname "${name}*.dist-info" | head -n1 || true)
+  src=$(find "$ACTUAL_SITE_PACKAGES" -maxdepth 1 -type d -iname "${name}*.dist-info" | head -n1 || true)
   if [ -n "$src" ] && [ -d "$src" ]; then
     rsync -a "$src" "$DST_SITE/"
   else
-    echo "[deb][WARN] dist-info for ${name} not found under $HOST_SITE; continuing."
+    echo "[deb][WARN] dist-info for ${name} not found under $ACTUAL_SITE_PACKAGES; continuing."
   fi
 done
+# --- [FIXED SECTION END] ---
+
 echo "[deb] Copying licensing package into venv..."
-if [ ! -d "$HOST_SITE/licensing" ]; then
-  echo "[deb][ERROR] Host Python is missing licensing. Install it first (e.g. python3 -m pip install --user licensing) and retry." >&2
+
+# --- [FIXED SECTION START] Licensing Detection ---
+LICENSING_SRC=$(python3 -c "import os, licensing; print(os.path.dirname(licensing.__file__))" 2>/dev/null || true)
+
+if [ -z "$LICENSING_SRC" ] || [ ! -d "$LICENSING_SRC" ]; then
+  echo "[deb][ERROR] Host Python is missing licensing. Install it first (e.g. python3 -m pip install licensing) and retry." >&2
   exit 1
 fi
-rsync -a "$HOST_SITE/licensing" "$DST_SITE/"
-LICENSE_DIST=$(find "$HOST_SITE" -maxdepth 1 -type d -iname "licensing-*.dist-info" | head -n1 || true)
+
+rsync -a "$LICENSING_SRC" "$DST_SITE/"
+
+LICENSING_PARENT=$(dirname "$LICENSING_SRC")
+LICENSE_DIST=$(find "$LICENSING_PARENT" -maxdepth 1 -type d -iname "licensing-*.dist-info" | head -n1 || true)
+
 if [ -n "$LICENSE_DIST" ] && [ -d "$LICENSE_DIST" ]; then
   rsync -a "$LICENSE_DIST" "$DST_SITE/"
 else
-  echo "[deb][WARN] dist-info for licensing not found under $HOST_SITE; continuing."
+  echo "[deb][WARN] dist-info for licensing not found in $LICENSING_PARENT; continuing."
 fi
+# --- [FIXED SECTION END] ---
+
 echo "[deb] Embedded venv ready at $VENV_DIR (copied from host PySide6)"
 
 echo "[deb] Embedding project payload for HOME deployment..."
