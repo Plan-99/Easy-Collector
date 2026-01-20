@@ -56,6 +56,16 @@ jobs:
             --exclude "src/backend/lerobot" \
             --exclude "release/ui/launcher.py"
 
+          echo "2. 폴더 구조 맞추기 (ui -> release/ui)"
+          
+          # 1) temp_obf 안에 release 폴더 만들기
+          mkdir -p temp_obf/release
+          
+          # 2) temp_obf/ui 폴더를 temp_obf/release/ui 로 이동
+          if [ -d "temp_obf/ui" ]; then
+              mv temp_obf/ui temp_obf/release/
+          fi
+
           echo "2. [중요] Docker 마운트를 위해 Runtime 폴더를 src 안으로 이동"
           # temp_obf 안에 생성된 pyarmor_runtime_xxxx 폴더를 찾아서
           # temp_obf/src/ 안으로 이동시킵니다.
