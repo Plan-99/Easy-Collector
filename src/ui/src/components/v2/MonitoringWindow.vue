@@ -1,7 +1,7 @@
 <template>
     <div class="bg-secondary border-rounded border-white column q-px-sm" style="max-height: 700px;">
-        <div class="col-6 row flex felx-center" v-if="sensors.length > 0">
-            <div v-for="sensor in sensors" :key="sensor.id" class="col q-py-sm q-px-xs relative-position">
+        <div class="col-6 row flex felx-center q-col-gutter-x-sm" v-if="sensors.length > 0">
+            <div v-for="sensor in sensors" :key="sensor.id" class="col q-py-sm relative-position">
                 <web-rtc-video
                     :process-id="`sensor_${sensor.id}`"
                     :topic="sensor.read_topic"
@@ -86,7 +86,14 @@
                     text-color="white"
                     label="REC"
                     @click="startDataCollection"
-                ></q-btn>
+                >
+                    <q-badge 
+                        @click.stop="moveHomposeInDataCollection = !moveHomposeInDataCollection" 
+                        :color="moveHomposeInDataCollection ? 'blue' : 'grey-5'"
+                        floating>
+                        <q-icon name="home" size="xs" class="cursor-pointer" />
+                    </q-badge>
+                </q-btn>
             </div>
             <div class="row flex flex-center full-height" v-else>
                 <div class="col q-pr-md">
@@ -253,6 +260,8 @@ function focusSensorRobot(device, type) {
 const collectingProgress = ref(0);
 const showProcessConsole = ref(false);
 
+const moveHomposeInDataCollection = ref(false);
+
 function startDataCollection() {
     if (!selectedDatasetId.value) {
         Notify.create({
@@ -272,6 +281,7 @@ function startDataCollection() {
         sensors: props.sensors,
         tele_type: teleType.value,
         assembly_id: props.workspace.assembly_id,
+        move_homepose: moveHomposeInDataCollection.value,
     }).catch((error) => {
         console.error('Error starting data collection:', error);
         Notify.create({
@@ -281,7 +291,7 @@ function startDataCollection() {
     });
 }
 
-const eeStepSize = ref(0.0015);
+const eeStepSize = ref(0.001);
 
 const keyboardHandler = (event) => {
     if (focused.value?.device_type !== 'robot') return;
@@ -303,7 +313,7 @@ const keyboardHandler = (event) => {
         else if (event.key === 'p') eeDelta[4] += eeStepSize.value*4;
         else if (event.key === ';') eeDelta[4] -= eeStepSize.value*4;
         else if (event.key === 'l') eeDelta[5] += eeStepSize.value*4;
-        else if (event.key === ',') eeDelta[5] -= eeStepSize.value*4;
+        else if (event.key === "'") eeDelta[5] -= eeStepSize.value*4;
         else if (event.key === 'b' && currentRobot.tool_inner) eeDelta[6] += eeStepSize.value*30;
         else if (event.key === 'n' && currentRobot.tool_inner) eeDelta[6] -= eeStepSize.value*30;
         else if (event.key === ' ' || event.key === 32) eeDelta.fill(0); // stop
