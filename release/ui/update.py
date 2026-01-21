@@ -89,6 +89,17 @@ def _version_to_str(ver: tuple[int, int, int]) -> str:
     return f"{ver[0]}.{ver[1]}.{ver[2]}"
 
 
+def _read_app_version_file() -> str | None:
+    path = APP_HOME / "VERSION"
+    try:
+        if path.is_file():
+            value = path.read_text(encoding="utf-8").strip()
+            return value or None
+    except Exception:
+        return None
+    return None
+
+
 def _repo_slug_from_url(url: str | None) -> str | None:
     if not url:
         return None
@@ -152,6 +163,7 @@ class UpdateManager:
         self._prompt_open = False
         self._continue_handler = None
         self._continue_called = False
+        self._from_version: str | None = None
         self._dispatcher = _UiDispatcher(self._window)
 
     def schedule_check(self, delay_ms: int = 2500):
@@ -216,9 +228,10 @@ class UpdateManager:
             self._log("[UPDATE][WARN] 릴리즈에 deb 파일이 없습니다.")
             self._ui_call(lambda: self._handle_no_update())
             return
-        current_tuple = _parse_version(APP_VERSION) or (0, 0, 0)
+        current_version = self._current_version()
+        current_tuple = _parse_version(current_version) or (0, 0, 0)
         if not _is_newer(version_tuple, current_tuple):
-            self._log(f"[UPDATE] 최신 버전입니다. (현재 {APP_VERSION}, 최신 {version_str})")
+            self._log(f"[UPDATE] 최신 버전입니다. (현재 {current_version}, 최신 {version_str})")
             self._ui_call(lambda: self._handle_no_update())
             return
         cfg = load_config()
@@ -285,7 +298,7 @@ class UpdateManager:
         if self._in_progress or self._prompt_open:
             return
         self._prompt_open = True
-        current_version = APP_VERSION or "0.0.0"
+        current_version = self._current_version()
         if info.is_major_upgrade:
             detail = "버전 업그레이드가 예정되어있어서 약 30분의 시간이 소요됩니다."
         else:
@@ -330,6 +343,7 @@ class UpdateManager:
         if self._in_progress:
             return
         self._in_progress = True
+        self._from_version = self._current_version()
         self._show_progress("업데이트를 준비하는 중입니다...")
         thread = threading.Thread(target=self._apply_update_worker, args=(info,), daemon=True)
         thread.start()
@@ -357,8 +371,6 @@ class UpdateManager:
                 pass
             self._set_progress_text("런처를 업데이트하는 중입니다...")
             self._sync_launcher_assets(extract_root)
-            self._set_progress_text("버전 정보를 갱신하는 중입니다...")
-            self._update_version_file(extract_root, info.version)
             self._set_progress_text("마무리하는 중입니다...")
             self._update_app_assets(extract_root)
             cfg = load_config()
@@ -366,6 +378,8 @@ class UpdateManager:
             if cfg.get(CONFIG_SKIP_KEY) == info.version:
                 cfg.pop(CONFIG_SKIP_KEY, None)
             save_config(cfg)
+            self._set_progress_text("버전 정보를 갱신하는 중입니다...")
+            self._update_version_file(extract_root, info.version)
             self._ui_call(lambda: self._finish_update(success=True, info=info))
         except Exception as e:
             self._ui_call(lambda: self._finish_update(success=False, info=info, error=str(e)))
@@ -610,17 +624,20 @@ class UpdateManager:
             pass
 
     def _update_version_file(self, extract_root: Path, version: str):
-        src = extract_root / "usr" / "share" / "easytrainer-project" / "VERSION"
-        fallback_src = extract_root / "opt" / "easytrainer" / "VERSION"
-        dst = DEFAULT_PROJECT_PATH / "VERSION"
+        src_candidates = [
+            extract_root / "opt" / "easytrainer" / "VERSION",
+            extract_root / "usr" / "share" / "easytrainer-project" / "VERSION",
+        ]
+        dst = APP_HOME / "VERSION"
         try:
-            if src.exists():
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src, dst)
-                return
-            if fallback_src.exists():
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(fallback_src, dst)
+            copied = False
+            for src in src_candidates:
+                if src.exists():
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src, dst)
+                    copied = True
+                    break
+            if copied:
                 return
         except Exception:
             pass
@@ -641,6 +658,8 @@ class UpdateManager:
 
     def _finish_update(self, success: bool, info: UpdateInfo, error: str | None = None):
         self._in_progress = False
+        from_version = self._from_version
+        self._from_version = None
         if not success:
             detail = f"업데이트에 실패했습니다:\n{error or '알 수 없는 오류'}"
             def _continue_after_error():
@@ -654,14 +673,27 @@ class UpdateManager:
             except Exception:
                 pass
             return
-        detail = "업데이트가 완료되었습니다.\n프로그램 재시작을 권장합니다."
+        detail = "업데이트가 완료되었습니다.\n필요 시 프로그램을 다시 실행해 주세요."
         try:
+            def _close_panel():
+                try:
+                    self._window.hide_update_panel()
+                except Exception:
+                    pass
             self._window.show_update_done_panel(
                 detail,
-                lambda: self._restart_application(info.is_major_upgrade, info.version),
+                _close_panel,
+                from_version or self._current_version(),
+                info.version,
             )
         except Exception:
             pass
+
+    def _current_version(self) -> str:
+        version = _read_app_version_file()
+        if version:
+            return version
+        return APP_VERSION or "0.0.0"
 
     def _restart_application(self, force_upgrade: bool, version: str | None = None):
         if force_upgrade:

@@ -133,6 +133,7 @@ UI_LOG_FILE = UI_LOG_DIR / "ui.log"
 def _load_app_version() -> str:
     """Resolve app version from bundled file or repo root."""
     candidates = [
+        APP_HOME / "VERSION",
         DEFAULT_PROJECT_PATH / "VERSION",
         Path(__file__).resolve().parents[1] / "VERSION",
         REPO_ROOT_CANDIDATE / "VERSION",

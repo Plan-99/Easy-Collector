@@ -2382,12 +2382,19 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
     def set_update_progress(self, percent: int | None, text: str | None = None):
         self._set_update_progress(percent, text)
 
-    def show_update_done_panel(self, detail: str, on_restart):
+    def show_update_done_panel(
+        self,
+        detail: str,
+        on_close,
+        current_version: str | None = None,
+        latest_version: str | None = None,
+        button_text: str = "닫기",
+    ):
         self._update_panel_actions.clear()
         self._set_update_eta(None)
-        self._configure_update_panel("업데이트 완료", detail, False)
+        self._configure_update_panel("업데이트 완료", detail, False, current_version, latest_version)
         self._set_update_log_visible(False)
-        self._set_update_panel_button("primary", "프로그램 재시작", True, on_restart)
+        self._set_update_panel_button("primary", button_text, True, on_close)
         self._set_update_panel_button("secondary", None, False)
         self._set_update_panel_button("tertiary", None, False)
         self._set_update_panel_visible(True)
