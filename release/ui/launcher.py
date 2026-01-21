@@ -2355,7 +2355,15 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self._set_update_panel_button("tertiary", None, False)
         self._set_update_panel_visible(True)
 
-    def show_update_prompt_panel(self, current_version: str, latest_version: str, detail: str, on_install, on_skip, on_later):
+    def show_update_prompt_panel(
+        self,
+        current_version: str,
+        latest_version: str,
+        detail: str,
+        on_install,
+        on_skip,
+        on_later,
+    ):
         self._update_panel_actions.clear()
         self._set_update_eta(None)
         self._configure_update_panel("업데이트가 있습니다", detail, False, current_version, latest_version)

@@ -89,6 +89,17 @@ def _version_to_str(ver: tuple[int, int, int]) -> str:
     return f"{ver[0]}.{ver[1]}.{ver[2]}"
 
 
+def _format_version_display(raw: str | None) -> str:
+    if not raw:
+        return "?"
+    value = str(raw).strip()
+    if not value:
+        return "?"
+    if value.lower().startswith("v"):
+        return value
+    return f"v{value}"
+
+
 def _read_app_version_file() -> str | None:
     path = APP_HOME / "VERSION"
     try:
@@ -303,6 +314,8 @@ class UpdateManager:
             detail = "버전 업그레이드가 예정되어있어서 약 30분의 시간이 소요됩니다."
         else:
             detail = "버그 수정 및 개선을 위한 버전 업데이트가 예정되어있습니다."
+        version_summary = f"{_format_version_display(current_version)} -> {_format_version_display(info.version)}"
+        detail = f"{version_summary}\n{detail}"
 
         def _on_skip():
             cfg = load_config()
@@ -321,7 +334,14 @@ class UpdateManager:
             self._start_update(info)
 
         try:
-            self._window.show_update_prompt_panel(current_version, info.version, detail, _on_install, _on_skip, _on_later)
+            self._window.show_update_prompt_panel(
+                current_version,
+                info.version,
+                detail,
+                _on_install,
+                _on_skip,
+                _on_later,
+            )
         except Exception:
             self._prompt_open = False
             self._handle_no_update()
