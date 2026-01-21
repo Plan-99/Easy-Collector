@@ -59,6 +59,7 @@ from app_context import (
     Qt,
     QWebEngineView,
     load_config,
+    resolve_project_root,
     save_config,
     _app_icon_path,
     _window_icon,
@@ -612,33 +613,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         cfg = load_config()
         self.install_variant = cfg.get("install_variant", "gpu")
         self._update_window_title()
-        env_root = os.environ.get("EASYCOLLECTOR_PROJECT_ROOT", "").strip()
-        cfg_root = cfg.get("project_root")
-        if env_root:
-            self.project_root = Path(env_root).expanduser()
-        elif cfg_root:
-            candidate = Path(cfg_root).expanduser()
-            if self._is_home_scoped(candidate):
-                candidate = DEFAULT_PROJECT_PATH
-                cfg["project_root"] = str(candidate)
-                save_config(cfg)
-            self.project_root = candidate
-        else:
-            self.project_root = DEFAULT_PROJECT_PATH
-            cfg["project_root"] = str(self.project_root)
-            save_config(cfg)
-
-        # Always request auth on startup, then ensure app data/project roots are writable.
-        if not self._ensure_app_and_project_writable(force_auth=True):
-            try:
-                QMessageBox.critical(self, "권한 필요", "데이터/프로젝트 경로 권한을 획득하지 못해 종료합니다.")
-            except Exception:
-                pass
-            try:
-                QTimer.singleShot(0, lambda: QApplication.instance().quit())
-            except Exception:
-                sys.exit(1)
-            return
+        self.project_root = resolve_project_root(cfg)
         # Ensure project exists; if not, copy from system payload or repo
         self._ensure_project_present()
         # Unify compose service name to 'service' inside project compose files
@@ -2782,6 +2757,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         installed = self.is_installed()
         running = self._get_running_services()
         loading = getattr(self, "_pill_loading", False)
+        update_panel_visible = getattr(self, "_update_panel_visible", False)
         status_parts = []
         status_parts.append("설치됨" if installed else "미설치")
         status_parts.append("실행 중" if running else "중지됨")
@@ -2791,17 +2767,17 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         except Exception:
             pass
         try:
-            self.btn_open_browser.setEnabled(bool(running) and not loading)
+            self.btn_open_browser.setEnabled(bool(running) and not loading and not update_panel_visible)
         except Exception:
             pass
-        if loading or getattr(self, "_update_panel_visible", False):
+        if loading or update_panel_visible:
             try:
                 self.btn_quick_apply.setEnabled(False)
             except Exception:
                 pass
         if self.status_label.isVisible():
             self.status_label.setText(text)
-        if not loading and not getattr(self, "_update_panel_visible", False):
+        if not loading and not update_panel_visible:
             self.update_buttons()
         self._position_floating_bar()
 
