@@ -150,7 +150,7 @@ class Agent:
                 print("Current joint states are None, cannot move.")
                 return
             self.joint_trajectory_point.velocities = [(abs(t - c) / 2) for t, c in zip(action, current_pos)]
-            self.joint_trajectory_point.time_from_start = rclpy.duration.Duration(seconds=0.7).to_msg()
+            self.joint_trajectory_point.time_from_start = rclpy.duration.Duration(seconds=0.3).to_msg()
             self.write_topic_msg_data.points = [self.joint_trajectory_point]
             self.move_robot_pub.publish(self.write_topic_msg_data)
         else:

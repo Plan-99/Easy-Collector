@@ -443,7 +443,7 @@
                     :path="`${selectedDatasetId}/${selectedEpisode.name}`"
                     @update:robot-states="selectedEpisode.robotStates = $event"
                 ></hdf5-viewer>
-                <div class="flex flex-center col-5 row" v-if="selectedEpisode.robotStates">
+                <div class="col-5 row q-gutter-x-sm" v-if="selectedEpisode.robotStates">
                     <div v-for="(val, robotId) in selectedEpisode.robotStates" :key="robotId" class="col column q-pa-md relative-position border-rounded border-white text-white cursor-pointer">
                         <div v-for="(j, i) in val.qpos.length" :key="i" class="col flex flex-center q-gutter-x-md">
                             <div class="border-rounded border-white q-px-md q-py-xs text-center">[{{ j }}] {{ val.qpos[i]?.toFixed(4) }}</div>
