@@ -313,7 +313,7 @@ const keyboardHandler = (event) => {
         else if (event.key === 'p') eeDelta[4] += eeStepSize.value*4;
         else if (event.key === ';') eeDelta[4] -= eeStepSize.value*4;
         else if (event.key === 'l') eeDelta[5] += eeStepSize.value*4;
-        else if (event.key === ',') eeDelta[5] -= eeStepSize.value*4;
+        else if (event.key === "'") eeDelta[5] -= eeStepSize.value*4;
         else if (event.key === 'b' && currentRobot.tool_inner) eeDelta[6] += eeStepSize.value*30;
         else if (event.key === 'n' && currentRobot.tool_inner) eeDelta[6] -= eeStepSize.value*30;
         else if (event.key === ' ' || event.key === 32) eeDelta.fill(0); // stop
