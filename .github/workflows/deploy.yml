@@ -1,0 +1,191 @@
+name: "Obfuscate In-Place and Build"
+
+run-name: Deploying Version ${{ github.ref_name }} (by @${{ github.actor }})
+
+on:
+  push:
+    tags:
+        - '[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          echo "1. 시스템 라이브러리 설치 (Qt6 필수 의존성)"
+          sudo apt-get update
+          
+          sudo apt-get install -y \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-keysyms1 \
+            libxcb-image0 \
+            libxcb-render-util0 \
+            libxcb-xinerama0 \
+            libxcb-shape0 \
+            libxcb-xfixes0 \
+            libxkbcommon-x11-0 \
+            libpulse0 \
+            libasound2t64 \
+            libegl1 \
+            libopengl0 \
+            libnss3 \
+            libpcsclite1
+
+          echo "2. Python 패키지 설치"
+          pip install --upgrade pip
+          pip install pyarmor pyinstaller
+          
+          # 앱 구동에 필요한 Python 라이브러리
+          pip install PySide6 shiboken6 licensing
+          
+          # requirements 파일이 있다면 설치
+          if [ -f requirements.launcher.txt ]; then pip install -r requirements.launcher.txt; fi
+
+      # ▼▼▼ [핵심] 난독화 후 원본에 덮어씌우기 ▼▼▼
+      - name: Obfuscate and Overwrite
+        run: |
+          echo "1. 난독화 시작 (결과물은 임시폴더 temp_obf에 저장)"
+          
+          # 제외할 파일은 --exclude로 지정
+          pyarmor gen -O temp_obf \
+            -r release/ui src \
+            --exclude "src/backend/lerobot" \
+            --exclude "release/ui/launcher.py"
+
+          echo "2. 폴더 구조 맞추기 (ui -> release/ui)"
+          
+          # 1) temp_obf 안에 release 폴더 만들기
+          mkdir -p temp_obf/release
+          
+          # 2) temp_obf/ui 폴더를 temp_obf/release/ui 로 이동
+          if [ -d "temp_obf/ui" ]; then
+              mv temp_obf/ui temp_obf/release/
+          fi
+
+          echo "3. [핵심] Runtime 폴더 배포 (Docker용 + Launcher용)"
+          # temp_obf 안에 생성된 pyarmor_runtime_xxxx 폴더를 찾습니다.
+          RUNTIME_DIR=$(find temp_obf -maxdepth 1 -type d -name "pyarmor_runtime_*" -printf "%f\n")
+            
+          if [ -n "$RUNTIME_DIR" ]; then
+              echo "Runtime folder found: $RUNTIME_DIR"
+
+              # [Step A] Docker를 위해 src 안으로 '복사' (Copy)
+              # Docker 컨테이너가 src를 마운트할 때 런타임도 같이 가져가야 함
+              if [ -d "temp_obf/src" ]; then
+                  echo " -> Copying to src/ for Docker"
+                  cp -r "temp_obf/$RUNTIME_DIR" "temp_obf/src/"
+              fi
+
+              # [Step B] Launcher 실행을 위해 release/ui 안으로 '이동' (Move)
+              # main.py 바로 옆에 런타임이 있어야 PyInstaller가 같이 포장하고, 실행 시 찾을 수 있음
+              if [ -d "temp_obf/release/ui" ]; then
+                  echo " -> Moving to release/ui/ for PyInstaller/Launcher"
+                  mv "temp_obf/$RUNTIME_DIR" "temp_obf/release/ui/"
+              else
+                  echo "WARNING: release/ui folder missing in temp_obf!"
+              fi
+          else
+              echo "WARNING: Runtime folder not found!"
+          fi
+
+          echo "4. 난독화된 파일을 원본 폴더에 강제 덮어쓰기"
+          # 이제 구조가 완벽합니다.
+          # - src/ 안에는 runtime 복사본이 있음
+          # - release/ui/ 안에는 runtime 원본이 이동됨
+          cp -rf temp_obf/* .
+          
+          echo "5. 덮어쓰기 완료. 임시폴더 삭제"
+          rm -rf temp_obf
+          
+          echo "=== 파일 상태 확인 ==="
+          ls -F release/ui/ | grep pyarmor_runtime
+          head -n 5 release/ui/main.py
+
+      # ▼▼▼ [빌드] 경로 설정이 아주 심플해짐! ▼▼▼
+      - name: Build with PyInstaller
+        run: |
+          echo "1. PyArmor Runtime 폴더 이름 찾기"
+          # 앞 단계에서 release/ui/ 안으로 이동시켰으므로 거기서 찾습니다.
+          RUNTIME_DIR_NAME=$(ls release/ui | grep "pyarmor_runtime_" | head -n 1)
+          
+          if [ -z "$RUNTIME_DIR_NAME" ]; then
+              echo "ERROR: release/ui 폴더 안에서 PyArmor Runtime을 찾을 수 없습니다!"
+              ls -R release/ui
+              exit 1
+          fi
+          
+          FULL_RUNTIME_PATH="release/ui/$RUNTIME_DIR_NAME"
+          echo "Found Runtime: $FULL_RUNTIME_PATH"
+
+          echo "2. 빌드 시작"
+          
+          pyinstaller --noconfirm --onefile --noconsole --name EasyLauncher \
+            --paths "." \
+            --paths "release/ui" \
+            --add-data "release/ui/img:release/ui/img" \
+            --add-data "$FULL_RUNTIME_PATH:$RUNTIME_DIR_NAME" \
+            --collect-all PySide6 \
+            --collect-all shiboken6 \
+            --collect-all licensing \
+            --hidden-import "app_context" \
+            --hidden-import "service" \
+            --hidden-import "installer" \
+            --hidden-import "license_validator" \
+            --hidden-import "launcher" \
+            --hidden-import "update" \
+            --hidden-import "tools" \
+            --hidden-import "src" \
+            --hidden-import "sqlite3" \
+            --hidden-import "json" \
+            --hidden-import "os" \
+            --hidden-import "sys" \
+            --hidden-import "shutil" \
+            --hidden-import "subprocess" \
+            --hidden-import "time" \
+            --hidden-import "pathlib" \
+            --hidden-import "platform" \
+            --hidden-import "threading" \
+            --hidden-import "typing" \
+            --hidden-import "shlex" \
+            release/ui/main.py
+
+      # ▼▼▼ 패키징 전 불필요한 소스 파일 삭제 (청소 단계) ▼▼▼
+      - name: Cleanup Redundant Source Files
+        run: |
+          echo "패키징 최적화를 위해 중복 소스 파일을 제거합니다."
+          # 1. release/ui 폴더 내의 모든 .py 파일 삭제
+          find release/ui -name "*.py" -delete
+          rm -rf release/ui/pyarmor_runtime_*
+
+          echo "청소 완료. 현재 폴더 상태:"
+          ls -R release/ui
+
+      # [변경] zip 대신 deb 만들기
+      - name: Build Debian Package
+        run: |
+          # 스크립트에 실행 권한 주기
+          chmod +x .github/workflows/build_deb.sh
+          
+          # 스크립트 실행 (dist/EasyLauncher 파일을 가져다 씀)
+          ./.github/workflows/build_deb.sh
+
+      # [변경] 결과물 업로드 (zip 대신 deb)
+      - name: Release to Public Repo
+        uses: softprops/action-gh-release@v1
+        with:
+          repository: Plan-99/Easy-Collector-Release
+          token: ${{ secrets.PUBLIC_REPO_TOKEN }}
+          tag_name: ${{ github.ref_name }}
+          files: |
+            *.deb

@@ -34,8 +34,8 @@ transformers
 rerun-sdk==0.20.1
 meshcat==0.3.2
 sshkeyboard==2.3.1
-numpy==1.26.4
-casadi
+# numpy==1.26.4
+# casadi
 scipy
 hydra-core
 scikit-learn

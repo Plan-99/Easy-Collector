@@ -18,6 +18,7 @@ services:
       - DISPLAY=${DISPLAY}
       - ROS_DOMAIN_ID=0
       - XAUTHORITY=${XAUTHORITY}
+      - PYTHONPATH=/root/src:${PYTHONPATH}
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
       # NPM: regional mirror and retry knobs (override in env if needed)

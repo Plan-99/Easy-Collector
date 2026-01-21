@@ -11,6 +11,12 @@ log_status() {
   fi
 }
 
+export PYTHONPATH="/root/src:/opt/openrobots/lib/python3.10/site-packages:${PYTHONPATH:-}"
+export LD_LIBRARY_PATH="/opt/openrobots/lib:${LD_LIBRARY_PATH:-}"
+export PATH="/opt/openrobots/bin:${PATH}"
+
+log_status "[DEBUG] Library path forced to /opt/openrobots and /root/src"
+
 # Print environment and runtime summary for diagnostics
 env_summary() {
   echo "[ENV] Flags: EC_NO_FRONTEND=${EC_NO_FRONTEND:-0} EC_NO_SIDE_PROCESSES=${EC_NO_SIDE_PROCESSES:-0} EC_SKIP_TORCHVISION_COMPAT=${EC_SKIP_TORCHVISION_COMPAT:-0} EC_MINIMAL_API=${EC_MINIMAL_API:-0} EC_NO_ROS=${EC_NO_ROS:-0} EC_DEBUG=${EC_DEBUG:-0}"
@@ -309,7 +315,7 @@ if [[ "${EC_NO_FRONTEND:-0}" != "1" ]]; then
   export NPM_CONFIG_FUND=${NPM_CONFIG_FUND:-false}
   if [[ ! -d node_modules ]] || [[ ! -x ./node_modules/.bin/quasar ]]; then
     log_status "[FRONTEND] Installing node modules ..."
-    (npm ci --no-audit --no-fund --prefer-offline --legacy-peer-deps || npm install --no-audit --no-fund --legacy-peer-deps)
+    (npm ci --verbose --no-audit --no-fund --prefer-offline --legacy-peer-deps || npm install --no-audit --no-fund --legacy-peer-deps)
   fi
   log_status "[FRONTEND] Starting Quasar dev server on 0.0.0.0:5173"
   export NODE_OPTIONS="--max-old-space-size=${EC_NODE_MAX_OLD_SPACE_SIZE:-384}"
