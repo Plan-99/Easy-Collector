@@ -128,6 +128,54 @@
                                 </q-card-section>
                             </q-card>
                         </q-expansion-item>
+
+                        <q-expansion-item
+                            expand-separator
+                            icon="camera"
+                            label="Prospective Transform"
+                            caption="Change image perspective"
+                        >
+                            <q-card class="bg-secondary" dark>
+                                <q-card-section>
+                                    <div class="text-caption">Scale Factor</div>
+                                    <q-slider
+                                        v-model="form.prospective.scale_factor"
+                                        :min="0"
+                                        :max="50"
+                                        label
+                                        label-always
+                                        @change="addConfig"
+                                    />
+                                    <div class="text-caption">Degrees</div>
+                                    <q-slider
+                                        v-model="form.prospective.degrees"
+                                        :min="-180"
+                                        :max="180"
+                                        label
+                                        label-always
+                                        @change="addConfig"
+                                    />
+                                    <div class="text-caption">Shear</div>
+                                    <q-slider
+                                        v-model="form.prospective.shear"
+                                        :min="-45"
+                                        :max="45"
+                                        label
+                                        label-always
+                                        @change="addConfig"
+                                    />
+                                    <div class="text-caption">Perspective</div>
+                                    <q-slider
+                                        v-model="form.prospective.perspective"
+                                        :min="-100"
+                                        :max="100"
+                                        label
+                                        label-always
+                                        @change="addConfig"
+                                    />
+                                </q-card-section>
+                            </q-card>
+                        </q-expansion-item>
                     </q-list>
                 </div>
                 <div class="col-md-8 col-sm-12">
@@ -202,6 +250,12 @@ const form = ref({
     gaussian: {
         mean: 0,
         sigma: 0
+    },
+    prospective: {
+        scale_factor: 0,
+        degrees: 0,
+        shear: 0,
+        perspective: 0,
     }
 });
 

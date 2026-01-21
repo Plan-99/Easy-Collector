@@ -177,6 +177,7 @@ def augment_dataset_route(id):
         rectangles=data.get('rectangles'),
         salt_and_pepper=data.get('saltAndPepper'),
         gaussian=data.get('gaussian'),
+        prospective=data.get('prospective'),
         socketio_instance=current_app.pm.socketio,
         name=f"augment_dataset",
     )

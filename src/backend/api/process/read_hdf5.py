@@ -6,7 +6,7 @@ import argparse
 import os
 import cv2
 import base64 # 이미지 인코딩을 위해 추가
-from .augment_dataset import adjust_lightness, draw_rectangles, add_salt_and_pepper_noise, add_gaussian_noise, generate_rect_params
+from .augment_dataset import adjust_lightness, draw_rectangles, add_salt_and_pepper_noise, add_gaussian_noise, generate_rect_params, prospective_transform, generate_prospective_transform
 from PIL import Image
 
 
@@ -25,6 +25,7 @@ def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=
         qaction_data = {}
         with h5py.File(hdf5_path, 'r') as f:
             rect_params = []
+            transform_matrix = None
             # actions = f[f"action"][:]
             # xactions = f[f"xaction"][:]
             # xvel_actions = f[f"xvel_action"][:]
@@ -69,8 +70,15 @@ def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=
                     if 'saltAndPepper' in config:
                         img = add_salt_and_pepper_noise(img, config['saltAndPepper'].get('amount', 0))
                     if 'gaussian' in config:
-                        img = add_gaussian_noise(img, config['gaussian'].get('mean', 0), config['gaussian'].get('sigma', 0))    
-                    
+                        img = add_gaussian_noise(img, config['gaussian'].get('mean', 0), config['gaussian'].get('sigma', 0))
+                    if 'prospective' in config:
+                        if i == 0:
+                            transform_matrix = generate_prospective_transform(img.width, img.height,
+                                                                              config['prospective'].get('scale_factor', 0),
+                                                                              config['prospective'].get('degrees', 0),
+                                                                              config['prospective'].get('shear', 0),
+                                                                              config['prospective'].get('perspective', 0))
+                        img = prospective_transform(img, transform_matrix)
                     img_array = np.array(img)
                     
                     # 이미지를 JPEG 형식으로 메모리 버퍼에 인코딩
