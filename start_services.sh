@@ -315,7 +315,7 @@ if [[ "${EC_NO_FRONTEND:-0}" != "1" ]]; then
   export NPM_CONFIG_FUND=${NPM_CONFIG_FUND:-false}
   if [[ ! -d node_modules ]] || [[ ! -x ./node_modules/.bin/quasar ]]; then
     log_status "[FRONTEND] Installing node modules ..."
-    (npm ci --no-audit --no-fund --prefer-offline --legacy-peer-deps || npm install --no-audit --no-fund --legacy-peer-deps)
+    (npm ci --verbose --no-audit --no-fund --prefer-offline --legacy-peer-deps || npm install --no-audit --no-fund --legacy-peer-deps)
   fi
   log_status "[FRONTEND] Starting Quasar dev server on 0.0.0.0:5173"
   export NODE_OPTIONS="--max-old-space-size=${EC_NODE_MAX_OLD_SPACE_SIZE:-384}"
