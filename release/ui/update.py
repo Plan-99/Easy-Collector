@@ -27,7 +27,7 @@ try:
 except Exception:
     from PyQt6.QtCore import QObject, pyqtSignal as Signal, pyqtSlot as Slot
 
-DEFAULT_REPO_URL = "https://github.com/doni-boy/QWE.git"
+DEFAULT_REPO_URL = "https://github.com/Plan-99/Easy-Collector-Release.git"
 DEFAULT_UPDATE_DIR = "/opt/easytrainer/update"
 REPO_ENV = "EASYTRAINER_UPDATE_REPO"
 UPDATE_DIR_ENV = "EASYTRAINER_UPDATE_DIR"
