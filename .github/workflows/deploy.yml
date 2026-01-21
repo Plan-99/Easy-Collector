@@ -160,6 +160,17 @@ jobs:
             --hidden-import "shlex" \
             release/ui/main.py
 
+      # ▼▼▼ 패키징 전 불필요한 소스 파일 삭제 (청소 단계) ▼▼▼
+      - name: Cleanup Redundant Source Files
+        run: |
+          echo "패키징 최적화를 위해 중복 소스 파일을 제거합니다."
+          # 1. release/ui 폴더 내의 모든 .py 파일 삭제
+          find release/ui -name "*.py" -delete
+          rm -rf release/ui/pyarmor_runtime_*
+
+          echo "청소 완료. 현재 폴더 상태:"
+          ls -R release/ui
+
       # [변경] zip 대신 deb 만들기
       - name: Build Debian Package
         run: |
