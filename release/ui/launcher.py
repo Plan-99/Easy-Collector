@@ -1175,10 +1175,15 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self._fullscreen_pref = fullscreen
 
     def _circle_icon_paths(self) -> list[Path]:
-        img_dir = Path(__file__).resolve().parent / "img"
-        icons = [img_dir / f"Plugin icon - {idx}.png" for idx in range(1, 7)]
-        if all(p.is_file() for p in icons):
-            return icons
+        img_dirs = [Path(__file__).resolve().parent / "img"]
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            img_dirs.append(Path(meipass) / "img")
+            img_dirs.append(Path(meipass) / "release" / "ui" / "img")
+        for img_dir in img_dirs:
+            icons = [img_dir / f"Plugin icon - {idx}.png" for idx in range(1, 7)]
+            if all(p.is_file() for p in icons):
+                return icons
         return []
 
     def _create_circle_button(self, text: str, tooltip: str, icon_path: Path | str | None = None) -> QPushButton:

@@ -37,6 +37,7 @@ CONFIG_SKIP_KEY = "update_skip_version"
 CONFIG_LAST_APPLIED_KEY = "update_last_applied_version"
 CONFIG_UPDATE_DIR_KEY = "update_dir"
 CONFIG_UPGRADE_KEY = "update_upgrade_pending"
+LAUNCHER_BIN_NAME = "EasyLauncher"
 
 _VERSION_RE = re.compile(r"(\d+)")
 _GITHUB_API = "https://api.github.com/repos/{slug}/releases/latest"
@@ -348,15 +349,14 @@ class UpdateManager:
             self._set_progress_text("업데이트 파일을 압축 해제하는 중입니다...")
             self._extract_deb(deb_path, extract_root)
             payload_root = extract_root / "usr" / "share" / "easytrainer-project"
-            ui_root = extract_root / "opt" / "easytrainer" / "ui"
             self._set_progress_text("코드를 동기화하는 중입니다...")
             self._sync_payload(payload_root)
             try:
                 self._window._apply_compose_variant(self._window.install_variant)
             except Exception:
                 pass
-            self._set_progress_text("런처 UI를 업데이트하는 중입니다...")
-            self._sync_ui(ui_root)
+            self._set_progress_text("런처를 업데이트하는 중입니다...")
+            self._sync_launcher_assets(extract_root)
             self._set_progress_text("버전 정보를 갱신하는 중입니다...")
             self._update_version_file(extract_root, info.version)
             self._set_progress_text("마무리하는 중입니다...")
@@ -560,6 +560,55 @@ class UpdateManager:
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
         )
 
+    def _sync_launcher_assets(self, extract_root: Path):
+        bin_src = extract_root / "opt" / "easytrainer" / LAUNCHER_BIN_NAME
+        if bin_src.is_file():
+            self._sync_launcher_bin(bin_src)
+            self._ensure_legacy_launcher_stub()
+            return
+        ui_root = extract_root / "opt" / "easytrainer" / "ui"
+        if ui_root.exists():
+            self._sync_ui(ui_root)
+            return
+        self._log("[UPDATE][WARN] 런처 업데이트 대상이 없습니다.")
+
+    def _sync_launcher_bin(self, bin_src: Path):
+        dst = APP_HOME / LAUNCHER_BIN_NAME
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dst.parent / f"{dst.name}.new"
+        shutil.copy2(bin_src, tmp)
+        try:
+            tmp.chmod(0o755)
+        except Exception:
+            pass
+        tmp.replace(dst)
+
+    def _ensure_legacy_launcher_stub(self):
+        ui_root = APP_HOME / "ui"
+        ui_root.mkdir(parents=True, exist_ok=True)
+        stub_path = ui_root / "main.py"
+        stub = (
+            "#!/usr/bin/env python3\n"
+            "import os\n"
+            "import sys\n"
+            "from pathlib import Path\n"
+            "\n"
+            "def main():\n"
+            "    app_home = Path(__file__).resolve().parents[1]\n"
+            f"    launcher = app_home / \"{LAUNCHER_BIN_NAME}\"\n"
+            "    if launcher.is_file():\n"
+            "        os.execv(str(launcher), [str(launcher)] + sys.argv[1:])\n"
+            "    print(f\"EasyLauncher binary not found: {launcher}\", file=sys.stderr)\n"
+            "    return 1\n"
+            "\n"
+            "if __name__ == \"__main__\":\n"
+            "    raise SystemExit(main())\n"
+        )
+        try:
+            stub_path.write_text(stub, encoding="utf-8")
+        except Exception:
+            pass
+
     def _update_version_file(self, extract_root: Path, version: str):
         src = extract_root / "usr" / "share" / "easytrainer-project" / "VERSION"
         fallback_src = extract_root / "opt" / "easytrainer" / "VERSION"
@@ -622,9 +671,15 @@ class UpdateManager:
                 save_config(cfg)
             except Exception:
                 pass
-        main_py = Path(__file__).resolve().parent / "main.py"
         try:
-            QProcess.startDetached(sys.executable, [str(main_py)])
+            launcher_bin = APP_HOME / LAUNCHER_BIN_NAME
+            if launcher_bin.is_file():
+                QProcess.startDetached(str(launcher_bin), [])
+            elif getattr(sys, "frozen", False):
+                QProcess.startDetached(sys.executable, [])
+            else:
+                main_py = Path(__file__).resolve().parent / "main.py"
+                QProcess.startDetached(sys.executable, [str(main_py)])
         except Exception as e:
             QMessageBox.critical(self._window, "재시작 실패", f"프로그램 재시작에 실패했습니다: {e}")
             return
