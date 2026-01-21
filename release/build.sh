@@ -325,7 +325,11 @@ chmod 0644 "$STAGE/usr/share/applications/EasyTrainer.desktop"
 # Control file
 # Runtime GUI libs needed by Qt (ensure auto-install by apt)
 RUNTIME_LIBS="libxcb-cursor0, libxkbcommon-x11-0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-render-util0, libxcb-xinerama0, libegl1, libgl1-mesa-dri, libopengl0, libnss3, libasound2"
-DEPENDS_LINE="Depends: python3 (>= ${PY_VER}), python3 (<< ${PY_MAJOR}.${PY_NEXT_MINOR}), xdg-utils, ${RUNTIME_LIBS}"
+if [ "$USE_PYINSTALLER" = "1" ]; then
+  DEPENDS_LINE="Depends: xdg-utils, ${RUNTIME_LIBS}"
+else
+  DEPENDS_LINE="Depends: python3 (>= ${PY_VER}), python3 (<< ${PY_MAJOR}.${PY_NEXT_MINOR}), xdg-utils, ${RUNTIME_LIBS}"
+fi
 
 cat > "$STAGE/DEBIAN/control" <<EOF
 Package: ${PKG}
