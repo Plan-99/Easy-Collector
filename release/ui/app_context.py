@@ -133,7 +133,7 @@ UI_LOG_FILE = UI_LOG_DIR / "ui.log"
 def _load_app_version() -> str:
     """Resolve app version from bundled file or repo root."""
     candidates = [
-        DATA_ROOT / "VERSION",
+        DEFAULT_PROJECT_PATH / "VERSION",
         Path(__file__).resolve().parents[1] / "VERSION",
         REPO_ROOT_CANDIDATE / "VERSION",
     ]
@@ -212,3 +212,33 @@ def save_config(cfg: dict):
         CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2))
     except Exception:
         pass
+
+
+def is_home_scoped(path: Path | None) -> bool:
+    if not path:
+        return False
+    try:
+        resolved = path.expanduser().resolve()
+        home = Path.home().resolve()
+        return resolved == home or home in resolved.parents
+    except Exception:
+        return False
+
+
+def resolve_project_root(cfg: dict | None = None) -> Path:
+    cfg = cfg or load_config()
+    env_root = os.environ.get("EASYCOLLECTOR_PROJECT_ROOT", "").strip()
+    cfg_root = cfg.get("project_root")
+    if env_root:
+        return Path(env_root).expanduser()
+    if cfg_root:
+        candidate = Path(cfg_root).expanduser()
+        if is_home_scoped(candidate):
+            candidate = DEFAULT_PROJECT_PATH
+            cfg["project_root"] = str(candidate)
+            save_config(cfg)
+        return candidate
+    candidate = DEFAULT_PROJECT_PATH
+    cfg["project_root"] = str(candidate)
+    save_config(cfg)
+    return candidate

@@ -15,6 +15,7 @@ from urllib.error import HTTPError, URLError
 from app_context import (
     APP_HOME,
     APP_VERSION,
+    DEFAULT_PROJECT_PATH,
     MARKER_FILE,
     QApplication,
     QProcess,
@@ -560,12 +561,17 @@ class UpdateManager:
         )
 
     def _update_version_file(self, extract_root: Path, version: str):
-        src = extract_root / "opt" / "easytrainer" / "VERSION"
-        dst = APP_HOME / "VERSION"
+        src = extract_root / "usr" / "share" / "easytrainer-project" / "VERSION"
+        fallback_src = extract_root / "opt" / "easytrainer" / "VERSION"
+        dst = DEFAULT_PROJECT_PATH / "VERSION"
         try:
             if src.exists():
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(src, dst)
+                return
+            if fallback_src.exists():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(fallback_src, dst)
                 return
         except Exception:
             pass

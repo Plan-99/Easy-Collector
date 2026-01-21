@@ -3,10 +3,10 @@ from __future__ import annotations
 import os
 import sys
 
-from app_context import QApplication, QMessageBox, QTimer, _window_icon, load_config
+from app_context import QApplication, QMessageBox, QTimer, _window_icon, load_config, resolve_project_root
 from installer import run_setup_wizard
 from launcher import MainWindow
-from service import check_license_gui, docker_compose_available
+from service import RuntimeServiceMixin, check_license_gui, docker_compose_available
 from update import CONFIG_UPGRADE_KEY
 
 _APP_STYLE = """
@@ -128,12 +128,26 @@ def _apply_app_style(app: QApplication) -> None:
         pass
 
 
+class _PermissionProbe(RuntimeServiceMixin):
+    def __init__(self, project_root):
+        self.project_root = project_root
+
+
+def _ensure_startup_permissions() -> bool:
+    project_root = resolve_project_root()
+    probe = _PermissionProbe(project_root)
+    return probe._ensure_app_and_project_writable(force_auth=True)
+
+
 def main() -> int:
     os.environ.setdefault("QT_QPA_PLATFORMTHEME", "")
     os.environ.setdefault("QT_STYLE_OVERRIDE", "Fusion")
     os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")
     app = QApplication(sys.argv)
     _apply_app_style(app)
+    if not _ensure_startup_permissions():
+        QMessageBox.critical(None, "권한 필요", "데이터/프로젝트 경로 권한을 획득하지 못해 종료합니다.")
+        return 1
     if not check_license_gui():
         QMessageBox.critical(None, "라이선스 오류", "라이선스 인증에 실패했습니다. 프로그램을 종료합니다.")
         return 1
