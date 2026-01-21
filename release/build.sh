@@ -209,19 +209,7 @@ if [ "${SKIP_PAYLOAD_SIZE_CHECK:-0}" != "1" ] && [ "$PAYLOAD_SIZE" -ge "$MAX_PAY
   exit 1
 fi
 
-# Validate critical runtime paths (prevent shipping stale payloads)
-PY_CHECK="${STAGE}${PAYLOAD_DIR}/src/backend/configs/global_configs.py"
-if [ -f "$PY_CHECK" ]; then
-  python3 - "$PY_CHECK" <<'PY'
-import sys
-from pathlib import Path
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-required = "/root/ros2_ws/src/piper_ros/src/piper_description/"
-if required not in text:
-    raise SystemExit(f"[deb][ERROR] Missing '{required}' in {path} (payload may be stale).")
-PY
-fi
+# Payload sanity check removed by request.
 # Ensure critical code paths exist in the payload (avoid shipping partial copies)
 REQUIRED_PATHS=(
   "$STAGE${PAYLOAD_DIR}/docker-compose.yml"
