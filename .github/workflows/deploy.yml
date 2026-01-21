@@ -10,7 +10,7 @@ on:
 
 jobs:
   build-and-deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -36,7 +36,7 @@ jobs:
             libxcb-xfixes0 \
             libxkbcommon-x11-0 \
             libpulse0 \
-            libasound2t64 \
+            libasound2 \
             libegl1 \
             libopengl0 \
             libnss3 \
