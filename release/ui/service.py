@@ -1077,27 +1077,32 @@ class RuntimeServiceMixin:
         self.append_log("[RESTART] docker compose down --remove-orphans --volumes ...")
         self.run_compose(["down", "--remove-orphans", "--volumes"], on_finish=_after_down)
 
-    def _run_backend_kill(self):
+    def _run_backend_kill(self, keep_backend: bool = False, label: str = "STOP"):
         """Best-effort: run kill.sh inside the service container to clean ROS/backend processes."""
         container = "easy_collector_service"
         if "service" not in self._get_running_services():
             return
+        label = label or "STOP"
+        cmd = "/root/src/kill.sh"
+        if keep_backend:
+            cmd = "EC_KILL_BACKEND=0 /root/src/kill.sh"
         try:
             result = subprocess.run(
-                ["docker", "exec", "-T", container, "bash", "-lc", "/root/src/kill.sh"],
+                ["docker", "exec", "-i", container, "bash", "-lc", cmd],
                 capture_output=True,
                 text=True,
                 timeout=10,
             )
             msg = result.stdout.strip() if result.stdout else ""
             if result.returncode == 0:
-                self.append_log("[STOP] kill.sh executed inside container.")
+                suffix = " (keep backend)" if keep_backend else ""
+                self.append_log(f"[{label}] kill.sh executed inside container{suffix}.")
                 if msg:
-                    self.append_log(f"[STOP][kill.sh] {msg}")
+                    self.append_log(f"[{label}][kill.sh] {msg}")
             else:
                 err = result.stderr.strip() if result.stderr else ""
-                self.append_log(f"[STOP][WARN] kill.sh returned {result.returncode}: {err or 'no output'}")
+                self.append_log(f"[{label}][WARN] kill.sh returned {result.returncode}: {err or 'no output'}")
         except FileNotFoundError:
-            self.append_log("[STOP][WARN] Docker not found; skip kill.sh.")
+            self.append_log(f"[{label}][WARN] Docker not found; skip kill.sh.")
         except Exception as e:
-            self.append_log(f"[STOP][WARN] kill.sh failed: {e}")
+            self.append_log(f"[{label}][WARN] kill.sh failed: {e}")

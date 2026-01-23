@@ -1,4 +1,14 @@
-pkill -9 -f backend.api
+KEEP_BACKEND=0
+if [[ "${EC_KILL_BACKEND:-1}" == "0" ]]; then
+  KEEP_BACKEND=1
+fi
+if [[ "${1:-}" == "--keep-backend" ]]; then
+  KEEP_BACKEND=1
+fi
+
+if [[ "${KEEP_BACKEND}" != "1" ]]; then
+  pkill -9 -f backend.api
+fi
 pkill -9 -f rosbridge
 pkill -9 -f realsense
 pkill -9 -f piper

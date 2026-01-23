@@ -193,6 +193,7 @@ copy_file "docker-compose.dev.yml"
 copy_file "docker-compose.cpu.yml"
 copy_file "docker-compose.gpu.yml"
 copy_file "start_services.sh" 755
+copy_file "src/kill.sh" 755
 copy_file "Dockerfile"
 copy_file ".dockerignore"
 copy_file "requirements.txt"

@@ -557,6 +557,7 @@ class UpdateManager:
             "docker-compose.cpu.yml",
             "docker-compose.gpu.yml",
             "start_services.sh",
+            "src/kill.sh",
             "Dockerfile",
             ".dockerignore",
             "requirements.txt",

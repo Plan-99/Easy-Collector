@@ -668,6 +668,7 @@ class ToolingMixin:
             "docker-compose.cpu.yml",
             "docker-compose.gpu.yml",
             "start_services.sh",
+            "src/kill.sh",
             "Dockerfile",
             ".dockerignore",
             "requirements.txt",
@@ -795,14 +796,24 @@ class ToolingMixin:
         if not self._is_valid_dev_src(self.dev_src_root):
             self.load_ui(open_mode="CURRENT")
             return
+        compose_ready = docker_compose_available() and self._is_valid_project_root(self.project_root)
+        fast_backend_reload = os.environ.get("EC_BACKEND_AUTORELOAD", "1") != "0"
+        running = "service" in self._get_running_services() if compose_ready else False
+        process_busy = self.process is not None and self.process.state() != QProcess.NotRunning
+        cleanup_nodes = os.environ.get("EC_QUICK_SYNC_CLEANUP", "1") != "0"
         self.append_log("[SYNC] 원본에서 빠른 적용 중...")
+        if compose_ready and running and fast_backend_reload and cleanup_nodes and not process_busy:
+            self.append_log("[SYNC] ROS/로봇 노드 정리 중...")
+            try:
+                self._run_backend_kill(keep_backend=True, label="SYNC")
+            except Exception:
+                pass
         if not self._sync_dev_files(show_errors=False):
             self.append_log("[SYNC][WARN] 원본 적용에 실패했습니다. 경로를 확인하세요.")
             return
         # Default to fast path: assume backend autoreload is on (container default) to avoid restarts
-        fast_backend_reload = os.environ.get("EC_BACKEND_AUTORELOAD", "1") != "0"
-        running = "service" in self._get_running_services()
-        if docker_compose_available() and self._is_valid_project_root(self.project_root):
+        if compose_ready:
+            running = "service" in self._get_running_services()
             if self.process is not None and self.process.state() != QProcess.NotRunning:
                 if self._pending_quick_apply:
                     self.append_log("[SYNC][INFO] 다른 작업이 끝나면 대기 중인 빠른 동기화를 실행합니다.")
