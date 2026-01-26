@@ -208,8 +208,8 @@ class IK_Solver:
         opts = {
             'ipopt': {
                 'print_level': 0,
-                'max_iter': 50,       # 반복 횟수를 과감히 줄임 (Warm start 믿고 가기)
-                'tol': 1e-7,          # 현실적인 오차 허용
+                'max_iter': 200,       # 반복 횟수를 과감히 줄임 (Warm start 믿고 가기)
+                'tol': 1e-8,          # 현실적인 오차 허용
                 'warm_start_init_point': 'yes',
                 'mu_strategy': 'adaptive', # 수렴 속도 향상
             },

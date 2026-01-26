@@ -13,8 +13,9 @@
                         'border-primary': focused.id === sensor.id && focused.device_type === 'sensor',
                     }"
                     @click="focusSensorRobot(sensor, 'sensor')"
-                    :resize="workspace.sensor_settings?.[sensor.id]?.img_size || [640, 480]"
-                    :cropped_area="workspace.sensor_settings?.[sensor.id]?.cropped_area || {}"
+                    :resize="workspace.sensor_img_size[sensor.id] || [640, 480]"
+                    :cropped_area="workspace.sensor_cropped_area[sensor.id] || {}"
+                    :rotate="workspace.sensor_rotate[sensor.id] || 0"
                 ></web-rtc-video>
                 <div class="full-height border-white bg-dark border-rounded flex flex-center" v-else>
                     <q-btn round flat icon="play_arrow" text-color="white" size="xl" @click="sensor.handler.startSensor(sensor)"></q-btn>

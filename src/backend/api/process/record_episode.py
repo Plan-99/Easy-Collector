@@ -146,8 +146,9 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                     for t_step in timesteps:
                         img = t_step.observation['images'][f'sensor_{s_id}']
                         img_data.append(fetch_image_with_config(img, {
-                            'resize': task['sensor_settings'][s_id]['img_size'],
-                            'cropped_area': task['sensor_settings'][s_id].get('cropped_area', None)
+                            'resize': task['sensor_img_size'][s_id],
+                            'cropped_area': task['sensor_cropped_area'][s_id],
+                            'rotate': task['sensor_rotate'][s_id]
                         }))
                     image_group.create_dataset(f"sensor_{s_id}", data=np.array(img_data), dtype='uint8')
 

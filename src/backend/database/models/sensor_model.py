@@ -43,6 +43,7 @@ class Sensor(Model, SoftDeletes):
         'read_topic',
         'read_topic_msg',
         'resolution',
+        'process_id'
     ]
 
     def get_sensor_type_info(self):
@@ -93,6 +94,10 @@ class Sensor(Model, SoftDeletes):
         if 'ip_address' in settings:
             return settings['ip_address']
         return None
+    
+    @accessor
+    def process_id(self):
+        return f'sensor_{self.id}'
     
     
 

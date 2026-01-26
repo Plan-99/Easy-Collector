@@ -153,8 +153,10 @@ def update_task(id):
     task.home_pose = data.get('home_pose', task.home_pose)
     task.image = data.get('image', task.image)
     task.episode_len = data.get('episode_len', task.episode_len)
-    task.sensor_settings = data.get('sensor_settings', task.sensor_settings)
+    task.sensor_ids = data.get('sensor_ids', task.sensor_ids)
     task.settings = data.get('settings', task.settings)
+
+    print("Updated Task Data:", task.to_dict())
 
     task.save()
     return {'status': 'success', 'message': 'Task Updated'}, 200
@@ -176,6 +178,8 @@ def update_task_device_settings(id):
         original_settings[device_type][device_id][key] = value
 
     task.settings = original_settings
+
+    print("Updated Device Settings:", task.settings)
 
     task.save()
     return {'status': 'success', 'message': 'Task Settings Updated'}, 200
