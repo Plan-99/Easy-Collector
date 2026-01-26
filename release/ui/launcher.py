@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import os
 import shlex
 import shutil
@@ -258,6 +259,9 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self._pad_update_detail: QLabel | None = None
         self._pad_update_bar: QProgressBar | None = None
         self._pad_update_progress_label: QLabel | None = None
+        self._pad_update_status_row: QWidget | None = None
+        self._pad_update_front_label: QLabel | None = None
+        self._pad_update_back_label: QLabel | None = None
         self._pad_update_log_view: QPlainTextEdit | None = None
         self._pad_update_primary_btn: QPushButton | None = None
         self._pad_update_secondary_btn: QPushButton | None = None
@@ -265,11 +269,16 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self._update_panel_actions: dict[str, callable] = {}
         self._update_panel_visible = False
         self._upgrade_in_progress = False
+        self._ros_domain_change_active = False
+        self._ros_domain_wait_timer: QTimer | None = None
         self._update_log_lines: list[str] = []
         self._pad_status_front_label: QLabel | None = None
         self._pad_status_back_label: QLabel | None = None
         self._pad_status_front_dot: QLabel | None = None
         self._pad_status_back_dot: QLabel | None = None
+        self._ros_domain_input: QLineEdit | None = None
+        self._ros_domain_apply_btn: QLabel | None = None
+        self._ros_domain_saved_value: int = 0
         self._preload_message: str = ""
         self._preload_detail: str = ""
         self._preload_auto_open_new: bool = True
@@ -540,7 +549,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self._register_drag_targets(self, wrapper, self.pill, self._right_pad)
 
         # Use a normal window type (not Qt.Tool) so the icon shows in the taskbar even when floating
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Window)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
         try:
             self.setAttribute(Qt.WA_TranslucentBackground, True)
             self.setAttribute(Qt.WA_Hover, True)
@@ -612,6 +621,20 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         # Resolve project root: env > config > default under data root (no HOME fallback)
         cfg = load_config()
         self.install_variant = cfg.get("install_variant", "gpu")
+        self._ros_domain_saved_value = self._sanitize_ros_domain_value(cfg.get("ros_domain_id", 0))
+        os.environ["ROS_DOMAIN_ID"] = str(self._ros_domain_saved_value)
+        if self._ros_domain_input is not None:
+            try:
+                self._ros_domain_input.blockSignals(True)
+                self._ros_domain_input.setText(str(self._ros_domain_saved_value))
+                self._ros_domain_input.blockSignals(False)
+            except Exception:
+                pass
+        if self._ros_domain_apply_btn is not None:
+            try:
+                self._ros_domain_apply_btn.setVisible(True)
+            except Exception:
+                pass
         self._update_window_title()
         self.project_root = resolve_project_root(cfg)
         # Ensure project exists; if not, copy from system payload or repo
@@ -620,6 +643,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self._unify_compose_service()
         # Ensure docker-compose.yml matches the selected variant
         self._apply_compose_variant(self.install_variant)
+        self._sync_ros_domain_compose_files(self._ros_domain_saved_value)
 
         # Initialize developer source path
         self.dev_src_root = None
@@ -866,6 +890,22 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                 return False
             local = pad.mapFromGlobal(global_pos)
             return pad.rect().contains(local)
+        except Exception:
+            return False
+
+    def _is_ros_domain_editing(self) -> bool:
+        widget = getattr(self, "_ros_domain_input", None)
+        if widget is None:
+            return False
+        try:
+            if not widget.isVisible():
+                return False
+            if widget.hasFocus():
+                return True
+            focus = QApplication.focusWidget()
+            if focus is None:
+                return False
+            return focus is widget or widget.isAncestorOf(focus)
         except Exception:
             return False
 
@@ -1127,6 +1167,8 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             return
         if getattr(self, "_update_panel_visible", False):
             return
+        if self._is_ros_domain_editing():
+            return
         if self._cursor_over_pill(strict=True):
             return
         self._animate_pill(False)
@@ -1137,6 +1179,8 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         if getattr(self, "_pill_loading", False):
             return
         if getattr(self, "_update_panel_visible", False):
+            return
+        if self._is_ros_domain_editing():
             return
         hovered = self._cursor_over_pill(strict=True)
         if hovered and not self._pill_expanded:
@@ -1655,6 +1699,20 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         progress_label.setAlignment(Qt.AlignCenter)
         progress_label.setVisible(False)
 
+        status_row_wrap = QWidget(panel)
+        status_row_wrap.setVisible(False)
+        status_row = QHBoxLayout(status_row_wrap)
+        status_row.setContentsMargins(0, 0, 0, 0)
+        status_row.setSpacing(10)
+        status_front = QLabel("프론트엔드: 대기중", panel)
+        status_back = QLabel("백엔드: 대기중", panel)
+        for lbl in (status_front, status_back):
+            lbl.setStyleSheet("color: #e0e0e0; font-size: 11px; font-weight: 700;")
+            lbl.setAlignment(Qt.AlignVCenter)
+        status_row.addWidget(status_front, 0, Qt.AlignLeft | Qt.AlignVCenter)
+        status_row.addStretch(1)
+        status_row.addWidget(status_back, 0, Qt.AlignRight | Qt.AlignVCenter)
+
         button_col = QVBoxLayout()
         button_col.setContentsMargins(0, 0, 0, 0)
         button_col.setSpacing(6)
@@ -1678,6 +1736,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         layout.addStretch(1)
         layout.addWidget(log_view)
         layout.addWidget(progress_label)
+        layout.addWidget(status_row_wrap)
         layout.addWidget(bar)
         layout.addLayout(button_col)
 
@@ -1694,6 +1753,9 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self._pad_update_detail = detail
         self._pad_update_bar = bar
         self._pad_update_progress_label = progress_label
+        self._pad_update_status_row = status_row_wrap
+        self._pad_update_front_label = status_front
+        self._pad_update_back_label = status_back
         self._pad_update_log_view = log_view
         self._pad_update_primary_btn = btn_primary
         self._pad_update_secondary_btn = btn_secondary
@@ -1701,6 +1763,98 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
         panel.hide()
         return panel
+
+    def _sanitize_ros_domain_value(self, raw) -> int:
+        try:
+            value = int(str(raw).strip())
+        except Exception:
+            return 0
+        if value < 0:
+            return 0
+        if value > 232:
+            return 232
+        return value
+
+    def _sync_ros_domain_compose_files(self, value: int) -> bool:
+        value = self._sanitize_ros_domain_value(value)
+        if not self._is_valid_project_root(self.project_root):
+            return False
+        if not self._ensure_project_root_writable():
+            return False
+        found_any = False
+        for name in ("docker-compose.yml", "docker-compose.gpu.yml", "docker-compose.cpu.yml"):
+            path = self.project_root / name
+            if not path.exists():
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                continue
+            updated_text, count = re.subn(
+                r"(?m)^(\s*-\s*ROS_DOMAIN_ID\s*=).*$",
+                f"\\g<1>{value}",
+                text,
+            )
+            if count == 0:
+                updated_text, count = re.subn(
+                    r"(?m)^(\s*ROS_DOMAIN_ID\s*:\s*).*$",
+                    f"\\g<1>{value}",
+                    text,
+                )
+            if count > 0:
+                found_any = True
+            if updated_text != text:
+                try:
+                    path.write_text(updated_text, encoding="utf-8")
+                except Exception:
+                    pass
+        if not found_any:
+            try:
+                self.append_log("[SETTINGS][WARN] compose 파일에서 ROS_DOMAIN_ID 항목을 찾지 못했습니다.")
+            except Exception:
+                pass
+        return found_any
+
+    def _apply_ros_domain_value(self, value: int):
+        value = self._sanitize_ros_domain_value(value)
+        self._ros_domain_saved_value = value
+        os.environ["ROS_DOMAIN_ID"] = str(value)
+        try:
+            cfg = load_config()
+            cfg["ros_domain_id"] = value
+            save_config(cfg)
+        except Exception:
+            pass
+        synced = self._sync_ros_domain_compose_files(value)
+        if synced:
+            self.append_log(f"[SETTINGS] ROS_DOMAIN_ID={value} 저장 완료.")
+        else:
+            self.append_log(f"[SETTINGS] ROS_DOMAIN_ID={value} 저장 완료 (compose 적용 대기).")
+        running = False
+        try:
+            running = "service" in self._get_running_services()
+        except Exception:
+            running = False
+        if not running:
+            return
+        if not docker_compose_available() or not self._is_valid_project_root(self.project_root):
+            self.append_log("[SETTINGS][WARN] compose 사용 불가: 다음 시작 때 적용됩니다.")
+            return
+        if self.process is not None and self.process.state() != QProcess.NotRunning:
+            self.append_log("[SETTINGS][WARN] 다른 작업 중이라 적용을 보류합니다.")
+            return
+        self.append_log("[SETTINGS] ROS DOMAIN 적용을 위해 서비스를 다시 시작합니다...")
+        self._show_ros_domain_change_panel(value)
+
+        def _after_restart(exit_code: int, *_):
+            if exit_code != 0:
+                self.append_log(f"[SETTINGS][WARN] ROS DOMAIN 적용 실패 (code={exit_code}).")
+                self._hide_ros_domain_change_panel()
+                return
+            self.append_log("[SETTINGS] ROS DOMAIN 적용 중... 서비스 준비를 기다립니다.")
+            self._wait_for_ros_domain_ready(value)
+
+        self.run_compose(["up", "-d", "--force-recreate", "--no-deps", "service"], on_finish=_after_restart)
 
     def _setup_settings_status_mode(self):
         stack = getattr(self, "pad_stack_settings", None)
@@ -1724,7 +1878,9 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             mode2_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         mode2_layout.setContentsMargins(5, 5, 5, 5)
         mode2_layout.setSpacing(5)
+        mode2_layout.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         container = QWidget(mode2_page)
+        container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         vlayout = QVBoxLayout(container)
         vlayout.setContentsMargins(0, 0, 0, 0)
         vlayout.setSpacing(5)
@@ -1751,10 +1907,112 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         vlayout.addWidget(row_back, 1)
         mode2_layout.addWidget(container, 1)
 
+        right_container = QWidget(mode2_page)
+        right_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        right_layout = QVBoxLayout(right_container)
+        right_layout.setContentsMargins(0, 2, 0, 2)
+        right_layout.setSpacing(4)
+        right_layout.setAlignment(Qt.AlignTop)
+        top_row = QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
+        top_row.setSpacing(6)
+        ros_label = QLabel("ROS DOMAIN", right_container)
+        ros_label.setStyleSheet("color: #cfd8dc; font-size: 10px; font-weight: 700;")
+        ros_input = QLineEdit(right_container)
+        ros_input.setFixedWidth(32)
+        ros_input.setMaxLength(3)
+        ros_input.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        ros_input.setStyleSheet(
+            "background-color: rgb(30,30,30); color: #e0e0e0; border: 1px solid #3a3a3a; "
+            "border-radius: 6px; padding: 1px 4px; font-weight: 700; font-size: 11px;"
+        )
+        ros_input.setText(str(self._ros_domain_saved_value))
+        top_row.addWidget(ros_label, 0, Qt.AlignLeft | Qt.AlignVCenter)
+        top_row.addStretch(1)
+        top_row.addWidget(ros_input, 0, Qt.AlignRight | Qt.AlignVCenter)
+        right_layout.addLayout(top_row)
+        right_layout.addStretch(1)
+        ros_apply = QLabel("적용 및 저장", right_container)
+        ros_apply.setFixedHeight(14)
+        ros_apply.setAlignment(Qt.AlignCenter)
+        ros_apply.setStyleSheet(
+            "background-color: rgb(30,30,30); color: #e0e0e0; border: none; border-radius: 6px; "
+            "font-weight: 700; font-size: 11px; padding: 1px 6px; border-radius: 4px;"
+        )
+        try:
+            ros_apply.setCursor(Qt.PointingHandCursor)
+        except Exception:
+            pass
+        apply_placeholder = QWidget(right_container)
+        apply_placeholder.setFixedHeight(14)
+        apply_stack_wrap = QWidget(right_container)
+        apply_stack = QStackedLayout(apply_stack_wrap)
+        apply_stack.setContentsMargins(0, 0, 0, 0)
+        apply_stack.addWidget(apply_placeholder)
+        apply_stack.addWidget(ros_apply)
+        apply_stack.setCurrentWidget(apply_placeholder)
+        right_layout.addWidget(apply_stack_wrap, 0, Qt.AlignLeft | Qt.AlignBottom)
+        mode2_layout.addWidget(right_container, 0)
+
+        def _parse_ros_domain(text: str) -> int | None:
+            text = str(text).strip()
+            if not text or not text.isdigit():
+                return None
+            try:
+                value = int(text)
+            except Exception:
+                return None
+            if value < 0 or value > 232:
+                return None
+            return value
+
+        def _refresh_ros_domain_button():
+            value = _parse_ros_domain(ros_input.text())
+            dirty = value is not None and value != self._ros_domain_saved_value
+            try:
+                apply_stack.setCurrentWidget(ros_apply if dirty else apply_placeholder)
+            except Exception:
+                pass
+
+        def _apply_ros_domain():
+            value = _parse_ros_domain(ros_input.text())
+            if value is None:
+                QMessageBox.warning(self, "입력 오류", "ROS DOMAIN 값은 0~232 사이 숫자여야 합니다.")
+                return
+            if value == self._ros_domain_saved_value:
+                ros_apply.setVisible(False)
+                return
+            self._apply_ros_domain_value(value)
+            try:
+                ros_input.blockSignals(True)
+                ros_input.setText(str(value))
+                ros_input.blockSignals(False)
+            except Exception:
+                pass
+            _refresh_ros_domain_button()
+
+        def _on_apply_mouse(event):
+            try:
+                if event is not None and event.button() != Qt.LeftButton:
+                    return
+            except Exception:
+                pass
+            _apply_ros_domain()
+            try:
+                event.accept()
+            except Exception:
+                pass
+
+        ros_input.textChanged.connect(lambda *_: _refresh_ros_domain_button())
+        ros_apply.mousePressEvent = _on_apply_mouse
+        _refresh_ros_domain_button()
+
         self._pad_status_front_label = front_label
         self._pad_status_back_label = back_label
         self._pad_status_front_dot = front_dot
         self._pad_status_back_dot = back_dot
+        self._ros_domain_input = ros_input
+        self._ros_domain_apply_btn = ros_apply
 
     def _ensure_choice_indicator(self, btn: QPushButton):
         indicator = getattr(btn, "_choice_indicator", None)
@@ -2179,6 +2437,29 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             except Exception:
                 pass
 
+    def _set_update_status_row_visible(self, visible: bool):
+        row = getattr(self, "_pad_update_status_row", None)
+        if row is None:
+            return
+        try:
+            row.setVisible(visible)
+        except Exception:
+            pass
+
+    def _set_update_status_row(self, frontend_ok: bool, backend_ok: bool):
+        front = getattr(self, "_pad_update_front_label", None)
+        back = getattr(self, "_pad_update_back_label", None)
+        if front is not None:
+            state = "준비완료" if frontend_ok else "대기중"
+            color = "#2ecc71" if frontend_ok else "#e74c3c"
+            front.setText(f"프론트엔드: {state}")
+            front.setStyleSheet(f"color: {color}; font-size: 11px; font-weight: 700;")
+        if back is not None:
+            state = "준비완료" if backend_ok else "대기중"
+            color = "#2ecc71" if backend_ok else "#e74c3c"
+            back.setText(f"백엔드: {state}")
+            back.setStyleSheet(f"color: {color}; font-size: 11px; font-weight: 700;")
+
     def _set_update_panel_visible(self, visible: bool):
         if visible == getattr(self, "_update_panel_visible", False):
             return
@@ -2254,6 +2535,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                 version_row.setVisible(True)
             else:
                 version_row.setVisible(False)
+        self._set_update_status_row_visible(False)
         self._update_update_header_row_visibility()
         self._set_update_panel_buttons_enabled(True)
 
@@ -2422,6 +2704,69 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self._set_update_log_visible(False)
         self._set_update_eta(None)
         self._set_update_panel_visible(False)
+
+    def _show_ros_domain_change_panel(self, value: int):
+        self._ros_domain_change_active = True
+        self._update_panel_actions.clear()
+        self._set_update_eta(None)
+        detail = f"ROS DOMAIN ID를 {value}로 적용하는 중입니다."
+        self._configure_update_panel("ROS DOMAIN 변경 중...", detail, True)
+        self._set_update_log_visible(False)
+        self._set_update_progress(None, None)
+        self._set_update_status_row_visible(True)
+        self._set_update_status_row(False, False)
+        self._set_update_panel_button("primary", None, False)
+        self._set_update_panel_button("secondary", None, False)
+        self._set_update_panel_button("tertiary", None, False)
+        self._set_update_panel_visible(True)
+        self._set_pill_buttons_enabled(False)
+        for btn in (getattr(self, "btn_open_browser", None), getattr(self, "btn_exit", None)):
+            if btn is None:
+                continue
+            try:
+                btn.setEnabled(True)
+            except Exception:
+                pass
+
+    def _stop_ros_domain_wait_timer(self):
+        timer = getattr(self, "_ros_domain_wait_timer", None)
+        if timer is None:
+            return
+        try:
+            timer.stop()
+        except Exception:
+            pass
+        self._ros_domain_wait_timer = None
+
+    def _wait_for_ros_domain_ready(self, value: int):
+        self._stop_ros_domain_wait_timer()
+
+        def _poll():
+            try:
+                frontend_ok = self._is_frontend_ready(timeout=0.8)
+            except Exception:
+                frontend_ok = False
+            try:
+                backend_ok = self._check_backend_ready(timeout=0.8)
+            except Exception:
+                backend_ok = False
+            self._set_update_status_row(frontend_ok, backend_ok)
+            if frontend_ok and backend_ok:
+                self._stop_ros_domain_wait_timer()
+                self._hide_ros_domain_change_panel()
+
+        timer = QTimer(self)
+        timer.setInterval(1000)
+        timer.timeout.connect(_poll)
+        self._ros_domain_wait_timer = timer
+        _poll()
+        timer.start()
+
+    def _hide_ros_domain_change_panel(self):
+        self._ros_domain_change_active = False
+        self._stop_ros_domain_wait_timer()
+        self._set_update_status_row_visible(False)
+        self.hide_update_panel()
 
     def start_upgrade_flow(self, version: str | None = None):
         if getattr(self, "_upgrade_in_progress", False):
@@ -2633,7 +2978,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                 if self._cursor_over_pill(strict=True):
                     self._animate_pill(True)
             else:
-                if not self._cursor_over_pill(strict=True):
+                if not self._cursor_over_pill(strict=True) and not self._is_ros_domain_editing():
                     self._animate_pill(False)
         if self._is_drag_target(obj):
             if etype == QEvent.MouseButtonPress:
@@ -2673,7 +3018,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                     self._collapse_timer.stop()
                 except Exception:
                     pass
-                if not self._cursor_over_pill(strict=True):
+                if not self._cursor_over_pill(strict=True) and not self._is_ros_domain_editing():
                     self._animate_pill(False)
         return super().eventFilter(obj, event)
 
