@@ -12,17 +12,27 @@ from PIL import Image
 
 config = {}
 
-def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=False):
+def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=False, sensors=None, agents=None, task=None):
     global config
     config = {}
     if move_robot:
         from ...env.env import Env
-        env = Env(node, task_control['robots'], task_control['sensors'])
+        env = Env(node, agents, sensors)
 
     while True:
         image_data = {}
         qpos_data = {}
         qaction_data = {}
+        if move_robot:
+            home_pose = task.get('home_pose', None)
+
+            if home_pose is not None:
+                for agent in agents:
+                    if str(agent.id) in home_pose:
+                        agent.move_to(home_pose[str(agent.id)], duration=5.0)
+
+            time.sleep(5)
+
         with h5py.File(hdf5_path, 'r') as f:
             rect_params = []
             transform_matrix = None
@@ -102,12 +112,13 @@ def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=
                         'qpos': qpos_array.tolist(),
                         'qaction': qaction_array.tolist(),
                     }
+                    if move_robot:
+                        for agent in agents:
+                            if str(agent.id) == robot_name.replace("robot_", ""):
+                                agent.move_joint_step(qaction_array)
 
-                if move_robot:
-                    for agent in env.agents:
-                        agent.move_to(qpos_data[f'robot_{agent.id}'][0])  
 
-                time.sleep(0.1)
+                time.sleep(0.2)
                 socketio_instance.emit('show_episode_step', {
                     'hdf5_path': hdf5_path,
                     'images': encoded_images,

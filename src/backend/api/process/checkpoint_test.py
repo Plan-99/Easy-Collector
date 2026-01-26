@@ -218,7 +218,7 @@ def checkpoint_test(
                 agent.move_joint_step(target_qpos)
                 start_action_id += agent.joint_len
             
-            time.sleep(0.1)
+            time.sleep(0.2)
             ts_next = env.record_step()
 
             # === d. OTI-RL 학습 ===

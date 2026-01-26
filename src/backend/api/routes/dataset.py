@@ -120,6 +120,39 @@ def stop_read_hdf5(id, file_name):
     ),
     return {'status': 'success', 'message': 'HDF5 reading process stopped'}, 200
 
+@dataset_bp.route('/dataset/<id>/<file_name>/:start_replay_episode', methods=['POST'])
+def start_replay_episode(id, file_name):
+    data = request.json
+    hdf5_path = os.path.join(DATASET_DIR, id, file_name)
+    if not os.path.exists(hdf5_path) or not os.path.isfile(hdf5_path):
+        return {'status': 'error', 'message': 'HDF5 file not found'}, 404
+    
+    agents = [current_app.agents[agent_id] for agent_id in data.get('robot_ids', [])]
+
+    current_app.pm.stop_function(
+        name=f"read_hdf5_{id}_{file_name}",
+    )
+
+    current_app.pm.start_function(
+        func=read_hdf5,
+        node=current_app.node,
+        name=f"replay_episode",
+        hdf5_path=hdf5_path,
+        socketio_instance=current_app.pm.socketio,
+        agents=agents,
+        task=data.get('task', {}),
+        sensors=data.get('sensors', []),
+        move_robot=True,
+        sid=request.json.get('sid', None),  # Optional socket ID for real-time updates
+    )
+    return {'status': 'success', 'message': 'HDF5 replay process started'}, 200
+
+@dataset_bp.route('/dataset/<id>/<file_name>/:stop_replay_episode', methods=['POST'])
+def stop_replay_episode(id, file_name):
+    current_app.pm.stop_function(
+        name=f"replay_episode",
+    )
+    return {'status': 'success', 'message': 'HDF5 replay process stopped'}, 200
 
 @dataset_bp.route('/dataset/<id>/<file_name>/:read_hdf5_add_config', methods=['POST'])
 def read_hdf5_add_config(id, file_name):

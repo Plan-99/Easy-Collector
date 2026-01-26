@@ -416,7 +416,6 @@
                 </div>
             </div>
             <monitoring-window
-                v-if="!selectedEpisode.name"
                 class="col"
                 :workspace="selectedWorkspace"
                 :robots="robots"
@@ -424,42 +423,12 @@
                 v-model:selected-dataset-id="selectedDatasetId"
                 v-model:selected-checkpoint-id="selectedCheckpointId"
                 v-model:focused="focused"
+                v-model:selected-episode="selectedEpisode"
                 :datasets="datasets"
                 :checkpoints="checkpoints"
                 :status="status"
                 :class="isFailureDetected ? 'border-red' : 'border-white'"
             />
-            <div v-else-if="selectedEpisode.name && selectedDatasetId" class="relative-position col bg-secondary border-rounded border-white q-px-sm">
-                <q-btn
-                    icon="close"
-                    round
-                    flat
-                    class="absolute-top-right q-mt-sm q-mr-sm"
-                    color="white"
-                    style="background-color: #00000099;"
-                    @click="deselectEpisode"
-                ></q-btn>
-                <hdf5-viewer
-                    :path="`${selectedDatasetId}/${selectedEpisode.name}`"
-                    @update:robot-states="selectedEpisode.robotStates = $event"
-                ></hdf5-viewer>
-                <div class="col-5 row q-gutter-x-sm" v-if="selectedEpisode.robotStates">
-                    <div v-for="(val, robotId) in selectedEpisode.robotStates" :key="robotId" class="col column q-pa-md relative-position border-rounded border-white text-white cursor-pointer">
-                        <div v-for="(j, i) in val.qpos.length" :key="i" class="col flex flex-center q-gutter-x-md">
-                            <div class="border-rounded border-white q-px-md q-py-xs text-center">[{{ j }}] {{ val.qpos[i]?.toFixed(4) }}</div>
-                            <q-icon name="arrow_forward"></q-icon>
-                            <div class="border-rounded border-primary q-px-md q-py-xs text-center text-primary">[{{ j }}] {{ val.qaction[i]?.toFixed(4) }}</div>
-                        </div>
-                    </div>
-                </div>
-                <div
-                    class="col q-pa-sm bg-dark border-rounded text-white row"
-                >
-                    <div>
-                        <div class="text-h6">{{ selectedDataset?.name }} / {{ selectedEpisode.name }} </div>
-                    </div>
-                </div>
-            </div>
         </div>
         <form-dialog
             v-model="showWorkspaceForm"
@@ -532,7 +501,6 @@ import { api } from 'src/boot/axios';
 import FormDialog from 'src/components/v2/FormDialog.vue';
 import { useSensor } from '../../composables/useSensor';
 import { useRobot } from 'src/composables/useRobot';
-import Hdf5Viewer from 'src/components/v2/Hdf5Viewer.vue';
 import { Notify } from 'quasar';
 import { useI18n } from 'vue-i18n';
 import DataAugmentationDialog from 'src/components/v2/DataAugmentationDialog.vue';
@@ -899,6 +867,8 @@ const status = computed(() => {
         return 'testing';
     } else if (processStore.isRunning('record_episode')) {
         return 'inferencing';
+    } else if (processStore.isRunning('replay_episode')) {
+        return 'replaying';
     } else {
         return 'pending';
     }

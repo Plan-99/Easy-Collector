@@ -57,108 +57,149 @@
         <div class="flex flex-center col" v-if="!isRobotSensorAllOn">
             <div class="text-yellow">Start all sensors and robots to view live data streams.</div>
         </div>
-        <div class="col q-py-sm" v-else-if="!checkpoint">
-            <div class="text-grey bg-dark border-rounded row full-height flex flex-center" v-if="status === 'pending'">
-                <q-select
-                    v-model="selectedDatasetId"
-                    dense
-                    outlined
-                    dark
-                    bg-color="dark"
-                    label="Select Dataset for Data Collection"
-                    style="width: 200px"
-                    :options="datasets"
-                    option-label="name"
-                    option-value="id"
-                    map-options
-                    emit-value
-                ></q-select>
-                <q-space></q-space>
-                <div class="q-mr-md">Teleoparation Type: </div>
-                <div class="q-gutter-sm q-mr-xl">
-                    <q-radio dark v-model="teleType" val="leader" :label="$t('leaderTele')" />
-                    <q-radio dark v-model="teleType" val="keyboard" :label="$t('keyboardTele')" />
-                    <q-radio dark v-model="teleType" val="externel" :label="$t('externalTele')" />
-                </div>
-                <q-btn
-                    color="red"
-                    icon="fiber_manual_record"
-                    text-color="white"
-                    label="REC"
-                    @click="startDataCollection"
-                >
-                    <q-badge 
-                        @click.stop="moveHomposeInDataCollection = !moveHomposeInDataCollection" 
-                        :color="moveHomposeInDataCollection ? 'blue' : 'grey-5'"
-                        floating>
-                        <q-icon name="home" size="xs" class="cursor-pointer" />
-                    </q-badge>
-                </q-btn>
-            </div>
-            <div class="row flex flex-center full-height" v-else>
-                <div class="col q-pr-md">
-                    <q-linear-progress
-                        :value="collectingProgress"
-                        color="primary"
-                        track-color="black"
-                        size="30px"
-                        instant-feedback
+        <div class="col q-py-sm" v-else>
+            <div v-if="selectedEpisode.name && selectedDatasetId">
+                <div class="row q-mb-sm">
+                    <div
+                        class="col bg-dark border-rounded text-white row"
                     >
-                        <div class="absolute-full flex flex-center">
-                            <q-badge color="white" text-color="dark" :label="`${Number(collectingProgress * 100).toFixed(0)}%`" />
+                        <div>
+                            <div class="text-h6">{{ selectedEpisode?.name }}</div>
                         </div>
-                    </q-linear-progress>
+                        <div>
+                            <q-btn
+                                icon="close"
+                                round
+                                flat
+                                @click="selectedEpisode = {}"
+                                v-if="status === 'pending'"
+                            ></q-btn>
+                        </div>
+                        <q-space class="col"></q-space>
+                        <div>
+                            <q-btn
+                                color="red"
+                                text-color="white"
+                                label="Play"
+                                icon="play_arrow"
+                                @click="startReplay"
+                                v-if="status === 'pending'"
+                            ></q-btn>
+                            <q-btn
+                                color="white"
+                                text-color="red"
+                                label="Stop"
+                                icon="stop"
+                                @click="stopReplay"
+                                v-else
+                            ></q-btn>
+                        </div>
+                    </div>
                 </div>
-
-                <q-btn
-                    color="white"
-                    text-color="red"
-                    label="STOP"
-                    icon="stop"
-                    @click="stopDataCollection"
-                ></q-btn>
             </div>
-        </div>
-        <div v-else class="col">
-            <div
-                class="col q-pa-sm bg-dark border-rounded text-white row flex flex-center"
-                v-if="status === 'pending'"
-            >
-                <div>
-                    <div class="text-h6">{{ checkpoint?.name }}</div>
+            <div v-else-if="checkpoint" class="row q-mb-sm">
+                <div
+                    class="col bg-dark border-rounded text-white row flex flex-center"
+                    v-if="status === 'pending'"
+                >
+                    <div>
+                        <div class="text-h6">{{ checkpoint?.name }}</div>
+                    </div>
+                    <div>
+                        <q-btn
+                            icon="close"
+                            round
+                            flat
+                            @click="selectedCheckpointId = null"
+                        ></q-btn>
+                    </div>
+                    <q-space class="col"></q-space>
+                    <div>
+                        <q-btn
+                            color="red"
+                            text-color="white"
+                            label="Start Inference"
+                            icon="play_arrow"
+                            @click="startInference"
+                            v-if="status === 'pending'"
+                        ></q-btn>
+                    </div>
                 </div>
-                <div>
+                <div
+                    class="col q-pa-sm bg-dark border-rounded text-white row flex flex-center"
+                    v-else
+                >
+                    <q-space></q-space>
                     <q-btn
-                        icon="close"
-                        round
-                        flat
-                        @click="selectedCheckpointId = null"
+                        color="white"
+                        text-color="red"
+                        label="Stop Inference"
+                        icon="stop"
+                        @click="stopInference"
                     ></q-btn>
                 </div>
-                <q-space class="col"></q-space>
-                <div>
+            </div>
+            <div v-else>
+                <div class="text-grey bg-dark border-rounded row full-height flex flex-center" v-if="status === 'pending'">
+                    <q-select
+                        v-model="selectedDatasetId"
+                        dense
+                        outlined
+                        dark
+                        bg-color="dark"
+                        label="Select Dataset for Data Collection"
+                        style="width: 200px"
+                        :options="datasets"
+                        option-label="name"
+                        option-value="id"
+                        map-options
+                        emit-value
+                    ></q-select>
+                    <q-space></q-space>
+                    <div class="q-mr-md">Teleoparation Type: </div>
+                    <div class="q-gutter-sm q-mr-xl">
+                        <q-radio dark v-model="teleType" val="leader" :label="$t('leaderTele')" />
+                        <q-radio dark v-model="teleType" val="keyboard" :label="$t('keyboardTele')" />
+                        <q-radio dark v-model="teleType" val="externel" :label="$t('externalTele')" />
+                    </div>
                     <q-btn
                         color="red"
+                        icon="fiber_manual_record"
                         text-color="white"
-                        label="Start Inference"
-                        icon="play_arrow"
-                        @click="startInference"
-                        v-if="status === 'pending'"
+                        label="REC"
+                        @click="startDataCollection"
+                    >
+                        <q-badge 
+                            @click.stop="moveHomposeInDataCollection = !moveHomposeInDataCollection" 
+                            :color="moveHomposeInDataCollection ? 'blue' : 'grey-5'"
+                            floating>
+                            <q-icon name="home" size="xs" class="cursor-pointer" />
+                        </q-badge>
+                    </q-btn>
+                </div>
+                <div class="row flex flex-center full-height" v-else>
+                    <div class="col q-pr-md">
+                        <q-linear-progress
+                            :value="collectingProgress"
+                            color="primary"
+                            track-color="black"
+                            size="30px"
+                            instant-feedback
+                        >
+                            <div class="absolute-full flex flex-center">
+                                <q-badge color="white" text-color="dark" :label="`${Number(collectingProgress * 100).toFixed(0)}%`" />
+                            </div>
+                        </q-linear-progress>
+                    </div>
+
+                    <q-btn
+                        color="white"
+                        text-color="red"
+                        label="STOP"
+                        icon="stop"
+                        @click="stopDataCollection"
                     ></q-btn>
                 </div>
-            </div>
-            <div
-                class="col q-pa-sm bg-dark border-rounded text-white row flex flex-center"
-                v-else
-            >
-                <q-space></q-space>
-                <q-btn
-                    color="white"
-                    text-color="red"
-                    label="Stop Inference"
-                    icon="stop"
-                    @click="stopInference"
-                ></q-btn>
             </div>
         </div>
         <div style="position: fixed; bottom: 20px; left: 20px; z-index: 1000;">
@@ -178,6 +219,23 @@
             >
             </process-console> 
         </div>
+        <div style="position: fixed; top: 10px; right: 20px; z-index: 10000; width: 600px" 
+                v-if="selectedEpisode.name && selectedDatasetId"
+                class="border-white border-rounded bg-dark p-md relative-position"
+        >
+            <q-btn
+                class="absolute-top-right"
+                icon="close"
+                round
+                flat
+                @click="selectedEpisode = {}"
+                color="white"
+                v-if="status === 'pending'"
+            ></q-btn>
+            <hdf5-viewer
+                :path="`${selectedDatasetId}/${selectedEpisode.name}`"
+            ></hdf5-viewer>
+        </div>
     </div>
 </template>
 
@@ -188,6 +246,8 @@ import { api } from 'src/boot/axios';
 import ProcessConsole from './ProcessConsole.vue';
 import { useSocket } from 'src/composables/useSocket.js';
 import WebRtcVideo from './WebRtcVideo.vue';
+import Hdf5Viewer from 'src/components/v2/Hdf5Viewer.vue';
+
 
 const { socket } = useSocket();
 
@@ -229,6 +289,10 @@ const selectedDatasetId = defineModel('selectedDatasetId', {
 const selectedCheckpointId = defineModel('selectedCheckpointId', {
     type: [String, Number],
     default: null
+});
+const selectedEpisode = defineModel('selectedEpisode', {
+    type: Object,
+    default: {}
 });
 const checkpoint = computed(() => {
     return props.checkpoints?.find(c => c.id === selectedCheckpointId.value);
@@ -379,6 +443,31 @@ function stopInference() {
         Notify.create({
             color: 'negative',
             message: 'Error stopping test'
+        });
+    });
+}
+
+function startReplay() {
+    api.post(`/dataset/${selectedDatasetId.value}/${selectedEpisode.value.name}/:start_replay_episode`, {
+        episode: selectedEpisode.value,
+        robot_ids: props.robots.map(r => r.id),
+        sensors: props.sensors,
+        task: props.workspace,
+    }).catch((error) => {
+        console.error('Error starting replay:', error);
+        Notify.create({
+            color: 'negative',
+            message: 'Error starting replay'
+        });
+    });
+}
+
+function stopReplay() {
+    api.post(`/dataset/${selectedDatasetId.value}/${selectedEpisode.value.name}/:stop_replay_episode`).catch((error) => {
+        console.error('Error stopping replay:', error);
+        Notify.create({
+            color: 'negative',
+            message: 'Error stopping replay'
         });
     });
 }
