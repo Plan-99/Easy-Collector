@@ -864,9 +864,12 @@ function deleteWorkspace(workspace) {
 
 const status = computed(() => {
     if (processStore.isRunning('checkpoint_test')) {
-        return 'testing';
-    } else if (processStore.isRunning('record_episode')) {
+        if (processStore.isRunning('record_episode')) {
+            return 'recording_inference';
+        }
         return 'inferencing';
+    } else if (processStore.isRunning('record_episode')) {
+        return 'recording';
     } else if (processStore.isRunning('replay_episode')) {
         return 'replaying';
     } else {
@@ -945,7 +948,6 @@ function saveCheckpoint(form) {
     return api.put(`/checkpoint/${form.id}`, form).then(() => {
         checkpointForm.value.forEach(field => field.value = field.default); // Reset form fields
         listCheckpoints()
-        
     })
 }
 

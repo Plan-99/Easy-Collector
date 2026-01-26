@@ -19,7 +19,9 @@ def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
             return i
     raise Exception(f"Error getting auto index, or more than {max_idx} episodes")
 
-def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors, task, language_instruction, socketio_instance, task_control, tele_type='leader', iter=100000):
+def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors, task, 
+                   language_instruction, socketio_instance, task_control, tele_type='leader', 
+                   iter=100000, freq=10):
     env = Env(node, agents=agents, sensors=sensors)
     dataset_dir = f"{DATASET_DIR}/{dataset_id}"
 
@@ -47,7 +49,7 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
             'type': 'stdout '
         })
 
-        if move_homepose and tele_type != 'externel':
+        if move_homepose and tele_type != 'external':
             for agent in agents:
                 agent.move_lock = True
                 agent.move_to(home_pose[str(agent.id)])
@@ -123,7 +125,7 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
 
             ts = env.record_step()
             timesteps.append(ts)
-            time.sleep(0.1)
+            time.sleep(1 / freq)
             
             if tele_type == 'keyboard':
                 for agent in agents:
@@ -193,73 +195,6 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                                 dtype=h5py.string_dtype(encoding='utf-8'))
                 
                 time.sleep(1)  # Ensure all data is written before emitting event
-
-            # data_dict = {}
-            # for agent in agents:
-            #     data_dict[f'/observations/qpos/robot_{agent.id}'] = []
-            #     data_dict[f'/qaction/robot_{agent.id}'] = []
-            # for sensor in sensors:
-            #     data_dict[f'/observations/images/sensor_{sensor["id"]}'] = []
-
-            # data_dict[f'/language_instruction'] = language_instruction if language_instruction is not None else ''
-
-            # timesteps.pop(len(timesteps) - 1)
-
-            # step = 0
-            # while timesteps:
-            #     ts = timesteps.pop(0)
-
-            #     for agent in agents:
-            #         data_dict[f'/observations/qpos/robot_{agent.id}'].append(ts.observation['robot_states'][agent.id]['qpos'])
-            #         data_dict[f'/qaction/robot_{agent.id}'].append(ts.observation['robot_states'][agent.id]['qaction'])
-            #         # print(np.array(ts.observation['robot_states'][agent.id]['qaction']).shape, np.array(ts.observation['robot_states'][agent.id]['qpos']).shape, agent.id)
-                
-            #     for sensor in sensors:
-            #         image = ts.observation['images']['sensor_' + str(sensor['id'])]
-
-            #         if image is not None:
-            #             image = fetch_image_with_config(image, {
-            #                 'resize': task['sensor_img_size'],
-            #             })
-            #             data_dict[f'/observations/images/sensor_{sensor["id"]}'].append(image)
-            #         else:
-            #             print("error")
-                        
-            #     step += 1
-
-            
-            # # HDF5
-            # t0 = time.time()
-            # image_size = (task['sensor_img_size'][1], task['sensor_img_size'][0])
-            # print("image size", image_size)
-            # with h5py.File(dataset_path, 'w', rdcc_nbytes=1024**2*2) as root:
-            #     root.attrs['sim'] = False
-            #     obs = root.create_group('observations')
-            #     image = obs.create_group('images')
-            #     qpos = obs.create_group('qpos')
-            #     qaction = root.create_group('qaction')
-            #     root.create_dataset('/language_instruction', shape=(), dtype=h5py.string_dtype(encoding='utf-8'))
-
-            #     for sensor in sensors:
-            #         _ = image.create_dataset(f"sensor_{sensor['id']}", (max_timesteps, image_size[0], image_size[1], 3), dtype='uint8',
-            #                                 chunks=(1, image_size[0], image_size[1], 3), )
-
-            #     for agent in agents:
-            #         _ = qpos.create_dataset(f'robot_{agent.id}', (max_timesteps, agent.joint_len))
-            #         _ = qaction.create_dataset(f'robot_{agent.id}', (max_timesteps, agent.joint_len))
-
-            #     for name, array in data_dict.items():
-            #         root[name][...] = array
-
-            # socketio_instance.emit('episode_added', {
-            #     'name': dataset_name,
-            # })
-                
-            # print(f"Data saved at {dataset_path}, time taken: {time.time() - t0:.4f} sec")
-
-            # tele_control['stop'] = True
-
-            # time.sleep(5)
 
             print("Episode recording process ended.")
         

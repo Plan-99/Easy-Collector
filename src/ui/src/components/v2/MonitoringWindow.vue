@@ -97,9 +97,9 @@
                     </div>
                 </div>
             </div>
-            <div v-else-if="checkpoint" class="row q-mb-sm">
+            <div v-else-if="checkpoint">
                 <div
-                    class="col bg-dark border-rounded text-white row flex flex-center"
+                    class="text-grey bg-dark border-rounded row full-height flex flex-center"
                     v-if="status === 'pending'"
                 >
                     <div>
@@ -126,21 +126,68 @@
                     </div>
                 </div>
                 <div
-                    class="col q-pa-sm bg-dark border-rounded text-white row flex flex-center"
-                    v-else
+                    class="bg-dark border-rounded row full-height flex flex-center"
+                    v-else-if="status === 'inferencing'"
                 >
+                    <div>
+                        <div class="text-h6">{{ checkpoint?.name }}</div>
+                    </div>
                     <q-space></q-space>
+                    <div class="row flex flex-center full-height">
+                        <q-btn
+                            color="red"
+                            text-color="white"
+                            label="Record"
+                            icon="play_arrow"
+                            @click="showRecordDatasetFromInferDialog = true"
+                            class="q-mr-md"
+                        ></q-btn>
+                        <q-btn
+                            color="white"
+                            text-color="red"
+                            label="Stop Inference"
+                            icon="stop"
+                            @click="stopInference"
+                        ></q-btn>
+                    </div>
+                </div>
+                <div v-else-if="status === 'recording_inference'"
+                    class="bg-dark border-rounded row full-height flex flex-center"
+                >
+                    <div class="col q-pr-md">
+                        <q-linear-progress
+                            :value="collectingProgress"
+                            color="primary"
+                            track-color="black"
+                            size="30px"
+                            instant-feedback
+                        >
+                            <div class="absolute-full flex flex-center">
+                                <q-badge color="white" text-color="dark" :label="`${Number(collectingProgress * 100).toFixed(0)}%`" />
+                            </div>
+                        </q-linear-progress>
+                    </div>
+
                     <q-btn
                         color="white"
                         text-color="red"
                         label="Stop Inference"
                         icon="stop"
+                        class="q-mr-md"
                         @click="stopInference"
+                    ></q-btn>
+
+                    <q-btn
+                        color="white"
+                        text-color="red"
+                        label="STOP"
+                        icon="stop"
+                        @click="stopDataCollection"
                     ></q-btn>
                 </div>
             </div>
             <div v-else>
-                <div class="text-grey bg-dark border-rounded row full-height flex flex-center" v-if="status === 'pending'">
+                <div class="bg-dark border-rounded row full-height flex flex-center" v-if="status === 'pending'">
                     <q-select
                         v-model="selectedDatasetId"
                         dense
@@ -160,14 +207,14 @@
                     <div class="q-gutter-sm q-mr-xl">
                         <q-radio dark v-model="teleType" val="leader" :label="$t('leaderTele')" />
                         <q-radio dark v-model="teleType" val="keyboard" :label="$t('keyboardTele')" />
-                        <q-radio dark v-model="teleType" val="externel" :label="$t('externalTele')" />
+                        <q-radio dark v-model="teleType" val="external" :label="$t('externalTele')" />
                     </div>
                     <q-btn
                         color="red"
                         icon="fiber_manual_record"
                         text-color="white"
                         label="REC"
-                        @click="startDataCollection"
+                        @click="() => startDataCollection(selectedDatasetId, teleType)"
                     >
                         <q-badge 
                             @click.stop="moveHomposeInDataCollection = !moveHomposeInDataCollection" 
@@ -236,6 +283,13 @@
                 :path="`${selectedDatasetId}/${selectedEpisode.name}`"
             ></hdf5-viewer>
         </div>
+        <form-dialog
+            v-model="showRecordDatasetFromInferDialog"
+            title="Select Dataset to Record"
+            :form="recordDatasetFromInferForm"
+            @submit="(form) => startDataCollection(form.dataset_id, 'external')"
+            ok-button-label="Start Recording"
+        ></form-dialog>
     </div>
 </template>
 
@@ -247,6 +301,7 @@ import ProcessConsole from './ProcessConsole.vue';
 import { useSocket } from 'src/composables/useSocket.js';
 import WebRtcVideo from './WebRtcVideo.vue';
 import Hdf5Viewer from 'src/components/v2/Hdf5Viewer.vue';
+import FormDialog from 'src/components/v2/FormDialog.vue';
 
 
 const { socket } = useSocket();
@@ -326,15 +381,15 @@ const showProcessConsole = ref(false);
 
 const moveHomposeInDataCollection = ref(false);
 
-function startDataCollection() {
-    if (!selectedDatasetId.value) {
+function startDataCollection(datasetId, teleType) {
+    if (!datasetId) {
         Notify.create({
             color: 'negative',
             message: 'Please select a dataset for data collection'
         });
         return;
     }
-    if (teleType.value === 'keyboard') {
+    if (teleType === 'keyboard') {
         addKeyboardListener();
     }
     showProcessConsole.value = true;
@@ -438,6 +493,9 @@ function startInference() {
 }
 
 function stopInference() {
+    if (props.status === 'recording_inference') {
+        stopDataCollection();
+    }
     return api.post(`/checkpoint/${selectedCheckpointId.value}/:stop_test`).catch((error) => {
         console.error('Error stopping test:', error);
         Notify.create({
@@ -471,6 +529,18 @@ function stopReplay() {
         });
     });
 }
+
+const showRecordDatasetFromInferDialog = ref(false);
+const recordDatasetFromInferForm = ref([
+    {
+        key: 'dataset_id',
+        label: 'Dataset',
+        type: 'select',
+        options: props.datasets.map(d => ({ label: d.name, value: d.id })),
+        value: null,
+        required: true,
+    },
+]);
 
 onMounted(() => {
 
