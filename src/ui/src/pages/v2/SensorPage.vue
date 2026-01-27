@@ -78,12 +78,20 @@
             <template v-for="sensor in sensors.filter((e) => e.status !== 'off')" :key="sensor.id" v-slot:[sensor.id]>
                 <div class="row q-gutter-x-md">
                     <web-rtc-video
+                        v-if="isImageType(sensor.read_topic_msg)"
                         :process-id="`sensor_${sensor.id}`"
                         :topic="sensor.read_topic"
                         ref="sensorVideo"
                         :loading="sensor.status !== 'on'"
                         style="height: 300px"
                     ></web-rtc-video>
+                    <topic-data-viewer
+                        v-else
+                        :topic="sensor.read_topic"
+                        :type="sensor.read_topic_msg"
+                        style="height: 300px"
+                        class="bg-black text-green q-pa-sm border-rounded scroll"
+                    ></topic-data-viewer>
                     <div class="col">
                         <process-console 
                             :process="sensor.process_id" 
@@ -129,6 +137,8 @@ const sensorForm = ref([
     }))) },
     { key: 'serial_no', label: t('serialNUmber'), value: '', default: '', type: 'text', show: (form) => getFormSensorInfo(form) && getFormSensorInfo(form).custom_fields && getFormSensorInfo(form).custom_fields.includes('serial_no') },
     { key: 'ip_address', label: t('ipAddress'), value: '', default: '192.168.50.10', type: 'text', show: (form) => getFormSensorInfo(form) && getFormSensorInfo(form).custom_fields && getFormSensorInfo(form).custom_fields.includes('ip_address') },
+    { key: 'read_topic', label: t('Select Topic'), value: '', default: '', type: 'select', show: (form) => form.find(e => e.key === 'type').value === 'custom',},
+    { key: 'read_topic_msg', label: t('Message Type'), value: '', default: '', type: 'text', show: () => false, },
 ]);
 const showSensorForm = ref(false);
 const watchingSensor = ref(null);
@@ -138,6 +148,11 @@ const supportingSensors = ref([]);
 // const sensorTypeOptions = [
 //     { label: 'Realsense Camera', value: 'realsense_camera' }
 // };
+
+function isImageType(msgType) {
+    if (!msgType) return false;
+    return msgType.includes('Image') || msgType.includes('image'); 
+}
 
 function listSensors() {                                                                                                     
     return api.get('/sensors').then((response) => {
@@ -175,6 +190,9 @@ function openAddSensorForm() {
     sensorForm.value.forEach(field => {
         field.value = field.default;
     });
+
+    fetchRosTopics();
+
     showSensorForm.value = true;
 }
 
@@ -183,10 +201,25 @@ function openEditSensorForm(sensor) {
         field.value = sensor[field.key] || field.default;
     });
     sensorForm.value.find((e) => e.key === 'id').value = sensor.id; // Set ID for edit
+
+    fetchRosTopics();
+
     showSensorForm.value = true;
 }   
 
 function saveSensor(formData) {
+    if (formData.type === 'custom' && formData.read_topic) {
+        const topicField = sensorForm.value.find(f => f.key === 'read_topic');
+        
+        if (topicField && topicField.options) {
+            const selectedOption = topicField.options.find(opt => opt.value === formData.read_topic);
+
+            if (selectedOption) {
+                formData.read_topic_msg = selectedOption.description;
+            }
+        }
+    }
+
     if (sensorForm.value.find((e) => e.key === 'id').value) {
         return api.put(`/sensor/${formData.id}`, formData).then(() => {
             sensorForm.value.forEach(field => field.value = field.default); // Reset form fields
@@ -222,6 +255,25 @@ function toggleSensor(sensor) {
             watchSensor(sensor); // Start watching the sensor after it is started
         })
     }
+}
+
+function fetchRosTopics() {
+    api.get('/topics').then((response) => {
+        const topics = response.data.topics;
+        
+        const topicField = sensorForm.value.find(f => f.key === 'read_topic');
+        
+        if (topicField) {
+            topicField.options = topics.map(t => ({
+                label: t.name,
+                value: t.name,
+                description: t.type // 부가 정보로 메시지 타입 저장
+            }));
+        }
+    }).catch(err => {
+        console.error("Failed to fetch topics", err);
+        Notify.create({ type: 'negative', message: 'Failed to load ROS topics' });
+    });
 }
 
 

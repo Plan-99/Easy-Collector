@@ -109,14 +109,23 @@ def create_sensor():
     ip_address = request.json.get('ip_address')
     name = request.json.get('name')
     type = request.json.get('type')
+    
+    read_topic = request.json.get('read_topic')
+    read_topic_msg = request.json.get('read_topic_msg')
+
+    settings_dict = {
+        'serial_number': serial_no,
+        'ip_address': ip_address
+    }
+
+    if type == 'custom':
+        settings_dict['read_topic'] = read_topic
+        settings_dict['read_topic_msg'] = read_topic_msg
 
     SensorModel.create(
         name=name,
         type=type,
-        settings={
-            'serial_number': serial_no,
-            'ip_address': ip_address
-        }
+        settings=settings_dict
     )
     
     return {'status': 'success', 'message': 'Sensor Created'}, 200
@@ -136,6 +145,12 @@ def update_sensor(id):
     }
     sensor.name = name
     sensor.type = type
+
+    if type == 'custom':
+        sensor.settings = {
+            'read_topic': request.json.get('read_topic'),
+            'read_topic_msg': request.json.get('read_topic_msg')
+        }
 
     sensor.save()
     return {'status': 'success', 'message': 'Sensor Updated'}, 200
