@@ -70,7 +70,7 @@ app.register_blueprint(vla_bp, url_prefix='/api')
 app.register_blueprint(teleoperator_bp, url_prefix='/api')
 app.register_blueprint(assembly_bp, url_prefix='/api')
 
-socketio.on_namespace(SensorNamespace('/sensor', pm))
+socketio.on_namespace(SensorNamespace('/sensor', pm, node))
 socketio.on_namespace(RobotNamespace('/robot', pm))
 
 

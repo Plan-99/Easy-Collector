@@ -36,7 +36,7 @@
                         <div class="text-grey-6 text-caption" v-if="sensor.serial_no">Serial No. {{ sensor.serial_no }}</div>
                         <div class="text-grey-6 text-caption" v-if="sensor.ip_address">IP Address: {{ sensor.ip_address }}</div>
                     </q-card-section>
-                    <q-card-section class="q-pa-none q-mt-sm row">
+                    <q-card-section class="q-pa-none q-mt-sm row" v-if="sensor.type !== 'custom'">
                         <div class="text-primary text-caption" v-if="sensor.status === 'on'">ONLINE</div>
                         <div class="text-orange text-caption" v-if="sensor.status === 'loading'">LOADING</div>
                         <div class="text-grey-7 text-caption" v-if="sensor.status === 'off'">OFFLINE</div>
@@ -48,6 +48,14 @@
                             @click.stop="toggleSensor(sensor)"
                         />
                     </q-card-section>
+
+                    <q-card-section class="q-pa-none q-mt-sm row" v-else>
+                        <div class="text-primary text-caption" v-if="sensor.status === 'on'">TOPIC ON</div>
+                        <div class="text-negative text-caption" v-else-if="sensor.status === 'error'">ERROR</div>
+                        <div class="text-grey-7 text-caption" v-else-if="sensor.status === 'off'">TOPIC OFF</div>
+                        <div class="text-grey-7 text-caption" v-else>CHECKING...</div>
+                    </q-card-section>
+
                     <q-inner-loading :showing="sensor.status === 'loading'">
                         <q-spinner-gears size="50px" color="primary" />
                     </q-inner-loading>
@@ -90,7 +98,7 @@
                         :topic="sensor.read_topic"
                         :type="sensor.read_topic_msg"
                         style="height: 300px"
-                        class="bg-black text-green q-pa-sm border-rounded scroll"
+                        class="col bg-black text-green q-pa-sm border-rounded scroll"
                     ></topic-data-viewer>
                     <div class="col">
                         <process-console 
@@ -121,6 +129,7 @@ import BottomTerminal from 'src/components/v2/BottomTerminal.vue';
 import WebRtcVideo from 'src/components/v2/WebRtcVideo.vue';
 import { useSensor } from '../../composables/useSensor';
 import FormDialog from 'src/components/v2/FormDialog.vue';
+import TopicDataViewer from 'src/components/v2/TopicDataViewer.vue';
 
 import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
@@ -135,7 +144,7 @@ const sensorForm = ref([
         label: sensor.name + (sensor.company ? ` (${sensor.company})` : ''),
         value: sensor.name
     }))) },
-    { key: 'serial_no', label: t('serialNUmber'), value: '', default: '', type: 'text', show: (form) => getFormSensorInfo(form) && getFormSensorInfo(form).custom_fields && getFormSensorInfo(form).custom_fields.includes('serial_no') },
+    { key: 'serial_no', label: t('serialNumber'), value: '', default: '', type: 'text', show: (form) => getFormSensorInfo(form) && getFormSensorInfo(form).custom_fields && getFormSensorInfo(form).custom_fields.includes('serial_no') },
     { key: 'ip_address', label: t('ipAddress'), value: '', default: '192.168.50.10', type: 'text', show: (form) => getFormSensorInfo(form) && getFormSensorInfo(form).custom_fields && getFormSensorInfo(form).custom_fields.includes('ip_address') },
     { key: 'read_topic', label: t('Select Topic'), value: '', default: '', type: 'select', show: (form) => form.find(e => e.key === 'type').value === 'custom',},
     { key: 'read_topic_msg', label: t('Message Type'), value: '', default: '', type: 'text', show: () => false, },
@@ -163,8 +172,27 @@ function listSensors() {
                 watchSensor(sensor);
             });
         });
+
+        checkSensorTopics();
+
     }).catch((error) => {
         console.error('Error fetching sensors:', error);
+    });
+}
+
+function checkSensorTopics() {
+    api.get('/topics').then((res) => {
+        const activeTopics = res.data.topics.map(t => t.name); 
+
+        sensors.value.forEach(sensor => {
+            if (sensor.type === 'custom') {
+                if (activeTopics.includes(sensor.read_topic)) {
+                    sensor.status = 'on';
+                } else {
+                    sensor.status = 'off';
+                }
+            }
+        });
     });
 }
 
@@ -292,6 +320,10 @@ function initialize() {
 
 onMounted(() => {
     initialize();
+    
+    setInterval(() => {
+        checkSensorTopics();
+    }, 2000);
 })
 
 
