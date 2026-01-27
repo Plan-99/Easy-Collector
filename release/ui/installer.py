@@ -24,6 +24,7 @@ from app_context import (
     QVBoxLayout,
     QWidget,
     Qt,
+    QApplication,
     _app_icon_path,
 )
 from service import docker_compose_available, get_compose_cmd
@@ -600,6 +601,22 @@ def run_setup_wizard(self: "MainWindow") -> bool:
 
     dlg.closeEvent = _on_close
     dlg.reject = _on_reject
+
+    def _center_dialog():
+        try:
+            screen = dlg.screen() or QApplication.primaryScreen()
+            if not screen:
+                return
+            geo = screen.availableGeometry()
+            x = int(geo.x() + (geo.width() - dlg.width()) / 2)
+            y = int(geo.y() + (geo.height() - dlg.height()) / 2)
+            dlg.move(x, y)
+        except Exception:
+            pass
+
+    # Center the dialog when it first appears.
+    _center_dialog()
+    QTimer.singleShot(0, _center_dialog)
 
     # Exec modal; abort app if not completed
     result = dlg.exec()
