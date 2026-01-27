@@ -12,7 +12,34 @@ from PIL import Image
 
 config = {}
 
+def preview_augment_hsv(image):
+    # Apply some fixed, representative augmentation for preview
+    h_adj = 45.0  # Fixed 45-degree shift for a visible preview
+    s_adj = 1.5   # Fixed 50% saturation increase
+    v_adj = 1.2   # Fixed 20% value increase
+    
+    img_np = np.array(image)
+    hsv = cv2.cvtColor(img_np, cv2.COLOR_RGB2HSV)
+    h, s, v = cv2.split(hsv)
+
+    h = h.astype(np.float32)
+    h_new = (h + h_adj) % 180
+    h_new = h_new.astype(np.uint8)
+
+    s = s.astype(np.float32)
+    s_new = np.clip(s * s_adj, 0, 255).astype(np.uint8)
+
+    v = v.astype(np.float32)
+    v_new = np.clip(v * v_adj, 0, 255).astype(np.uint8)
+
+    final_hsv = cv2.merge((h_new, s_new, v_new))
+    img_rgb = cv2.cvtColor(final_hsv, cv2.COLOR_HSV2RGB)
+
+    return Image.fromarray(img_rgb)
+
+
 def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=False, sensors=None, agents=None, task=None):
+
     global config
     config = {}
     if move_robot:
@@ -89,6 +116,8 @@ def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=
                                                                               config['prospective'].get('shear', 0),
                                                                               config['prospective'].get('perspective', 0))
                         img = prospective_transform(img, transform_matrix)
+                    if config.get('hsv'):
+                        img = preview_augment_hsv(img)
                     img_array = np.array(img)
                     
                     # 이미지를 JPEG 형식으로 메모리 버퍼에 인코딩

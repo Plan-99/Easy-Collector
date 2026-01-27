@@ -44,6 +44,16 @@
                             </q-card>
                         </q-expansion-item>
 
+                        <q-item tag="label" v-ripple>
+                            <q-item-section>
+                                <q-item-label>HSV Augmentation</q-item-label>
+                                <q-item-label caption>Randomly adjust hue, saturation, and value for each episode.</q-item-label>
+                            </q-item-section>
+                            <q-item-section avatar>
+                                <q-checkbox v-model="form.hsv" @update:model-value="addConfig" />
+                            </q-item-section>
+                        </q-item>
+
                         <q-expansion-item
                             expand-separator
                             icon="crop_square"
@@ -256,7 +266,8 @@ const form = ref({
         degrees: 0,
         shear: 0,
         perspective: 0,
-    }
+    },
+    hsv: false
 });
 
 function augmentDataset() {
