@@ -149,6 +149,9 @@ PY
   if [[ -d /etc/profile.d ]]; then
     printf 'export ROS_DOMAIN_ID=%s\n' "$ROS_DOMAIN_ID" > /etc/profile.d/ros_domain_id.sh 2>/dev/null || true
   fi
+  if ! grep -q "ros_domain_id.sh" /root/.bashrc; then
+    echo '[ -f /etc/profile.d/ros_domain_id.sh ] && source /etc/profile.d/ros_domain_id.sh' >> /root/.bashrc
+  fi
 }
 
 ensure_data_root_writable
