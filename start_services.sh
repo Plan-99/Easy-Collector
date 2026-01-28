@@ -114,11 +114,49 @@ ensure_data_root_writable() {
   fi
 }
 
+apply_ros_domain_from_config() {
+  local cfg="${CONFIG_PATH}"
+  local value="0"
+  if [[ -f "$cfg" && -r "$cfg" ]]; then
+    value=$(python3 - "$cfg" <<'PY'
+import json, sys
+cfg = sys.argv[1] if len(sys.argv) > 1 else ""
+value = 0
+if cfg:
+    try:
+        with open(cfg, encoding="utf-8") as f:
+            data = json.load(f)
+        raw = data.get("ros_domain_id", 0)
+        try:
+            value = int(str(raw).strip())
+        except Exception:
+            value = 0
+    except Exception:
+        value = 0
+if value < 0:
+    value = 0
+if value > 232:
+    value = 232
+print(value)
+PY
+    )
+  fi
+  if [[ -z "$value" ]]; then
+    value=0
+  fi
+  export ROS_DOMAIN_ID="$value"
+  log_status "[ROS] ROS_DOMAIN_ID=${ROS_DOMAIN_ID}"
+  if [[ -d /etc/profile.d ]]; then
+    printf 'export ROS_DOMAIN_ID=%s\n' "$ROS_DOMAIN_ID" > /etc/profile.d/ros_domain_id.sh 2>/dev/null || true
+  fi
+}
+
 ensure_data_root_writable
 
 init_status_log
 log_status "[ENTRY] Starting Easy Collector services (single container)"
 log_status "[ENTRY] Data root=${DATA_ROOT} logs=${LOG_DIR}"
+apply_ros_domain_from_config
 
 detect_low_mem
 if [[ "${LOW_MEM:-0}" == "1" ]]; then
