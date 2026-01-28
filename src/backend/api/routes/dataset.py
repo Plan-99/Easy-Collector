@@ -212,7 +212,7 @@ def augment_dataset_route(id):
         salt_and_pepper=data.get('saltAndPepper'),
         gaussian=data.get('gaussian'),
         prospective=data.get('prospective'),
-        hsv=data.get('hsv', False),
+        hsv=data.get('hsv'),
         socketio_instance=current_app.pm.socketio,
         name=f"augment_dataset",
     )
