@@ -93,9 +93,12 @@ def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=
                         hsv_config = config['hsv']
                         if hsv_config.get('random'):
                             # For preview, use fixed "random" values
-                            h_adj = 45.0
-                            s_adj = 1.5
-                            v_adj = 1.2
+                            h_gain = 0.5
+                            s_gain = 0.7
+                            v_gain = 0.4
+                            h_adj = (np.random.rand() * 2 - 1) * h_gain * 180
+                            s_adj = (np.random.rand() * 2 - 1) * s_gain + 1
+                            v_adj = (np.random.rand() * 2 - 1) * v_gain + 1
                         else:
                             # Use exact slider values
                             h_adj = hsv_config.get('h', 0) * 180
