@@ -74,16 +74,11 @@ def start_training():
     command_list = ['python3', '-u', '-m', 'backend.scripts.train',
                     '--checkpoint_id', str(checkpoint_id)]
 
-    process_id = f"train_task"
-
-    current_app.pm.process_queue['train_task'].append({
-        'checkpoint_id': checkpoint_id,
-        'command': command_list
-    })
+    process_id = "train_task"
 
     if process_id not in current_app.pm.processes:
         process = current_app.pm.start_process(process_id, command_list)
-    
+
         return {
             'status': 'success',
             'message': f'Training started for checkpoint {checkpoint_id}',
@@ -92,6 +87,10 @@ def start_training():
             'pid': process.pid
         }, 200
     else:
+        current_app.pm.process_queue[process_id].append({
+            'checkpoint_id': checkpoint_id,
+            'command': command_list
+        })
         return {
             'status': 'success',
             'message': f'Training queued for checkpoint {checkpoint_id}',

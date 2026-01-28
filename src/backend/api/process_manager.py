@@ -113,7 +113,7 @@ class ProcessManager:
                 self.socketio.emit("stop_process", {'id': name, 'return_code': return_code}, to=sid)
                 
                 # 큐 처리 로직
-                if name in self.process_queue and self.process_queue[name]:
+                if name in self.process_queue and len(self.process_queue[name]) > 0:
                     next_task = self.process_queue[name].pop(0)
                     self.start_process(name, next_task['command'], log_emit_id=log_emit_id, sid=sid)
 

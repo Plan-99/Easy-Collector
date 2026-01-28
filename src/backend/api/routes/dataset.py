@@ -5,6 +5,7 @@ import shutil
 from ..process.read_hdf5 import read_hdf5, add_config
 from ..process.record_episode import record_episode
 from ..process.augment_dataset import augment_dataset
+from ..process.merge_dataset import merge_dataset
 import base64
 from io import BytesIO
 from PIL import Image
@@ -218,3 +219,16 @@ def augment_dataset_route(id):
     )
     
     return {'status': 'success', 'message': 'Dataset augmentation started'}, 200
+
+@dataset_bp.route('/dataset/:merge', methods=['POST'])
+def merge_datasets():
+    data = request.json
+    source_dataset_id = data.get('source_dataset_id')
+    target_dataset_ids = data.get('target_dataset_ids', [])
+    
+    source_dataset = DatasetModel.find(source_dataset_id)
+    target_datasets = [DatasetModel.find(int(tid)) for tid in target_dataset_ids]
+
+    merge_dataset(source_dataset, target_datasets)
+
+    return {'status': 'success', 'message': 'Dataset merged successfully'}, 200

@@ -358,6 +358,12 @@
                                                         <q-icon name="edit" size="xs" />
                                                     </q-item-section>
                                                 </q-item>
+                                                <q-item clickable v-ripple v-close-popup @click="openMergeDatasetForm(dataset)">
+                                                    <q-item-section>Merge Dataset</q-item-section>
+                                                    <q-item-section side>
+                                                        <q-icon name="merge_type" size="xs" />
+                                                    </q-item-section>
+                                                </q-item>
                                                 <q-item clickable v-ripple class="text-negative" @click="deleteDataset(dataset)">
                                                     <q-item-section>Delete Dataset</q-item-section>
                                                     <q-item-section side>
@@ -492,6 +498,13 @@
             @submit="saveCheckpoint"
             :ok-button-label="$t('save')"
         ></form-dialog>
+        <form-dialog
+            v-model="showMergeDatasetForm"
+            :title="$t('mergeDatasetFormTitle')"
+            :form="mergeDatasetForm"
+            @submit="mergeDatasets"
+            :ok-button-label="$t('save')"
+        ></form-dialog>
 
         <q-dialog
             v-model="showAugmentationForm"
@@ -534,7 +547,7 @@ import { api } from 'src/boot/axios';
 import FormDialog from 'src/components/v2/FormDialog.vue';
 import { useSensor } from '../../composables/useSensor';
 import { useRobot } from 'src/composables/useRobot';
-import { Notify } from 'quasar';
+import { Notify, Loading } from 'quasar';
 import { useI18n } from 'vue-i18n';
 import DataAugmentationDialog from 'src/components/v2/DataAugmentationDialog.vue';
 import { useSocket } from 'src/composables/useSocket.js';
@@ -695,21 +708,6 @@ function initCommonSensorResolution() {
         return { width: 640, height: 480 }; // Default resolution
     })();
 }
-
-// watch(selectedWorkspace, (workspace) => {
-//     if (workspace && workspace.settings) {
-//         const firstSensorId = Object.keys(workspace.sensors)[0];
-//         if (firstSensorId) {
-//             const settings = workspace.sensors[firstSensorId];
-//             if (settings && settings.img_size && settings.img_size.length === 2) {
-//                 commonSensorResolution.value = {
-//                     width: settings.img_size[0],
-//                     height: settings.img_size[1]
-//                 };
-//             }
-//         }
-//     }
-// }, { deep: true, immediate: true });
 
 watch(commonSensorResolution, (newRes) => {
     updateAllSensorResolutions(newRes.width, newRes.height);
@@ -1135,6 +1133,28 @@ function resetCroppedArea() {
     });
 }
 
+const showMergeDatasetForm = ref(false);
+const mergeDatasetForm = ref([
+    { key: 'source_dataset_id', label: 'Source Dataset', type: 'select', options: computed(() => datasets.value.map(d => ({ label: d.name, value: d.id }))), value: null, default: null },
+    { key: 'target_dataset_ids', label: 'Target Dataset', type: 'multiselect_list', options: computed(() => datasets.value.map(d => ({ label: d.name, value: d.id }))), value: [], default: [] },
+]);
+
+function openMergeDatasetForm(dataset) {
+    mergeDatasetForm.value.forEach((field) => {
+        field.value = field.default;
+    });
+    mergeDatasetForm.value.find(e => e.key === 'source_dataset_id').value = dataset.id;
+    showMergeDatasetForm.value = true;
+}
+
+function mergeDatasets(form) {
+    Loading.show();
+    return api.post('/dataset/:merge', form).then(() => {
+        listDatasets()
+    }).finally(() => {
+        Loading.hide();
+    });
+}
 
 onUnmounted(() => {
     robots.value.forEach(robot => {
