@@ -31,7 +31,7 @@ def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=
             # xpos_data = f["observations/xpos"][:]
             # xvel_data = f["observations/xvel"][:]
             sensor_names = [name for name in f["observations/images"].keys()]
-            robot_names = [name for name in f["observations/qpos"].keys()]
+            robot_names = [name for name in f["observations/qpos"].keys()] 
 
             for name in sensor_names:
                 image_data[name] = f[f"observations/images/{name}"][:]
@@ -110,7 +110,6 @@ def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=
                     # 'xpos': xpos_data[i].tolist(),
                     # 'xvel': xvel_data[i].tolist()
                 }, to=sid)
-
 
 
 def add_config(config_data):

@@ -299,11 +299,10 @@
                                 :caption="`${dataset.episodes.length} episodes`"
                                 v-for="dataset in datasets"
                                 :key="dataset.id"
-                                class="text-white"
                                 dark
                                 :model-value="selectedDatasetId === dataset.id"
                                 @show="selectedDatasetId = dataset.id"
-                                header-class="items-center"
+                                header-class="text-white"
                             >
                                 <template v-slot:header>
                                     <q-icon name="folder" class="q-mr-lg" size="lg"></q-icon>
@@ -334,6 +333,9 @@
                                             </q-list>
                                         </q-menu>
                                     </div>
+                                    <q-item-section side v-if="!checkDatasetCompatibility(dataset)">
+                                        <q-icon name="warning" color="negative" size="24px" />
+                                    </q-item-section>
                                     <q-space class="col"></q-space>
                                 </template>
                                 <q-list bordered separator dark dense v-if="selectedDatasetId === dataset.id">
@@ -478,11 +480,53 @@
         ></form-dialog>
         <form-dialog
             v-model="showDatasetForm"
-            :title="$t(datasetForm.id ? 'datasetEditFormTitle' : 'datasetAddFormTitle')"
+            :title="$t(datasetForm.find(f => f.key === 'id')? 'datasetEditFormTitle' : 'datasetAddFormTitle')"
             :form="datasetForm"
             @submit="saveDataset"
-            :ok-button-label="$t(datasetForm.id ? 'save' : 'add')"
-        ></form-dialog>
+            :ok-button-label="$t(datasetForm.find(f => f.key === 'id') ? 'save' : 'add')"
+        >
+            <template v-slot:hdf5_metadata>
+                <div style="color: red;">You have to remap the sensors and robots because this dataset was created with a different sensor/robot configuration.</div>
+                <div v-for="robot in datasetForm.find(f => f.key === 'hdf5_metadata').value.robots" :key="robot">
+                    <div class="row q-my-md q-col-gutter-sm">
+                        <div class="text-white">{{ robot }}</div>
+                        <q-select
+                            dense
+                            outlined
+                            dark
+                            bg-color="dark"
+                            v-model="datasetForm.find(f => f.key === 'robot_mappings').value[robot]"
+                            :options="robots"
+                            label="Select Robot"
+                            style="width: 200px"
+                            map-options
+                            emit-value
+                            option-label="name"
+                            option-value="id"
+                        ></q-select>
+                    </div>
+                </div>
+                <div v-for="sensor in datasetForm.find(f => f.key === 'hdf5_metadata').value.sensors" :key="sensor">
+                    <div class="row q-my-md q-col-gutter-sm">
+                        <div class="text-white">{{ sensor }}</div>
+                        <q-select
+                            dense
+                            outlined
+                            dark
+                            bg-color="dark"
+                            v-model="datasetForm.find(f => f.key === 'sensor_mappings').value[sensor]"
+                            :options="selectedWorkspaceSensors"
+                            label="Select Sensor"
+                            style="width: 200px"
+                            map-options
+                            emit-value
+                            option-label="name"
+                            option-value="id"
+                        ></q-select>
+                    </div>
+                </div>
+            </template>
+        </form-dialog>
         <form-dialog
             v-model="showCheckpointForm"
             :title="$t('checkpointEditFormTitle')"
@@ -828,7 +872,15 @@ const showDatasetForm = ref(false);
 const datasetForm = ref([
     { key: 'id', value: null },
     { key: 'name', label: t('datasetName'), type: 'text', value: '', default: '' },
+    { key: 'hdf5_metadata', label: 'HDF5 Metadata', type: 'custom', value: {}, default: {}, show: (form) => !checkDatasetCompatibility(form)},
+    { key: 'robot_mappings', label: 'Robot Mappings', type: 'custom', value: [], default: {}, show: () => false },
+    { key: 'sensor_mappings', label: 'Sensor Mappings', type: 'custom', value: {}, default: {}, show: () => false },
 ])
+
+// const datasetMetadataForm = ref([
+//     { key: 'robot_mappings', label: 'Robot Mappings', type: 'custom', value: [], default: {} },
+//     { key: 'sensor_mappings', label: 'Sensor Mappings', type: 'custom', value: {}, default: {} },
+// ]);
 
 function openAddDatasetForm() {
     datasetForm.value.forEach((field) => {
@@ -837,25 +889,107 @@ function openAddDatasetForm() {
     showDatasetForm.value = true;
 }
 
-function openEditDatasetForm(dataset) {
+async function openEditDatasetForm(dataset) {
+    // 1. 기본 필드 값 세팅 (id, name 등)
     datasetForm.value.forEach((field) => {
         field.value = dataset[field.key] || field.default;
     });
-    datasetForm.value.find((e) => e.key === 'id').value = dataset.id; // Set ID for edit
+
+    // 2. robot_mappings 필드 커스텀 세팅
+
+    console.log('Dataset HDF5 Metadata:', datasetForm.value.find((e) => e.key === 'robot_mappings'));
+    
+    const robotMappingField = datasetForm.value.find((e) => e.key === 'robot_mappings');
+    if (robotMappingField && dataset.hdf5_metadata?.robots) {
+        // robots 리스트: ['robot_a', 'robot_b']
+        // 변환 결과: { "robot_a": null, "robot_b": null }
+        robotMappingField.value = Object.fromEntries(
+            dataset.hdf5_metadata.robots.map(robot => [robot, null])
+        );
+    }
+    console.log('Robot Mappings set to:', robotMappingField.value);
+
+    const sensorMappingField = datasetForm.value.find((e) => e.key === 'sensor_mappings');
+    if (sensorMappingField && dataset.hdf5_metadata?.sensors) {
+        sensorMappingField.value = Object.fromEntries(
+            dataset.hdf5_metadata.sensors.map(sensor => [sensor, null])
+        );
+    }
+
     showDatasetForm.value = true;
 }
 
-function saveDataset(form) {
-    if (datasetForm.value.find((e) => e.key === 'id').value) {
-        return api.put(`/dataset/${form.id}`, form).then(() => {
-            datasetForm.value.forEach(field => field.value = field.default); // Reset form fields
-            listDatasets()
-        })
+async function saveDataset(form) {
+    try {
+        // 1. 현재 datasetForm(배열)의 모든 value를 하나의 객체로 추출
+        const payload = {};
+        datasetForm.value.forEach(field => {
+            payload[field.key] = field.value;
+        });
+
+        // 만약 인자로 들어온 form에 추가 데이터가 있다면 합쳐줍니다.
+        const finalData = { ...form, ...payload };
+
+        const id = datasetForm.value.find((e) => e.key === 'id').value;
+
+        if (id) {
+            // --- 수정(Edit) 로직 ---
+            await api.put(`/dataset/${id}`, finalData);
+            
+            // 메타데이터 수정 API 호출 (finalData에 robot_mappings 등이 포함됨)
+            await api.post(`/dataset/${id}/:edit_datasets_metadata`, finalData);
+
+        } else {
+            // --- 추가(Add) 로직 ---
+            await api.post(`/dataset`, { 
+                ...finalData, 
+                task_id: selectedWorkspaceId.value 
+            });
+        }
+
+        // 공통 마무리 로직
+        datasetForm.value.forEach(field => field.value = field.default); // 폼 초기화
+        await listDatasets(); // 목록 갱신
+        showDatasetForm.value = false; // 다이얼로그 닫기
+
+    } catch (error) {
+        console.error('데이터 저장 실패:', error);
+        // 사용자에게 에러 알림 (예: $q.notify 등)
     }
-    return api.post(`/dataset`, { ...form, task_id: selectedWorkspaceId.value }).then(() => {
-        datasetForm.value.forEach(field => field.value = field.default); // Reset form fields
-        listDatasets()
-    })
+}
+
+function checkDatasetCompatibility(form) {
+
+    const workspaceRobotTypes = robots.value.map(r => "robot_" + r.id).sort();
+    const workspaceSensorTypes = selectedWorkspaceSensors.value.map(s => "sensor_" + s.id).sort();
+
+    const datasetRobotTypes = ref([]);
+    const datasetSensorTypes = ref([]);
+
+    if (Array.isArray(form)) {
+        // 1. 배열 형태인 form에서 hdf5_metadata 값을 추출합니다.
+        const hdf5MetadataEntry = form.find(item => item.key === 'hdf5_metadata');
+        const hdf5_metadata = hdf5MetadataEntry ? hdf5MetadataEntry.value : { robots: [], sensors: [] };
+
+        // 3. 데이터셋(HDF5)의 구성을 가져옵니다.
+        datasetRobotTypes.value = (hdf5_metadata.robots || []).filter(t => t !== null).sort();
+        datasetSensorTypes.value = (hdf5_metadata.sensors || []).filter(t => t !== null).sort();
+
+    } else {
+        datasetRobotTypes.value = (form.hdf5_metadata?.robots || []).filter(t => t !== null).sort();
+        datasetSensorTypes.value = (form.hdf5_metadata?.sensors || []).filter(t => t !== null).sort();
+    }
+    const robotsMatch = JSON.stringify(workspaceRobotTypes) === JSON.stringify(datasetRobotTypes.value);
+    const sensorsMatch = JSON.stringify(workspaceSensorTypes) === JSON.stringify(datasetSensorTypes.value);
+
+    console.log(datasetRobotTypes.value)
+    console.log(datasetSensorTypes.value)
+
+    if (datasetRobotTypes.value.length == 0 && datasetSensorTypes.value.length == 0) {
+        return true;
+    }
+
+    return robotsMatch && sensorsMatch;
 }
 
 const showAugmentationForm = ref(false);

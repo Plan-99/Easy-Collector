@@ -98,7 +98,76 @@ def delete_dataset_file(id, file_name):
 
     os.remove(dataset_path)
     return {'status': 'success', 'message': 'File Deleted'}, 200
+
+
+@dataset_bp.route('/dataset/<id>/:get_datasets_metadata', methods=['GET'])
+def get_datasets_metadata(id):
+    folder_path = os.path.join(DATASET_DIR, id)
+    if not os.path.exists(folder_path) or not os.path.isdir(folder_path):
+        return {'status': 'error', 'message': 'Folder not found'}, 404
+
+    metadata = {}
+    if os.listdir(folder_path):
+        first_file = os.listdir(folder_path)[0]
+        hdf5_path = os.path.join(folder_path, first_file)
+        with h5py.File(hdf5_path, 'r') as f:
+            sensor_names = [name for name in f["observations/images"].keys()]
+            robot_names = [name for name in f["observations/qpos"].keys()]
+
+            metadata['sensors'] = sensor_names
+            metadata['robots'] = robot_names
+
+    return {'status': 'success', 'metadata': metadata}, 200
+
+@dataset_bp.route('/dataset/<id>/:edit_datasets_metadata', methods=['POST'])
+def edit_datasets_metadata(id):
+    data = request.json
+    sensor_mappings = data.get('sensor_mappings', {})
+    robot_mappings = data.get('robot_mappings', {})
     
+    folder_path = os.path.join(DATASET_DIR, id)
+    if not os.path.exists(folder_path) or not os.path.isdir(folder_path):
+        return {'status': 'error', 'message': 'Folder not found'}, 404
+    
+    for file_name in os.listdir(folder_path):
+        hdf5_path = os.path.join(folder_path, file_name)
+        with h5py.File(hdf5_path, 'a') as f:
+            
+            # 1. 센서 이름 변경 (Temporary renaming)
+            # key: "sensor_1", value: 2 -> new_name: "sensor_2"
+            for old_name, val in sensor_mappings.items():
+                new_name = f"sensor_{val}"
+                if old_name in f["observations/images"]:
+                    # 바로 new_name으로 바꾸지 않고 임시 이름으로 변경
+                    f["observations/images"].move(old_name, f"{new_name}_temp")
+
+            # 2. 센서 이름 확정 (Finalize)
+            for val in sensor_mappings.values():
+                target = f"sensor_{val}"
+                if f"{target}_temp" in f["observations/images"]:
+                    f["observations/images"].move(f"{target}_temp", target)
+
+            # 3. 로봇 관련 데이터셋 변경 (Temporary renaming)
+            # 처리해야 할 경로 리스트
+            robot_paths = [
+                "observations/qpos", "observations/eepos", 
+                "qaction", "qaction_delta", "eetarget", "eetarget_delta"
+            ]
+
+            for old_name, val in robot_mappings.items():
+                new_name = f"robot_{val}"
+                for path in robot_paths:
+                    if path in f and old_name in f[path]:
+                        f[path].move(old_name, f"{new_name}_temp")
+
+            # 4. 로봇 이름 확정 (Finalize)
+            for val in robot_mappings.values():
+                target = f"robot_{val}"
+                for path in robot_paths:
+                    if path in f and f"{target}_temp" in f[path]:
+                        f[path].move(f"{target}_temp", target)
+
+    return {'status': 'success', 'message': 'Metadata updated'}, 200
 
 @dataset_bp.route('/dataset/<id>/<file_name>/:start_read_hdf5', methods=['POST'])
 def start_read_hdf5(id, file_name):

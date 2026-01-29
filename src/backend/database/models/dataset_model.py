@@ -3,6 +3,7 @@ from orator.orm import belongs_to
 from .task_model import Task
 from orator.orm import accessor
 import os
+import h5py
 from ...configs.global_configs import DATASET_DIR
 
 class Dataset(Model, SoftDeletes):
@@ -18,10 +19,12 @@ class Dataset(Model, SoftDeletes):
         'episode_len',
         # 'episode_num',
         'episodes',
+        'hdf5_metadata',
     ]
 
     __casts__ = {
         'sensor_ids': 'json',
+        'hdf5_metadata': 'json',
     }
     
     __timestamps__ = True
@@ -65,3 +68,25 @@ class Dataset(Model, SoftDeletes):
             files, key=lambda x: os.path.getmtime(os.path.join(folder_path, x['name'])), reverse=False
         )
         return files
+    
+    @accessor
+    def hdf5_metadata(self):
+        folder_path = os.path.join(DATASET_DIR, str(self.id))
+        if not os.path.exists(folder_path) or not os.path.isdir(folder_path):
+            return {'status': 'error', 'message': 'Folder not found'}, 404
+
+        metadata = {}
+        if os.listdir(folder_path):
+            first_file = os.listdir(folder_path)[0]
+            hdf5_path = os.path.join(folder_path, first_file)
+            with h5py.File(hdf5_path, 'r') as f:
+                sensor_names = [name for name in f["observations/images"].keys()]
+                robot_names = [name for name in f["observations/qpos"].keys()]
+
+                metadata['sensors'] = sensor_names
+                metadata['robots'] = robot_names
+        else:
+            metadata['sensors'] = []
+            metadata['robots'] = []
+
+        return metadata
