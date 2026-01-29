@@ -698,9 +698,12 @@ class UpdateManager:
         try:
             def _close_panel():
                 try:
-                    self._window.hide_update_panel()
+                    self._window.close()
                 except Exception:
-                    pass
+                    try:
+                        QApplication.instance().quit()
+                    except Exception:
+                        pass
             self._window.show_update_done_panel(
                 detail,
                 _close_panel,

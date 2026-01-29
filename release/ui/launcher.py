@@ -2354,13 +2354,18 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             getattr(self, "btn_quick_apply", None),
             getattr(self, "btn_folder", None),
             getattr(self, "btn_logs", None),
-            getattr(self, "btn_settings", None),
             getattr(self, "btn_exit", None),
         ):
             if btn is None:
                 continue
             try:
                 btn.setEnabled(enabled)
+            except Exception:
+                pass
+        log_btn = getattr(self, "btn_settings", None)
+        if log_btn is not None:
+            try:
+                log_btn.setEnabled(True)
             except Exception:
                 pass
 
@@ -2679,10 +2684,11 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         current_version: str | None = None,
         latest_version: str | None = None,
         button_text: str = "닫기",
+        title: str = "업데이트 완료",
     ):
         self._update_panel_actions.clear()
         self._set_update_eta(None)
-        self._configure_update_panel("업데이트 완료", detail, False, current_version, latest_version)
+        self._configure_update_panel(title, detail, False, current_version, latest_version)
         self._set_update_log_visible(False)
         self._set_update_panel_button("primary", button_text, True, on_close)
         self._set_update_panel_button("secondary", None, False)
@@ -2817,9 +2823,30 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                     save_config(cfg)
             except Exception:
                 pass
-            self.hide_update_panel()
             self._upgrade_in_progress = False
-            self._wait_for_services_ready(self.load_ui)
+            detail = "업그레이드가 완료되었습니다.\n프로그램을 다시 실행해 주세요."
+            def _close_panel():
+                try:
+                    self.close()
+                except Exception:
+                    try:
+                        QApplication.instance().quit()
+                    except Exception:
+                        pass
+            try:
+                self.show_update_done_panel(
+                    detail,
+                    _close_panel,
+                    None,
+                    None,
+                    "닫기",
+                    "업그레이드 완료",
+                )
+            except Exception:
+                try:
+                    self.close()
+                except Exception:
+                    pass
 
         self.show_update_progress_panel("Docker 이미지를 빌드하는 중입니다...")
         self.run_compose(["build", "--no-cache"], on_finish=_after_build)

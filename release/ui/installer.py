@@ -68,7 +68,7 @@ def run_setup_wizard(self: "MainWindow") -> bool:
 
     # Sidebar
     steps = QListWidget(); steps.setFixedWidth(170); steps.setEnabled(False)
-    for s in ["시작", "설치 준비", "설치 옵션", "설치 중", "완료"]:
+    for s in ["시작", "소프트웨어 사용권 계약", "설치 준비", "설치 옵션", "설치 중", "완료"]:
         QListWidgetItem(s, steps)
 
     # Pages inside a bordered content box
@@ -80,6 +80,25 @@ def run_setup_wizard(self: "MainWindow") -> bool:
     v1.addStretch(1)
     v1.addWidget(QLabel("'다음'을 눌러 설치를 진행하세요."))
     page_start.setLayout(v1)
+
+    page_eula = QWidget(); v1b = QVBoxLayout()
+    v1b.addWidget(QLabel("소프트웨어 사용권 계약을 확인해 주세요."))
+    eula_text = QTextEdit()
+    eula_text.setReadOnly(True)
+    eula_text.setPlainText(
+        "소프트웨어 사용권 계약 (EULA)\n"
+        "\n"
+        "본 소프트웨어를 설치하거나 사용하는 경우, 아래 조건에 동의한 것으로 간주됩니다.\n"
+        "\n"
+        "~\n"
+    )
+    v1b.addWidget(eula_text, 1)
+    eula_agree_row = QHBoxLayout()
+    chk_eula_agree = QCheckBox("동의함")
+    eula_agree_row.addWidget(chk_eula_agree)
+    eula_agree_row.addStretch(1)
+    v1b.addLayout(eula_agree_row)
+    page_eula.setLayout(v1b)
 
     page_prepare = QWidget(); v2 = QVBoxLayout()
     lbl_space = QLabel("")
@@ -128,7 +147,7 @@ def run_setup_wizard(self: "MainWindow") -> bool:
     v4.addStretch(1)
     page_done.setLayout(v4)
 
-    pages = [page_start, page_prepare, page_variant, page_install, page_done]
+    pages = [page_start, page_eula, page_prepare, page_variant, page_install, page_done]
 
     def set_page(idx: int):
         steps.setCurrentRow(idx)
@@ -137,14 +156,16 @@ def run_setup_wizard(self: "MainWindow") -> bool:
             if w is not None:
                 w.setParent(None)
         container_layout.addWidget(pages[idx])
-        btn_prev.setVisible(idx in (1, 2))
-        btn_prev.setEnabled(idx in (1, 2))
-        btn_next.setVisible(idx in (0, 1, 3))
-        btn_install.setVisible(idx == 2)
-        btn_finish.setVisible(idx == 4)
+        btn_prev.setVisible(idx in (1, 2, 3))
+        btn_prev.setEnabled(idx in (1, 2, 3))
+        btn_next.setVisible(idx in (0, 1, 2, 4))
+        btn_install.setVisible(idx == 3)
+        btn_finish.setVisible(idx == 5)
         if idx == 0:
             btn_next.setEnabled(True)
         elif idx == 1:
+            btn_next.setEnabled(chk_eula_agree.isChecked())
+        elif idx == 2:
             try:
                 target = self._disk_usage_target()
                 usage = shutil.disk_usage(str(target))
@@ -154,7 +175,7 @@ def run_setup_wizard(self: "MainWindow") -> bool:
                 lbl_space.setText("현재 여유 공간: 확인 불가")
                 has_space = True
             btn_next.setEnabled(has_space and docker_compose_available())
-        elif idx == 3:
+        elif idx == 4:
             btn_next.setEnabled(False)
         else:
             btn_next.setEnabled(True)
@@ -212,10 +233,10 @@ def run_setup_wizard(self: "MainWindow") -> bool:
             current -= 1; set_page(current)
     def on_next():
         nonlocal current
-        if current in (0, 1):
+        if current in (0, 1, 2):
             current += 1; set_page(current)
-        elif current == 3:
-            current = 4; set_page(current)
+        elif current == 4:
+            current = 5; set_page(current)
     def _record_launch_choice():
         try:
             self._auto_launch_after_install = chk_launch.isChecked()
@@ -229,6 +250,12 @@ def run_setup_wizard(self: "MainWindow") -> bool:
     btn_prev.clicked.connect(on_prev)
     btn_next.clicked.connect(on_next)
     btn_finish.clicked.connect(on_finish)
+
+    def _update_eula_next():
+        if current == 1:
+            btn_next.setEnabled(chk_eula_agree.isChecked())
+
+    chk_eula_agree.toggled.connect(_update_eula_next)
 
     INSTALL_LOG_TARGET = 14954
     progress_state = {
@@ -395,7 +422,7 @@ def run_setup_wizard(self: "MainWindow") -> bool:
             QMessageBox.critical(dlg, "오류", "선택한 설치 옵션에 맞는 docker-compose 템플릿을 찾을 수 없습니다.")
             return
         nonlocal current
-        current = 3; set_page(current)
+        current = 4; set_page(current)
         log.clear()
 
         progress_state.update({
@@ -585,7 +612,7 @@ def run_setup_wizard(self: "MainWindow") -> bool:
     def _on_close(ev):
         try:
             if _confirm_exit():
-                if current == 4:
+                if current == 5:
                     _record_launch_choice()
                 ev.accept()
             else:
@@ -595,7 +622,7 @@ def run_setup_wizard(self: "MainWindow") -> bool:
 
     def _on_reject():
         if _confirm_exit():
-            if current == 4:
+            if current == 5:
                 _record_launch_choice()
             QDialog.reject(dlg)
 
