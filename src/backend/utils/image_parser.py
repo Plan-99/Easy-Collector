@@ -8,9 +8,18 @@ def fetch_image_with_config(image, config):
         xy_start = (area[0], area[1])
         xy_end = (area[2],area[3])
         image = image[xy_start[1]:xy_end[1], xy_start[0]:xy_end[0]]
+    if 'rotate' in config:
+        angle = config['rotate']
+        if angle == 90:
+            image = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
+        elif angle == 180:
+            image = cv2.rotate(image, cv2.ROTATE_180)
+        elif angle == 270:
+            image = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
     if 'resize' in config:
         size = config['resize']
         image = cv2.resize(image, size)
+    
     return image
 
 def ros_image_to_numpy(image_msg):

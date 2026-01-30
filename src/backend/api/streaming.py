@@ -45,20 +45,47 @@ class ROSImageStreamTrack(VideoStreamTrack):
             np_arr = np.frombuffer(msg.data, np.uint8)
             cv_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
             
-            if cv_image is None: return
+            # 1. 디코딩 실패 확인
+            if cv_image is None or cv_image.size == 0:
+                return
 
+            h, w = cv_image.shape[:2] # 원본 해상도 확인
             config = stream_config.get(self.stream_id, {})
-            if 'cropped_area' in config and config['cropped_area']:
-                area = config['cropped_area']
-                xy_start = (area[0], area[1])
-                xy_end = (area[2],area[3])
-                cv_image = cv_image[xy_start[1]:xy_end[1], xy_start[0]:xy_end[0]]
-            if 'resize' in config and config['resize'] and len(config['resize']) == 2:
-                cv_image = cv2.resize(cv_image, tuple(config['resize']))
+            
+            # 2. Crop 안전 장치
+            if config.get('cropped_area'):
+                area = config['cropped_area'] # [x1, y1, x2, y2]
+                
+                # 좌표 정규화 및 이미지 경계 제한
+                x1 = max(0, min(area[0], w - 1))
+                y1 = max(0, min(area[1], h - 1))
+                x2 = max(x1 + 1, min(area[2], w))
+                y2 = max(y1 + 1, min(area[3], h))
+                
+                cv_image = cv_image[y1:y2, x1:x2]
+
+            # 3. 슬라이싱 후 이미지가 비었는지 최종 확인
+            if cv_image.size == 0:
+                self.node.get_logger().warn(f"Empty image after cropping! Area: {config.get('cropped_area')}")
+                return
+
+            # 4. Rotate
+            angle = config.get('rotate', 0)
+            if angle in [90, 180, 270]:
+                rotation_map = {90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180, 270: cv2.ROTATE_90_COUNTERCLOCKWISE}
+                cv_image = cv2.rotate(cv_image, rotation_map[angle])
+
+            # 5. Resize (이제 안전함)
+            if config.get('resize'):
+                target_size = config['resize']
+                cv_image = cv2.resize(cv_image, (target_size[0], target_size[1]))
+            
                 
             self.frame = VideoFrame.from_ndarray(cv_image, format="bgr24")
+        
         except Exception as e:
             self.node.get_logger().error(f"Error in ros_callback: {e}\n{traceback.format_exc()}")
+
 
     async def recv(self):
         # 최신 프레임이 있을 때까지 잠시 대기 (비동기)
@@ -122,6 +149,8 @@ async def add_config(request):
         stream_config[stream_id]['resize'] = config['resize']
     if stream_id in stream_config and 'cropped_area' in config:
         stream_config[stream_id]['cropped_area'] = config['cropped_area']
+    if stream_id in stream_config and 'rotate' in config:
+        stream_config[stream_id]['rotate'] = config['rotate']
 
     return web.json_response({"status": "success"})
 

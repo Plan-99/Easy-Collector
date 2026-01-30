@@ -1,5 +1,6 @@
 import os
 from PIL import Image, ImageDraw, ImageEnhance
+import cv2
 import random
 import h5py
 import numpy as np
@@ -65,7 +66,80 @@ def add_gaussian_noise(image, mean, sigma):
         return Image.fromarray(noisy_image_array.astype('uint8'))
     return image
 
-def augment_dataset(dataset_id, aug_dataset_id, lightness, rectangles, salt_and_pepper, gaussian, socketio_instance, task_control):
+def generate_prospective_transform(width, height, scale_factor=0, degrees=0, shear=0, perspective=0):
+    # 1. Center matrix
+    C = np.eye(3)
+    C[0, 2] = -width / 2
+    C[1, 2] = -height / 2
+
+    perspective = perspective * 0.0001
+
+    # 2. Perspective matrix
+    P = np.eye(3)
+    P[2, 0] = random.uniform(-perspective, perspective)
+    P[2, 1] = random.uniform(-perspective, perspective)
+
+    # 3. Rotation & Scale matrix
+    R = np.eye(3)
+    a = random.uniform(-degrees, degrees)
+    s = random.uniform(1-scale_factor*0.01, 1+scale_factor*0.01)
+    R[:2] = cv2.getRotationMatrix2D(angle=a, center=(0, 0), scale=s)
+
+    # 4. Shear matrix
+    S = np.eye(3)
+    S[0, 1] = np.tan(random.uniform(-shear, shear) * np.pi / 180)
+    S[1, 0] = np.tan(random.uniform(-shear, shear) * np.pi / 180)
+
+    # 5. Translation matrix
+    T = np.eye(3)
+    T[0, 2] = width / 2
+    T[1, 2] = height / 2
+
+    # Combined transformation matrix
+    M = T @ S @ R @ P @ C 
+    return M
+
+def prospective_transform(image, M):
+    """
+    YOLO 스타일의 Perspective Transform Augmentation
+    :param image: 입력 이미지 (PIL Image 객체)
+    :param M: 변환 행렬
+    :return: 변환된 PIL Image 객체
+    """
+    if M is None:
+        return image
+    
+    # 1. PIL 이미지 크기 가져오기 및 NumPy 배열 변환
+    width, height = image.size
+    img_np = np.array(image) # OpenCV 연산을 위해 NumPy 배열로 변환
+
+    # 2. 이미지에 변환 적용 (입력은 NumPy 배열인 img_np)
+    result_np = cv2.warpPerspective(img_np, M, dsize=(width, height), borderValue=(114, 114, 114))
+
+    # 3. 다시 PIL 이미지로 변환하여 반환
+    return Image.fromarray(result_np)
+
+def apply_hsv(image, h_adj, s_adj, v_adj):
+    img_np = np.array(image)
+    hsv = cv2.cvtColor(img_np, cv2.COLOR_RGB2HSV)
+    h, s, v_channel = cv2.split(hsv)
+    
+    h = h.astype(np.float32)
+    h_new = (h + h_adj) % 180
+    h_new = h_new.astype(np.uint8)
+    
+    s = s.astype(np.float32)
+    s_new = np.clip(s * s_adj, 0, 255).astype(np.uint8)
+    
+    v_channel = v_channel.astype(np.float32)
+    v_new = np.clip(v_channel * v_adj, 0, 255).astype(np.uint8)
+    
+    final_hsv = cv2.merge((h_new, s_new, v_new))
+    img_rgb = cv2.cvtColor(final_hsv, cv2.COLOR_HSV2RGB)
+    
+    return Image.fromarray(img_rgb)
+
+def augment_dataset(dataset_id, aug_dataset_id, lightness, rectangles, salt_and_pepper, gaussian, prospective, hsv, socketio_instance, task_control):
     dataset_path = os.path.join('/root/src/backend/datasets', str(dataset_id))
     aug_dataset_path = os.path.join('/root/src/backend/datasets', str(aug_dataset_id))
 
@@ -84,6 +158,16 @@ def augment_dataset(dataset_id, aug_dataset_id, lightness, rectangles, salt_and_
         'progress': 0,
     })
 
+    h_gain = 0.5
+    s_gain = 0.7
+    v_gain = 0.4
+    
+    # Pre-calculate fixed values if not random
+    if hsv and not hsv.get('random'):
+        fixed_h_adj = hsv.get('h', 0) * 180
+        fixed_s_adj = 1 + hsv.get('s', 0)
+        fixed_v_adj = 1 + hsv.get('v', 0)
+
     for i, hdf5_file in enumerate(hdf5_files):
         if task_control.get('stop'):
             print("Stopping Data Augmentation")
@@ -99,6 +183,7 @@ def augment_dataset(dataset_id, aug_dataset_id, lightness, rectangles, salt_and_
                 # Determine rectangle parameters for this episode (HDF5 file)
                 rect_params = []
                 image_keys = list(f['observations/images'].keys())
+
                 if image_keys:
                     first_image_dataset = f['observations/images'][image_keys[0]]
                     if first_image_dataset.shape[0] > 0:
@@ -120,6 +205,29 @@ def augment_dataset(dataset_id, aug_dataset_id, lightness, rectangles, salt_and_
                         img = draw_rectangles(img, rect_params)
                         img = add_salt_and_pepper_noise(img, salt_and_pepper.get('amount', 0))
                         img = add_gaussian_noise(img, gaussian.get('mean', 0), gaussian.get('sigma', 0))
+                        
+                        if prospective:
+                            transform_matrix = generate_prospective_transform(
+                                img.width, 
+                                img.height, 
+                                prospective.get('scale_factor', 0), 
+                                prospective.get('degrees', 0), 
+                                prospective.get('shear', 0), 
+                                prospective.get('perspective', 0)
+                            )
+                            img = prospective_transform(img, transform_matrix)
+                        
+                        if hsv:
+                            if hsv.get('random'):
+                                # calculate random values for each image
+                                rand_h_adj = (np.random.rand() * 2 - 1) * h_gain * 180
+                                rand_s_adj = (np.random.rand() * 2 - 1) * s_gain + 1
+                                rand_v_adj = (np.random.rand() * 2 - 1) * v_gain + 1
+                                img = apply_hsv(img, rand_h_adj, rand_s_adj, rand_v_adj)
+                            else:
+                                # use pre-calculated fixed values
+                                img = apply_hsv(img, fixed_h_adj, fixed_s_adj, fixed_v_adj)
+
                         augmented_images.append(np.array(img))
                     
                     image_group[key][...] = np.array(augmented_images)

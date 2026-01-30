@@ -19,7 +19,7 @@ def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
             return i
     raise Exception(f"Error getting auto index, or more than {max_idx} episodes")
 
-def record_episode(node, dataset_id, agents, assembly_id, sensors, task, language_instruction, socketio_instance, task_control, tele_type='leader', iter=100000):
+def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors, task, language_instruction, socketio_instance, task_control, tele_type='leader', iter=100000):
     env = Env(node, agents=agents, sensors=sensors)
     dataset_dir = f"{DATASET_DIR}/{dataset_id}"
 
@@ -47,7 +47,7 @@ def record_episode(node, dataset_id, agents, assembly_id, sensors, task, languag
             'type': 'stdout '
         })
 
-        if home_pose is not None and tele_type != 'externel':
+        if move_homepose and tele_type != 'externel':
             for agent in agents:
                 agent.move_lock = True
                 agent.move_to(home_pose[str(agent.id)])
@@ -146,8 +146,9 @@ def record_episode(node, dataset_id, agents, assembly_id, sensors, task, languag
                     for t_step in timesteps:
                         img = t_step.observation['images'][f'sensor_{s_id}']
                         img_data.append(fetch_image_with_config(img, {
-                            'resize': task['sensor_settings'][s_id]['img_size'],
-                            'cropped_area': task['sensor_settings'][s_id].get('cropped_area', None)
+                            'resize': task['sensor_img_size'][s_id],
+                            'cropped_area': task['sensor_cropped_area'][s_id],
+                            'rotate': task['sensor_rotate'][s_id]
                         }))
                     image_group.create_dataset(f"sensor_{s_id}", data=np.array(img_data), dtype='uint8')
 

@@ -216,7 +216,7 @@ def main(args):
         checkpoint = checkpoint.to_dict()
 
         batch_size = checkpoint['train_settings']['batch_size']
-        sensor_ids = task['sensor_settings'].keys()
+        sensor_ids = task['sensor_ids']
         if policy['type'] in ['ACT', 'VLAsEn']:
             chunk_size = policy['settings']['chunk_size']
             vision_backbone = policy['settings']['vision_backbone']

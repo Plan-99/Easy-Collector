@@ -150,7 +150,8 @@ class Agent:
                 print("Current joint states are None, cannot move.")
                 return
             self.joint_trajectory_point.velocities = [(abs(t - c) / 2) for t, c in zip(action, current_pos)]
-            self.joint_trajectory_point.time_from_start = rclpy.duration.Duration(seconds=0.7).to_msg()
+            # self.joint_trajectory_point.velocities = [0.0] * self.joint_len
+            self.joint_trajectory_point.time_from_start = rclpy.duration.Duration(seconds=0.2).to_msg()
             self.write_topic_msg_data.points = [self.joint_trajectory_point]
             self.move_robot_pub.publish(self.write_topic_msg_data)
         else:
@@ -220,7 +221,6 @@ class Agent:
         """
         입력 규격: target_ee_dict = {'L_ee': [x, y, z, r, p, y, tool], 'R_ee': [x, y, z, r, p, y, tool]}
         """
-        print("move_ee_step called with:", target_ee_dict)
         if self.role == 'tool' or self.ik_solver is None:
             return
 
@@ -477,7 +477,7 @@ class Agent:
 
         return full_joint_positions, None
 
-    def move_to(self, target_pos, step_size=0.1):
+    def move_to(self, target_pos, step_size=0.1, duration=5.0):
         if self.robot_company == 'Piper':
             self.move_joint_step(target_pos)
         elif self.robot_company == 'Kinova':
@@ -486,7 +486,7 @@ class Agent:
             self.joint_trajectory_point.positions = [float(x) for x in target_pos]
             # velocities를  0으로 설정
             self.joint_trajectory_point.velocities = [0.0] * self.joint_len
-            self.joint_trajectory_point.time_from_start = rclpy.duration.Duration(seconds=5.0).to_msg()
+            self.joint_trajectory_point.time_from_start = rclpy.duration.Duration(seconds=duration).to_msg()
             self.write_topic_msg_data.points = [self.joint_trajectory_point]
             self.move_robot_pub.publish(self.write_topic_msg_data)
         elif self.role == 'tool':

@@ -74,16 +74,11 @@ def start_training():
     command_list = ['python3', '-u', '-m', 'backend.scripts.train',
                     '--checkpoint_id', str(checkpoint_id)]
 
-    process_id = f"train_task"
-
-    current_app.pm.process_queue['train_task'].append({
-        'checkpoint_id': checkpoint_id,
-        'command': command_list
-    })
+    process_id = "train_task"
 
     if process_id not in current_app.pm.processes:
         process = current_app.pm.start_process(process_id, command_list)
-    
+
         return {
             'status': 'success',
             'message': f'Training started for checkpoint {checkpoint_id}',
@@ -92,6 +87,10 @@ def start_training():
             'pid': process.pid
         }, 200
     else:
+        current_app.pm.process_queue[process_id].append({
+            'checkpoint_id': checkpoint_id,
+            'command': command_list
+        })
         return {
             'status': 'success',
             'message': f'Training queued for checkpoint {checkpoint_id}',
@@ -153,8 +152,10 @@ def update_task(id):
     task.home_pose = data.get('home_pose', task.home_pose)
     task.image = data.get('image', task.image)
     task.episode_len = data.get('episode_len', task.episode_len)
-    task.sensor_settings = data.get('sensor_settings', task.sensor_settings)
+    task.sensor_ids = data.get('sensor_ids', task.sensor_ids)
     task.settings = data.get('settings', task.settings)
+
+    print("Updated Task Data:", task.to_dict())
 
     task.save()
     return {'status': 'success', 'message': 'Task Updated'}, 200
@@ -176,6 +177,8 @@ def update_task_device_settings(id):
         original_settings[device_type][device_id][key] = value
 
     task.settings = original_settings
+
+    print("Updated Device Settings:", task.settings)
 
     task.save()
     return {'status': 'success', 'message': 'Task Settings Updated'}, 200
