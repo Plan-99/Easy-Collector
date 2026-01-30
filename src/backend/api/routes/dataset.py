@@ -122,6 +122,8 @@ def get_datasets_metadata(id):
 
 @dataset_bp.route('/dataset/<id>/:edit_datasets_metadata', methods=['POST'])
 def edit_datasets_metadata(id):
+    os.environ['HDF5_USE_FILE_LOCKING'] = 'FALSE'
+    
     data = request.json
     sensor_mappings = data.get('sensor_mappings', {})
     robot_mappings = data.get('robot_mappings', {})

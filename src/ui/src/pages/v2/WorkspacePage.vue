@@ -523,7 +523,7 @@
                             dark
                             bg-color="dark"
                             v-model="datasetForm.find(f => f.key === 'sensor_mappings').value[sensor]"
-                            :options="selectedWorkspaceSensors"
+                            :options="selectedSensors"
                             label="Select Sensor"
                             style="width: 200px"
                             map-options
@@ -968,7 +968,7 @@ async function saveDataset(form) {
 function checkDatasetCompatibility(form) {
 
     const workspaceRobotTypes = robots.value.map(r => "robot_" + r.id).sort();
-    const workspaceSensorTypes = selectedWorkspaceSensors.value.map(s => "sensor_" + s.id).sort();
+    const workspaceSensorTypes = selectedSensors.value.map(s => "sensor_" + s.id).sort();
 
     const datasetRobotTypes = ref([]);
     const datasetSensorTypes = ref([]);

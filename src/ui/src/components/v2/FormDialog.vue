@@ -135,27 +135,38 @@ watch(isOpen, (newVal) => {
 });
 
 function submitForm() {
+    // 1. Reset validation status
+    props.form.forEach(field => {
+        field.validated = true;
+    });
+
+    let isFormValid = true;
     const formData = {};
+
+    // 2. Validate and collect data
     props.form.forEach((field) => {
-        if (!(field.show === undefined || field.show(props.form))) {
+        // Skip fields that shouldn't be shown
+        if (field.show !== undefined && !field.show(props.form)) {
             return;
         }
-        if ((field.value === '' || field.value === null || field.value === undefined) && field.key !== 'id') {
-            // Notify.create({
-            //     type: 'negative',
-            //     message: `Please fill in the ${field.label} field.`
-            // });
+
+        const value = field.value;
+        const isInvalid = (value === '' || value === null || value === undefined || (Array.isArray(value) && value.length === 0));
+        
+        if (isInvalid && field.key !== 'id') {
             field.validated = false;
-            return;
+            isFormValid = false;
+        } else {
+            formData[field.key] = value;
         }
-        formData[field.key] = field.value;
     });
-    if (props.form.some((field) => field.validated === false)) {
-        return;
+
+    // 3. Check validity and submit
+    if (!isFormValid) {
+        return; // Exit if validation failed
     }
-    emit('submit', {
-        ...formData
-    });
+    
+    emit('submit', { ...formData });
     isOpen.value = false;
 }
 // function closeDialog() {
