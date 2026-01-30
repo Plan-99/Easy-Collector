@@ -479,7 +479,10 @@ class Agent:
 
     def move_to(self, target_pos, step_size=0.1, duration=5.0):
         if self.robot_company == 'Piper':
+            print("Moving to target position:", target_pos)
             self.move_joint_step(target_pos)
+            print("Moving to target position:", target_pos)
+            time.sleep(0.5)
         elif self.robot_company == 'Kinova':
             self.write_topic_msg_data.joint_names = self.joint_names
             print("Moving to target position:", target_pos)
