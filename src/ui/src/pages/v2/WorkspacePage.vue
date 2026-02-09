@@ -909,6 +909,7 @@ const status = computed(() => {
     } else if (processStore.isRunning('replay_episode')) {
         return 'replaying';
     } else {
+        listDatasets();
         return 'pending';
     }
 });

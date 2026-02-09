@@ -117,7 +117,7 @@ SUPPORT_ROBOTS = [
         'ik_setting': {
             'joints_to_lock': [],
             'ee_definitions': [
-                ('ee', 'end_effector_link', None)
+                ('ee', 'joint_7', np.array([0, 0, -0.2]).T)
             ],
         },
     },
