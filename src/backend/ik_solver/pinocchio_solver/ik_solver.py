@@ -33,6 +33,34 @@ def se3_to_xyzrpy(se3_matrix):
     rpy = pin.rpy.matrixToRpy(rotation_matrix)
     return np.concatenate([xyz, rpy]).tolist()
 
+def se3_to_xyzaxayaz(se3_matrix):
+    """
+    SE3 객체를 (x, y, z, ax, ay, az) 형식의 리스트로 변환합니다.
+    ax, ay, az는 회전 벡터(Rotation Vector)입니다.
+    """
+    # 1. 위치 추출 (x, y, z)
+    xyz = se3_matrix.translation
+    
+    # 2. 회전 행렬을 회전 벡터로 변환 (ax, ay, az)
+    # pin.log3는 SO(3) -> so(3) 매핑을 수행합니다.
+    rotation_matrix = se3_matrix.rotation
+    axayaz = pin.log3(rotation_matrix)
+    
+    return np.concatenate([xyz, axayaz]).tolist()
+
+def xyzaxayaz_to_se3(xyzaxayaz):
+    """
+    (x, y, z, ax, ay, az) 형식의 리스트를 SE3 객체로 변환합니다.
+    ax, ay, az는 회전 벡터(Rotation Vector)입니다.
+    """
+    xyz = np.array(xyzaxayaz[:3])
+    axayaz = np.array(xyzaxayaz[3:])
+    
+    # 회전 벡터를 회전 행렬로 변환 (지수 사상)
+    rotation_matrix = pin.exp3(axayaz)
+    
+    se3_pose = pin.SE3(rotation_matrix, xyz)
+    return se3_pose.homogeneous
 
 # ---------------------------------------------------------------------------
 # 헬퍼 클래스 (변경 없음)
@@ -261,7 +289,9 @@ class IK_Solver:
         # target_poses 딕셔너리를 기반으로 파라미터 설정
         for name, pose in target_poses.items():
             if name in self.ee_params:
-                se3_pose = xyzrpy_to_se3(pose)
+                # [수정] xyzrpy_to_se3 대신 xyzaxayaz_to_se3 사용
+                se3_pose = xyzaxayaz_to_se3(pose)
+                
                 self.opti.set_value(self.ee_params[name], se3_pose)
                 if self.Visualization:
                     self.vis.viewer[f'{name}_target'].set_transform(se3_pose)
@@ -273,11 +303,12 @@ class IK_Solver:
         try:
             sol = self.opti.solve()
             sol_q = self.opti.value(self.var_q)
-            # self.smooth_filter.add_data(sol_q)
-            # sol_q = self.smooth_filter.filtered_data
 
-            if current_lr_arm_motor_dq is not None: v = current_lr_arm_motor_dq * 0.0
-            else: v = (sol_q - self.init_data) * 0.0
+            # 속도 및 토크 계산 (v는 현재 0으로 설정되어 있음)
+            if current_lr_arm_motor_dq is not None: 
+                v = current_lr_arm_motor_dq * 0.0
+            else: 
+                v = (sol_q - self.init_data) * 0.0
 
             self.init_data = sol_q
             sol_tauff = pin.rnea(self.reduced_robot.model, self.reduced_robot.data, sol_q, v, np.zeros(self.reduced_robot.model.nv))
@@ -286,7 +317,7 @@ class IK_Solver:
             return sol_q, sol_tauff
         
         except Exception as e:
-            logger_mp.error(f"ERROR in convergence, plotting debug info.{e}")
+            logger_mp.error(f"ERROR in convergence, plotting debug info. {e}")
             sol_q = self.opti.debug.value(self.var_q)
             self.smooth_filter.add_data(sol_q)
             sol_q = self.smooth_filter.filtered_data
@@ -297,23 +328,31 @@ class IK_Solver:
             self.init_data = sol_q
             sol_tauff = pin.rnea(self.reduced_robot.model, self.reduced_robot.data, sol_q, v, np.zeros(self.reduced_robot.model.nv))
 
-            logger_mp.error(f"sol_q:{sol_q} \nmotorstate: \n{current_lr_arm_motor_q} \ntarget_poses: \n{target_poses}")
+            # 에러 로그 출력 시에도 형식이 바뀐 것을 명시
+            logger_mp.error(f"sol_q:{sol_q} \ntarget_poses(xyzaxayaz): \n{target_poses}")
             if self.Visualization: self.vis.display(sol_q)
+            
+            # 실패 시 현재 상태를 그대로 유지하도록 반환
             return current_lr_arm_motor_q, np.zeros(self.reduced_robot.model.nv)
         
     
+    # --- IK_Solver 클래스 내부 메서드 수정 ---
     def get_ee_position(self, q_numeric):
         """
-        주어진 관절 각도(q)에 대한 모든 EE의 현재 포즈(SE3)를 딕셔너리로 반환합니다.
+        주어진 관절 각도(q)에 대한 모든 EE의 현재 포즈를 
+        (x, y, z, ax, ay, az) 딕셔너리로 반환합니다.
         """
+        # 1. 순기구학 계산
         pin.forwardKinematics(self.reduced_robot.model, self.reduced_robot.data, np.array(q_numeric))
         pin.updateFramePlacements(self.reduced_robot.model, self.reduced_robot.data)
         
         poses = {}
         for name, ee_id in self.ee_ids.items():
+            # 2. 각 EE의 SE3 포즈 가져오기
             se3_pose = self.reduced_robot.data.oMf[ee_id]
 
-            poses[name] = se3_to_xyzrpy(se3_pose)
+            # 3. 새로운 헬퍼 함수를 사용하여 변환
+            poses[name] = se3_to_xyzaxayaz(se3_pose)
             
         return poses
     
@@ -334,4 +373,38 @@ class IK_Solver:
             self.smooth_filter.add_data(q_target)
             
         logger_mp.info(f"IK Solver state reset complete. Q: {q_target.tolist()}")
+
+    def compute_delta_target(self, name, current_q, delta_xyzaxayaz, frame='global'):
+        """
+        현재 관절 상태(q)와 변화량(delta)을 받아 차기 목표(xyzaxayaz)를 계산합니다.
+        delta_xyzaxayaz: [dx, dy, dz, dax, day, daz]
+        frame: 'global' (베이스 기준) 또는 'local' (EE 기준)
+        """
+        # 1. 현재 포즈 계산 (FK)
+        pin.forwardKinematics(self.reduced_robot.model, self.reduced_robot.data, current_q)
+        pin.updateFramePlacements(self.reduced_robot.model, self.reduced_robot.data)
+        
+        ee_id = self.ee_ids[name]
+        current_oMf = self.reduced_robot.data.oMf[ee_id]
+        
+        # 2. 변화량 분리
+        d_xyz = np.array(delta_xyzaxayaz[:3])
+        d_axayaz = np.array(delta_xyzaxayaz[3:])
+        
+        # 3. 미세 회전 행렬 생성 (Exponential Map)
+        delta_R = pin.exp3(d_axayaz)
+        
+        # 4. 행렬 연산으로 차기 자세 계산
+        if frame == 'global':
+            # 베이스 축 기준 회전
+            new_R = delta_R @ current_oMf.rotation 
+        else:
+            # 로봇 손(EE) 축 기준 회전
+            new_R = current_oMf.rotation @ delta_R 
+            
+        new_t = current_oMf.translation + d_xyz
+        
+        # 5. 결과를 다시 xyzaxayaz 형식으로 변환
+        new_se3 = pin.SE3(new_R, new_t)
+        return se3_to_xyzaxayaz(new_se3)
 

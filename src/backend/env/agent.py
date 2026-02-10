@@ -291,34 +291,37 @@ class Agent:
 
             # 4. 로봇에 명령 발행
             if final_action:
+                print(final_action)
                 self.move_joint_step(final_action, from_ee=True)
 
     def move_ee_delta_step(self, delta_ee_dict):
-        """
-        입력 규격: delta_ee_dict = {'L_ee': [dx, dy, dz, dr, dp, dy, dtool], 'R_ee': [dx, dy, dz, dr, dp, dy, dtool]}
-        """
         if self.role == 'tool' or self.ik_solver is None:
             return
 
-        current_ee_pos = self.get_ee_position()
-        if current_ee_pos is None:
-            return
+        full_js = self.get_joint_states()
+        arm_js, _ = self.get_joint_and_tool_pos(full_js)
 
         target_ee_dict = {}
         for name in self.ee_names:
-            if name in delta_ee_dict and name in current_ee_pos:
-                curr_vals = current_ee_pos[name]
-                delta_vals = delta_ee_dict[name]
-                # 델타 값이 7개라고 가정 (마지막이 툴 델타)
-                if len(delta_vals) >= 7:
-                    target_vals = [curr + delta for curr, delta in zip(curr_vals[:6], delta_vals[:6])]
-                    target_tool = curr_vals[6] + delta_vals[6]
-                    target_ee_dict[name] = target_vals + [target_tool]
-                else:
-                    # 툴 델타가 없는 경우 기존 로직 유지
-                    target_vals = [curr + delta for curr, delta in zip(curr_vals, delta_vals)]
-                    target_ee_dict[name] = target_vals
+            if name in delta_ee_dict:
+                # 1. Solver에게 "다음 목표 계산해줘"라고 요청
+                # 여기서 frame='global' 또는 'local'을 선택할 수 있습니다.
+                target_pose = self.ik_solver.compute_delta_target(
+                    name, 
+                    np.array(arm_js), 
+                    delta_ee_dict[name][:6],
+                    frame='global' 
+                )
+                
+                # 2. 툴(그리퍼) 값 처리
+                if len(delta_ee_dict[name]) >= 7:
+                    # 현재 툴 값 + 델타 툴 (툴은 단순 덧셈 가능)
+                    _, tool_js = self.get_joint_and_tool_pos(full_js)
+                    target_pose.append(tool_js[0] + delta_ee_dict[name][6])
+                
+                target_ee_dict[name] = target_pose
 
+        # 3. 계산된 절대 좌표 타겟으로 이동 명령
         self.move_ee_step(target_ee_dict)
         
     def joint_state_cb(self, msg):
