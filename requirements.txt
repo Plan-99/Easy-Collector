@@ -44,6 +44,8 @@ pandas
 zarr
 logging_mp
 pymodbus==3.9.2
+pin-pink
+proxsuite
 
 # # diffusion policy
 # dill
@@ -53,3 +55,4 @@ pymodbus==3.9.2
 # jax
 # jax-lib
 # s3fs
+

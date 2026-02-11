@@ -96,6 +96,12 @@ class PiperRosNode(Node):
                         self.piper.GetArmLowSpdInfoMsgs().motor_4.foc_status.driver_enable_status and \
                         self.piper.GetArmLowSpdInfoMsgs().motor_5.foc_status.driver_enable_status and \
                         self.piper.GetArmLowSpdInfoMsgs().motor_6.foc_status.driver_enable_status
+                    self.get_logger().info(f"motor1 enable status:{self.piper.GetArmLowSpdInfoMsgs().motor_1.foc_status.driver_enable_status}")
+                    self.get_logger().info(f"motor2 enable status:{self.piper.GetArmLowSpdInfoMsgs().motor_2.foc_status.driver_enable_status}")
+                    self.get_logger().info(f"motor3 enable status:{self.piper.GetArmLowSpdInfoMsgs().motor_3.foc_status.driver_enable_status}")
+                    self.get_logger().info(f"motor4 enable status:{self.piper.GetArmLowSpdInfoMsgs().motor_4.foc_status.driver_enable_status}")
+                    self.get_logger().info(f"motor5 enable status:{self.piper.GetArmLowSpdInfoMsgs().motor_5.foc_status.driver_enable_status}")
+                    self.get_logger().info(f"motor6 enable status:{self.piper.GetArmLowSpdInfoMsgs().motor_6.foc_status.driver_enable_status}")
                     self.get_logger().info(f"Enable status:{enable_flag}")
                     self.piper.EnableArm(7)
                     self.piper.GripperCtrl(0, 1000, 0x01, 0)
