@@ -18,11 +18,15 @@
 - 실행 환경 구성
   - UI & 배포 환경: 
     ```bash
+    sudo apt update
+    sudo apt install python3-pip
     sudo apt-get install -y dpkg-dev rsync python3-venv
     python3 -m pip install --user PySide6
     ```
   - Docker & Docker Compose v2
     ```bash
+    sudo apt update
+    sudo apt install curl -y
     sudo install -m 0755 -d /etc/apt/keyrings
     curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
       sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
