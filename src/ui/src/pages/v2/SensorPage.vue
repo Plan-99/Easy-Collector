@@ -33,8 +33,9 @@
 
                     <q-card-section class="q-pa-none q-mt-sm">
                         <div class="text-bold">{{ sensor.name }}</div>
-                        <div class="text-grey-6 text-caption" v-if="sensor.serial_no">Serial No. {{ sensor.serial_no }}</div>
-                        <div class="text-grey-6 text-caption" v-if="sensor.ip_address">IP Address: {{ sensor.ip_address }}</div>
+                        <div class="text-grey-6 text-caption">{{ sensor.type }}</div>
+                        <!-- <div class="text-grey-6 text-caption" v-if="sensor.ip_address">IP Address: {{ sensor.ip_address }}</div> -->
+                        <!-- <div class="text-grey-6 text-caption" v-if="sensor.device_index">Device Index: {{ sensor.device_index }}</div> -->
                     </q-card-section>
                     <q-card-section class="q-pa-none q-mt-sm row">
                         <div class="text-primary text-caption" v-if="sensor.status === 'on'">ONLINE</div>
@@ -129,6 +130,7 @@ const sensorForm = ref([
     }))) },
     { key: 'serial_no', label: t('serialNUmber'), value: '', default: '', type: 'text', show: (form) => getFormSensorInfo(form) && getFormSensorInfo(form).custom_fields && getFormSensorInfo(form).custom_fields.includes('serial_no') },
     { key: 'ip_address', label: t('ipAddress'), value: '', default: '192.168.50.10', type: 'text', show: (form) => getFormSensorInfo(form) && getFormSensorInfo(form).custom_fields && getFormSensorInfo(form).custom_fields.includes('ip_address') },
+    { key: 'device_index', label: t('deviceIndex'), value: 0, default: 0, type: 'number', show: (form) => getFormSensorInfo(form) && getFormSensorInfo(form).custom_fields && getFormSensorInfo(form).custom_fields.includes('device_index') },
 ]);
 const showSensorForm = ref(false);
 const watchingSensor = ref(null);

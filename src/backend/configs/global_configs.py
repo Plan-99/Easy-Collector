@@ -204,6 +204,16 @@ SUPPORT_SENSORS = [
         'resolution': [848, 480]
     },
     {
+        'name': 'webcam_color',
+        'company': 'Logitec',
+        'role': 'rgb_camera',
+        'topic_type': 'color',
+        'read_topic': '/image_raw',
+        'read_topic_msg': 'sensor_msgs/Image',
+        'custom_fields': ['device_index'],
+        'resolution': [600, 480]
+    },
+    {
         'name': 'kinova_vision_color',
         'company': 'Kinova',
         'role': 'rgb_camera',

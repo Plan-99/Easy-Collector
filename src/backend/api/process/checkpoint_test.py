@@ -165,6 +165,11 @@ def checkpoint_test(
                 time.sleep(7)
                 ts = env.reset()
                 print('Robot moved to homepose')
+
+            # 일정 스텝마다 강제 메모리 정리 (예: 100스텝마다)
+            if step_num % 100 == 0:
+                gc.collect()
+                torch.cuda.empty_cache()
                 
             # === a. 현재 상태(state_t) 계산 ===
             obs_t = ts.observation
@@ -219,7 +224,7 @@ def checkpoint_test(
                 agent.move_joint_step(target_qpos)
                 start_action_id += agent.joint_len
             
-            time.sleep(0.2)
+            time.sleep(0.12)
             ts_next = env.record_step()
 
             # === d. OTI-RL 학습 ===
