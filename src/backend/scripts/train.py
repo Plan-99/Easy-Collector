@@ -4,6 +4,7 @@ import sys
 import os
 import numpy as np
 from tqdm import tqdm
+import time
 from copy import deepcopy
 import argparse
 import json
@@ -116,6 +117,7 @@ def train(
     best_ckpt_info = None
 
     # Main training loop
+    start_time = time.time()
     for epoch in range(num_epochs):
         
         # --- Validation Step ---
@@ -146,11 +148,13 @@ def train(
             train_history.append({'loss': loss.item()})
             
         epoch_summary = compute_dict_mean(train_history[(batch_idx+1)*epoch:(batch_idx+1)*(epoch+1)])
+        train_time_sec = time.time() - start_time
         train_log = {
             'epoch': epoch,
             'total_epoch': num_epochs,
             'val_loss': epoch_val_loss,
-            'train_loss': epoch_summary["loss"]
+            'train_loss': epoch_summary["loss"],
+            'train_time_sec': train_time_sec,
         }
         print(f"[TRAIN_LOG] {json.dumps(train_log)}")
 

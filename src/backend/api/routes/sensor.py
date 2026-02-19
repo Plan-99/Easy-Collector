@@ -64,6 +64,11 @@ def start_sensor():
         if serial_no is None:
             return {'status': 'error', 'message': 'serial_no is required'}, 400
         command = ['ros2', 'launch', 'realsense2_camera', 'rs_launch.py', f'camera_namespace:=ec_sensor_{id}', f'serial_no:="{serial_no}"']
+    elif company == 'Logitec':
+        device_index = data.get('device_index', None)
+        if device_index is None:
+            return {'status': 'error', 'message': 'device_index is required'}, 400
+        command = ['ros2', 'launch', 'webcam_publisher', 'webcam_publisher.launch.py', f'namespace:=ec_sensor_{id}', f'device_index:={device_index}']
     elif company == 'Kinova':
         ip_address = data.get('ip_address', None)
         if ip_address is None:
@@ -107,6 +112,7 @@ def stop_sensor():
 def create_sensor():
     serial_no = request.json.get('serial_no')
     ip_address = request.json.get('ip_address')
+    device_index = request.json.get('device_index')
     name = request.json.get('name')
     type = request.json.get('type')
 
@@ -115,7 +121,8 @@ def create_sensor():
         type=type,
         settings={
             'serial_number': serial_no,
-            'ip_address': ip_address
+            'ip_address': ip_address,
+            'device_index': device_index
         }
     )
     
@@ -126,13 +133,15 @@ def create_sensor():
 def update_sensor(id):
     serial_no = request.json.get('serial_no')
     ip_address = request.json.get('ip_address')
+    device_index = request.json.get('device_index')
     name = request.json.get('name')
     type = request.json.get('type')
 
     sensor = SensorModel.find(id)
     sensor.settings = {
         'serial_number': serial_no,
-        'ip_address': ip_address
+        'ip_address': ip_address,
+        'device_index': device_index
     }
     sensor.name = name
     sensor.type = type

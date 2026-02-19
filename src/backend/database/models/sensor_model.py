@@ -40,6 +40,7 @@ class Sensor(Model, SoftDeletes):
         'company',
         'serial_no', 
         'ip_address',
+        'device_index',
         'read_topic',
         'read_topic_msg',
         'resolution',
@@ -93,6 +94,13 @@ class Sensor(Model, SoftDeletes):
         settings = json.loads(self.get_raw_attribute('settings'))
         if 'ip_address' in settings:
             return settings['ip_address']
+        return None
+    
+    @accessor
+    def device_index(self):
+        settings = json.loads(self.get_raw_attribute('settings'))
+        if 'device_index' in settings:
+            return settings['device_index']
         return None
     
     @accessor
