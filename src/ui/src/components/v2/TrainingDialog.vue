@@ -27,7 +27,7 @@
             track-color="black"
           >
             <div class="absolute-full flex flex-center">
-              <q-badge color="white" text-color="dark" :label="`${Number(trainingProgress * 100).toFixed(2)}%`" />
+              <q-badge color="white" text-color="dark" :label="`${Number(trainingProgress * 100).toFixed(2)}% (${formatTime(train_sec)}/${formatTime(train_sec / trainingProgress)})`" />
             </div>
           </q-linear-progress>
 
@@ -134,6 +134,16 @@ function addLoss(epoch, trainLoss, valLoss) {
     };
 }
 
+const train_sec = ref(0);
+
+// Format seconds to HH:MM:SS
+function formatTime(seconds) {
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+}
+
 const onLogTrainTask = (logData) => {
     if (logData.id === 'train_task') {
         if (logData.message.includes('[TRAIN_LOG]')) {
@@ -141,6 +151,7 @@ const onLogTrainTask = (logData) => {
           const trainLogJson = JSON.parse(trainLogStr);
           trainingProgress.value = trainLogJson.epoch / trainLogJson.total_epoch;
           addLoss(trainLogJson.epoch, trainLogJson.train_loss, trainLogJson.val_loss);
+          train_sec.value = trainLogJson.train_time_sec;
       }
     }
 };

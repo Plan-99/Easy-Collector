@@ -117,7 +117,7 @@ SUPPORT_ROBOTS = [
         'ik_setting': {
             'joints_to_lock': [],
             'ee_definitions': [
-                ('ee', 'end_effector_link', None)
+                ('ee', 'joint_7', np.array([0, 0, -0.2]).T)
             ],
         },
     },
@@ -202,6 +202,16 @@ SUPPORT_SENSORS = [
         'read_topic_msg': 'sensor_msgs/CompressedImage',
         'custom_fields': ['serial_no'],
         'resolution': [848, 480]
+    },
+    {
+        'name': 'webcam_color',
+        'company': 'Logitec',
+        'role': 'rgb_camera',
+        'topic_type': 'color',
+        'read_topic': '/image_raw',
+        'read_topic_msg': 'sensor_msgs/Image',
+        'custom_fields': ['device_index'],
+        'resolution': [600, 480]
     },
     {
         'name': 'kinova_vision_color',

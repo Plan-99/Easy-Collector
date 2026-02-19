@@ -18,7 +18,7 @@ class DynamixelNode(Node):
         self.ADDR_PRESENT_POSITION = 132
         
         # 파라미터 선언 및 할당
-        self.declare_parameter('baudrate', 57600)
+        self.declare_parameter('baudrate', 4000000)
         # self.declare_parameter('device_port', '/dev/ttyUSB0')
         self.BAUDRATE = self.get_parameter('baudrate').get_parameter_value().integer_value
         # self.PORTNAME = self.get_parameter('device_port').get_parameter_value().string_value

@@ -11,6 +11,12 @@ log_status() {
   fi
 }
 
+export PYTHONPATH="/root/src:/opt/openrobots/lib/python3.10/site-packages:${PYTHONPATH:-}"
+export LD_LIBRARY_PATH="/opt/openrobots/lib:${LD_LIBRARY_PATH:-}"
+export PATH="/opt/openrobots/bin:${PATH}"
+
+log_status "[DEBUG] Library path forced to /opt/openrobots and /root/src"
+
 # Print environment and runtime summary for diagnostics
 env_summary() {
   echo "[ENV] Flags: EC_NO_FRONTEND=${EC_NO_FRONTEND:-0} EC_NO_SIDE_PROCESSES=${EC_NO_SIDE_PROCESSES:-0} EC_SKIP_TORCHVISION_COMPAT=${EC_SKIP_TORCHVISION_COMPAT:-0} EC_MINIMAL_API=${EC_MINIMAL_API:-0} EC_NO_ROS=${EC_NO_ROS:-0} EC_DEBUG=${EC_DEBUG:-0}"
@@ -108,11 +114,52 @@ ensure_data_root_writable() {
   fi
 }
 
+apply_ros_domain_from_config() {
+  local cfg="${CONFIG_PATH}"
+  local value="0"
+  if [[ -f "$cfg" && -r "$cfg" ]]; then
+    value=$(python3 - "$cfg" <<'PY'
+import json, sys
+cfg = sys.argv[1] if len(sys.argv) > 1 else ""
+value = 0
+if cfg:
+    try:
+        with open(cfg, encoding="utf-8") as f:
+            data = json.load(f)
+        raw = data.get("ros_domain_id", 0)
+        try:
+            value = int(str(raw).strip())
+        except Exception:
+            value = 0
+    except Exception:
+        value = 0
+if value < 0:
+    value = 0
+if value > 232:
+    value = 232
+print(value)
+PY
+    )
+  fi
+  if [[ -z "$value" ]]; then
+    value=0
+  fi
+  export ROS_DOMAIN_ID="$value"
+  log_status "[ROS] ROS_DOMAIN_ID=${ROS_DOMAIN_ID}"
+  if [[ -d /etc/profile.d ]]; then
+    printf 'export ROS_DOMAIN_ID=%s\n' "$ROS_DOMAIN_ID" > /etc/profile.d/ros_domain_id.sh 2>/dev/null || true
+  fi
+  if ! grep -q "ros_domain_id.sh" /root/.bashrc; then
+    echo '[ -f /etc/profile.d/ros_domain_id.sh ] && source /etc/profile.d/ros_domain_id.sh' >> /root/.bashrc
+  fi
+}
+
 ensure_data_root_writable
 
 init_status_log
 log_status "[ENTRY] Starting Easy Collector services (single container)"
 log_status "[ENTRY] Data root=${DATA_ROOT} logs=${LOG_DIR}"
+apply_ros_domain_from_config
 
 detect_low_mem
 if [[ "${LOW_MEM:-0}" == "1" ]]; then
@@ -309,7 +356,7 @@ if [[ "${EC_NO_FRONTEND:-0}" != "1" ]]; then
   export NPM_CONFIG_FUND=${NPM_CONFIG_FUND:-false}
   if [[ ! -d node_modules ]] || [[ ! -x ./node_modules/.bin/quasar ]]; then
     log_status "[FRONTEND] Installing node modules ..."
-    (npm ci --no-audit --no-fund --prefer-offline --legacy-peer-deps || npm install --no-audit --no-fund --legacy-peer-deps)
+    (npm ci --registry=https://registry.npmjs.org --verbose --no-audit --no-fund --prefer-offline --legacy-peer-deps || npm install --no-audit --no-fund --legacy-peer-deps)
   fi
   log_status "[FRONTEND] Starting Quasar dev server on 0.0.0.0:5173"
   export NODE_OPTIONS="--max-old-space-size=${EC_NODE_MAX_OLD_SPACE_SIZE:-384}"
@@ -506,6 +553,14 @@ PY
   log_status "[DB][WARN] Python API migration failed; trying migration.sh if present"
   bash migration.sh || true
 }
+
+log_status "[DB] Ensuring database path is writable for host-side imports"
+if [ -d "${DATA_ROOT}/database" ]; then
+  chmod 777 "${DATA_ROOT}/database" 2>/dev/null || true
+fi
+if [ -f "${DATA_ROOT}/database/main.db" ]; then
+  chmod 666 "${DATA_ROOT}/database/main.db" 2>/dev/null || true
+fi
 
 # 3) Start backend API
 cd /root/src

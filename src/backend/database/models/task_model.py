@@ -8,26 +8,34 @@ class Task(Model, SoftDeletes):
 
     __fillable__ = [
         'name',
-        'sensor_ids',
         'home_pose',
         'end_pose',
         'image',
         'episode_len',
-        'sensor_settings',
         'settings',
         'assembly_id',
+        'sensor_ids',
+        'sensor_img_size',
+        'sensor_cropped_area',
+        'sensor_rotate',
     ]
 
     __casts__ = {
-        'sensor_ids': 'json',
         'home_pose': 'json',
         'end_pose': 'json',
-        'sensor_settings': 'json',
         'settings': 'json',
+        'sensor_ids': 'json',
+        'sensor_img_size': 'json',
+        'sensor_cropped_area': 'json',
+        'sensor_rotate': 'json',
     }
 
     __appends__ = [
-        'joint_dim'
+        'joint_dim',
+        'sensors',
+        'sensor_img_size',
+        'sensor_cropped_area',
+        'sensor_rotate'
     ]
 
     __timestamps__ = True
@@ -55,6 +63,45 @@ class Task(Model, SoftDeletes):
             robot = Robot.find(robot['id'])
             joint_dim += robot.joint_dim
         return joint_dim
+    
+    @accessor
+    def sensors(self):
+        sensors = []
+        for sensor_id in self.sensor_ids:
+            sensor = Sensor.find(sensor_id)
+            if sensor:
+                sensors.append(sensor.to_dict())
+        return sensors
+    
+    @accessor
+    def sensor_img_size(self):
+        img_size = {}
+        for sensor_id in self.sensor_ids:
+            if str(sensor_id) not in self.settings.get('sensors', {}):
+                img_size[str(sensor_id)] = [640, 480]
+            else:
+                img_size[str(sensor_id)] = self.settings['sensors'][str(sensor_id)].get('img_size', [640, 480])
+        return img_size
+
+    @accessor
+    def sensor_cropped_area(self):
+        cropped_area = {}
+        for sensor_id in self.sensor_ids:
+            if str(sensor_id) not in self.settings.get('sensors', {}):
+                cropped_area[str(sensor_id)] = [0, 0, 640, 480]
+            else:
+                cropped_area[str(sensor_id)] = self.settings['sensors'][str(sensor_id)].get('cropped_area', [0, 0, 640, 480])
+        return cropped_area
+    
+    @accessor
+    def sensor_rotate(self):
+        rotation = {}
+        for sensor_id in self.sensor_ids:
+            if str(sensor_id) not in self.settings.get('sensors', {}):
+                rotation[str(sensor_id)] = 0
+            else:
+                rotation[str(sensor_id)] = self.settings['sensors'][str(sensor_id)].get('rotate', 0)
+        return rotation
     
     @belongs_to('assembly_id')
     def assembly(self):

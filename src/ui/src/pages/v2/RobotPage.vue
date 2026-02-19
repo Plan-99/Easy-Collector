@@ -305,7 +305,7 @@ const robotForm = ref([
         show: (form) => form.find((e) => e.key === 'type').value === 'custom' 
     },
     { label: 'Joint Names', key: 'joint_names', type: 'custom', value: [], default: [] , show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
-    { label: '', key: 'tool_index', type: 'custom', value: [], default: [], show: () => (form) => form.find((e) => e.key === 'type').value === 'custom' },
+    { label: '', key: 'tool_index', type: 'custom', value: [], default: [], show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
     { label: 'Joint Lower Bounds', key: 'joint_lower_bounds', type: 'custom', value: [], default: [] , show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
     { label: 'Joint Upper Bounds', key: 'joint_upper_bounds', type: 'custom', value: [], default: [] , show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
     { label: 'Read Topic', key: 'read_topic', type: 'text', value: '', default: '', show: (form) => form.find((e) => e.key === 'type').value === 'custom' },

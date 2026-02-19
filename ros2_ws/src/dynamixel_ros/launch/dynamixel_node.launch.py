@@ -27,7 +27,7 @@ def generate_launch_description():
         emulate_tty=True, # output='screen'과 함께 사용하면 출력이 안정적입니다.
         parameters=[
             # <param> 태그는 parameters 리스트로 변환됩니다.
-            {'baudrate': 57600},
+            {'baudrate': 4000000},
             # $(arg device_port)는 LaunchConfiguration을 사용해 값을 가져옵니다.
             {'device_port': LaunchConfiguration('device_port')}
         ]

@@ -30,9 +30,7 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
         if task_control['stop']:
             break
 
-        tele_control = {
-            'stop': task_control['stop'],
-        }
+        task_control['episode_stop'] = False
 
         dataset_name = f"episode_{get_auto_index(dataset_dir)}.hdf5"
 
@@ -53,6 +51,7 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
             for agent in agents:
                 agent.move_lock = True
                 agent.move_to(home_pose[str(agent.id)])
+
                 if agent.ik_solver is not None:
                     agent.reset_ik_solver(home_pose[str(agent.id)])
 
@@ -64,14 +63,15 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
 
             if teleop is None:
                 print(f'[ERROR]: No leader robot preset for assembly {assembly_id}')
-                tele_control['stop'] = True
+                task_control['stop'] = True
                 return
 
             leader = Leader(node, agents, socketio_instance, teleop.settings)
 
+            
             socketio_instance.start_background_task(
                 target=leader.leader_teleop_workflow,
-                task_control=tele_control
+                task_control=task_control
             )
 
             while not leader.is_synced:
@@ -88,18 +88,18 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
         for agent in agents:
             if agent.joint_states is None:
                 print(f'[ERROR] No joint states from robot {agent.id}')
-                tele_control['stop'] = True
+                task_control['stop'] = True
                 return
             if agent.joint_actions is None:
                 print(f'[ERROR] No joint commands from robot {agent.id}')
-                tele_control['stop'] = True
+                task_control['stop'] = True
                 return
             agent.move_lock = False
             
         for sensor in sensors:
             if getattr(env, f'sensor_{sensor["id"]}') is None:
                 print(f'[ERROR] No data from sensor {sensor["id"]}')
-                tele_control['stop'] = True
+                task_control['stop'] = True
                 return
             
         ts = env.reset()
@@ -111,7 +111,7 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                 while not any(agent.moved_by_ui for agent in agents):
                     if task_control['stop']:
                         print('Stopping episode recording as requested.')
-                        tele_control['stop'] = True
+                        task_control['stop'] = True
                         return
                     time.sleep(0.1)
 
@@ -120,7 +120,7 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
             })
             if task_control['stop']:
                 print('Stopping episode recording as requested.')
-                tele_control['stop'] = True
+                task_control['stop'] = True
                 return
 
             ts = env.record_step()
@@ -130,6 +130,10 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
             if tele_type == 'keyboard':
                 for agent in agents:
                     agent.moved_by_ui = False
+        
+        if tele_type == 'leader':
+            task_control['episode_stop'] = True
+            time.sleep(0.5)
 
         print(f'Saving Data: {dataset_name}')
 
@@ -148,8 +152,9 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                     for t_step in timesteps:
                         img = t_step.observation['images'][f'sensor_{s_id}']
                         img_data.append(fetch_image_with_config(img, {
-                            'resize': task['sensor_settings'][s_id]['img_size'],
-                            'cropped_area': task['sensor_settings'][s_id].get('cropped_area', None)
+                            'resize': task['sensor_img_size'][s_id],
+                            'cropped_area': task['sensor_cropped_area'][s_id],
+                            'rotate': task['sensor_rotate'][s_id]
                         }))
                     image_group.create_dataset(f"sensor_{s_id}", data=np.array(img_data), dtype='uint8')
 
@@ -202,7 +207,7 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
             import traceback
             traceback_msg = traceback.format_exc()
             print(f"[ERROR] Error during episode recording:\n{traceback_msg}")
-            tele_control['stop'] = True
+            task_control['stop'] = True
 
 # def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
 #     max_idx = 1000

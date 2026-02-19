@@ -27,6 +27,10 @@ const props = defineProps({
   cropped_area: {
     type: Object,
     default: () => ({}),
+  },
+  rotate: {
+    type: Number,
+    default: 0,
   }
 });
 
@@ -39,6 +43,7 @@ const setupWebRTC = () => {
   connect(props.topic, {
     resize: props.resize.length ? props.resize : null,
     cropped_area: props.cropped_area.length ? props.cropped_area : null,
+    rotate: props.rotate,
   }, (event) => {
     if (videoElement.value) {
       const newStream = new MediaStream();
@@ -67,6 +72,7 @@ watch(() => props.resize, (newResize, oldResize) => {
   addConfig(stream_id, {
     resize: newResize.length ? newResize : null,
     cropped_area: props.cropped_area.length ? props.cropped_area : null,
+    rotate: props.rotate,
   });
 });
 
@@ -77,7 +83,19 @@ watch(() => props.cropped_area, (newCroppedArea, oldCroppedArea) => {
   addConfig(stream_id, {
     resize: props.resize.length ? props.resize : null,
     cropped_area: newCroppedArea,
+    rotate: props.rotate,
   });
+});
+
+watch (() => props.rotate, (newRotate, oldRotate) => {
+  if (newRotate === oldRotate) {
+    return;
+  }
+  addConfig(stream_id, {
+    resize: props.resize.length ? props.resize : null,
+    cropped_area: props.cropped_area.length ? props.cropped_area : null,
+    rotate: newRotate,
+  })
 });
 
 onMounted(() => {

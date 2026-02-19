@@ -5,12 +5,11 @@
   2. Ubuntu 배포용 `.deb` 자동 생성 → 현재 프로젝트 버전 그대로 설치 가능
   3. 런처에서 원본 프로젝트 경로 지정 후 “빠른 동기화(⇆)”로 `src/backend`, `src/ui`, `ros2_ws/src`, compose 파일을 바로 적용
   4. 로컬 앱처럼 실행하면 켜지고 창을 닫으면 종료
+  5. 데이터 내보내기 기능, 삭제 기능
+  6. 코드 업데이트 기능 → 전체 재설치 대신 암호화된 코드만 교체하여 적용
 
 - 예정 기능
-  1. 데이터 내보내기 기능, 삭제 기능
-2. 코드 정리
-  3. 코드 업데이트 기능 → 전체 재설치 대신 필요한 코드 또는 암호화된 코드만 교체하여 적용
-  4. 다양한 OS 배포 기능 (Windows/macOS)
+  1. 다양한 OS 배포 기능 (Windows/macOS)
 
 ---
 
@@ -19,11 +18,15 @@
 - 실행 환경 구성
   - UI & 배포 환경: 
     ```bash
+    sudo apt update
+    sudo apt install python3-pip
     sudo apt-get install -y dpkg-dev rsync python3-venv
     python3 -m pip install --user PySide6
     ```
   - Docker & Docker Compose v2
     ```bash
+    sudo apt update
+    sudo apt install curl -y
     sudo install -m 0755 -d /etc/apt/keyrings
     curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
       sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
@@ -88,6 +91,7 @@
   - 중지: `docker compose stop service`
   - 완전 초기화: `docker compose down --remove-orphans --volumes`
   - 로그: `docker logs -f easy_collector_service`
+  - UI 터미널 실행: `python3 release/ui/main.py`
 
 ---
 

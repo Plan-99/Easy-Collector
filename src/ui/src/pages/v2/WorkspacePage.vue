@@ -80,13 +80,13 @@
                     <q-list dark bordered separator class="border-rounded bg-dark" >
                         <q-expansion-item
                             icon="camera"
-                            :label="`${$t('sensorSetting')} (${selectedWorkspaceSensors.length})`"
+                            :label="`${$t('sensorSetting')} (${selectedSensors.length})`"
                         >
                             <q-card class="bg-dark">
                                 <q-card-section>
                                     <div
                                         class="q-pa-sm q-px-md q-my-sm border-rounded row"
-                                        v-for="sensor in selectedWorkspaceSensors" 
+                                        v-for="sensor in selectedSensors" 
                                         :key="sensor.id"
                                         :class="sensor.status === 'on' ? 'bg-green-10' : 'bg-grey-8'"
                                     >
@@ -236,14 +236,47 @@
                                 ></div>
                             </div>
                             <div>
-                                <div class="text-caption q-mt-sm">Cropped Area</div>
-                                <div>
-                                    {{ selectedWorkspace.sensor_settings?.[focused.id]?.cropped_area || 'Not Set' }}
+                                <div class="row justify-between">
+                                    <div class="text-caption">Cropped Area</div>
+                                    <div>
+                                        {{ selectedWorkspace.sensor_cropped_area[focused.id] ? `${selectedWorkspace.sensor_cropped_area[focused.id][2] - selectedWorkspace.sensor_cropped_area[focused.id][0]} x ${selectedWorkspace.sensor_cropped_area[focused.id][3] - selectedWorkspace.sensor_cropped_area[focused.id][1]}` : 'Not Set' }}
+                                    </div>
                                 </div>
-                                <div class="text-caption q-mt-sm">Cropped Size</div>
-                                <div>
-                                    {{ selectedWorkspace.sensor_settings?.[focused.id]?.cropped_area ? `${selectedWorkspace.sensor_settings?.[focused.id]?.cropped_area[2] - selectedWorkspace.sensor_settings?.[focused.id]?.cropped_area[0]} x ${selectedWorkspace.sensor_settings?.[focused.id]?.cropped_area[3] - selectedWorkspace.sensor_settings?.[focused.id]?.cropped_area[1]}` : 'Not Set' }}
+                                <div class="row q-gutter-x-sm">
+                                    <q-input
+                                        v-for="(val, index) in ['x1', 'y1', 'x2', 'y2']"
+                                        :key="index"
+                                        dense
+                                        outlined
+                                        dark
+                                        bg-color="dark"
+                                        class="col"
+                                        v-model.number="selectedWorkspace.sensor_cropped_area[focused.id][index]"
+                                        @update:model-value="updateWorkspaceDeviceSetting({ 
+                                            device_type: 'sensors',
+                                            key: 'cropped_area',
+                                            setting: selectedWorkspace.sensor_cropped_area,
+                                        });"
+                                    ></q-input>
                                 </div>
+                                
+                            </div>
+                            <div class="q-mt-sm">
+                                <div class="text-caption q-mb-xs">Rotate</div>
+                                <q-select
+                                    dense
+                                    outlined
+                                    dark
+                                    bg-color="dark"
+                                    v-model="selectedWorkspace.sensor_rotate[focused.id]"
+                                    :options="[0, 90, 180, 270]"
+                                    label="Rotation (degrees)"
+                                    @update:model-value="updateWorkspaceDeviceSetting({ 
+                                        device_type: 'sensors',
+                                        key: 'rotate',
+                                        setting: selectedWorkspace.sensor_rotate,
+                                    });"
+                                ></q-select>
                             </div>
                         </div>
                         <div
@@ -299,11 +332,10 @@
                                 :caption="`${dataset.episodes.length} episodes`"
                                 v-for="dataset in datasets"
                                 :key="dataset.id"
-                                class="text-white"
                                 dark
                                 :model-value="selectedDatasetId === dataset.id"
                                 @show="selectedDatasetId = dataset.id"
-                                header-class="items-center"
+                                header-class="text-white"
                             >
                                 <template v-slot:header>
                                     <q-icon name="folder" class="q-mr-lg" size="lg"></q-icon>
@@ -325,6 +357,12 @@
                                                         <q-icon name="edit" size="xs" />
                                                     </q-item-section>
                                                 </q-item>
+                                                <q-item clickable v-ripple v-close-popup @click="openMergeDatasetForm(dataset)">
+                                                    <q-item-section>Merge Dataset</q-item-section>
+                                                    <q-item-section side>
+                                                        <q-icon name="merge_type" size="xs" />
+                                                    </q-item-section>
+                                                </q-item>
                                                 <q-item clickable v-ripple class="text-negative" @click="deleteDataset(dataset)">
                                                     <q-item-section>Delete Dataset</q-item-section>
                                                     <q-item-section side>
@@ -334,6 +372,9 @@
                                             </q-list>
                                         </q-menu>
                                     </div>
+                                    <q-item-section side v-if="!checkDatasetCompatibility(dataset)">
+                                        <q-icon name="warning" color="negative" size="24px" />
+                                    </q-item-section>
                                     <q-space class="col"></q-space>
                                 </template>
                                 <q-list bordered separator dark dense v-if="selectedDatasetId === dataset.id">
@@ -419,7 +460,7 @@
                 class="col"
                 :workspace="selectedWorkspace"
                 :robots="robots"
-                :sensors="selectedWorkspaceSensors"
+                :sensors="selectedSensors"
                 v-model:selected-dataset-id="selectedDatasetId"
                 v-model:selected-checkpoint-id="selectedCheckpointId"
                 v-model:focused="focused"
@@ -447,16 +488,65 @@
         ></form-dialog>
         <form-dialog
             v-model="showDatasetForm"
-            :title="$t(datasetForm.id ? 'datasetEditFormTitle' : 'datasetAddFormTitle')"
+            :title="$t(datasetForm.find(f => f.key === 'id')? 'datasetEditFormTitle' : 'datasetAddFormTitle')"
             :form="datasetForm"
             @submit="saveDataset"
-            :ok-button-label="$t(datasetForm.id ? 'save' : 'add')"
-        ></form-dialog>
+            :ok-button-label="$t(datasetForm.find(f => f.key === 'id') ? 'save' : 'add')"
+        >
+            <template v-slot:hdf5_metadata>
+                <div style="color: red;">You have to remap the sensors and robots because this dataset was created with a different sensor/robot configuration.</div>
+                <div v-for="robot in datasetForm.find(f => f.key === 'hdf5_metadata').value.robots" :key="robot">
+                    <div class="row q-my-md q-col-gutter-sm">
+                        <div class="text-white">{{ robot }}</div>
+                        <q-select
+                            dense
+                            outlined
+                            dark
+                            bg-color="dark"
+                            v-model="datasetForm.find(f => f.key === 'robot_mappings').value[robot]"
+                            :options="robots"
+                            label="Select Robot"
+                            style="width: 200px"
+                            map-options
+                            emit-value
+                            option-label="name"
+                            option-value="id"
+                        ></q-select>
+                    </div>
+                </div>
+                <div v-for="sensor in datasetForm.find(f => f.key === 'hdf5_metadata').value.sensors" :key="sensor">
+                    <div class="row q-my-md q-col-gutter-sm">
+                        <div class="text-white">{{ sensor }}</div>
+                        <q-select
+                            dense
+                            outlined
+                            dark
+                            bg-color="dark"
+                            v-model="datasetForm.find(f => f.key === 'sensor_mappings').value[sensor]"
+                            :options="selectedSensors"
+                            label="Select Sensor"
+                            style="width: 200px"
+                            map-options
+                            emit-value
+                            option-label="name"
+                            option-value="id"
+                        ></q-select>
+                    </div>
+                </div>
+            </template>
+        </form-dialog>
         <form-dialog
             v-model="showCheckpointForm"
             :title="$t('checkpointEditFormTitle')"
             :form="checkpointForm"
             @submit="saveCheckpoint"
+            :ok-button-label="$t('save')"
+        ></form-dialog>
+        <form-dialog
+            v-model="showMergeDatasetForm"
+            :title="$t('mergeDatasetFormTitle')"
+            :form="mergeDatasetForm"
+            @submit="mergeDatasets"
             :ok-button-label="$t('save')"
         ></form-dialog>
 
@@ -501,7 +591,7 @@ import { api } from 'src/boot/axios';
 import FormDialog from 'src/components/v2/FormDialog.vue';
 import { useSensor } from '../../composables/useSensor';
 import { useRobot } from 'src/composables/useRobot';
-import { Notify } from 'quasar';
+import { Notify, Loading } from 'quasar';
 import { useI18n } from 'vue-i18n';
 import DataAugmentationDialog from 'src/components/v2/DataAugmentationDialog.vue';
 import { useSocket } from 'src/composables/useSocket.js';
@@ -569,7 +659,6 @@ const selectedWorkspace = computed(() => {
 
 console.log('Selected Workspace:', selectedWorkspace);
 
-const sensors = ref([]);
 const robots = computed(() => {
     if (!selectedWorkspace.value) {
         return [];
@@ -587,12 +676,20 @@ const robots = computed(() => {
     })
 });
 
-const selectedWorkspaceSensors = computed(() => {
-    if (!selectedWorkspace.value || !selectedWorkspace.value.sensor_settings) {
+const sensors = ref([]);
+
+const selectedSensors = computed(() => {
+    if (!selectedWorkspace.value) {
         return [];
     }
-    const selectedIds = Object.keys(selectedWorkspace.value.sensor_settings);
-    return sensors.value.filter(s => selectedIds.includes(String(s.id)));
+    return selectedWorkspace.value.sensors.map((sensor) => {
+        const handler = useSensor(sensor);
+        sensor.handler = handler;
+        if (sensor.type === 'custom') {
+            sensor.handler.checkSensorTopic();
+        }   
+        return sensor;
+    });
 });
 
 function listSensors() {
@@ -618,6 +715,7 @@ function listAssemblies() {
 const selectedTab = ref('setting');
 
 function toggleSensor(sensor) {
+    sensor.process_id = `sensor_${sensor.id}`;
     if (sensor.status === 'on') {
         sensor.handler.stopSensor()
     } else {
@@ -632,72 +730,56 @@ const sensorForm = ref([
 ])
 
 const sensorSettingsMap = ref({});
-watch(() => selectedWorkspace.value?.sensor_settings, (newSettings) => {
+watch(() => selectedWorkspace.value?.settings, (newSettings) => {
     sensorSettingsMap.value = JSON.parse(JSON.stringify(newSettings || {}));
 }, { deep: true, immediate: true });
 
-const commonSensorResolution = ref({ width: 640, height: 480 });
+const commonSensorResolution = ref({});
 
-watch(selectedWorkspace, (workspace) => {
-    if (workspace && workspace.sensor_settings) {
-        const firstSensorId = Object.keys(workspace.sensor_settings)[0];
+function initCommonSensorResolution() {
+    console.log('Initializing commonSensorResolution...');
+    commonSensorResolution.value = (() => {
+        const firstSensorId = selectedWorkspace.value.sensor_ids[0];
         if (firstSensorId) {
-            const settings = workspace.sensor_settings[firstSensorId];
-            if (settings && settings.img_size && settings.img_size.length === 2) {
-                commonSensorResolution.value = {
-                    width: settings.img_size[0],
-                    height: settings.img_size[1]
+            const settings = selectedWorkspace.value.sensor_img_size[firstSensorId];
+            if (settings && settings.length === 2) {
+                return {
+                    width: settings[0],
+                    height: settings[1]
                 };
             }
         }
-    }
-}, { deep: true, immediate: true });
+        return { width: 640, height: 480 }; // Default resolution
+    })();
+}
 
-function updateAllSensorResolutions() {
-    if (!sensorSettingsMap.value) return;
+watch(commonSensorResolution, (newRes) => {
+    updateAllSensorResolutions(newRes.width, newRes.height);
+}, { deep: true });
 
-    const newWidth = commonSensorResolution.value.width;
-    const newHeight = commonSensorResolution.value.height;
-
-    const newSettings = { ...sensorSettingsMap.value };
-
-    for (const sensorId in newSettings) {
-        if (Object.prototype.hasOwnProperty.call(newSettings, sensorId)) {
-            newSettings[sensorId].img_size = [newWidth, newHeight];
-        }
+function updateAllSensorResolutions(width, height) {
+    for(const sensorId of selectedWorkspace.value.sensor_ids) {
+        selectedWorkspace.value.sensor_img_size[sensorId] = [width, height];
     }
 
-    sensorSettingsMap.value = newSettings;
-
-    updateWorkspace({ sensor_settings: sensorSettingsMap.value });
+    updateWorkspaceDeviceSetting({
+        device_type: 'sensors',
+        key: 'img_size',
+        setting: selectedWorkspace.value.sensor_img_size
+    })
 }
 
 
 function openSensorForm() {
     if (selectedWorkspace.value) {
-        sensorForm.value.find(e => e.key === 'sensor_ids').value = Object.keys(selectedWorkspace.value.sensor_settings || {}).map(id => parseInt(id, 10));
+        sensorForm.value.find(e => e.key === 'sensor_ids').value = Object.keys(selectedWorkspace.value.sensors || {}).map(id => parseInt(id, 10));
     }
     showSensorForm.value = true;
 }
 
 function saveSensorSettings(form) {
-    const newSettings = {};
-    const existingSettings = selectedWorkspace.value.sensor_settings || {};
-
-    for (const id of form.sensor_ids) {
-        newSettings[id] = existingSettings[id] || {
-            sensor_id: id,
-            img_size: [640, 480],
-            cropped_area: [0, 0, 640, 480]
-        };
-    }
-    
-    const updateForm = {
-        sensor_settings: newSettings,
-        sensor_ids: []
-    }
-    
-    return updateWorkspace(updateForm);
+    console.log('Sensor IDs to update:', form.sensor_ids);
+    return updateWorkspace({ sensor_ids: form.sensor_ids });
 }
 
 function updateWorkspace(form) {
@@ -708,6 +790,7 @@ function updateWorkspace(form) {
 }
 
 function updateWorkspaceDeviceSetting(form) {
+    console.log('Updating workspace device settings with form:', form);
     return api.put(`/task/${selectedWorkspace.value.id}/device_settings`, form).then(() => {
         listWorkspaces();
     });
@@ -721,7 +804,7 @@ watch(selectedWorkspaceId, (newVal) => {
     focused.value = {};
     listDatasets();
     listCheckpoints();
-
+    initCommonSensorResolution();
 });
 
 function toggleRobot(robot) {
@@ -796,7 +879,15 @@ const showDatasetForm = ref(false);
 const datasetForm = ref([
     { key: 'id', value: null },
     { key: 'name', label: t('datasetName'), type: 'text', value: '', default: '' },
+    { key: 'hdf5_metadata', label: 'HDF5 Metadata', type: 'custom', value: {}, default: {}, show: (form) => !checkDatasetCompatibility(form)},
+    { key: 'robot_mappings', label: 'Robot Mappings', type: 'custom', value: [], default: {}, show: () => false },
+    { key: 'sensor_mappings', label: 'Sensor Mappings', type: 'custom', value: {}, default: {}, show: () => false },
 ])
+
+// const datasetMetadataForm = ref([
+//     { key: 'robot_mappings', label: 'Robot Mappings', type: 'custom', value: [], default: {} },
+//     { key: 'sensor_mappings', label: 'Sensor Mappings', type: 'custom', value: {}, default: {} },
+// ]);
 
 function openAddDatasetForm() {
     datasetForm.value.forEach((field) => {
@@ -805,25 +896,107 @@ function openAddDatasetForm() {
     showDatasetForm.value = true;
 }
 
-function openEditDatasetForm(dataset) {
+async function openEditDatasetForm(dataset) {
+    // 1. 기본 필드 값 세팅 (id, name 등)
     datasetForm.value.forEach((field) => {
         field.value = dataset[field.key] || field.default;
     });
-    datasetForm.value.find((e) => e.key === 'id').value = dataset.id; // Set ID for edit
+
+    // 2. robot_mappings 필드 커스텀 세팅
+
+    console.log('Dataset HDF5 Metadata:', datasetForm.value.find((e) => e.key === 'robot_mappings'));
+    
+    const robotMappingField = datasetForm.value.find((e) => e.key === 'robot_mappings');
+    if (robotMappingField && dataset.hdf5_metadata?.robots) {
+        // robots 리스트: ['robot_a', 'robot_b']
+        // 변환 결과: { "robot_a": null, "robot_b": null }
+        robotMappingField.value = Object.fromEntries(
+            dataset.hdf5_metadata.robots.map(robot => [robot, null])
+        );
+    }
+    console.log('Robot Mappings set to:', robotMappingField.value);
+
+    const sensorMappingField = datasetForm.value.find((e) => e.key === 'sensor_mappings');
+    if (sensorMappingField && dataset.hdf5_metadata?.sensors) {
+        sensorMappingField.value = Object.fromEntries(
+            dataset.hdf5_metadata.sensors.map(sensor => [sensor, null])
+        );
+    }
+
     showDatasetForm.value = true;
 }
 
-function saveDataset(form) {
-    if (datasetForm.value.find((e) => e.key === 'id').value) {
-        return api.put(`/dataset/${form.id}`, form).then(() => {
-            datasetForm.value.forEach(field => field.value = field.default); // Reset form fields
-            listDatasets()
-        })
+async function saveDataset(form) {
+    try {
+        // 1. 현재 datasetForm(배열)의 모든 value를 하나의 객체로 추출
+        const payload = {};
+        datasetForm.value.forEach(field => {
+            payload[field.key] = field.value;
+        });
+
+        // 만약 인자로 들어온 form에 추가 데이터가 있다면 합쳐줍니다.
+        const finalData = { ...form, ...payload };
+
+        const id = datasetForm.value.find((e) => e.key === 'id').value;
+
+        if (id) {
+            // --- 수정(Edit) 로직 ---
+            await api.put(`/dataset/${id}`, finalData);
+            
+            // 메타데이터 수정 API 호출 (finalData에 robot_mappings 등이 포함됨)
+            await api.post(`/dataset/${id}/:edit_datasets_metadata`, finalData);
+
+        } else {
+            // --- 추가(Add) 로직 ---
+            await api.post(`/dataset`, { 
+                ...finalData, 
+                task_id: selectedWorkspaceId.value 
+            });
+        }
+
+        // 공통 마무리 로직
+        datasetForm.value.forEach(field => field.value = field.default); // 폼 초기화
+        await listDatasets(); // 목록 갱신
+        showDatasetForm.value = false; // 다이얼로그 닫기
+
+    } catch (error) {
+        console.error('데이터 저장 실패:', error);
+        // 사용자에게 에러 알림 (예: $q.notify 등)
     }
-    return api.post(`/dataset`, { ...form, task_id: selectedWorkspaceId.value }).then(() => {
-        datasetForm.value.forEach(field => field.value = field.default); // Reset form fields
-        listDatasets()
-    })
+}
+
+function checkDatasetCompatibility(form) {
+
+    const workspaceRobotTypes = robots.value.map(r => "robot_" + r.id).sort();
+    const workspaceSensorTypes = selectedSensors.value.map(s => "sensor_" + s.id).sort();
+
+    const datasetRobotTypes = ref([]);
+    const datasetSensorTypes = ref([]);
+
+    if (Array.isArray(form)) {
+        // 1. 배열 형태인 form에서 hdf5_metadata 값을 추출합니다.
+        const hdf5MetadataEntry = form.find(item => item.key === 'hdf5_metadata');
+        const hdf5_metadata = hdf5MetadataEntry ? hdf5MetadataEntry.value : { robots: [], sensors: [] };
+
+        // 3. 데이터셋(HDF5)의 구성을 가져옵니다.
+        datasetRobotTypes.value = (hdf5_metadata.robots || []).filter(t => t !== null).sort();
+        datasetSensorTypes.value = (hdf5_metadata.sensors || []).filter(t => t !== null).sort();
+
+    } else {
+        datasetRobotTypes.value = (form.hdf5_metadata?.robots || []).filter(t => t !== null).sort();
+        datasetSensorTypes.value = (form.hdf5_metadata?.sensors || []).filter(t => t !== null).sort();
+    }
+    const robotsMatch = JSON.stringify(workspaceRobotTypes) === JSON.stringify(datasetRobotTypes.value);
+    const sensorsMatch = JSON.stringify(workspaceSensorTypes) === JSON.stringify(datasetSensorTypes.value);
+
+    console.log(datasetRobotTypes.value)
+    console.log(datasetSensorTypes.value)
+
+    if (datasetRobotTypes.value.length == 0 && datasetSensorTypes.value.length == 0) {
+        return true;
+    }
+
+    return robotsMatch && sensorsMatch;
 }
 
 const showAugmentationForm = ref(false);
@@ -873,6 +1046,7 @@ const status = computed(() => {
     } else if (processStore.isRunning('replay_episode')) {
         return 'replaying';
     } else {
+        listDatasets();
         return 'pending';
     }
 });
@@ -1072,25 +1246,52 @@ function saveCroppedArea() {
     const x2_clamped = Math.max(0, Math.min(focused.value.resolution[0], x2));
     const y2_clamped = Math.max(0, Math.min(focused.value.resolution[1], y2));
 
-    if (sensorSettingsMap.value[focused.value.id]) {
-        sensorSettingsMap.value[focused.value.id].cropped_area = [x1_clamped, y1_clamped, x2_clamped, y2_clamped];
-        updateWorkspace({ sensor_settings: sensorSettingsMap.value });
-    }
+    selectedWorkspace.value.sensor_cropped_area[focused.value.id] = [x1_clamped, y1_clamped, x2_clamped, y2_clamped];
+        
+    updateWorkspaceDeviceSetting({ 
+        device_type: 'sensors',
+        key: 'cropped_area',
+        setting: selectedWorkspace.value.sensor_cropped_area
+    });
 }
 
 function resetCroppedArea() {
     if (!focused.value.id) return;
-    if (sensorSettingsMap.value[focused.value.id]) {
-        sensorSettingsMap.value[focused.value.id].cropped_area = [
-            0,
-            0,
-            focused.value.resolution[0],
-            focused.value.resolution[1]
-        ];
-        updateWorkspace({ sensor_settings: sensorSettingsMap.value });
-    }
+    selectedWorkspace.value.sensor_cropped_area[focused.value.id] = [
+        0,
+        0,
+        focused.value.resolution[0],
+        focused.value.resolution[1]
+    ];
+    updateWorkspaceDeviceSetting({
+        device_type: 'sensors',
+        key: 'cropped_area',
+        setting: selectedWorkspace.value.sensor_cropped_area
+    });
 }
 
+const showMergeDatasetForm = ref(false);
+const mergeDatasetForm = ref([
+    { key: 'source_dataset_id', label: 'Source Dataset', type: 'select', options: computed(() => datasets.value.map(d => ({ label: d.name, value: d.id }))), value: null, default: null },
+    { key: 'target_dataset_ids', label: 'Target Dataset', type: 'multiselect_list', options: computed(() => datasets.value.map(d => ({ label: d.name, value: d.id }))), value: [], default: [] },
+]);
+
+function openMergeDatasetForm(dataset) {
+    mergeDatasetForm.value.forEach((field) => {
+        field.value = field.default;
+    });
+    mergeDatasetForm.value.find(e => e.key === 'source_dataset_id').value = dataset.id;
+    showMergeDatasetForm.value = true;
+}
+
+function mergeDatasets(form) {
+    Loading.show();
+    return api.post('/dataset/:merge', form).then(() => {
+        listDatasets()
+    }).finally(() => {
+        Loading.hide();
+    });
+}
 
 onUnmounted(() => {
     robots.value.forEach(robot => {

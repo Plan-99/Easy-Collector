@@ -46,6 +46,57 @@
 
                         <q-expansion-item
                             expand-separator
+                            icon="palette"
+                            label="HSV Color Space"
+                            caption="Adjust hue, saturation, value"
+                        >
+                            <q-card class="bg-secondary" dark>
+                                <q-card-section>
+                                    <q-checkbox
+                                        v-model="form.hsv.random"
+                                        label="Random HSV"
+                                        @update:model-value="addConfig"
+                                        class="q-mb-md"
+                                    />
+                                    <div class="text-caption">Hue</div>
+                                    <q-slider
+                                        v-model="form.hsv.h"
+                                        :min="0"
+                                        :max="1"
+                                        :step="0.01"
+                                        label
+                                        label-always
+                                        :disable="form.hsv.random"
+                                        @change="addConfig"
+                                    />
+                                    <div class="text-caption">Saturation</div>
+                                    <q-slider
+                                        v-model="form.hsv.s"
+                                        :min="0"
+                                        :max="1"
+                                        :step="0.01"
+                                        label
+                                        label-always
+                                        :disable="form.hsv.random"
+                                        @change="addConfig"
+                                    />
+                                    <div class="text-caption">Value</div>
+                                    <q-slider
+                                        v-model="form.hsv.v"
+                                        :min="0"
+                                        :max="1"
+                                        :step="0.01"
+                                        label
+                                        label-always
+                                        :disable="form.hsv.random"
+                                        @change="addConfig"
+                                    />
+                                </q-card-section>
+                            </q-card>
+                        </q-expansion-item>
+
+                        <q-expansion-item
+                            expand-separator
                             icon="crop_square"
                             label="Disturbances"
                             caption="Add random disturbances"
@@ -256,6 +307,12 @@ const form = ref({
         degrees: 0,
         shear: 0,
         perspective: 0,
+    },
+    hsv: {
+        h: 0,
+        s: 0,
+        v: 0,
+        random: false
     }
 });
 

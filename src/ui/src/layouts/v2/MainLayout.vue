@@ -15,13 +15,13 @@
           Easy Trainer
         </q-toolbar-title>
         <q-space></q-space>
-        <q-btn
+        <!-- <q-btn
           flat
           dense
           round
           icon="refresh"
           @click="$router.go()"
-        ></q-btn>
+        ></q-btn> -->
       </q-toolbar>
     </q-header>
     <q-drawer

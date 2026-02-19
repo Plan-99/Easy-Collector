@@ -1,337 +1,214 @@
-import casadi                                                                       
-import meshcat.geometry as mg
-import numpy as np
-import pinocchio as pin                             
-import time
-from pinocchio import casadi as cpin    
-from pinocchio.visualize import MeshcatVisualizer   
-import os
-import sys
-import logging_mp
-logger_mp = logging_mp.get_logger(__name__)
-parent2_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.append(parent2_dir)
+# -*- coding: utf-8 -*-
+#
+# Copyright 2024 Pukyung National University
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
+import numpy as np
+import pinocchio as pin
+from pink import solve_ik
+from pink.tasks import FrameTask
+from pink.configuration import Configuration
+
+# ---------------------------------------------------------------------------
+# Helper Functions (Largely unchanged, as they are used for pose representation)
+# ---------------------------------------------------------------------------
 
 def xyzrpy_to_se3(xyzrpy):
     """
-    (x, y, z, roll, pitch, yaw) 형식의 리스트를 SE3 객체로 변환합니다.
+    Converts a list of [x, y, z, roll, pitch, yaw] to a pin.SE3 object.
     """
     xyz = np.array(xyzrpy[:3])
     rpy = np.array(xyzrpy[3:])
     rotation_matrix = pin.rpy.rpyToMatrix(rpy)
-    se3_pose = pin.SE3(rotation_matrix, xyz)
-    return se3_pose.homogeneous
-
+    return pin.SE3(rotation_matrix, xyz)
 
 def se3_to_xyzrpy(se3_matrix):
     """
-    SE3 객체를 (x, y, z, roll, pitch, yaw) 형식의 리스트로 변환합니다.
+    Converts a pin.SE3 object to a list of [x, y, z, roll, pitch, yaw].
     """
     xyz = se3_matrix.translation
     rotation_matrix = se3_matrix.rotation
     rpy = pin.rpy.matrixToRpy(rotation_matrix)
     return np.concatenate([xyz, rpy]).tolist()
 
+def se3_to_xyzaxayaz(se3_matrix):
+    """
+    Converts a pin.SE3 object to a list of [x, y, z, ax, ay, az] (rotation vector).
+    """
+    xyz = se3_matrix.translation
+    rotation_matrix = se3_matrix.rotation
+    axayaz = pin.log3(rotation_matrix)
+    return np.concatenate([xyz, axayaz]).tolist()
+
+def xyzaxayaz_to_se3(xyzaxayaz):
+    """
+    Converts a list of [x, y, z, ax, ay, az] (rotation vector) to a pin.SE3 object.
+    """
+    xyz = np.array(xyzaxayaz[:3])
+    axayaz = np.array(xyzaxayaz[3:])
+    rotation_matrix = pin.exp3(axayaz)
+    return pin.SE3(rotation_matrix, xyz)
 
 # ---------------------------------------------------------------------------
-# 헬퍼 클래스 (변경 없음)
-# ---------------------------------------------------------------------------
-class WeightedMovingFilter:
-    def __init__(self, weights, data_size = 14):
-        self._window_size = len(weights)
-        self._weights = np.array(weights)
-        assert np.isclose(np.sum(self._weights), 1.0), "[WeightedMovingFilter] the sum of weights list must be 1.0!"
-        self._data_size = data_size
-        self._filtered_data = np.zeros(self._data_size)
-        self._data_queue = []
-
-    def _apply_filter(self):
-        if len(self._data_queue) < self._window_size:
-            return self._data_queue[-1]
-
-        data_array = np.array(self._data_queue)
-        temp_filtered_data = np.zeros(self._data_size)
-        for i in range(self._data_size):
-            temp_filtered_data[i] = np.convolve(data_array[:, i], self._weights, mode='valid')[-1]
-        
-        return temp_filtered_data
-
-    def add_data(self, new_data):
-        assert len(new_data) == self._data_size
-
-        if len(self._data_queue) > 0 and np.array_equal(new_data, self._data_queue[-1]):
-            return  # skip duplicate data
-        
-        if len(self._data_queue) >= self._window_size:
-            self._data_queue.pop(0)
-
-        self._data_queue.append(new_data)
-        self._filtered_data = self._apply_filter()
-
-    @property
-    def filtered_data(self):
-        return self._filtered_data
-
-# ---------------------------------------------------------------------------
-# ## 🚀 상위 클래스: IK_Solver (General-Purpose)
+# ## 🚀 Main Class: IK_Solver (using pink)
 # ---------------------------------------------------------------------------
 class IK_Solver:
     def __init__(self, 
                  urdf_path, 
-                 package_dir, 
                  joints_to_lock, 
-                 ee_definitions, # <--- 변경: l_ee_def, r_ee_def 대신 리스트 사용
-                 cost_weights,
-                 use_scaling=False,
-                 Visualization=False):
+                 ee_definitions,
+                 dt=0.01, # Timestep for IK integration
+                 solver='proxqp',
+                 **kwargs): # Absorb unused parameters
         
         np.set_printoptions(precision=5, suppress=True, linewidth=200)
-        self.Visualization = Visualization
-        self.use_scaling = use_scaling 
+        
+        # 1. Load and reduce the robot model using Pinocchio
+        full_model = pin.buildModelFromUrdf(urdf_path)
+        joints_to_lock_ids = [full_model.getJointId(jname) for jname in joints_to_lock if full_model.existJointName(jname)]
+        q_reference = pin.neutral(full_model) # Use neutral configuration as reference
+        
+        self.model = pin.buildReducedModel(full_model, joints_to_lock_ids, q_reference)
+        self.data = self.model.createData()
+        
+        self.nq = self.model.nq
+        self.nv = self.model.nv
+        self.dt = dt
+        self.solver = solver
+
+        # 2. Dynamically add EE frames if they don't exist
         self.ee_names = []
-        self.ee_ids = {}
-        self.ee_params = {}     # 최적화용 파라미터 (목표치)
-        self.ee_sym_vars = {}   # 심볼릭 변수 (수식용)
-
-        # 1. 로봇 로드
-        self.robot = pin.RobotWrapper.BuildFromURDF(urdf_path, package_dir)
-
-        # 2. 모델 축소
-        self.reduced_robot = self.robot.buildReducedRobot(
-            list_of_joints_to_lock=joints_to_lock,
-            reference_configuration=np.array([0.0] * self.robot.model.nq),
-        )
-
-        # 3. EE 프레임 동적 추가
-        # ee_definitions 형식: [ ('L_ee', 'joint_name', offset_array), 
-        #                      ('R_ee', 'joint_name', offset_array) ]
+        self.ee_frame_names = {}
         for name, parent_or_existing_frame, offset in ee_definitions:
             self.ee_names.append(name)
-            
+            frame_name_to_use = name # Use the task name as the frame name by default
+
             if offset is not None:
-                # --- 1. '새 프레임 추가' 로직 (기존과 동일) ---
+                # This logic creates a new frame in the model
                 parent_joint_name = parent_or_existing_frame
-                logger_mp.debug(f"Adding new EE frame: '{name}' relative to '{parent_joint_name}'")
+                if not self.model.existJointName(parent_joint_name):
+                    raise ValueError(f"Joint '{parent_joint_name}' not found.")
+                parent_joint_id = self.model.getJointId(parent_joint_name)
                 
-                self.reduced_robot.model.addFrame(
-                    pin.Frame(name,
-                              self.reduced_robot.model.getJointId(parent_joint_name),
-                              pin.SE3(np.eye(3), offset),
-                              pin.FrameType.OP_FRAME)
-                )
-                self.ee_ids[name] = self.reduced_robot.model.getFrameId(name)
-            
+                new_frame = pin.Frame(frame_name_to_use, parent_joint_id, pin.SE3(np.eye(3), np.array(offset)), pin.FrameType.OP_FRAME)
+                
+                if not self.model.existFrame(frame_name_to_use):
+                    self.model.addFrame(new_frame)
+                
             else:
-                # --- 2. '기존 프레임 사용' 로직 (새 로직) ---
-                existing_frame_name = parent_or_existing_frame
-                logger_mp.debug(f"Using existing URDF frame: '{existing_frame_name}' as EE '{name}'")
+                # Use an existing frame
+                frame_name_to_use = parent_or_existing_frame
+                if not self.model.existFrame(frame_name_to_use):
+                    raise ValueError(f"Frame '{frame_name_to_use}' not found.")
 
-                # reduced_robot 모델에 해당 프레임이 존재하는지 확인
-                if not self.reduced_robot.model.existFrame(existing_frame_name):
-                    raise ValueError(f"'{existing_frame_name}' 프레임이 reduced_robot.model에 존재하지 않습니다. "
-                                     "URDF나 buildReducedRobot 로직을 확인하세요.")
-                
-                # 'name' (예: 'L_ee')을 키로, 'existing_frame_name' (예: 'left_palm_center')의 ID를 저장
-                self.ee_ids[name] = self.reduced_robot.model.getFrameId(existing_frame_name)
+            self.ee_frame_names[name] = frame_name_to_use
 
+        # Re-create data object after model modifications
+        self.data = self.model.createData()
 
-        self.reduced_robot.data = self.reduced_robot.model.createData()
-
-        # 4. Casadi 모델 생성
-        self.cmodel = cpin.Model(self.reduced_robot.model)
-        self.cdata = self.cmodel.createData()
-
-        # 5. 심볼릭 변수 생성
-        self.cq = casadi.SX.sym("q", self.reduced_robot.model.nq, 1) 
-        for name in self.ee_names:
-            self.ee_sym_vars[name] = casadi.SX.sym(f"tf_{name}", 4, 4)
-        
-        cpin.framesForwardKinematics(self.cmodel, self.cdata, self.cq)
-
-        # 6. 오차 함수 동적 정의
-        trans_errors = []
-        rot_errors = []
-        sym_vars_list = [self.cq] + list(self.ee_sym_vars.values())
-
-        for name in self.ee_names:
-            ee_id = self.ee_ids[name]
-            sym_var = self.ee_sym_vars[name]
-            
-            trans_error = self.cdata.oMf[ee_id].translation - sym_var[:3, 3]
-            rot_error = cpin.log3(self.cdata.oMf[ee_id].rotation @ sym_var[:3, :3].T)
-            
-            trans_errors.append(trans_error)
-            rot_errors.append(rot_error)
-
-        self.translational_error = casadi.Function(
-            "translational_error",
-            sym_vars_list,
-            [casadi.vertcat(*trans_errors)]
-        )
-        self.rotational_error = casadi.Function(
-            "rotational_error",
-            sym_vars_list,
-            [casadi.vertcat(*rot_errors)]
-        )
-
-        # 7. 최적화 문제 정의
-        self.opti = casadi.Opti()
-        self.var_q = self.opti.variable(self.reduced_robot.model.nq)
-        self.var_q_last = self.opti.parameter(self.reduced_robot.model.nq)
-        
-        for name in self.ee_names:
-            self.ee_params[name] = self.opti.parameter(4, 4)
-
-        param_list = [self.var_q] + list(self.ee_params.values())
-
-        self.translational_cost = casadi.sumsqr(self.translational_error(*param_list))
-        self.rotation_cost = casadi.sumsqr(self.rotational_error(*param_list))
-        self.regularization_cost = casadi.sumsqr(self.var_q)
-        self.smooth_cost = casadi.sumsqr(self.var_q - self.var_q_last)
-
-        # 8. 제약 조건 및 비용 함수 설정
-        self.opti.subject_to(self.opti.bounded(
-            self.reduced_robot.model.lowerPositionLimit,
-            self.var_q,
-            self.reduced_robot.model.upperPositionLimit)
-        )
-        w = cost_weights
-        self.opti.minimize(
-            w['trans'] * self.translational_cost + 
-            w['rot'] * self.rotation_cost + # rotation_cost 변수명 확인
-            w['reg'] * self.regularization_cost + 
-            w['smooth'] * self.smooth_cost
-        )
-
-        # 9. 솔버 설정
-        opts = {
-            'ipopt': {
-                'print_level': 0,
-                'max_iter': 50,       # 반복 횟수를 과감히 줄임 (Warm start 믿고 가기)
-                'tol': 1e-7,          # 현실적인 오차 허용
-                'warm_start_init_point': 'yes',
-                'mu_strategy': 'adaptive', # 수렴 속도 향상
-            },
-            'print_time': False
+        # 3. Create pink FrameTasks for each end-effector
+        self.tasks = {
+            name: FrameTask(
+                self.ee_frame_names[name],
+                position_cost=1.0, # High cost for position
+                orientation_cost=1.0 # High cost for orientation
+            ) for name in self.ee_names
         }
-        self.opti.solver("ipopt", opts)
 
-        # 10. 필터 및 시각화 초기화
-        self.init_data = np.zeros(self.reduced_robot.model.nq)
-        self.smooth_filter = WeightedMovingFilter(np.array([0.4, 0.3, 0.2, 0.1]), self.reduced_robot.model.nq)
-        self.vis = None
+        # 4. Set initial state
+        self.q = pin.neutral(self.model)
 
-        if self.Visualization:
-            self.vis = MeshcatVisualizer(self.reduced_robot.model, self.reduced_robot.collision_model, self.reduced_robot.visual_model)
-            self.vis.initViewer(open=True) 
-            self.vis.loadViewerModel("pinocchio") 
-            self.vis.displayFrames(True, frame_ids=list(self.ee_ids.values()), axis_length = 0.15, axis_width = 5)
-            self.vis.display(pin.neutral(self.reduced_robot.model))
-
-            frame_viz_names = [f'{name}_target' for name in self.ee_names]
-            FRAME_AXIS_POSITIONS = (np.array([[0, 0, 0], [1, 0, 0],[0, 0, 0], [0, 1, 0],[0, 0, 0], [0, 0, 1]]).astype(np.float32).T)
-            FRAME_AXIS_COLORS = (np.array([[1, 0, 0], [1, 0.6, 0],[0, 1, 0], [0.6, 1, 0],[0, 0, 1], [0, 0.6, 1]]).astype(np.float32).T)
-            axis_length = 0.1
-            axis_width = cost_weights.get('viz_axis_width', 10)
-            
-            for frame_viz_name in frame_viz_names:
-                self.vis.viewer[frame_viz_name].set_object(
-                    mg.LineSegments(
-                        mg.PointsGeometry(position=axis_length * FRAME_AXIS_POSITIONS, color=FRAME_AXIS_COLORS),
-                        mg.LineBasicMaterial(linewidth=axis_width, vertexColors=True),
-                    )
-                )
-
-    # --- 공통 메서드 ---
-    def scale_arms(self, human_left_pose, human_right_pose, human_arm_length=0.60, robot_arm_length=0.75):
-        # 이 함수는 H1 케이스 전용으로 남겨두되, solve_ik에서 호출을 관리합니다.
-        scale_factor = robot_arm_length / human_arm_length
-        robot_left_pose = human_left_pose.copy()
-        robot_right_pose = human_right_pose.copy()
-        robot_left_pose[:3, 3] *= scale_factor
-        robot_right_pose[:3, 3] *= scale_factor
-        return robot_left_pose, robot_right_pose
-
-    def solve_ik(self, target_poses: dict, current_lr_arm_motor_q = None, current_lr_arm_motor_dq = None):
+    def solve_ik(self, target_poses: dict, current_lr_arm_motor_q=None, current_lr_arm_motor_dq=None):
+        """
+        Solves the inverse kinematics problem using pink.
+        
+        :param target_poses: Dictionary mapping EE names to their target poses in xyzaxayaz format.
+        :param current_lr_arm_motor_q: Current joint configuration (optional).
+        :return: Tuple of (solved joint positions, feedforward torques).
+        """
         if current_lr_arm_motor_q is not None:
-            self.init_data = current_lr_arm_motor_q
-        self.opti.set_initial(self.var_q, self.init_data)
+            self.q = np.array(current_lr_arm_motor_q)
 
-        # target_poses 딕셔너리를 기반으로 파라미터 설정
-        for name, pose in target_poses.items():
-            if name in self.ee_params:
-                se3_pose = xyzrpy_to_se3(pose)
-                self.opti.set_value(self.ee_params[name], se3_pose)
-                if self.Visualization:
-                    self.vis.viewer[f'{name}_target'].set_transform(se3_pose)
-            else:
-                logger_mp.warn(f"Target pose for '{name}' ignored (not in ee_params).")
+        # 1. Update task targets
+        for name, target_pose_vec in target_poses.items():
+            if name in self.tasks:
+                target_pose_se3 = xyzaxayaz_to_se3(target_pose_vec)
+                self.tasks[name].set_target(target_pose_se3)
 
-        self.opti.set_value(self.var_q_last, self.init_data)
-
+        # 2. Create configuration and solve IK
+        configuration = Configuration(self.model, self.data, self.q)
+        
+        # The solve_ik function computes the velocity `v` needed to move towards the targets
         try:
-            sol = self.opti.solve()
-            sol_q = self.opti.value(self.var_q)
-            # self.smooth_filter.add_data(sol_q)
-            # sol_q = self.smooth_filter.filtered_data
-
-            if current_lr_arm_motor_dq is not None: v = current_lr_arm_motor_dq * 0.0
-            else: v = (sol_q - self.init_data) * 0.0
-
-            self.init_data = sol_q
-            sol_tauff = pin.rnea(self.reduced_robot.model, self.reduced_robot.data, sol_q, v, np.zeros(self.reduced_robot.model.nv))
-
-            if self.Visualization: self.vis.display(sol_q)
-            return sol_q, sol_tauff
-        
+            velocity = solve_ik(configuration, self.tasks.values(), self.dt, solver=self.solver)
         except Exception as e:
-            logger_mp.error(f"ERROR in convergence, plotting debug info.{e}")
-            sol_q = self.opti.debug.value(self.var_q)
-            self.smooth_filter.add_data(sol_q)
-            sol_q = self.smooth_filter.filtered_data
+            # Return current state if solver fails
+            velocity = np.zeros(self.nv)
 
-            if current_lr_arm_motor_dq is not None: v = current_lr_arm_motor_dq * 0.0
-            else: v = (sol_q - self.init_data) * 0.0
-
-            self.init_data = sol_q
-            sol_tauff = pin.rnea(self.reduced_robot.model, self.reduced_robot.data, sol_q, v, np.zeros(self.reduced_robot.model.nv))
-
-            logger_mp.error(f"sol_q:{sol_q} \nmotorstate: \n{current_lr_arm_motor_q} \ntarget_poses: \n{target_poses}")
-            if self.Visualization: self.vis.display(sol_q)
-            return current_lr_arm_motor_q, np.zeros(self.reduced_robot.model.nv)
+        # 3. Integrate velocity to get the new joint configuration
+        self.q = configuration.integrate(velocity, self.dt)
         
-    
+        # 4. Compute feedforward torques (optional, but good to have)
+        # We use the computed velocity and assume zero acceleration for RNEA
+        tau_ff = pin.rnea(self.model, self.data, self.q, velocity, np.zeros(self.nv))
+        
+        return self.q, tau_ff
+
     def get_ee_position(self, q_numeric):
         """
-        주어진 관절 각도(q)에 대한 모든 EE의 현재 포즈(SE3)를 딕셔너리로 반환합니다.
+        Computes forward kinematics for a given joint configuration `q`.
+        Returns a dictionary of EE poses in xyzaxayaz format.
         """
-        pin.forwardKinematics(self.reduced_robot.model, self.reduced_robot.data, np.array(q_numeric))
-        pin.updateFramePlacements(self.reduced_robot.model, self.reduced_robot.data)
+        pin.forwardKinematics(self.model, self.data, np.array(q_numeric))
+        pin.updateFramePlacements(self.model, self.data)
         
         poses = {}
-        for name, ee_id in self.ee_ids.items():
-            se3_pose = self.reduced_robot.data.oMf[ee_id]
-
-            poses[name] = se3_to_xyzrpy(se3_pose)
+        for name, frame_name in self.ee_frame_names.items():
+            frame_id = self.model.getFrameId(frame_name)
+            se3_pose = self.data.oMf[frame_id]
+            poses[name] = se3_to_xyzaxayaz(se3_pose)
             
         return poses
-    
+
     def reset_state(self, current_q):
-        """IK Solver의 필터와 최적화기 내부 파라미터를 현재 상태로 강제 동기화"""
-        # 1. 데이터를 넘파이 배열로 변환
-        q_target = np.array(current_q).flatten()
-        self.init_data = q_target
+        """
+        Resets the internal state of the solver to a given joint configuration.
+        """
+        self.q = np.array(current_q).flatten()
 
-        # 2. [가장 중요] CasADi 파라미터 및 초기값 리셋
-        # = 가 아니라 set_value와 set_initial을 사용해야 합니다.
-        self.opti.set_value(self.var_q_last, q_target) # 이전 위치를 현재 위치로 세팅 (smooth_cost 기준점)
-        self.opti.set_initial(self.var_q, q_target)    # 솔버의 계산 시작점을 현재 위치로 세팅
-
-        # 3. 필터 큐 비우기 및 현재 값으로 채우기
-        self.smooth_filter._data_queue = []
-        for _ in range(self.smooth_filter._window_size):
-            self.smooth_filter.add_data(q_target)
+    def compute_delta_target(self, name, current_q, delta_xyzaxayaz, frame='global'):
+        """
+        Computes the next target pose based on a delta from the current pose.
+        """
+        # 1. FK to get current pose
+        pin.forwardKinematics(self.model, self.data, current_q)
+        pin.updateFramePlacements(self.model, self.data)
+        
+        frame_id = self.model.getFrameId(self.ee_frame_names[name])
+        current_oMf = self.data.oMf[frame_id]
+        
+        # 2. Calculate new pose based on delta
+        d_xyz = np.array(delta_xyzaxayaz[:3])
+        d_axayaz = np.array(delta_xyzaxayaz[3:])
+        delta_R = pin.exp3(d_axayaz)
+        
+        if frame == 'global':
+            new_R = delta_R @ current_oMf.rotation
+        else: # local frame
+            new_R = current_oMf.rotation @ delta_R
             
-        logger_mp.info(f"IK Solver state reset complete. Q: {q_target.tolist()}")
-
+        new_t = current_oMf.translation + d_xyz
+        
+        new_se3 = pin.SE3(new_R, new_t)
+        return se3_to_xyzaxayaz(new_se3)

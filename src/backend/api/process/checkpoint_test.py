@@ -165,6 +165,11 @@ def checkpoint_test(
                 time.sleep(7)
                 ts = env.reset()
                 print('Robot moved to homepose')
+
+            # 일정 스텝마다 강제 메모리 정리 (예: 100스텝마다)
+            if step_num % 100 == 0:
+                gc.collect()
+                torch.cuda.empty_cache()
                 
             # === a. 현재 상태(state_t) 계산 ===
             obs_t = ts.observation
@@ -176,9 +181,10 @@ def checkpoint_test(
                     image = obs_t['images'][f'sensor_{sensor["id"]}']
                     sensor_id = str(sensor['id'])
                     image = fetch_image_with_config(image, {
-                        'resize': task['sensor_settings'][sensor_id]['img_size'],
-                        'cropped_area': task['sensor_settings'][sensor_id].get('cropped_area', None)
-                        })
+                        'resize': task['sensor_img_size'][str(sensor_id)],
+                        'cropped_area': task['sensor_cropped_area'][str(sensor_id)],
+                        'rotate': task['sensor_rotate'][str(sensor_id)]
+                    })
                     image = process_image(image, vision_backbone, to_cuda=True)
                     policy_input_t[f'observation.images.sensor_{sensor["id"]}'] = image.unsqueeze(0)
 
@@ -218,7 +224,7 @@ def checkpoint_test(
                 agent.move_joint_step(target_qpos)
                 start_action_id += agent.joint_len
             
-            time.sleep(0.2)
+            time.sleep(0.12)
             ts_next = env.record_step()
 
             # === d. OTI-RL 학습 ===
@@ -239,8 +245,9 @@ def checkpoint_test(
                         sensor_id = str(sensor['id'])
                         image = obs_t1['images'][f'sensor_{sensor_id}']
                         image = fetch_image_with_config(image, {
-                            'resize': task['sensor_settings'][sensor_id]['img_size'],
-                            'cropped_area': task['sensor_settings'][sensor_id].get('cropped_area', None)
+                            'resize': task['sensor_img_size'][sensor_id],
+                            'cropped_area': task['sensor_cropped_area'][sensor_id].get('cropped_area', None),
+                            'rotate': task['sensor_rotate'][sensor_id]
                         })
                         image = process_image(image, vision_backbone, to_cuda=True)
                         policy_input_t1[f'observation.images.sensor_{sensor_id}'] = image.unsqueeze(0)

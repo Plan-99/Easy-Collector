@@ -6,13 +6,14 @@ import argparse
 import os
 import cv2
 import base64 # 이미지 인코딩을 위해 추가
-from .augment_dataset import adjust_lightness, draw_rectangles, add_salt_and_pepper_noise, add_gaussian_noise, generate_rect_params, prospective_transform, generate_prospective_transform
+from .augment_dataset import adjust_lightness, draw_rectangles, add_salt_and_pepper_noise, add_gaussian_noise, generate_rect_params, prospective_transform, generate_prospective_transform, apply_hsv
 from PIL import Image
 
 
 config = {}
 
 def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=False, sensors=None, agents=None, task=None):
+
     global config
     config = {}
     if move_robot:
@@ -35,14 +36,13 @@ def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=
 
         with h5py.File(hdf5_path, 'r') as f:
             rect_params = []
-            transform_matrix = None
             # actions = f[f"action"][:]
             # xactions = f[f"xaction"][:]
-            # xvel_actions = f[f"xvel_action"][:]
+            # xvel_actions = f[f"xvel_actions"][:]
             # xpos_data = f["observations/xpos"][:]
             # xvel_data = f["observations/xvel"][:]
             sensor_names = [name for name in f["observations/images"].keys()]
-            robot_names = [name for name in f["observations/qpos"].keys()]
+            robot_names = [name for name in f["observations/qpos"].keys()] 
 
             for name in sensor_names:
                 image_data[name] = f[f"observations/images/{name}"][:]
@@ -82,13 +82,31 @@ def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=
                     if 'gaussian' in config:
                         img = add_gaussian_noise(img, config['gaussian'].get('mean', 0), config['gaussian'].get('sigma', 0))
                     if 'prospective' in config:
-                        if i == 0:
-                            transform_matrix = generate_prospective_transform(img.width, img.height,
-                                                                              config['prospective'].get('scale_factor', 0),
-                                                                              config['prospective'].get('degrees', 0),
-                                                                              config['prospective'].get('shear', 0),
-                                                                              config['prospective'].get('perspective', 0))
+                        transform_matrix = generate_prospective_transform(img.width, img.height,
+                                                                          config['prospective'].get('scale_factor', 0),
+                                                                          config['prospective'].get('degrees', 0),
+                                                                          config['prospective'].get('shear', 0),
+                                                                          config['prospective'].get('perspective', 0))
                         img = prospective_transform(img, transform_matrix)
+                    
+                    if 'hsv' in config and config['hsv']:
+                        hsv_config = config['hsv']
+                        if hsv_config.get('random'):
+                            # For preview, use fixed "random" values
+                            h_gain = 0.5
+                            s_gain = 0.7
+                            v_gain = 0.4
+                            h_adj = (np.random.rand() * 2 - 1) * h_gain * 180
+                            s_adj = (np.random.rand() * 2 - 1) * s_gain + 1
+                            v_adj = (np.random.rand() * 2 - 1) * v_gain + 1
+                        else:
+                            # Use exact slider values
+                            h_adj = hsv_config.get('h', 0) * 180
+                            s_adj = 1 + hsv_config.get('s', 0)
+                            v_adj = 1 + hsv_config.get('v', 0)
+                        
+                        img = apply_hsv(img, h_adj, s_adj, v_adj)
+
                     img_array = np.array(img)
                     
                     # 이미지를 JPEG 형식으로 메모리 버퍼에 인코딩
@@ -129,7 +147,6 @@ def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=
                     # 'xpos': xpos_data[i].tolist(),
                     # 'xvel': xvel_data[i].tolist()
                 }, to=sid)
-
 
 
 def add_config(config_data):

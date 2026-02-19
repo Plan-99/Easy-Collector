@@ -13,8 +13,9 @@
                         'border-primary': focused.id === sensor.id && focused.device_type === 'sensor',
                     }"
                     @click="focusSensorRobot(sensor, 'sensor')"
-                    :resize="workspace.sensor_settings?.[sensor.id]?.img_size || [640, 480]"
-                    :cropped_area="workspace.sensor_settings?.[sensor.id]?.cropped_area || {}"
+                    :resize="workspace.sensor_img_size[sensor.id] || [640, 480]"
+                    :cropped_area="workspace.sensor_cropped_area[sensor.id] || {}"
+                    :rotate="workspace.sensor_rotate[sensor.id] || 0"
                 ></web-rtc-video>
                 <div class="full-height border-white bg-dark border-rounded flex flex-center" v-else>
                     <q-btn round flat icon="play_arrow" text-color="white" size="xl" @click="sensor.handler.startSensor(sensor)"></q-btn>
@@ -421,18 +422,18 @@ const keyboardHandler = (event) => {
     if (currentRobot.role === 'single_arm') {
         const eeDelta = Array(currentRobot.tool_inner ? 7 : 6).fill(0); // x, y, z, roll, pitch, yaw, tool
 
-        if (event.key === 'w') eeDelta[0] += eeStepSize.value;
-        else if (event.key === 's') eeDelta[0] -= eeStepSize.value;
+        if (event.key === 'w') eeDelta[0] += eeStepSize.value / 2;
+        else if (event.key === 's') eeDelta[0] -= eeStepSize.value / 2;
         else if (event.key === 'a') eeDelta[1] += eeStepSize.value;
         else if (event.key === 'd') eeDelta[1] -= eeStepSize.value;
         else if (event.key === 'e') eeDelta[2] += eeStepSize.value;
         else if (event.key === 'z') eeDelta[2] -= eeStepSize.value;
-        else if (event.key === '[') eeDelta[3] += eeStepSize.value*4;
-        else if (event.key === '.') eeDelta[3] -= eeStepSize.value*4;
-        else if (event.key === 'p') eeDelta[4] += eeStepSize.value*4;
-        else if (event.key === ';') eeDelta[4] -= eeStepSize.value*4;
-        else if (event.key === 'l') eeDelta[5] += eeStepSize.value*4;
-        else if (event.key === "'") eeDelta[5] -= eeStepSize.value*4;
+        else if (event.key === '.') eeDelta[3] += eeStepSize.value*20;
+        else if (event.key === '[') eeDelta[3] -= eeStepSize.value*20;
+        else if (event.key === 'p') eeDelta[4] += eeStepSize.value*20;
+        else if (event.key === ';') eeDelta[4] -= eeStepSize.value*20;
+        else if (event.key === 'l') eeDelta[5] += eeStepSize.value*20;
+        else if (event.key === "'") eeDelta[5] -= eeStepSize.value*20;
         else if (event.key === 'b' && currentRobot.tool_inner) eeDelta[6] += eeStepSize.value*30;
         else if (event.key === 'n' && currentRobot.tool_inner) eeDelta[6] -= eeStepSize.value*30;
         else if (event.key === ' ' || event.key === 32) eeDelta.fill(0); // stop

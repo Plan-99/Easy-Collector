@@ -28,7 +28,7 @@ def replay_episode(node, task, filename, socketio_instance, task_control):
     with h5py.File(hdf5_path, 'r') as f:
         qpos_data = f["observations/qpos"][:]
         images = []
-        for sensor_id in task['sensor_settings'].keys():
+        for sensor_id in task['sensor_ids']:
             images.append(f[f"observations/images/sensor_{sensor_id}"])
 
         for i in tqdm(range(len(qpos_data))):

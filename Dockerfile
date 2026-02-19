@@ -88,7 +88,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
 RUN mkdir -p /etc/apt/keyrings && \
     curl -sSL http://robotpkg.openrobots.org/packages/debian/robotpkg.asc | tee /etc/apt/keyrings/robotpkg.asc > /dev/null && \
     echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/robotpkg.asc] http://robotpkg.openrobots.org/packages/debian/pub $(lsb_release -cs) robotpkg" | tee /etc/apt/sources.list.d/robotpkg.list && \
-    apt-get update && apt-get install -y --no-install-recommends robotpkg-py310-pinocchio && \
+    apt-get update && apt-get install -y --no-install-recommends\
+    robotpkg-simde=0.8.0 \
+    robotpkg-py310-pinocchio \
+    robotpkg-py310-casadi && \
     rm -rf /var/lib/apt/lists/*
 
 ENV PATH="/opt/openrobots/bin:${PATH}"

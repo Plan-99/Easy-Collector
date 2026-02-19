@@ -119,7 +119,27 @@ def prospective_transform(image, M):
     # 3. 다시 PIL 이미지로 변환하여 반환
     return Image.fromarray(result_np)
 
-def augment_dataset(dataset_id, aug_dataset_id, lightness, rectangles, salt_and_pepper, gaussian, prospective, socketio_instance, task_control):
+def apply_hsv(image, h_adj, s_adj, v_adj):
+    img_np = np.array(image)
+    hsv = cv2.cvtColor(img_np, cv2.COLOR_RGB2HSV)
+    h, s, v_channel = cv2.split(hsv)
+    
+    h = h.astype(np.float32)
+    h_new = (h + h_adj) % 180
+    h_new = h_new.astype(np.uint8)
+    
+    s = s.astype(np.float32)
+    s_new = np.clip(s * s_adj, 0, 255).astype(np.uint8)
+    
+    v_channel = v_channel.astype(np.float32)
+    v_new = np.clip(v_channel * v_adj, 0, 255).astype(np.uint8)
+    
+    final_hsv = cv2.merge((h_new, s_new, v_new))
+    img_rgb = cv2.cvtColor(final_hsv, cv2.COLOR_HSV2RGB)
+    
+    return Image.fromarray(img_rgb)
+
+def augment_dataset(dataset_id, aug_dataset_id, lightness, rectangles, salt_and_pepper, gaussian, prospective, hsv, socketio_instance, task_control):
     dataset_path = os.path.join('/root/src/backend/datasets', str(dataset_id))
     aug_dataset_path = os.path.join('/root/src/backend/datasets', str(aug_dataset_id))
 
@@ -138,6 +158,16 @@ def augment_dataset(dataset_id, aug_dataset_id, lightness, rectangles, salt_and_
         'progress': 0,
     })
 
+    h_gain = 0.5
+    s_gain = 0.7
+    v_gain = 0.4
+    
+    # Pre-calculate fixed values if not random
+    if hsv and not hsv.get('random'):
+        fixed_h_adj = hsv.get('h', 0) * 180
+        fixed_s_adj = 1 + hsv.get('s', 0)
+        fixed_v_adj = 1 + hsv.get('v', 0)
+
     for i, hdf5_file in enumerate(hdf5_files):
         if task_control.get('stop'):
             print("Stopping Data Augmentation")
@@ -153,12 +183,12 @@ def augment_dataset(dataset_id, aug_dataset_id, lightness, rectangles, salt_and_
                 # Determine rectangle parameters for this episode (HDF5 file)
                 rect_params = []
                 image_keys = list(f['observations/images'].keys())
+
                 if image_keys:
                     first_image_dataset = f['observations/images'][image_keys[0]]
                     if first_image_dataset.shape[0] > 0:
                         img_height, img_width, _ = first_image_dataset.shape[1:]
                         rect_params = generate_rect_params(rectangles, img_width, img_height)
-                        transform_matrix = generate_prospective_transform(img_width, img_height, prospective.get('scale_factor', 0), prospective.get('degrees', 0), prospective.get('shear', 0), prospective.get('perspective', 0))
 
                 # Now modify images
                 image_group = f['observations/images']
@@ -175,7 +205,29 @@ def augment_dataset(dataset_id, aug_dataset_id, lightness, rectangles, salt_and_
                         img = draw_rectangles(img, rect_params)
                         img = add_salt_and_pepper_noise(img, salt_and_pepper.get('amount', 0))
                         img = add_gaussian_noise(img, gaussian.get('mean', 0), gaussian.get('sigma', 0))
-                        img = prospective_transform(img, transform_matrix)
+                        
+                        if prospective:
+                            transform_matrix = generate_prospective_transform(
+                                img.width, 
+                                img.height, 
+                                prospective.get('scale_factor', 0), 
+                                prospective.get('degrees', 0), 
+                                prospective.get('shear', 0), 
+                                prospective.get('perspective', 0)
+                            )
+                            img = prospective_transform(img, transform_matrix)
+                        
+                        if hsv:
+                            if hsv.get('random'):
+                                # calculate random values for each image
+                                rand_h_adj = (np.random.rand() * 2 - 1) * h_gain * 180
+                                rand_s_adj = (np.random.rand() * 2 - 1) * s_gain + 1
+                                rand_v_adj = (np.random.rand() * 2 - 1) * v_gain + 1
+                                img = apply_hsv(img, rand_h_adj, rand_s_adj, rand_v_adj)
+                            else:
+                                # use pre-calculated fixed values
+                                img = apply_hsv(img, fixed_h_adj, fixed_s_adj, fixed_v_adj)
+
                         augmented_images.append(np.array(img))
                     
                     image_group[key][...] = np.array(augmented_images)

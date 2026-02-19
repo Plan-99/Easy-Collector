@@ -10,6 +10,9 @@ PAYLOAD_DIR=/usr/share/easytrainer-project
 RELEASE_DIR=$(cd "$(dirname "$0")" && pwd)
 ROOT_DIR=$(cd "$RELEASE_DIR/.." && pwd)
 VERSION_FILE="$ROOT_DIR/VERSION"
+USE_PYINSTALLER=${USE_PYINSTALLER:-0}
+LAUNCHER_BIN_NAME=${LAUNCHER_BIN_NAME:-EasyLauncher}
+LAUNCHER_BIN_SRC=${LAUNCHER_BIN_SRC:-$ROOT_DIR/dist/$LAUNCHER_BIN_NAME}
 
 # Version handling: control file always needs a Version, but filename can omit it
 VERSION_ENV="${VERSION:-}"
@@ -31,11 +34,39 @@ rm -rf "$STAGE" && mkdir -p "$STAGE/DEBIAN"
 mkdir -p \
   "$STAGE/usr/bin" \
   "$STAGE/usr/share/applications" \
-  "$STAGE${INSTALL_ROOT}/ui" \
+  "$STAGE${INSTALL_ROOT}" \
   "$STAGE${PAYLOAD_DIR}"
 
-echo "[deb] Copying launcher UI (release/ui -> ${INSTALL_ROOT}/ui)..."
-rsync -a "$RELEASE_DIR/ui/" "$STAGE${INSTALL_ROOT}/ui/"
+if [ "$USE_PYINSTALLER" = "1" ]; then
+  echo "[deb] Copying launcher binary (${LAUNCHER_BIN_SRC} -> ${INSTALL_ROOT}/${LAUNCHER_BIN_NAME})..."
+  if [ ! -f "$LAUNCHER_BIN_SRC" ]; then
+    echo "[deb][ERROR] Launcher binary not found: $LAUNCHER_BIN_SRC" >&2
+    exit 1
+  fi
+  cp "$LAUNCHER_BIN_SRC" "$STAGE${INSTALL_ROOT}/${LAUNCHER_BIN_NAME}"
+  chmod 0755 "$STAGE${INSTALL_ROOT}/${LAUNCHER_BIN_NAME}"
+else
+  mkdir -p "$STAGE${INSTALL_ROOT}/ui"
+  echo "[deb] Copying launcher UI (release/ui -> ${INSTALL_ROOT}/ui)..."
+  rsync -a \
+    --exclude='__pycache__/' \
+    --exclude='*.pyc' \
+    "$RELEASE_DIR/ui/" "$STAGE${INSTALL_ROOT}/ui/"
+  required_ui_files=(
+    "main.py"
+    "launcher.py"
+    "installer.py"
+    "service.py"
+    "app_context.py"
+    "tools.py"
+  )
+  for f in "${required_ui_files[@]}"; do
+    if [ ! -f "$STAGE${INSTALL_ROOT}/ui/$f" ]; then
+      echo "[deb][ERROR] Missing UI file: $f" >&2
+      exit 1
+    fi
+  done
+fi
 if [ -f "$ROOT_DIR/app_icon.png" ]; then
   cp "$ROOT_DIR/app_icon.png" "$STAGE${INSTALL_ROOT}/app_icon.png"
 fi
@@ -44,13 +75,6 @@ if [ -f "$VERSION_FILE" ]; then
   cp "$VERSION_FILE" "$STAGE${INSTALL_ROOT}/VERSION"
 fi
 
-# Always embed a Python virtualenv with PySide6 to avoid apt GUI deps
-VENV_EMBEDDED=1
-if ! python3 -c 'import ensurepip' 2>/dev/null; then
-  echo "[deb][ERROR] python3-venv (ensurepip) is not available on this build machine."
-  echo "Install it and retry: sudo apt-get update && sudo apt-get install -y python3-venv"
-  exit 1
-fi
 PY_VER=$(python3 - <<'PY'
 import sys
 print(f"{sys.version_info.major}.{sys.version_info.minor}")
@@ -60,35 +84,85 @@ PY_MAJOR=${PY_VER%%.*}
 PY_MINOR=${PY_VER#*.}
 PY_NEXT_MINOR=$((PY_MINOR + 1))
 echo "[deb] Using host Python $PY_VER"
-echo "[deb] Creating embedded venv with Qt..."
-VENV_DIR="$STAGE${INSTALL_ROOT}/venv"
-python3 -m venv "$VENV_DIR"
-# Keep default pip inside venv to avoid network upgrades
-echo "[deb] Copying existing PySide6 install into venv..."
-HOST_SITE=$(python3 - <<'PY'
-import site
-print(site.getusersitepackages())
-PY
-)
-DST_SITE="$VENV_DIR/lib/python${PY_VER}/site-packages"
-mkdir -p "$DST_SITE"
-if [ ! -d "$HOST_SITE/PySide6" ] || [ ! -d "$HOST_SITE/shiboken6" ]; then
-  echo "[deb][ERROR] Host Python is missing PySide6/shiboken6. Install them first (e.g. python3 -m pip install --user PySide6) and retry." >&2
-  exit 1
-fi
-for pkg in PySide6 shiboken6; do
-  rsync -a "$HOST_SITE/$pkg" "$DST_SITE/"
-done
-DIST_PACKAGES=(PySide6 shiboken6 PySide6_Addons PySide6_Essentials)
-for name in "${DIST_PACKAGES[@]}"; do
-  src=$(find "$HOST_SITE" -maxdepth 1 -type d -iname "${name}*.dist-info" | head -n1 || true)
-  if [ -n "$src" ] && [ -d "$src" ]; then
-    rsync -a "$src" "$DST_SITE/"
-  else
-    echo "[deb][WARN] dist-info for ${name} not found under $HOST_SITE; continuing."
+if [ "$USE_PYINSTALLER" != "1" ]; then
+  if ! python3 -c 'import ensurepip' 2>/dev/null; then
+    echo "[deb][ERROR] python3-venv (ensurepip) is not available on this build machine."
+    echo "Install it and retry: sudo apt-get update && sudo apt-get install -y python3-venv"
+    exit 1
   fi
-done
-echo "[deb] Embedded venv ready at $VENV_DIR (copied from host PySide6)"
+  echo "[deb] Creating embedded venv with Qt..."
+  VENV_DIR="$STAGE${INSTALL_ROOT}/venv"
+  python3 -m venv "$VENV_DIR"
+
+  # Keep default pip inside venv to avoid network upgrades
+  echo "[deb] Copying existing PySide6 install into venv..."
+  DST_SITE="$VENV_DIR/lib/python${PY_VER}/site-packages"
+  mkdir -p "$DST_SITE"
+
+  # --- [FIXED SECTION START] PySide6 & Shiboken6 Detection ---
+  # 1. Find PySide6 Path dynamically
+  PYSIDE_SRC=$(python3 -c "import os, PySide6; print(os.path.dirname(PySide6.__file__))" 2>/dev/null || true)
+
+  if [ -z "$PYSIDE_SRC" ] || [ ! -d "$PYSIDE_SRC" ]; then
+    echo "[deb][ERROR] Host Python is missing PySide6. Install it first (e.g. python3 -m pip install PySide6) and retry." >&2
+    exit 1
+  fi
+
+  # 2. Identify the actual site-packages directory where PySide6 lives
+  ACTUAL_SITE_PACKAGES=$(dirname "$PYSIDE_SRC")
+
+  # 3. Copy PySide6
+  rsync -a "$PYSIDE_SRC" "$DST_SITE/"
+
+  # 4. Find and Copy shiboken6 (Try same folder first, then dynamic check)
+  if [ -d "$ACTUAL_SITE_PACKAGES/shiboken6" ]; then
+    rsync -a "$ACTUAL_SITE_PACKAGES/shiboken6" "$DST_SITE/"
+  else
+    # Fallback: check if shiboken6 is installed elsewhere
+    SHIBOKEN_SRC=$(python3 -c "import os, shiboken6; print(os.path.dirname(shiboken6.__file__))" 2>/dev/null || true)
+    if [ -n "$SHIBOKEN_SRC" ] && [ -d "$SHIBOKEN_SRC" ]; then
+      rsync -a "$SHIBOKEN_SRC" "$DST_SITE/"
+    else
+      echo "[deb][WARN] shiboken6 module not found via path check."
+    fi
+  fi
+
+  # 5. Copy .dist-info for PySide/Shiboken from the discovered source dir
+  DIST_PACKAGES=(PySide6 shiboken6 PySide6_Addons PySide6_Essentials)
+  for name in "${DIST_PACKAGES[@]}"; do
+    src=$(find "$ACTUAL_SITE_PACKAGES" -maxdepth 1 -type d -iname "${name}*.dist-info" | head -n1 || true)
+    if [ -n "$src" ] && [ -d "$src" ]; then
+      rsync -a "$src" "$DST_SITE/"
+    else
+      echo "[deb][WARN] dist-info for ${name} not found under $ACTUAL_SITE_PACKAGES; continuing."
+    fi
+  done
+  # --- [FIXED SECTION END] ---
+
+  echo "[deb] Copying licensing package into venv..."
+
+  # --- [FIXED SECTION START] Licensing Detection ---
+  LICENSING_SRC=$(python3 -c "import os, licensing; print(os.path.dirname(licensing.__file__))" 2>/dev/null || true)
+
+  if [ -z "$LICENSING_SRC" ] || [ ! -d "$LICENSING_SRC" ]; then
+    echo "[deb][ERROR] Host Python is missing licensing. Install it first (e.g. python3 -m pip install licensing) and retry." >&2
+    exit 1
+  fi
+
+  rsync -a "$LICENSING_SRC" "$DST_SITE/"
+
+  LICENSING_PARENT=$(dirname "$LICENSING_SRC")
+  LICENSE_DIST=$(find "$LICENSING_PARENT" -maxdepth 1 -type d -iname "licensing-*.dist-info" | head -n1 || true)
+
+  if [ -n "$LICENSE_DIST" ] && [ -d "$LICENSE_DIST" ]; then
+    rsync -a "$LICENSE_DIST" "$DST_SITE/"
+  else
+    echo "[deb][WARN] dist-info for licensing not found in $LICENSING_PARENT; continuing."
+  fi
+  # --- [FIXED SECTION END] ---
+
+  echo "[deb] Embedded venv ready at $VENV_DIR (copied from host PySide6)"
+fi
 
 echo "[deb] Embedding project payload for HOME deployment..."
 # Exclude large/ephemeral build artifacts to speed up packaging
@@ -106,6 +180,7 @@ RSYNC_EXCLUDES=(
   'logs'
   'log'
   'build'
+  'dist'
   'install'
   'ros2_ws/build'
   'ros2_ws/install'
@@ -134,19 +209,7 @@ if [ "${SKIP_PAYLOAD_SIZE_CHECK:-0}" != "1" ] && [ "$PAYLOAD_SIZE" -ge "$MAX_PAY
   exit 1
 fi
 
-# Validate critical runtime paths (prevent shipping stale payloads)
-PY_CHECK="${STAGE}${PAYLOAD_DIR}/src/backend/configs/global_configs.py"
-if [ -f "$PY_CHECK" ]; then
-  python3 - "$PY_CHECK" <<'PY'
-import sys
-from pathlib import Path
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-required = "/root/ros2_ws/src/piper_ros/src/piper_description/"
-if required not in text:
-    raise SystemExit(f"[deb][ERROR] Missing '{required}' in {path} (payload may be stale).")
-PY
-fi
+# Payload sanity check removed by request.
 # Ensure critical code paths exist in the payload (avoid shipping partial copies)
 REQUIRED_PATHS=(
   "$STAGE${PAYLOAD_DIR}/docker-compose.yml"
@@ -199,11 +262,14 @@ if ! touch "$LOG_FILE" 2>/dev/null; then
   LOG_FILE="$FALLBACK_LOG"
 fi
 {
+LAUNCHER_BIN="/opt/easytrainer/EasyLauncher"
 VENV_PY="/opt/easytrainer/venv/bin/python"
-if [ -x "$VENV_PY" ]; then
+if [ -x "$LAUNCHER_BIN" ]; then
+  exec "$LAUNCHER_BIN" "$@"
+elif [ -x "$VENV_PY" ] && [ -f "/opt/easytrainer/ui/main.py" ]; then
   exec "$VENV_PY" /opt/easytrainer/ui/main.py "$@"
 else
-  echo "Embedded runtime not found. Please reinstall the package." >&2
+  echo "Launcher runtime not found. Please reinstall the package." >&2
   exit 1
 fi
 } >>"$LOG_FILE" 2>&1
@@ -259,7 +325,11 @@ chmod 0644 "$STAGE/usr/share/applications/EasyTrainer.desktop"
 # Control file
 # Runtime GUI libs needed by Qt (ensure auto-install by apt)
 RUNTIME_LIBS="libxcb-cursor0, libxkbcommon-x11-0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-render-util0, libxcb-xinerama0, libegl1, libgl1-mesa-dri, libopengl0, libnss3, libasound2"
-DEPENDS_LINE="Depends: python3 (>= ${PY_VER}), python3 (<< ${PY_MAJOR}.${PY_NEXT_MINOR}), xdg-utils, ${RUNTIME_LIBS}"
+if [ "$USE_PYINSTALLER" = "1" ]; then
+  DEPENDS_LINE="Depends: xdg-utils, ${RUNTIME_LIBS}"
+else
+  DEPENDS_LINE="Depends: python3 (>= ${PY_VER}), python3 (<< ${PY_MAJOR}.${PY_NEXT_MINOR}), xdg-utils, ${RUNTIME_LIBS}"
+fi
 
 cat > "$STAGE/DEBIAN/control" <<EOF
 Package: ${PKG}

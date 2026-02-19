@@ -46,10 +46,13 @@ class DxlController:
                 dxl_comm_result, dxl_error = self.packetHandler.write1ByteTxRx(self.portHandler, dxl_id, torque_enable_address, 1)
             if dxl_comm_result != dxl.COMM_SUCCESS:
                 print(f"Torque Enable Comm Error: {self.packetHandler.getTxRxResult(dxl_comm_result)}")
+                print(f"dxl_id: {dxl_id}")
                 return
             elif dxl_error != 0:
                 print(f"Torque Enable Error: {self.packetHandler.getRxPacketError(dxl_error)}")
+                print(f"dxl_id: {dxl_id}")
                 return
+            time.sleep(0.01)
             
     def remove_torque(self):
         torque_enable_address = 64  # MX, X 시리즈 기준
@@ -81,7 +84,7 @@ class DxlController:
         return position
     
     def read_all_dynamixel(self):
-        max_retries = 10
+        max_retries = 20
         
         with self.port_lock:
             for attempt in range(max_retries):
@@ -110,9 +113,10 @@ class DxlController:
                     # 여기서 에러가 잡히면 어떤 ID 읽다가 죽었는지 알 수 있음
                     print(f"[SDK Error] ID 읽기 중 예외 발생: {e} (시도 {attempt+1})")
                 
-                time.sleep(0.005) # 0.001보다 조금 더 여유를 줌
+                time.sleep(0.001) # 0.001보다 조금 더 여유를 줌
 
             # 실패 시 마지막으로 읽었던 값이나 안전한 기본값 반환
+            print("zzzzzzzzzzzzzzzzz")
             return [{'id': dxl_id, 'position': 0} for dxl_id in self.dxl_ids]
 
     def close(self):
@@ -125,7 +129,6 @@ class DxlController:
 
         success = True
 
-
         self.enable_torque()
 
         for dxl_id in self.dxl_ids:
@@ -137,6 +140,7 @@ class DxlController:
                 raise Exception(f"Velocity Comm Error: {self.packetHandler.getTxRxResult(dxl_comm_result)}")
             elif dxl_error != 0:
                 raise Exception(f"Velocity Error: {self.packetHandler.getRxPacketError(dxl_error)}")
+            
 
         # 2. GroupSyncWrite 객체 생성
         groupSyncWrite = dxl.GroupSyncWrite(self.portHandler, self.packetHandler, goal_position_address, 4)
@@ -173,6 +177,7 @@ class DxlController:
                 (new_goal >> 24) & 0xFF
             ]
             groupSyncWrite.addParam(dxl_id, bytearray(param_goal_position))
+        
 
         # 4. 한번에 전송
         dxl_comm_result = groupSyncWrite.txPacket()
@@ -184,6 +189,7 @@ class DxlController:
 
         # 5. 모든 모터가 도달할 때까지 대기
         reached = [False] * len(self.dxl_ids)
+
 
         while not all(reached) and not self.closed:
             for i, goal_joint_dict in enumerate(goal_joint_dicts):

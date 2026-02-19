@@ -241,8 +241,8 @@ class Leader():
             if is_joint_trajectory:
                 rate = self.node.create_rate(3)  # 50Hz
             else:
-                rate = self.node.create_rate(50)  # 10Hz
-            while rclpy.ok() and not task_control['stop']:
+                rate = self.node.create_rate(25)  # 10Hz
+            while rclpy.ok() and not task_control.get('stop', False) and not task_control.get('episode_stop', False):
                 
                 start = time.time()
 
@@ -350,6 +350,7 @@ class Leader():
         
         # 1. 동기화 실행 (내부의 while 루프 덕분에 완료될 때까지 여기서 블로킹됨)
         self.sync_leader_robot()
+
         
         # 만약 중간에 사용자가 중지 버튼을 눌렀다면 체크
         if task_control['stop']:
