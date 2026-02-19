@@ -1,21 +1,25 @@
-import sys
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 def generate_launch_description():
-    args = []
-    length = len(sys.argv)
-    if (len(sys.argv) >= 5):
-        i = 4
-        while i < len(sys.argv):
-            args.append(sys.argv[i])
-            i = i + 1
-
     return LaunchDescription([
+        DeclareLaunchArgument(
+            'robot_ip',
+            default_value='192.168.1.10',
+            description='IP address of the robot'
+        ),
+        DeclareLaunchArgument(
+            'namespace',
+            default_value='',
+            description='Namespace for the node'
+        ),
         Node(
             package='tm_driver',
             executable='tm_driver',
+            namespace=LaunchConfiguration('namespace'),
             output='screen',
-            arguments=args,
+            arguments=[['robot_ip:=', LaunchConfiguration('robot_ip')]],
         )
     ])

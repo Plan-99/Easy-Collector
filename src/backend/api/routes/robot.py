@@ -139,6 +139,11 @@ def start_robot():
                 'launch_rviz:=false'
         ]
 
+    if company == 'OMRON':
+        command = ['ros2', 'launch', 'tm_driver', 'tm_bringup.launch.py', 
+                   f'namespace:=ec_robot_{id}', 
+                   f'robot_ip:={settings.get("ip_address", "192.168.1.10")}']
+
     print(f"Attempting to start robot")
 
     process = current_app.pm.start_process(
