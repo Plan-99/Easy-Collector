@@ -70,7 +70,7 @@ class Agent:
             
         elif self.write_type == 'service':
             self.write_service_srv_cls = get_service(robot['write_topic_msg'])
-            self.write_service_srv_data = self.write_service_srv_cls()
+            self.write_service_srv_data = None
             self.move_robot_client = node.create_client(self.write_service_srv_cls, robot['write_topic'])
             if not self.move_robot_client.wait_for_service(timeout_sec=5.0):
                 print(f'Service {robot["write_topic"]} not available. Please check the connection.')
@@ -168,6 +168,21 @@ class Agent:
 
             req.command = int(action[0])
             
+            self.move_robot_client.call_async(req)
+
+        elif self.write_topic_msg == 'tm_msgs/srv/SendScript':
+            if not self.move_robot_client.service_is_ready():
+                return
+
+            # TM Script는 도(degree) 단위를 사용하므로 라디안에서 변환
+            angles_deg = [float(np.degrees(a)) for a in action]
+            
+            # PTP("JPP", j1, j2, j3, j4, j5, j6, 속도%, 가속ms, 블렌딩%, 가상디지털출력)
+            # 기본값: 속도 10%, 가속 200ms
+            script = 'PTP("JPP",{},{},{},{},{},{},10,200,0,false)'.format(*[f"{a:.4f}" for a in angles_deg])
+            
+            req.id = 'agent_step'
+            req.script = script
             self.move_robot_client.call_async(req)
 
     def move_joint_step_by_action(self, action):
