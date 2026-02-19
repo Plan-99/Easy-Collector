@@ -19,8 +19,6 @@ import pinocchio as pin
 from pink import solve_ik
 from pink.tasks import FrameTask
 from pink.configuration import Configuration
-import logging_mp
-logger_mp = logging_mp.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Helper Functions (Largely unchanged, as they are used for pose representation)
@@ -155,7 +153,6 @@ class IK_Solver:
         try:
             velocity = solve_ik(configuration, self.tasks.values(), self.dt, solver=self.solver)
         except Exception as e:
-            logger_mp.error(f"ERROR in pink.solve_ik: {e}")
             # Return current state if solver fails
             velocity = np.zeros(self.nv)
 
