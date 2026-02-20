@@ -944,7 +944,9 @@ async function saveDataset(form) {
             await api.put(`/dataset/${id}`, finalData);
             
             // 메타데이터 수정 API 호출 (finalData에 robot_mappings 등이 포함됨)
-            await api.post(`/dataset/${id}/:edit_datasets_metadata`, finalData);
+            if (Object.values(finalData.robot_mappings).some(v => v !== null) || Object.values(finalData.sensor_mappings).some(v => v !== null)) {
+                await api.post(`/dataset/${id}/:edit_datasets_metadata`, finalData);
+            }
 
         } else {
             // --- 추가(Add) 로직 ---
@@ -988,9 +990,6 @@ function checkDatasetCompatibility(form) {
     }
     const robotsMatch = JSON.stringify(workspaceRobotTypes) === JSON.stringify(datasetRobotTypes.value);
     const sensorsMatch = JSON.stringify(workspaceSensorTypes) === JSON.stringify(datasetSensorTypes.value);
-
-    console.log(datasetRobotTypes.value)
-    console.log(datasetSensorTypes.value)
 
     if (datasetRobotTypes.value.length == 0 && datasetSensorTypes.value.length == 0) {
         return true;
