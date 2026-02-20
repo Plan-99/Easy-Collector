@@ -58,6 +58,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-warehouse-ros \
     ros-humble-eigenpy \
     ros-humble-moveit-msgs \
+    # for jaka robot
+    ros-humble-moveit-visual-tools \
     ros-humble-srdfdom \
     ros-humble-rosbridge-server \
     ros-humble-ros2-control \
