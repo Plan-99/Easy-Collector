@@ -185,6 +185,20 @@ class Agent:
             req.script = script
             self.move_robot_client.call_async(req)
 
+        elif self.write_topic_msg == 'jaka_msgs/srv/Move':
+            if not self.move_robot_client.service_is_ready():
+                print("JAKA joint_move service is not ready, skipping command.")
+                return
+            
+            # The 'action' here is the absolute joint position.
+            req.pose = action
+            # Default velocity and acceleration for a joint move.
+            # These values might need to be tuned based on robot capabilities and desired motion.
+            req.mvvelo = 1.0  # Example: 1.0 rad/s or a percentage
+            req.mvacc = 0.5   # Example: 0.5 rad/s^2 or a percentage
+            
+            self.move_robot_client.call_async(req)
+
     def move_joint_step_by_action(self, action):
         # 1. 이전 Goal 전송 후 응답(Accepted)을 아직 못 받았다면 스킵
         if self.is_waiting_for_goal:

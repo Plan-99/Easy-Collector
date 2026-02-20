@@ -143,6 +143,11 @@ def start_robot():
         command = ['ros2', 'launch', 'tm_driver', 'tm_bringup.launch.py', 
                    f'namespace:=ec_robot_{id}', 
                    f'robot_ip:={settings.get("ip_address", "192.168.1.10")}']
+        
+    if company == 'JAKA':
+        command = ['ros2', 'launch', 'jaka_driver', 'robot_start.launch.py', 
+                   f'namespace:=ec_robot_{id}', 
+                   f'ip:={settings.get("ip_address", "192.168.1.10")}']
 
     print(f"Attempting to start robot")
 
