@@ -214,7 +214,7 @@ SUPPORT_SENSORS = [
         'read_topic': '/camera/color/image_raw/compressed',
         'read_topic_msg': 'sensor_msgs/CompressedImage',
         'custom_fields': ['serial_no'],
-        'resolution': [640, 480]
+        'resolution': [1280, 720]
     },
     {
         'name': 'realsense_d405_color',
