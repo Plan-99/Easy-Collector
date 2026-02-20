@@ -141,8 +141,8 @@
                                 <hdf5-viewer
                                     v-if="dataset && augmentationPreviewFile"
                                     :path="`${dataset.id}/${augmentationPreviewFile.name}`"
-                                    class="full-width full-height q-gutter-x-sm"
-                                    style="width: 100%; height: 100%;"
+                                    class="full-width q-gutter-x-sm"
+                                    style="width: 100%; height: 400px;"
                                     image-class="border-rounded border-white"
                                 />
                             </q-card-section>

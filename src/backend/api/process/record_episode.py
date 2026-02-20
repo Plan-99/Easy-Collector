@@ -35,7 +35,6 @@ def record_episode(node, dataset_id, agents, assembly_id, sensors, task, languag
             target=xr.run,
             task_control=tele_control
         )
-        time.sleep(10)
         tele_control['read'] = True
 
     for i in range(iter):
@@ -64,15 +63,10 @@ def record_episode(node, dataset_id, agents, assembly_id, sensors, task, languag
             'progress': 0,
             'type': 'stdout '
         })
-        if home_pose is not None and tele_type != 'externel':
-            for agent in agents:
-                agent.move_to(home_pose[str(agent.id)])
-            time.sleep(3)
-
-        # Reset the environment to get the first timestep at the home_pose
-        ts = env.reset()
-        timesteps = [ts]
-        time.sleep(1)
+        # if home_pose is not None and tele_type != 'externel':
+        #     for agent in agents:
+        #         agent.move_to(home_pose[str(agent.id)])
+        #     time.sleep(3)
 
         if tele_type == 'leader':
             teleop = TeleoperatorModel.where('type', 'leader').where('assembly_id', assembly_id).first()
@@ -93,6 +87,12 @@ def record_episode(node, dataset_id, agents, assembly_id, sensors, task, languag
                 task_control=tele_control
             )
 
+        time.sleep(2)
+
+        # Reset the environment to get the first timestep at the home_pose
+        ts = env.reset()
+        timesteps = [ts]
+
         # # saving dataset
         if not os.path.isdir(dataset_dir):
             os.makedirs(dataset_dir)
@@ -101,14 +101,14 @@ def record_episode(node, dataset_id, agents, assembly_id, sensors, task, languag
             print(f'Dataset already exist at \n{dataset_path}\nHint: set overwrite to True.')
 
         for agent in agents:
-            if agent.joint_states is None:
+            if agent.get_joint_states() is None:
                 socketio_instance.emit('log_record_episode', {
                     'log': f'[ERROR]: No joint states from robot {agent.id}',
                     'type': 'stderr'
                 })
                 tele_control['stop'] = True
                 return
-            if agent.joint_actions is None:
+            if agent.get_joint_actions() is None:
                 socketio_instance.emit('log_record_episode', {
                     'log': f'[ERROR]: No joint commands from robot {agent.id}',
                     'type': 'stderr'
@@ -175,7 +175,7 @@ def record_episode(node, dataset_id, agents, assembly_id, sensors, task, languag
                     })
                     data_dict[f'/observations/images/sensor_{sensor["id"]}'].append(image)
                 else:
-                    print("error")
+                    data_dict[f'/observations/images/sensor_{sensor["id"]}'].append(np.zeros((task['sensor_img_size'][0], task['sensor_img_size'][1], 3), dtype=np.uint8))
                     
             step += 1
 
@@ -201,6 +201,9 @@ def record_episode(node, dataset_id, agents, assembly_id, sensors, task, languag
                 _ = qaction.create_dataset(f'robot_{agent.id}', (max_timesteps, agent.joint_len))
 
             for name, array in data_dict.items():
+                print(name)
+                for e in array:
+                    print(len(e))
                 root[name][...] = array
 
         socketio_instance.emit('episode_added', {

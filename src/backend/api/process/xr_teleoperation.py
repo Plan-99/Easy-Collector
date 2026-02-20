@@ -23,7 +23,9 @@ class XRTeloperator:
         self.right_arm_agent = right_arm_agent
         self.left_tool_agent = left_tool_agent
         self.right_tool_agent = right_tool_agent
-        self.frequency = 30
+        self.frequency = 50
+
+        print(self.left_arm_agent, self.right_arm_agent)
         
         # 이미지 및 공유 메모리 설정
         self.img_shape = (480, 640, 3)
@@ -42,8 +44,10 @@ class XRTeloperator:
         )
         
         # 이전 포즈 저장 변수
-        self.prev_l_6d = None
-        self.prev_r_6d = None
+        self.prev_l_6d = [0] * 6
+        self.prev_r_6d = [0] * 6
+
+        self.is_dual_arm = self.left_arm_agent.id == self.right_arm_agent.id
 
     @staticmethod
     def matrix_to_6d(matrix):
@@ -67,7 +71,18 @@ class XRTeloperator:
         }) if socketio_instance and log_emit_id else None
         
         step = 0
+
+        if self.is_dual_arm:
+            ee_pos = self.left_arm_agent.get_ee_position()
+            left_origin = ee_pos['left']
+            right_origin = ee_pos['right']
+        else:
+            left_origin = self.left_arm_agent.get_ee_position() if self.left_arm_agent else None
+            right_origin = self.right_arm_agent.get_ee_position() if self.right_arm_agent else None
+
         try:
+            left_pos = left_origin
+            right_pos = right_origin
             while not task_control.get('stop', False):
                 loop_start = time.time()
                 
@@ -75,21 +90,42 @@ class XRTeloperator:
                 tele_data = self.tv_wrapper.get_motion_state_data()
                 curr_l_6d = self.matrix_to_6d(tele_data.left_arm_pose)
                 curr_r_6d = self.matrix_to_6d(tele_data.right_arm_pose)
+
+                print(f"Current Left 6D: {curr_l_6d}, Current Right 6D: {curr_r_6d}")
+                delta_l = (curr_l_6d - self.prev_l_6d) * 3
+                delta_r = (curr_r_6d - self.prev_r_6d) * 3
+                print('Delta L:', delta_l.round(4), 'Delta R:', delta_r.round(4))
                 # task_control['read']가 True일 때만 실제 제어 수행
 
                 if task_control.get('read', False):
                     step += 1
-                    if step > 500:
+                    if step > 2000:
                         break
                     if self.prev_l_6d is not None and self.prev_r_6d is not None:
                         # Delta 계산
-                        delta_l = (curr_l_6d - self.prev_l_6d) * 10
-                        delta_r = (curr_r_6d - self.prev_r_6d) * 10
+                        delta_l = (curr_l_6d - self.prev_l_6d) * 2
+                        delta_r = (curr_r_6d - self.prev_r_6d) * 2
+
+                        l_norm = np.linalg.norm(np.array(delta_l))
+                        r_norm = np.linalg.norm(np.array(delta_r))
+
+                        if l_norm > 3 or r_norm > 3:
+                            print(f"Delta L: {delta_l.round(4)}, Delta R: {delta_r.round(4)}")
+                            print("--------------------------------------------")
+                            continue
+
+                        left_pos = left_pos + delta_l
+                        right_pos = right_pos + delta_r
                         
-                        print(f"Delta L: {delta_l.round(4)}, Delta R: {delta_r.round(4)}")
-                        if self.left_arm_agent.id != self.right_arm_agent.id:
-                            self.left_arm_agent.move_ee_delta_step({'ee': delta_l})
-                            self.right_arm_agent.move_ee_delta_step({'ee': delta_r})
+                        if self.is_dual_arm:
+                            self.left_arm_agent.move_ee_step({
+                                'left': left_pos,
+                                'right': right_pos,
+                            })
+                        else:
+                            self.left_arm_agent.move_ee_step({'ee': left_pos})
+                            self.right_arm_agent.move_ee_step({'ee': right_pos})
+
                         
                         # if self.agent is not None:
                         #     self.agent.move_ee_delta_step(left_delta=delta_l, right_delta=delta_r)

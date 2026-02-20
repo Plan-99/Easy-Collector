@@ -108,7 +108,7 @@
                                                 :id="`dxl-${j.port}-${j.dxl_id}`"
                                                 style=" cursor: move;"
                                             />
-                                        </div>
+                                        </div> 
                                     </div>
                                     <q-stepper-navigation>
                                         <q-btn @click="() => { leaderSettingStep = 2 }" color="primary" outline label="Save & Go Next" :disable="leaderSettingForm.joint_map.filter((e) => !e.dxs_id && !e.port).length > 0" />
@@ -145,7 +145,7 @@
                                         </div>
                                     </div>
                                     <q-stepper-navigation>
-                                        <q-btn @click="() => { leaderSettingStep = 3; saveLeaderSetting() }" color="primary" outline label="Go Next" :disable="!leaderSettingForm.joint_map.filter((e) => e.is_gripper && e.gripper_dxl_range_saved[0] && e.gripper_dxl_range_saved[1]).length > 0" />
+                                        <q-btn @click="() => { leaderSettingStep = 3; saveLeaderSetting() }" color="primary" outline label="Go Next" />
                                         <q-btn flat @click="leaderSettingStep = 1" color="primary" label="Back" class="q-ml-sm" />
                                     </q-stepper-navigation>
                                 </q-step>

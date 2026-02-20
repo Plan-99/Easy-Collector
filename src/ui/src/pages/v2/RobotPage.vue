@@ -125,6 +125,7 @@
             :form="robotForm"
             @submit="saveRobot"
             :ok-button-label="$t(robotForm.find((e) => e.key === 'id').value ? 'save' : 'add')"
+            min-width="1400px"
         >
             <template v-slot:joint_names>
                 <div class="row q-mb-md q-col-gutter-sm">

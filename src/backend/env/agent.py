@@ -35,12 +35,36 @@ class Agent:
 
         self.ik_solver = None
         robot_info = get_robot_by_name(self.robot_type)
+
         if robot_info is not None and 'ik_setting' in robot_info:
             urdf_path = robot_info['urdf_path']
             urdf_package_dir = robot_info['urdf_package_dir']
             ik_setting = robot_info['ik_setting']
             self.ik_solver = Common_ArmIK(urdf_path=urdf_path, urdf_package_dir=urdf_package_dir, **ik_setting)
-
+        else:
+            urdf_path = '/ros2_ws/src/igris_c_description_public/urdf/igris_c_v2.urdf'
+            urdf_package_dir = '/ros2_ws/src/igris_c_description_public'
+            joints_to_lock = [
+                '0_Joint_Waist_Yaw',
+                '1_Joint_Waist_Roll',
+                '2_Joint_Waist_Pitch',
+                '3_Joint_Hip_Pitch_Left',
+                '4_Joint_Hip_Roll_Left',
+                '5_Joint_Hip_Yaw_Left',
+                '6_Joint_Knee_Pitch_Left',
+                '7_Joint_Ankle_Pitch_Left',
+                '8_Joint_Ankle_Roll_Left',
+                '9_Joint_Hip_Pitch_Right',
+                '10_Joint_Hip_Roll_Right',
+                '11_Joint_Hip_Yaw_Right',
+                '12_Joint_Knee_Pitch_Right',
+                '13_Joint_Ankle_Pitch_Right',
+                '14_Joint_Ankle_Roll_Right',
+                '29_Joint_Neck_Yaw',
+                '30_Joint_Neck_Pitch',
+        ]
+            ee_definitions = [('left', 'Left_Hand_Joint', None), ('right', 'Right_Hand_Joint', None)]
+            self.ik_solver = Common_ArmIK(urdf_path=urdf_path, urdf_package_dir=urdf_package_dir, joints_to_lock=joints_to_lock, ee_definitions=ee_definitions)
         read_topic_msg_cls = get_message(robot['read_topic_msg'])
         node.create_subscription(read_topic_msg_cls, robot['read_topic'], self.joint_state_cb, 10)
 
@@ -75,6 +99,9 @@ class Agent:
             self.ee_pos_cmd = None
 
         action = [float(a) for a in action]
+
+        # if np.linalg.norm(np.array(action)) > 1:
+        #     return
 
         if self.write_type == 'topic':
             self.move_joint_step_by_topic(action)
@@ -128,6 +155,8 @@ class Agent:
             if sol_q is not None:
                 if tool_position is not None:
                     sol_q = np.append(sol_q, tool_position)  # Keep gripper joint unchanged
+
+                # print(f"Moving to EE Position: {target_ee_pos} with Joint Solution: {sol_q.round(4)}")
                 self.move_joint_step(sol_q, from_ee=True)
 
         else:

@@ -1,6 +1,6 @@
 <template>
-    <div class="bg-secondary border-rounded border-white column q-px-sm" style="max-height: 700px;">
-        <div class="col-6 row flex felx-center" v-if="sensors.length > 0">
+    <div class="bg-secondary border-rounded border-white column q-px-sm">
+        <div class="row flex felx-center" v-if="sensors.length > 0" style="min-height: 400px;">
             <div v-for="sensor in sensors" :key="sensor.id" class="col q-py-sm q-px-xs relative-position">
                 <web-rtc-video
                     :process-id="`sensor_${sensor.id}`"
@@ -21,10 +21,10 @@
                 <q-chip color="blue-10" text-color="white" class="absolute-top-left" style="top: 20px; left: 15px">{{ sensor.name }} sensor</q-chip>
             </div>
         </div>
-        <div v-else class="col-6 q-py-sm">
+        <div v-else class="q-py-sm">
             <div class="text-white border-rounded border-white bg-dark full-height flex flex-center">No sensors available. Please add sensors to the workspace.</div>
         </div>
-        <div class="col-5 row q-gutter-x-sm" v-if="robots.length > 0">
+        <div class="row q-gutter-x-sm" v-if="robots.length > 0">
             <div v-for="robot in robots" :key="robot.id" class="col column q-pa-md relative-position border-rounded border-white text-white cursor-pointer"
                     :class="{
                         'border-primary': focused.id === robot.id && focused.device_type === 'robot',
@@ -56,7 +56,7 @@
         <div class="flex flex-center col" v-if="!isRobotSensorAllOn">
             <div class="text-yellow">Start all sensors and robots to view live data streams.</div>
         </div>
-        <div class="col q-py-sm" v-else-if="!checkpoint">
+        <div class="q-py-sm" v-else-if="!checkpoint">
             <div class="text-grey bg-dark border-rounded row full-height flex flex-center" v-if="status === 'pending'">
                 <q-select
                     v-model="selectedDatasetId"
@@ -111,7 +111,7 @@
                 ></q-btn>
             </div>
         </div>
-        <div v-else class="col">
+        <div v-else>
             <div
                 class="col q-pa-sm bg-dark border-rounded text-white row flex flex-center"
                 v-if="status === 'pending'"

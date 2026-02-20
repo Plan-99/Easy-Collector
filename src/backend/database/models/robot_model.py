@@ -196,7 +196,8 @@ class Robot(Model, SoftDeletes):
     def tool_inner(self):
         if self.type != 'custom':
             return self.get_robot_type_info().get('tool_inner', False)
-        return self.settings.get('tool_inner', False)
+        # return self.settings.get('tool_inner', False)
+        return False
     
     @accessor
     def tool_index(self):

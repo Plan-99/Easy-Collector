@@ -154,17 +154,19 @@ class Leader():
                 })
 
                 gripper_closed = False
-                while not gripper_closed:
-                    gripper_closed = True
-                    for gripper_dxl_id in dxl_controller.gripper_dxl_ids:
-                        gripper_pos = dxl_controller.read_dynamixel(gripper_dxl_id)  # 그리퍼의 현재 위치를 읽어오기
-                        gripper_range = self.get_joint_by_dxl_id(port, gripper_dxl_id)['gripper_dxl_range']
-                        if gripper_range[0] < gripper_range[1]:
-                            if gripper_pos < gripper_range[1]:
-                                gripper_closed = False
-                        else:
-                            if gripper_pos > gripper_range[1]:
-                                gripper_closed = False
+                time.sleep(5)
+                gripper_closed = True
+                # while not gripper_closed:
+                #     gripper_closed = True
+                #     for gripper_dxl_id in dxl_controller.gripper_dxl_ids:
+                #         gripper_pos = dxl_controller.read_dynamixel(gripper_dxl_id)  # 그리퍼의 현재 위치를 읽어오기
+                #         gripper_range = self.get_joint_by_dxl_id(port, gripper_dxl_id)['gripper_dxl_range']
+                #         if gripper_range[0] < gripper_range[1]:
+                #             if gripper_pos < gripper_range[1]:
+                #                 gripper_closed = False
+                #         else:
+                #             if gripper_pos > gripper_range[1]:
+                #                 gripper_closed = False
                 
                 dxl_controller.remove_torque()
             else:

@@ -12,7 +12,7 @@ def get_available_ports():
     target_ports = [p.device for p in ports if "ttyUSB" in p.device or "ttyACM" in p.device or "COM" in p.device]
     return target_ports
 
-def scan_ids_on_port(port_name, baudrate=57600, protocol_ver=2.0):
+def scan_ids_on_port(port_name, baudrate=4000000, protocol_ver=2.0):
     """ 특정 포트에서 연결된 다이나믹셀 ID들을 찾아서 리스트로 반환합니다. """
     found_ids = []
     
@@ -30,7 +30,7 @@ def scan_ids_on_port(port_name, baudrate=57600, protocol_ver=2.0):
         print(f"Scanning port: {port_name} ...")
         
         # ID 0부터 20까지만 스캔 (필요시 252까지 늘리세요)
-        for dxl_id in range(0, 20): 
+        for dxl_id in range(0, 50): 
             model_number, result, error = packetHandler.ping(portHandler, dxl_id)
             if result == COMM_SUCCESS:
                 print(f"  [Found] ID: {dxl_id} (Model: {model_number})")
@@ -47,7 +47,7 @@ def scan_ids_on_port(port_name, baudrate=57600, protocol_ver=2.0):
 # [Main Execution]
 # ==========================================
 
-def subscribe_dynamixel(socketio_instance, task_control, baudrate=57600):
+def subscribe_dynamixel(socketio_instance, task_control, baudrate=4000000):
     # 1. 모든 포트 검색
     ports = get_available_ports()
     print(f"Detected Ports: {ports}")

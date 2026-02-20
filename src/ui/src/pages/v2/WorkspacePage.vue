@@ -406,15 +406,15 @@
                     style="background-color: #00000099;"
                     @click="deselectEpisode"
                 ></q-btn>
-                <div class="row flex felx-center">
+                <div class="row flex felx-center q-mb-sm">
                     <hdf5-viewer
                         :path="`${selectedDatasetId}/${selectedEpisode.name}`"
-                        style="width: 100%; height: 100%;"
                         image-class="border-rounded border-white"
                         @update:robot-states="selectedEpisode.robotStates = $event"
+                        style="width: 100%; max-height: 400px;"
                     ></hdf5-viewer>
                 </div>
-                <div class="flex flex-center col-5 row" v-if="selectedEpisode.robotStates">
+                <div class="flex flex-center row" v-if="selectedEpisode.robotStates">
                     <div v-for="(val, robotId) in selectedEpisode.robotStates" :key="robotId" class="col column q-pa-md relative-position border-rounded border-white text-white cursor-pointer">
                         <div v-for="(j, i) in val.qpos.length" :key="i" class="col flex flex-center q-gutter-x-md">
                             <div class="border-rounded border-white q-px-md q-py-xs text-center">[{{ j }}] {{ val.qpos[i]?.toFixed(4) }}</div>
@@ -424,7 +424,7 @@
                     </div>
                 </div>
                 <div
-                    class="col q-pa-sm bg-dark border-rounded text-white row"
+                    class="q-pa-sm bg-dark border-rounded text-white row"
                 >
                     <div>
                         <div class="text-h6">{{ selectedDataset?.name }} / {{ selectedEpisode.name }} </div>

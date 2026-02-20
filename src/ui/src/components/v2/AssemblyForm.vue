@@ -158,6 +158,7 @@ function includeRobot(robot, part, exclude=false) {
         else includeParts(['left_tool'], robot.id);
     } else if (robot.role === 'dual_arm') {
         includeParts(['left_arm', 'right_arm'], robot.id);
+        console.log(robot.tool_inner)
         if (robot.tool_inner) includeParts(['left_arm', 'right_arm', 'left_tool', 'right_tool'], robot.id);
     }
 }

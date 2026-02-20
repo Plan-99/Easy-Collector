@@ -28,7 +28,7 @@
                 </div>
             </div>
         </div>
-        <div class="col" v-if="props.robot.ik_available">
+        <div class="col" v-if="props.robot.ik_available || props.robot.name === 'igris'">
             <div v-for="(r, i) in (props.robot.role === 'dual_arm' ? ['left', 'right'] : [''])" :key="i">
                 <div v-for="(p, j) in ['x', 'y', 'z', 'roll', 'pitch', 'yaw']" :key="j" class="q-gutter-x-md text-primary q-mb-sm">
                     <div class="border-primary q-px-md q-py-xs text-center row flex flex-center">

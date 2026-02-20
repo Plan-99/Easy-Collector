@@ -93,7 +93,6 @@ class IK_Solver:
         self.ee_ids = {}
         self.ee_params = {}     # 최적화용 파라미터 (목표치)
         self.ee_sym_vars = {}   # 심볼릭 변수 (수식용)
-
         # 1. 로봇 로드
         self.robot = pin.RobotWrapper.BuildFromURDF(urdf_path, package_dir)
 

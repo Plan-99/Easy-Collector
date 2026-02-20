@@ -5,6 +5,8 @@ from ...database.models.assembly_model import Assembly as AssemblyModel
 from ...api.process.subscribe_dynamixel import subscribe_dynamixel, scan_ids_on_port, get_available_ports
 from ...api.process.leader_teleoperation import Leader
 from ...api.process.xr_teleoperation import XRTeloperator
+from ...env.agent import Agent
+from ...database.models.robot_model import Robot as RobotModel
 
 
 # 1. Blueprint 생성
@@ -130,8 +132,19 @@ def start_xr_teleoperation():
 
 
     try:
-        left_arm_agent = current_app.agents.get(assembly.get('left_arm_id'))
-        right_arm_agent = current_app.agents.get(assembly.get('right_arm_id'))
+        if assembly.get('left_arm_id') in current_app.agents:
+            left_arm_agent = current_app.agents.get(assembly.get('left_arm_id'))
+        else:
+            left_arm_agent = Agent(node=current_app.node, robot=RobotModel.find(assembly.get('left_arm_id')).to_dict())
+            current_app.agents[assembly.get('left_arm_id')] = left_arm_agent
+        
+        if assembly.get('right_arm_id') in current_app.agents:
+            right_arm_agent = current_app.agents.get(assembly.get('right_arm_id'))
+        else:
+            right_arm_agent = Agent(node=current_app.node, robot=RobotModel.find(assembly.get('right_arm_id')).to_dict())
+            current_app.agents[assembly.get('right_arm_id')] = right_arm_agent
+
+
         if assembly['id'] in current_app.teleops:
             xr = current_app.teleops[assembly['id']]
         else:

@@ -5,7 +5,7 @@ import time
 
 
 class DxlController:
-    def __init__(self, serial_port, dxl_ids, gripper_dxl_ids=[], baudrate=57600):
+    def __init__(self, serial_port, dxl_ids, gripper_dxl_ids=[], baudrate=4000000):
         self.portHandler = dxl.PortHandler(serial_port)  # 다이나믹셀 포트
         self.packetHandler = dxl.PacketHandler(2.0)         # 프로토콜 2.0 사용
         self.port_lock = threading.Lock()
