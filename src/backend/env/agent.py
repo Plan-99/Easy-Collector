@@ -160,6 +160,7 @@ class Agent:
         
     def move_joint_step_by_service(self, action):
         req = self.write_service_srv_cls.Request()
+        self.joint_actions = action
         if self.write_topic_msg == 'onrobot_rg_msgs/SetCommand':
             # 서비스가 준비되었는지 확인 (Blocking 하지 않음)
             if not self.move_robot_client.service_is_ready():
@@ -175,11 +176,18 @@ class Agent:
                 return
 
             # TM Script는 도(degree) 단위를 사용하므로 라디안에서 변환
-            angles_deg = [float(np.degrees(a)) for a in action]
+            # If there are 7 joints (6 arm + 1 gripper), use only first 6 for PTP
+            arm_action = action[:6]
+            angles_deg = [float(np.degrees(a)) for a in arm_action]
             
             # PTP("JPP", j1, j2, j3, j4, j5, j6, 속도%, 가속ms, 블렌딩%, 가상디지털출력)
-            # 기본값: 속도 10%, 가속 200ms
             script = 'PTP("JPP",{},{},{},{},{},{},10,200,0,false)'.format(*[f"{a:.4f}" for a in angles_deg])
+            
+            # Gripper control: Append SET command to the same script string
+            # Module 1 (EndEffector), Type 1 (Digital Out), Pin 0
+            if len(action) > 6 and self.tool_inner:
+                gripper_state = 1 if action[6] > 0.4 else 0
+                script += '\r\nSET(1,1,0,{})'.format(gripper_state)
             
             req.id = 'agent_step'
             req.script = script
@@ -367,15 +375,31 @@ class Agent:
             joint_positions = []
             if self.read_topic_msg == 'sensor_msgs/JointState':
                 for i, joint_name in enumerate(self.joint_names):
-                    topic_index = self.joint_states.name.index(joint_name)
-                    joint_positions.append(self.joint_states.position[topic_index])
+                    try:
+                        topic_index = self.joint_states.name.index(joint_name)
+                        joint_positions.append(self.joint_states.position[topic_index])
+                    except (ValueError, AttributeError):
+                        joint_positions.append(0.0)
             elif self.read_topic_msg == 'control_msgs/JointTrajectoryControllerState':
                 for i, joint_name in enumerate(self.joint_names):
                     topic_index = self.joint_states.joint_names.index(joint_name)
                     joint_positions.append(self.joint_states.actual.positions[topic_index])
+            elif self.read_topic_msg == 'tm_msgs/msg/FeedbackState':
+                # TM FeedbackState: joint_pos (6 arm joints) + optional gripper from DI
+                joint_positions = list(self.joint_states.joint_pos)
+                if len(self.joint_names) > len(joint_positions) and self.tool_inner:
+                    if len(self.joint_states.ee_digital_input) > 0:
+                        # Map DI 0 to 0.0 (Open) or 0.85 (Closed)
+                        gripper_val = 0.85 if self.joint_states.ee_digital_input[0] == 1 else 0.0
+                        joint_positions.append(gripper_val)
+                    else:
+                        joint_positions.append(0.0)
             else:
                 for i in range(self.joint_len):
-                    joint_positions.append(self.joint_states.data[i])
+                    if hasattr(self.joint_states, 'data'):
+                        joint_positions.append(self.joint_states.data[i])
+                    else:
+                        joint_positions.append(0.0)
         return joint_positions
     
     def get_joint_actions(self):
