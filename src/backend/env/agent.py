@@ -189,7 +189,7 @@ class Agent:
                 gripper_state = 1 if action[6] > 0.4 else 0
                 script += '\r\nSET(1,1,0,{})'.format(gripper_state)
             
-            req.id = 'agent_step'
+            req.id = '1'
             req.script = script
             self.move_robot_client.call_async(req)
 
@@ -422,7 +422,7 @@ class Agent:
                     point = self.joint_actions.points[-1]  # 가장 최근 포인트 사용
                     for i, joint_name in enumerate(self.joint_names):
                         joint_actions.append(point.positions[i])
-        elif self.write_type == 'action':
+        elif self.write_type == 'action' or self.write_type == 'service':
             joint_actions = self.joint_actions
         return joint_actions
 
