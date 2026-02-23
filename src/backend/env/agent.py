@@ -88,7 +88,8 @@ class Agent:
         self.joint_trajectory_point = JointTrajectoryPoint()
             
         self.moved_by_ui = False
-        self.move_lock = False    
+        self.move_lock = False
+        self.is_waiting_for_service = False
         time.sleep(0.1)  # Wait for subscriber to be ready
 
 
@@ -161,6 +162,11 @@ class Agent:
     def move_joint_step_by_service(self, action):
         req = self.write_service_srv_cls.Request()
         self.joint_actions = action
+
+        # 1. 이미 서비스가 진행 중이면 새로운 명령을 무시합니다.
+        if self.is_waiting_for_service:
+            # print("Waiting for previous service response... skipping.")
+            return
         if self.write_topic_msg == 'onrobot_rg_msgs/SetCommand':
             # 서비스가 준비되었는지 확인 (Blocking 하지 않음)
             if not self.move_robot_client.service_is_ready():
@@ -181,7 +187,7 @@ class Agent:
             angles_deg = [float(np.degrees(a)) for a in arm_action]
             
             # PTP("JPP", j1, j2, j3, j4, j5, j6, 속도%, 가속ms, 블렌딩%, 가상디지털출력)
-            script = 'PTP("JPP",{},{},{},{},{},{},10,200,0,false)'.format(*[f"{a:.4f}" for a in angles_deg])
+            script = 'PTP("JPP",{},{},{},{},{},{},30,500,100,false)'.format(*[f"{a:.4f}" for a in angles_deg])
             
             # Gripper control: Append SET command to the same script string
             # Module 1 (EndEffector), Type 1 (Digital Out), Pin 0
@@ -191,7 +197,20 @@ class Agent:
             
             req.id = '1'
             req.script = script
-            self.move_robot_client.call_async(req)
+            self.is_waiting_for_service = True
+            future = self.move_robot_client.call_async(req)
+            future.add_done_callback(self.service_response_callback)
+
+    def service_response_callback(self, future):
+        """서비스 응답이 도착했을 때 호출되는 콜백"""
+        try:
+            response = future.result()
+            # 성공적으로 응답을 받았으므로 다음 명령 전송 가능
+            self.is_waiting_for_service = False
+        except Exception as e:
+            self.node.get_logger().error(f"Service call failed: {e}")
+            # 에러가 발생해도 플래그를 풀어줘야 다음 시도가 가능합니다.
+            self.is_waiting_for_service = False
 
     def move_joint_step_by_action(self, action):
         # 1. 이전 Goal 전송 후 응답(Accepted)을 아직 못 받았다면 스킵
@@ -534,6 +553,8 @@ class Agent:
             self.joint_trajectory_point.time_from_start = rclpy.duration.Duration(seconds=duration).to_msg()
             self.write_topic_msg_data.points = [self.joint_trajectory_point]
             self.move_robot_pub.publish(self.write_topic_msg_data)
+        elif self.robot_company == 'OMRON':
+            self.move_joint_step(target_pos)
         elif self.role == 'tool':
             self.move_joint_step(target_pos)
         else:
