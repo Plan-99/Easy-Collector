@@ -71,7 +71,7 @@ SUPPORT_ROBOTS = [
         'urdf_package_dir': '/root/ros2_ws/src/tm2_ros2/tm_description/',
         'ik_setting': {
             'joints_to_lock': [],
-            'ee_definitions': [('ee', 'joint_6', np.array([0.20, 0, 0]).T)],
+            'ee_definitions': [('ee', 'joint_6', np.array([0, 0, 0.15]).T)],
         },
     },
     {
@@ -94,7 +94,7 @@ SUPPORT_ROBOTS = [
         'urdf_package_dir': '/root/ros2_ws/src/tm2_ros2/tm_description/',
         'ik_setting': {
             'joints_to_lock': [],
-            'ee_definitions': [('ee', 'joint_6', np.array([0.20, 0, 0]).T)],
+            'ee_definitions': [('ee', 'joint_6', np.array([0, 0, 0.15]).T)],
         },
     },
     {

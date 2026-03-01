@@ -129,7 +129,7 @@ def start_robot():
     if company == 'Robotiq':
         command = ['ros2', 'launch', 'robotiq_description', 'robotiq_control.launch.py',
                    f'namespace:=ec_robot_{id}',
-                   f'com_port:={settings.get("port", "/dev/ttyUSB0")}'
+                   f'com_port:={settings.get("serial_port", "/dev/ttyUSB0")}'
         ]
 
     if company == "Kinova":
@@ -201,7 +201,7 @@ def create_robot():
             'tool_inner': len(request.json.get('tool_index', [])) > 0,
         }
 
-    custom_fields = ['can_port', 'ip_address', 'port', 'changer_address']
+    custom_fields = ['can_port', 'ip_address', 'port', 'changer_address', 'serial_port']
     for field in custom_fields:
         if field in request.json:
             settings[field] = request.json.get(field)
@@ -252,7 +252,7 @@ def update_robot(id):
             'tool_inner': len(request.json.get('tool_index', [])) > 0,
         }
 
-    custom_fields = ['can_port', 'ip_address', 'port', 'changer_address']
+    custom_fields = ['can_port', 'ip_address', 'port', 'changer_address', 'serial_port']
     for field in custom_fields:
         if field in request.json:
             settings[field] = request.json.get(field)

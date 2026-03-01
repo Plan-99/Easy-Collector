@@ -101,7 +101,7 @@ class Agent:
         return action
 
 
-    def move_joint_step(self, action, from_ee=False):
+    def move_joint_step(self, action, from_ee=False, velocity_arg=None):
         if not from_ee:
             self.ee_pos_cmd = None
 
@@ -126,13 +126,13 @@ class Agent:
             action = np.clip(action, self.joint_lower_bounds, self.joint_upper_bounds).tolist()
 
         if self.write_type == 'topic':
-            self.move_joint_step_by_topic(action)
+            self.move_joint_step_by_topic(action, velocity_arg)
         elif self.write_type == 'service':
-            self.move_joint_step_by_service(action)
+            self.move_joint_step_by_service(action, velocity_arg)
         elif self.write_type == 'action':
-            self.move_joint_step_by_action(action)
+            self.move_joint_step_by_action(action, velocity_arg)
         
-    def move_joint_step_by_topic(self, action):
+    def move_joint_step_by_topic(self, action, vel_arg=None):
         if self.write_topic_msg == 'std_msgs/Float64MultiArray':
             self.write_topic_msg_data.data = action
             self.move_robot_pub.publish(self.write_topic_msg_data)
@@ -159,14 +159,10 @@ class Agent:
             print("Unsupported write topic message type for move_joint_step_by_topic.")
             return
         
-    def move_joint_step_by_service(self, action):
+    def move_joint_step_by_service(self, action, vel_arg=None):
         req = self.write_service_srv_cls.Request()
         self.joint_actions = action
 
-        # 1. 이미 서비스가 진행 중이면 새로운 명령을 무시합니다.
-        if self.is_waiting_for_service:
-            # print("Waiting for previous service response... skipping.")
-            return
         if self.write_topic_msg == 'onrobot_rg_msgs/SetCommand':
             # 서비스가 준비되었는지 확인 (Blocking 하지 않음)
             if not self.move_robot_client.service_is_ready():
@@ -187,7 +183,7 @@ class Agent:
             angles_deg = [float(np.degrees(a)) for a in arm_action]
             
             # PTP("JPP", j1, j2, j3, j4, j5, j6, 속도%, 가속ms, 블렌딩%, 가상디지털출력)
-            script = 'PTP("JPP",{},{},{},{},{},{},30,500,100,false)'.format(*[f"{a:.4f}" for a in angles_deg])
+            script = 'PTP("JPP",{},{},{},{},{},{},{},25,100,false)'.format(*[f"{a:.4f}" for a in angles_deg] + [vel_arg if vel_arg is not None else 62])  # 속도 인자 추가, 기본값은 50%
             
             # Gripper control: Append SET command to the same script string
             # Module 1 (EndEffector), Type 1 (Digital Out), Pin 0
@@ -198,8 +194,7 @@ class Agent:
             req.id = '1'
             req.script = script
             self.is_waiting_for_service = True
-            future = self.move_robot_client.call_async(req)
-            future.add_done_callback(self.service_response_callback)
+            self.move_robot_client.call_async(req)
 
     def service_response_callback(self, future):
         """서비스 응답이 도착했을 때 호출되는 콜백"""
@@ -212,21 +207,31 @@ class Agent:
             # 에러가 발생해도 플래그를 풀어줘야 다음 시도가 가능합니다.
             self.is_waiting_for_service = False
 
-    def move_joint_step_by_action(self, action):
-        # 1. 이전 Goal 전송 후 응답(Accepted)을 아직 못 받았다면 스킵
+    def move_joint_step_by_action(self, action, vel_arg=None):
+        # 1. 이전 명령이 아직 '수락' 대기 중이면 바로 리턴 (병목 방지)
         if self.is_waiting_for_goal:
             return
 
-        action = [float(a) for a in action]
+        # 2. 값의 변화가 거의 없다면 통신하지 않음 (Deadband 필터)
+        # 10Hz에서 미세한 떨림으로 계속 Goal을 쏘는 것을 방지합니다.
+        current_states = self.get_joint_states()
+        if current_states is not None and all(abs(a - b) < 0.1 for a, b in zip(action, current_states)):
+            return
+
         self.joint_actions = action
+
+        # 3. 중요: 멤버 변수 대신 '로컬 변수'로 Goal 객체 생성
+        # 여러 스레드나 루프에서 공유 변수를 수정하는 위험을 방지합니다.
+        goal_msg = get_action(self.write_topic_msg).Goal()
+        
         if self.write_topic_msg == 'control_msgs/action/GripperCommand':
-            self.write_action_goal_data.command.position = action[0]
-            self.write_action_goal_data.command.max_effort = 10.0 
+            goal_msg.command.position = float(action[0])
+            goal_msg.command.max_effort = 10.0 
 
         self.is_waiting_for_goal = True
         
-        # send_goal_async를 호출하고 응답 콜백만 연결
-        send_goal_future = self.move_robot_client.send_goal_async(self.write_action_goal_data)
+        # send_goal_async 자체가 Non-blocking이므로 그대로 사용
+        send_goal_future = self.move_robot_client.send_goal_async(goal_msg)
         send_goal_future.add_done_callback(self.goal_response_callback)
 
     def goal_response_callback(self, future):
@@ -442,7 +447,7 @@ class Agent:
                     for i, joint_name in enumerate(self.joint_names):
                         joint_actions.append(point.positions[i])
         elif self.write_type == 'action' or self.write_type == 'service':
-            joint_actions = self.joint_actions
+            joint_actions = self.joint_actions if self.joint_actions is not None else self.get_joint_states()
         return joint_actions
 
     def get_ee_position(self):
@@ -554,7 +559,7 @@ class Agent:
             self.write_topic_msg_data.points = [self.joint_trajectory_point]
             self.move_robot_pub.publish(self.write_topic_msg_data)
         elif self.robot_company == 'OMRON':
-            self.move_joint_step(target_pos)
+            self.move_joint_step(target_pos, velocity_arg=10)
         elif self.role == 'tool':
             self.move_joint_step(target_pos)
         else:

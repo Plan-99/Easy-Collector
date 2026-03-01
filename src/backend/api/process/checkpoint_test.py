@@ -25,6 +25,7 @@ import rclpy
 import re
 
 import gc
+import threading
 
 
 def checkpoint_test(
@@ -37,6 +38,7 @@ def checkpoint_test(
     socketio_instance,
     task_control,
     max_timesteps,
+    move_homepose=False,
     ):
 
     oti_rl = False
@@ -69,6 +71,8 @@ def checkpoint_test(
         state_dim = sum(agent.joint_len for agent in agents)
         env = Env(node, agents, sensors)
         vision_backbone = policy_obj.get('vision_backbone')
+        episode_len = task.get('episode_len', 300) * 6
+        hz = 10
 
         # OTI-RL 관련 요소들 조건부 초기화
         if oti_rl:
@@ -154,15 +158,16 @@ def checkpoint_test(
         ts = env.reset()
         print('Robot moved to homepose')
         
+        start = time.time()
         while not task_control['stop']:
-            if step_num % (max_timesteps * 2) == 0 and oti_rl and step_num != 0: 
+            if step_num % episode_len == 0 and step_num != 0 and move_homepose: 
                 print(f"Episode finished. Total Reward: {episode_reward:.4f}")
                 episode_reward = 0.0
                 policy.reset()
                 if home_pose is not None:
                     for agent in env.agents:
                         agent.move_to(home_pose[str(agent.id)])
-                time.sleep(7)
+                time.sleep(4)
                 ts = env.reset()
                 print('Robot moved to homepose')
 
@@ -221,10 +226,14 @@ def checkpoint_test(
             start_action_id = 0
             for agent in env.agents:
                 target_qpos = final_action[start_action_id : start_action_id + agent.joint_len]
-                agent.move_joint_step(target_qpos)
+                move_thread = threading.Thread(
+                    target=agent.move_joint_step,
+                    args=(target_qpos,),
+                    daemon=True  # 메인 프로세스 종료 시 함께 종료
+                )
+                move_thread.start()
                 start_action_id += agent.joint_len
             
-            time.sleep(0.12)
             ts_next = env.record_step()
 
             # === d. OTI-RL 학습 ===
@@ -274,6 +283,9 @@ def checkpoint_test(
 
                 episode_reward += reward_t
 
+            time.sleep(max(0, (1.0 / hz) - (time.time() - start)))  # Loop at specified Hz
+            print(f"Time: -------------------{time.time() - start}" )
+            start = time.time()
             step_num += 1
             ts = ts_next
 

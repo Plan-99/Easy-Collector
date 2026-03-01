@@ -30,8 +30,6 @@ class Leader():
         # self.trigger_gripper_index = 0
         # self.trigger_dxl_id = self.gripper_dxl_ids[self.trigger_gripper_index]
 
-        self.is_paused = False
-
         self.address = 132  # 다이나믹셀의 현재 위치 주소 (주소 132번은 현재 위치)
         self.p_gain = 1
         self.is_synced = False
@@ -41,7 +39,7 @@ class Leader():
         self.joint_map = teleop_setting['joint_map']
 
         # 각 에이전트에 맞게 joint_map 업데이트
-        self.udpate_joint_map_with_agent_info()
+        self.update_joint_map_with_agent_info()
 
         grouped_by_port = self.group_joints_by_port()
         self.dxl_controllers = {}
@@ -52,19 +50,24 @@ class Leader():
                 gripper_dxl_ids=[item['dxl_id'] for item in joints if item.get('is_gripper', False)],
             )
 
+        self.is_paused = [False] * len(self.dxl_controllers)
+        
+
         self.ema = float(teleop_setting.get('ema', 0.0)) # EMA 필터 값
 
+        self.time = time.time()
 
-    def udpate_joint_map_with_agent_info(self):
+
+    def update_joint_map_with_agent_info(self):
         for joint_info in self.joint_map:
             for agent in self.agents:
-                if agent.id == joint_info['robot_id']:
-                    try:
+                try:
+                    if 'robot_id' in joint_info and agent.id == joint_info['robot_id']:
                         j_idx = agent.joint_names.index(joint_info['joint_name'])
                         joint_info['joint_upper_bound'] = agent.joint_upper_bounds[j_idx]
                         joint_info['joint_lower_bound'] = agent.joint_lower_bounds[j_idx]
-                    except ValueError:
-                        continue
+                except ValueError:
+                    continue
 
 
     def read_dxl_and_write_to_joint_map(self):
@@ -241,11 +244,9 @@ class Leader():
             if is_joint_trajectory:
                 rate = self.node.create_rate(3)  # 50Hz
             else:
-                rate = self.node.create_rate(25)  # 10Hz
+                rate = self.node.create_rate(10)  # 10Hz
             while rclpy.ok() and not task_control.get('stop', False) and not task_control.get('episode_stop', False):
                 
-                start = time.time()
-
                 # 1. 하드웨어 읽기 작업 (여기서 SerialException 등이 발생할 확률이 높음)
                 try:
                     self.read_dxl_and_write_to_joint_map()
@@ -279,7 +280,12 @@ class Leader():
 
 
                     action = agent.fetch_joint_map_to_action(joint_list)
-                    agent.move_joint_step(action)
+                    move_thread = threading.Thread(
+                        target=agent.move_joint_step,
+                        args=(action,),
+                        daemon=True  # 메인 프로세스 종료 시 함께 종료
+                    )
+                    move_thread.start()
                     end = time.time()
                 # self.target_pos[-1] = self.get_gripper_pos()
                 #-----------------------------------------
@@ -287,8 +293,8 @@ class Leader():
 
 
                 # 그리퍼를 벌리면 정지하도록 하는 코드--------------
-                should_pause = [False]
-                should_resume = [False]
+                should_pause = [False] * len(self.dxl_controllers)
+                should_resume = [False] * len(self.dxl_controllers)
                 dxl_contoller_index = 0
                 for port, dxl_controller in self.dxl_controllers.items():
                     gripper_dxl_ids = dxl_controller.gripper_dxl_ids
@@ -304,22 +310,23 @@ class Leader():
                             should_pause[dxl_contoller_index] = dxl_pos > gripper_range[0] + 200
                             should_resume[dxl_contoller_index] = dxl_pos < gripper_range[0] + 100
 
+                    if not self.is_paused[dxl_contoller_index] and should_pause[dxl_contoller_index]:
+                        self.is_paused[dxl_contoller_index] = True
+                        dxl_controller.enable_torque()
+                        time.sleep(0.1)  # 토크가 걸릴 시간을 약간 줌
+                        print("Teleoperation Paused")
+
+                    elif self.is_paused[dxl_contoller_index] and should_resume[dxl_contoller_index]:
+                        self.is_paused[dxl_contoller_index] = False
+                        dxl_controller.remove_torque()
+                        time.sleep(0.1)
+                        print("Teleoperation Resumed")
+                        
                     dxl_contoller_index += 1
 
-                if not self.is_paused and all(should_pause):
-                    self.is_paused = True
-                    for dxl_controller in self.dxl_controllers.values():
-                        dxl_controller.enable_torque()
-                    time.sleep(0.1)  # 토크가 걸릴 시간을 약간 줌
-                    print("Teleoperation Paused")
 
-                elif self.is_paused and all(should_resume):
-                    self.is_paused = False
-                    for dxl_controller in self.dxl_controllers.values():
-                        dxl_controller.remove_torque()
-                    time.sleep(0.1) 
-                    print("Teleoperation Resumed")
-
+                print("Time---------------: " + str(time.time() - self.time), flush=True)
+                self.time = time.time()
                 rate.sleep()
 
         except Exception as e:

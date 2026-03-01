@@ -123,7 +123,14 @@
                             icon="play_arrow"
                             @click="startInference"
                             v-if="status === 'pending'"
-                        ></q-btn>
+                        >
+                            <q-badge 
+                                @click.stop="moveHomposeInDataCollection = !moveHomposeInDataCollection" 
+                                :color="moveHomposeInDataCollection ? 'blue' : 'grey-5'"
+                                floating>
+                                <q-icon name="home" size="xs" class="cursor-pointer" />
+                            </q-badge>
+                        </q-btn>
                     </div>
                 </div>
                 <div
@@ -356,7 +363,7 @@ function startDataCollection() {
     });
 }
 
-const eeStepSize = ref(0.001);
+const eeStepSize = ref(0.0005);
 
 const keyboardHandler = (event) => {
     if (focused.value?.device_type !== 'robot') return;
@@ -367,8 +374,8 @@ const keyboardHandler = (event) => {
     if (currentRobot.role === 'single_arm') {
         const eeDelta = Array(currentRobot.tool_inner ? 7 : 6).fill(0); // x, y, z, roll, pitch, yaw, tool
 
-        if (event.key === 'w') eeDelta[0] += eeStepSize.value / 2;
-        else if (event.key === 's') eeDelta[0] -= eeStepSize.value / 2;
+        if (event.key === 'w') eeDelta[0] += eeStepSize.value;
+        else if (event.key === 's') eeDelta[0] -= eeStepSize.value;
         else if (event.key === 'a') eeDelta[1] += eeStepSize.value;
         else if (event.key === 'd') eeDelta[1] -= eeStepSize.value;
         else if (event.key === 'e') eeDelta[2] += eeStepSize.value;
@@ -392,8 +399,8 @@ const keyboardHandler = (event) => {
         console.log('tool teleop');
         const toolDelta = Array(1).fill(0); // tool only
 
-        if (event.key === 'b') toolDelta[0] += eeStepSize.value*30;
-        else if (event.key === 'n') toolDelta[0] -= eeStepSize.value*30;
+        if (event.key === 'b') toolDelta[0] += 0.12;
+        else if (event.key === 'n') toolDelta[0] -= 0.12;
         else return;
         console.log('toolDelta', toolDelta);
         // 백엔드로 전송
@@ -429,6 +436,7 @@ function startInference() {
         robot_ids: props.robots.map(r => r.id),
         sensors: props.sensors,
         checkpoint: checkpoint.value,
+        move_homepose: moveHomposeInDataCollection.value,
     }).catch((error) => {
         console.error('Error starting test:', error);
         Notify.create({

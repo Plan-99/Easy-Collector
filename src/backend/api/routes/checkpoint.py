@@ -79,6 +79,7 @@ def start_test(id):
         max_timesteps=data.get('timesteps', 100),
         socketio_instance=current_app.pm.socketio,
         name=f"checkpoint_test",
+        move_homepose=data.get('move_homepose', False),
     )
     
     return {'status': 'success', 'message': 'Checkpoint test started'}, 200
