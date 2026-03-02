@@ -213,7 +213,11 @@
         <q-dialog v-model="showHomeposeSettingDialog" persistent>
             <q-card style="min-width: 400px;" dark>
                 <q-card-section>
-                    <div class="text-h6 text-center">Homepose Setting</div>
+                    <div class="row full-width">
+                        <div class="text-h6 text-center">Homepose Setting</div>
+                        <q-space></q-space>
+                        <q-btn size="xs" outline color="pink-3" icon="sync" @click="scanRobotPose()" class="q-ml-sm" />
+                    </div>
                 </q-card-section>
                 <q-card-section>
                     <div class="row q-col-gutter-sm" v-if="watchingRobot">
@@ -472,6 +476,13 @@ function openHomeposeSetting() {
         }
         homeposeForm.value = [...initialHomepose]; // Create a copy for the form
         showHomeposeSettingDialog.value = true;
+    }
+}
+
+function scanRobotPose() {
+    console.log(watchingRobot.value.jointState);
+    if (watchingRobot.value.jointState) {
+        homeposeForm.value = [...watchingRobot.value.jointState];
     }
 }
 

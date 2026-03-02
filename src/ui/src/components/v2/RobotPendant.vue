@@ -1,4 +1,17 @@
 <template>
+    <div class="row">
+        <q-space></q-space>
+        <q-input
+            dense
+            outlined
+            dark
+            bg-color="dark"
+            v-model.number="robotStepSize"
+            type="number"
+            label="Step Size"
+            class="q-mb-md q-mt-xs col-2"
+        ></q-input>
+    </div>
     <div class="row q-gutter-x-md">
         <div class="col">
             <div v-for="(j, i) in props.robot.joint_names" :key="i" class="q-gutter-x-md text-white q-mb-sm">
