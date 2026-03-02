@@ -185,18 +185,20 @@ class Agent:
             req.script = script
             self.move_robot_client.call_async(req)
 
-        elif self.write_topic_msg == 'jaka_msgs/srv/Move':
+        elif self.write_topic_msg == 'jaka_msgs/srv/ServoMove':
             if not self.move_robot_client.service_is_ready():
-                print("JAKA joint_move service is not ready, skipping command.")
+                print("JAKA servo_j service is not ready, skipping command.")
                 return
             
-            # The 'action' here is the absolute joint position.
-            req.pose = action
-            # Default velocity and acceleration for a joint move.
-            # These values might need to be tuned based on robot capabilities and desired motion.
-            req.mvvelo = 1.0  # Example: 1.0 rad/s or a percentage
-            req.mvacc = 0.5   # Example: 0.5 rad/s^2 or a percentage
+            current_pos = self.get_joint_states()
+            if current_pos is None:
+                print("JAKA agent cannot get current joint states, skipping servo command.")
+                return
             
+            # servo_j는 증분(increment) 값을 받으므로 delta를 계산
+            delta = np.array(action) - np.array(current_pos)
+            
+            req.pose = delta.tolist()
             self.move_robot_client.call_async(req)
 
     def move_joint_step_by_action(self, action):

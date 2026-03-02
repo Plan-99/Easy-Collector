@@ -156,6 +156,28 @@ def start_robot():
         command=command,
     )
 
+    if company == 'JAKA':
+        # Give the driver a moment to start up before enabling servo mode
+        time.sleep(5)
+        
+        from jaka_msgs.srv import ServoMoveEnable
+        
+        # The service name in the driver has a leading '/', so it's absolute
+        service_name = '/jaka_driver/servo_move_enable'
+        servo_client = current_app.node.create_client(ServoMoveEnable, service_name)
+        
+        if not servo_client.wait_for_service(timeout_sec=5.0):
+            current_app.logger.error(f"JAKA servo_move_enable service not available.")
+            current_app.pm.stop_process(process_id)
+            return {'status': 'error', 'message': f'Failed to find JAKA servo_move_enable service'}, 500
+
+        req = ServoMoveEnable.Request()
+        req.enable = True
+        
+        # Fire and forget the service call
+        future = servo_client.call_async(req)
+        current_app.logger.info("Attempted to enable JAKA servo mode.")
+
     # agent = Agent(current_app.node, data)
 
     # current_app.agents[id] = agent
