@@ -100,7 +100,7 @@
             </div>
             <div v-else-if="checkpoint" class="row q-mb-sm">
                 <div
-                    class="col bg-dark border-rounded text-white row flex flex-center"
+                    class="col bg-dark border-rounded text-white row flex flex-center q-col-gutter-x-sm"
                     v-if="status === 'pending'"
                 >
                     <div>
@@ -115,6 +115,17 @@
                         ></q-btn>
                     </div>
                     <q-space class="col"></q-space>
+                    <div>
+                        <q-input
+                            v-model.number="hz"
+                            dense
+                            outlined
+                            dark
+                            bg-color="dark"
+                            label="Frequency (Hz)"
+                        >
+                        </q-input>
+                    </div>
                     <div>
                         <q-btn
                             color="red"
@@ -428,6 +439,7 @@ function stopDataCollection() {
     })
 }
 
+const hz = ref(10);
 function startInference() {
     showProcessConsole.value = true;
     api.post(`/checkpoint/${selectedCheckpointId.value}/:start_test`, {
@@ -437,6 +449,7 @@ function startInference() {
         sensors: props.sensors,
         checkpoint: checkpoint.value,
         move_homepose: moveHomposeInDataCollection.value,
+        hz: hz.value,
     }).catch((error) => {
         console.error('Error starting test:', error);
         Notify.create({

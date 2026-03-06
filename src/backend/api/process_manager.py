@@ -186,7 +186,7 @@ class ProcessManager:
         
         # 플래그를 True로 변경하여 함수가 스스로 멈추게 함
         task['obj']['stop'] = True
-        del self.processes[name]
+        del self.processes[name]  # 삭제는 task_wrapper의 finally에서 수행하도록 변경
         self.socketio.emit('stop_process', {'id': name})
         print(f"'{name}' Function stop signal sent.")
 

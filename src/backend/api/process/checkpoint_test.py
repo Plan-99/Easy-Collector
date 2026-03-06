@@ -39,6 +39,7 @@ def checkpoint_test(
     task_control,
     max_timesteps,
     move_homepose=False,
+    hz=10,
     ):
 
     oti_rl = False
@@ -48,6 +49,9 @@ def checkpoint_test(
     try:
         gc.collect()
         torch.cuda.empty_cache()
+
+        from concurrent.futures import ThreadPoolExecutor
+        thread_pool = ThreadPoolExecutor(max_workers=len(agents))
         executor = None
         
         # 기본 정책 로드
@@ -65,14 +69,13 @@ def checkpoint_test(
         
         policy.cuda()
         policy.eval()
-        print(f'Loaded Policy from {ckpt_dir}')
+        print(f'Loaded Policy from {ckpt_dir}, hz: {hz}')
         
         # 환경 및 RL 에이전트 초기화
         state_dim = sum(agent.joint_len for agent in agents)
         env = Env(node, agents, sensors)
         vision_backbone = policy_obj.get('vision_backbone')
-        episode_len = task.get('episode_len', 300) * 6
-        hz = 10
+        episode_len = task.get('episode_len', 300) * 1.5
 
         # OTI-RL 관련 요소들 조건부 초기화
         if oti_rl:
@@ -124,7 +127,7 @@ def checkpoint_test(
         noise_t_raw = None
         
         # --- Find the last saved RL step to resume numbering ---
-        last_step = 22000
+        last_step = 0
         uncertainty_entered_step = 0
         uncertainty_mode_timer = 0
         if oti_rl:
@@ -154,7 +157,7 @@ def checkpoint_test(
         if home_pose is not None:
             for agent in env.agents:
                 agent.move_to(home_pose[str(agent.id)])
-        time.sleep(3)
+        time.sleep(8)
         ts = env.reset()
         print('Robot moved to homepose')
         
@@ -167,7 +170,7 @@ def checkpoint_test(
                 if home_pose is not None:
                     for agent in env.agents:
                         agent.move_to(home_pose[str(agent.id)])
-                time.sleep(4)
+                time.sleep(6)
                 ts = env.reset()
                 print('Robot moved to homepose')
 
@@ -226,12 +229,7 @@ def checkpoint_test(
             start_action_id = 0
             for agent in env.agents:
                 target_qpos = final_action[start_action_id : start_action_id + agent.joint_len]
-                move_thread = threading.Thread(
-                    target=agent.move_joint_step,
-                    args=(target_qpos,),
-                    daemon=True  # 메인 프로세스 종료 시 함께 종료
-                )
-                move_thread.start()
+                thread_pool.submit(agent.move_joint_step, target_qpos)
                 start_action_id += agent.joint_len
             
             ts_next = env.record_step()
@@ -295,6 +293,7 @@ def checkpoint_test(
         print(f"Error in main loop: {error_string}")
 
     finally:
+        thread_pool.shutdown(wait=False)
         # --- 4. 종료 처리 ---
         if oti_rl and 'uncertainty_subscriber' in locals():
             uncertainty_subscriber.destroy_node()

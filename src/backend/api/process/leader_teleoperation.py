@@ -209,14 +209,18 @@ class Leader():
                 dxl_joints=joints
             )
 
-        time.sleep(0.1)
+        ## 컨트롤러 중 하나라도 동기화될 때까지 대기
+        time.sleep(0.5)
+        while not self.is_synced: # is_synced가 True가 될 때까지 반복
+            for dxl_controller in self.dxl_controllers.values():
+                if not dxl_controller.controlled:
+                    self.is_synced = True
+                    break # for 루프 탈출
+            
+            if not self.is_synced: # 아직 동기화 안 됐다면 대기
+                time.sleep(0.1)
 
-        while any([dc.controlled for dc in self.dxl_controllers.values()]):
-            time.sleep(0.1)
-
-        self.is_synced = True
-        print("[SUCCESS] Leader Robot Synced Successfully!")
-
+        print("[SUCCESS] Leader Robot Synced!")
 
     def get_gripper_pos(self, joint):
         gripper_pos_low = joint['joint_lower_bound']
