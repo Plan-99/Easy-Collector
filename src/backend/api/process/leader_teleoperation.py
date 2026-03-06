@@ -13,6 +13,7 @@ from .subscribe_dynamixel import get_available_ports
 from collections import defaultdict
 import sys
 
+from concurrent.futures import ThreadPoolExecutor
 
 class Leader():
     def __init__(self, node: Node, agents, socketio_instance, teleop_setting) -> None:
@@ -56,6 +57,9 @@ class Leader():
         self.ema = float(teleop_setting.get('ema', 0.0)) # EMA 필터 값
 
         self.time = time.time()
+
+        self.thread_pool = ThreadPoolExecutor(max_workers=len(self.agents))
+
 
 
     def update_joint_map_with_agent_info(self):
@@ -284,12 +288,8 @@ class Leader():
 
 
                     action = agent.fetch_joint_map_to_action(joint_list)
-                    move_thread = threading.Thread(
-                        target=agent.move_joint_step,
-                        args=(action,),
-                        daemon=True  # 메인 프로세스 종료 시 함께 종료
-                    )
-                    move_thread.start()
+                    self.thread_pool.submit(agent.move_joint_step, action)
+                    
                     end = time.time()
                 # self.target_pos[-1] = self.get_gripper_pos()
                 #-----------------------------------------
