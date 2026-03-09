@@ -25,7 +25,7 @@ if data_root:
     DB_PATH = os.path.join(db_dir, 'main.db')
     _ensure_db_permissions(db_dir, DB_PATH)
 else:
-    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    base_dir = '/opt/easytrainer/database'
     DB_PATH = os.path.join(base_dir, 'main.db')
 
 DATABASES = {

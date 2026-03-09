@@ -17,6 +17,7 @@ from .routes.checkpoint import checkpoint_bp
 from .routes.vla import vla_bp
 from .routes.teleoperator import teleoperator_bp
 from .routes.assembly import assembly_bp
+from .routes.planner import planner_bp
 
 import rclpy
 from rclpy.node import Node
@@ -69,6 +70,7 @@ app.register_blueprint(checkpoint_bp, url_prefix='/api')
 app.register_blueprint(vla_bp, url_prefix='/api')
 app.register_blueprint(teleoperator_bp, url_prefix='/api')
 app.register_blueprint(assembly_bp, url_prefix='/api')
+app.register_blueprint(planner_bp, url_prefix='/api')
 
 socketio.on_namespace(SensorNamespace('/sensor', pm))
 socketio.on_namespace(RobotNamespace('/robot', pm))

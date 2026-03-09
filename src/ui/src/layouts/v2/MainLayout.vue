@@ -83,6 +83,11 @@ const linksList = [
     title: 'Train',
     icon: 'school',
     link: '/train'
+  },
+  {
+    title: 'Planner',
+    icon: 'event_note',
+    link: '/planner'
   }
 ]
 
