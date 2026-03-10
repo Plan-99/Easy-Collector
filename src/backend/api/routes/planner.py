@@ -30,7 +30,8 @@ def create_planner():
     new_planner = PlannerModel.create(
         name=data.get('name'),
         task_ids=data.get('task_ids', []),
-        plan=data.get('plan', {})
+        plan=data.get('plan', {}),
+        blocks=data.get('blocks', [])
     )
     
     return {
@@ -53,6 +54,7 @@ def update_planner(id):
     planner.name = data.get('name', planner.name)
     planner.task_ids = data.get('workspace_ids', planner.task_ids)
     planner.plan = data.get('plan', planner.plan)
+    planner.blocks = data.get('blocks', planner.blocks)
     
     planner.save()
 

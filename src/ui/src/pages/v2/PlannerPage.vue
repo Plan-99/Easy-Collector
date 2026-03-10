@@ -82,26 +82,46 @@
                             <q-card class="bg-dark text-white">
                                 <q-card-section>
                                     <div class="text-subtitle2 q-mb-sm">Sensors</div>
-                                    <div v-for="sensor in workspace.settingd.sensors" :key="sensor.id" class="row items-center q-mb-xs">
+                                    <div v-for="sensor in workspace.sensors" :key="sensor.id"
+                                        class="q-pa-sm q-px-md q-my-xs border-rounded row items-center"
+                                        :class="sensor.status === 'on' ? 'bg-green-10' : 'bg-grey-8'"
+                                    >
                                         <div>{{ sensor.name }}</div>
                                         <q-space />
                                         <q-toggle
-                                            :model-value="sensor.handler?.status === 'on'"
+                                            :model-value="sensor.status === 'on'"
                                             dense
                                             color="positive"
-                                            @click="toggleSensor(workspace.id, sensor)"
+                                            @click="toggleSensor(sensor)"
+                                            v-if="sensor.type !== 'custom'"
                                         ></q-toggle>
+                                        <div v-else>
+                                            <div class="text-caption text-grey" v-if="sensor.status === 'off'">TOPIC OFF</div>
+                                            <div class="text-caption text-positive" v-else-if="sensor.status === 'on'">TOPIC ON</div>
+                                        </div>
+                                        <q-inner-loading :showing="sensor.status === 'loading'"></q-inner-loading>
                                     </div>
                                     <div class="text-subtitle2 q-mt-md q-mb-sm">Robots</div>
-                                    <div v-for="robot in workspace.robots" :key="robot.id" class="row items-center q-mb-xs">
+                                    <div v-if="!workspace.assembly" class="text-caption text-grey q-mb-sm">No assembly assigned</div>
+                                    <div v-for="robot in (workspace.assembly?.robots || [])" :key="robot.id"
+                                        class="q-pa-sm q-px-md q-my-xs border-rounded row items-center"
+                                        :class="robot.status === 'on' ? 'bg-green-10' : (robot.status === 'error' ? 'bg-red-10' : 'bg-grey-8')"
+                                    >
                                         <div>{{ robot.name }}</div>
                                         <q-space />
                                         <q-toggle
-                                            :model-value="robot.handler?.status === 'on'"
+                                            :model-value="robot.status === 'on'"
                                             dense
                                             color="positive"
-                                            @click="toggleRobot(workspace.id, robot)"
+                                            @click="toggleRobot(robot)"
+                                            v-if="robot.type !== 'custom'"
                                         ></q-toggle>
+                                        <div v-else>
+                                            <div class="text-caption text-grey" v-if="robot.status === 'off'">TOPIC OFF</div>
+                                            <div class="text-caption text-positive" v-else-if="robot.status === 'on'">TOPIC ON</div>
+                                            <div class="text-caption text-negative" v-else-if="robot.status === 'error'">ERROR</div>
+                                        </div>
+                                        <q-inner-loading :showing="robot.status === 'loading'"></q-inner-loading>
                                     </div>
                                 </q-card-section>
                             </q-card>
@@ -238,17 +258,19 @@ function listAvailableWorkspaces() {
         availableWorkspaces.value = tasks.map(workspace => {
             const augmentedWorkspace = { ...workspace };
 
-            // 2. sensors가 없을 경우를 대비해 빈 배열로 처리 후 map 실행
+            // 2. sensors가 없을 경우를 대비해 빈 배열로 처리 후 handler 직접 할당
             augmentedWorkspace.sensors = (workspace.sensors || []).map(sensor => {
-                const handler = useSensor(sensor);
-                return { ...sensor, handler: handler };
+                sensor.handler = useSensor(sensor);
+                return sensor;
             });
 
-            // 3. robots가 없을 경우를 대비해 빈 배열로 처리 후 map 실행
-            augmentedWorkspace.robots = (workspace.robots || []).map(robot => {
-                const handler = useRobot(robot);
-                return { ...robot, handler: handler };
-            });
+            // 3. assembly에 포함된 robots에 handler 직접 할당
+            if (augmentedWorkspace.assembly && augmentedWorkspace.assembly.robots) {
+                augmentedWorkspace.assembly.robots = augmentedWorkspace.assembly.robots.map(robot => {
+                    robot.handler = useRobot(robot);
+                    return robot;
+                });
+            }
 
             return augmentedWorkspace;
         });
@@ -262,25 +284,21 @@ function listSelectedWorkspaces() {
     selectedWorkspaces.value = availableWorkspaces.value.filter(w => selectedWorkspaceIds.value.includes(w.id));
 }
 
-function toggleSensor(workspace, sensor) {
-    if (!sensor.handler) return;
-
-    sensor.process_id = `sensor_${workspace.id}_${sensor.id}`;
-    if (sensor.handler.status === 'on') {
+function toggleSensor(sensor) {
+    sensor.process_id = `sensor_${sensor.id}`;
+    if (sensor.status === 'on') {
         sensor.handler.stopSensor();
     } else {
         sensor.handler.startSensor();
     }
 }
 
-function toggleRobot(workspace, robot) {
-    if (!robot.handler) return;
-
-    robot.process_id = `robot_${workspace.id}_${robot.id}`;
+function toggleRobot(robot) {
+    robot.process_id = `robot_${robot.id}`;
     const startFlow = () => robot.handler.startRobot();
-    if (robot.handler.status === 'on') {
+    if (robot.status === 'on') {
         robot.handler.stopRobot();
-    } else if (robot.handler.status === 'error') {
+    } else if (robot.status === 'error') {
         robot.handler.stopRobot().finally(() => startFlow());
     } else {
         startFlow();
@@ -302,6 +320,15 @@ watch(selectedPlannerId, () => {
 
 
 onUnmounted(() => {
+    availableWorkspaces.value.forEach(workspace => {
+        if (workspace.assembly?.robots) {
+            workspace.assembly.robots.forEach(robot => {
+                if (robot.handler) {
+                    robot.handler.unSubscribeRobot();
+                }
+            });
+        }
+    });
 });
 
 onMounted(() => {
