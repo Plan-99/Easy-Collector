@@ -150,9 +150,10 @@ class Agent:
             if current_pos is None:
                 print("Current joint states are None, cannot move.")
                 return
+            second = 0.08 if vel_arg is None else vel_arg
             self.joint_trajectory_point.velocities = [(abs(t - c) / 2) for t, c in zip(action, current_pos)]
             # self.joint_trajectory_point.velocities = [0.0] * self.joint_len
-            self.joint_trajectory_point.time_from_start = rclpy.duration.Duration(seconds=0.2).to_msg()
+            self.joint_trajectory_point.time_from_start = rclpy.duration.Duration(seconds=second).to_msg()
             self.write_topic_msg_data.points = [self.joint_trajectory_point]
             self.move_robot_pub.publish(self.write_topic_msg_data)
         else:
@@ -253,15 +254,17 @@ class Agent:
         # 2. 값의 변화가 거의 없다면 통신하지 않음 (Deadband 필터)
         # 10Hz에서 미세한 떨림으로 계속 Goal을 쏘는 것을 방지합니다.
         current_states = self.get_joint_states()
-        move_threshold = vel_arg if vel_arg is not None else 0.08
-        if  current_states[0] < 0.7 and current_states is not None and all(abs(a - b) < move_threshold for a, b in zip(action, current_states)):
-            return
-        
-        if current_states[0] >= 0.7 and current_states is not None and all(abs(a - b) < move_threshold / 3 for a, b in zip(action, current_states)):
-            return
-        
-        if current_states[0] > 0.78 and action[0] > 0.78:
-            return
+
+        if self.write_topic_msg == 'control_msgs/action/GripperCommand':
+            move_threshold = vel_arg if vel_arg is not None else 0.08
+            if  current_states[0] < 0.7 and current_states is not None and all(abs(a - b) < move_threshold for a, b in zip(action, current_states)):
+                return
+            
+            if current_states[0] >= 0.7 and current_states is not None and all(abs(a - b) < move_threshold / 3 for a, b in zip(action, current_states)):
+                return
+            
+            if current_states[0] > 0.78 and action[0] > 0.78:
+                return
         
         self.joint_actions = action
 
@@ -415,7 +418,26 @@ class Agent:
 
         # 3. 계산된 절대 좌표 타겟으로 이동 명령
         self.move_ee_step(target_ee_dict)
-        
+
+    def move_ee_from_origin(self, origin, offset_ee_dict):
+        """
+        origin으로부터 offset만큼 떨어진 절대 EE 포즈를 계산하여 이동한다.
+
+        origin:          [x, y, z, ax, ay, az] - 기준 EE 포즈 (월드 프레임, axis-angle)
+        offset_ee_dict:  {ee_name: [dx, dy, dz, dax, day, daz]} - origin 기준 offset
+        """
+        if self.role == 'tool' or self.ik_solver is None:
+            return
+
+        target_ee_dict = {}
+        for name, offset in offset_ee_dict.items():
+            target = self.ik_solver.compute_target_from_origin(origin, offset)
+            if len(offset) >= 7:
+                target.append(offset[6])
+            target_ee_dict[name] = target
+
+        self.move_ee_step(target_ee_dict)
+
     def joint_state_cb(self, msg):
         with self.js_mutex:
             self.joint_states = msg

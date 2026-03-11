@@ -238,6 +238,7 @@ def read_hdf5_add_config(id, file_name):
 def start_collection(id):
     data = request.json
     agents = [current_app.agents[robot['id']] for robot in data.get('robots', [])]
+    tele_type = data.get('tele_type', 'leader')
 
     current_app.pm.start_function(
         func=record_episode,
@@ -249,7 +250,7 @@ def start_collection(id):
         sensors=data.get('sensors'),
         task=data.get('task'),
         language_instruction=data.get('language_instruction'),
-        tele_type=data.get('tele_type', 'leader'),
+        tele_type=tele_type,
         socketio_instance=current_app.pm.socketio,
         iter=data.get('iter', 100000),
         name=f"record_episode",
