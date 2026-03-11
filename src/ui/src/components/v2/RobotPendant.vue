@@ -88,7 +88,7 @@ function moveOneJoint(index, delta) {
     // jointState[index] += delta;
     // props.robot.handler.moveRobotJoint(jointState);
     if (props.robot.role === 'tool') {
-        delta = delta * 30; // tool
+        delta = 0.12 * (delta > 0 ? 1 : -1); // tool
     }
     const deltaAction = new Array(props.robot.joint_names.length).fill(0);
     deltaAction[index] = delta;
@@ -111,7 +111,7 @@ function moveOneEE(tool_index, p_index, delta) {
     } else if (p_index < 6) {
         delta = delta * 4; // roll, pitch, yaw in radians
     } else {
-        delta = delta * 30; // tool
+        delta = 0.12 * (delta > 0 ? 1 : -1); // tool
     }
     const deltaPos = {};
     const toolName = props.robot.role === 'dual_arm' ? (tool_index === 0 ? 'L_ee' : 'R_ee') : 'ee';

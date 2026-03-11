@@ -85,9 +85,11 @@ class DxlController:
     
     def read_all_dynamixel(self):
         max_retries = 20
+        retry_count = 0
         
         with self.port_lock:
             for attempt in range(max_retries):
+                retry_count += 1
                 positions = []
                 try:
                     dxl_comm_result = self.syncRead.txRxPacket()
@@ -116,8 +118,8 @@ class DxlController:
                 time.sleep(0.001) # 0.001보다 조금 더 여유를 줌
 
             # 실패 시 마지막으로 읽었던 값이나 안전한 기본값 반환
-            print("zzzzzzzzzzzzzzzzz")
-            return [{'id': dxl_id, 'position': 0} for dxl_id in self.dxl_ids]
+            print("[ERROR] Failed to read all positions after multiple attempts.")
+            return 0
 
     def close(self):
         self.portHandler.closePort()

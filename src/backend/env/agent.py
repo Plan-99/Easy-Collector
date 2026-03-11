@@ -88,7 +88,8 @@ class Agent:
         self.joint_trajectory_point = JointTrajectoryPoint()
             
         self.moved_by_ui = False
-        self.move_lock = False    
+        self.move_lock = False
+        self.is_waiting_for_service = False
         time.sleep(0.1)  # Wait for subscriber to be ready
 
 
@@ -100,7 +101,7 @@ class Agent:
         return action
 
 
-    def move_joint_step(self, action, from_ee=False):
+    def move_joint_step(self, action, from_ee=False, velocity_arg=None):
         if not from_ee:
             self.ee_pos_cmd = None
 
@@ -125,13 +126,13 @@ class Agent:
             action = np.clip(action, self.joint_lower_bounds, self.joint_upper_bounds).tolist()
 
         if self.write_type == 'topic':
-            self.move_joint_step_by_topic(action)
+            self.move_joint_step_by_topic(action, velocity_arg)
         elif self.write_type == 'service':
-            self.move_joint_step_by_service(action)
+            self.move_joint_step_by_service(action, velocity_arg)
         elif self.write_type == 'action':
-            self.move_joint_step_by_action(action)
+            self.move_joint_step_by_action(action, velocity_arg)
         
-    def move_joint_step_by_topic(self, action):
+    def move_joint_step_by_topic(self, action, vel_arg=None):
         if self.write_topic_msg == 'std_msgs/Float64MultiArray':
             self.write_topic_msg_data.data = action
             self.move_robot_pub.publish(self.write_topic_msg_data)
@@ -158,8 +159,10 @@ class Agent:
             print("Unsupported write topic message type for move_joint_step_by_topic.")
             return
         
-    def move_joint_step_by_service(self, action):
+    def move_joint_step_by_service(self, action, vel_arg=None):
         req = self.write_service_srv_cls.Request()
+        self.joint_actions = action
+
         if self.write_topic_msg == 'onrobot_rg_msgs/SetCommand':
             # 서비스가 준비되었는지 확인 (Blocking 하지 않음)
             if not self.move_robot_client.service_is_ready():
@@ -175,14 +178,44 @@ class Agent:
                 return
 
             # TM Script는 도(degree) 단위를 사용하므로 라디안에서 변환
-            angles_deg = [float(np.degrees(a)) for a in action]
+            # If there are 7 joints (6 arm + 1 gripper), use only first 6 for PTP
+            arm_action = action[:6]
+            angles_deg = [float(np.degrees(a)) for a in arm_action]
             
             # PTP("JPP", j1, j2, j3, j4, j5, j6, 속도%, 가속ms, 블렌딩%, 가상디지털출력)
-            # 기본값: 속도 10%, 가속 200ms
-            script = 'PTP("JPP",{},{},{},{},{},{},10,200,0,false)'.format(*[f"{a:.4f}" for a in angles_deg])
+            if vel_arg is None:
+                curr_joints = self.get_joint_states()
+                if curr_joints is None:
+                    vel_arg = 10
+                else:
+                    scale_factor = 3
+                    max_speeds_deg = np.array([180, 180, 180, 225, 225, 225])
+                    # 3. 이동할 거리 계산 (도 단위)
+                    arm_action = action[:6]
+                    target_deg = np.degrees(arm_action)
+                    curr_deg = np.degrees(curr_joints[:6])
+                    diff_deg = np.abs(target_deg - curr_deg)
+
+                    # 4. 0.1초 내에 도달하기 위해 필요한 속도 비율(%) 계산
+                    # 공식: (거리 / 시간) / 최대속도 * 100
+                    # 25ms의 가속 시간(acc_ms)을 고려하면 실제 가용 시간은 더 짧아질 수 있습니다.
+                    required_speed_pct = (diff_deg / 0.1) / max_speeds_deg * scale_factor * 100
+
+                    # 5. 모든 관절 중 가장 큰 비율을 선택하고 1~100 사이로 제한
+                    vel_arg = int(np.max(required_speed_pct))
+                    vel_arg = max(1, min(100, vel_arg))
+
+            script = 'PTP("JPP",{},{},{},{},{},{},{},25,100,false)'.format(*[f"{a:.4f}" for a in angles_deg] + [vel_arg])  # 속도 인자 추가, 기본값은 50%
             
-            req.id = 'agent_step'
+            # Gripper control: Append SET command to the same script string
+            # Module 1 (EndEffector), Type 1 (Digital Out), Pin 0
+            if len(action) > 6 and self.tool_inner:
+                gripper_state = 1 if action[6] > 0.4 else 0
+                script += '\r\nSET(1,1,0,{})'.format(gripper_state)
+            
+            req.id = '1'
             req.script = script
+            self.is_waiting_for_service = True
             self.move_robot_client.call_async(req)
 
         elif self.write_topic_msg == 'jaka_msgs/srv/ServoMove':
@@ -201,21 +234,49 @@ class Agent:
             req.pose = delta.tolist()
             self.move_robot_client.call_async(req)
 
-    def move_joint_step_by_action(self, action):
-        # 1. 이전 Goal 전송 후 응답(Accepted)을 아직 못 받았다면 스킵
+    def service_response_callback(self, future):
+        """서비스 응답이 도착했을 때 호출되는 콜백"""
+        try:
+            response = future.result()
+            # 성공적으로 응답을 받았으므로 다음 명령 전송 가능
+            self.is_waiting_for_service = False
+        except Exception as e:
+            self.node.get_logger().error(f"Service call failed: {e}")
+            # 에러가 발생해도 플래그를 풀어줘야 다음 시도가 가능합니다.
+            self.is_waiting_for_service = False
+
+    def move_joint_step_by_action(self, action, vel_arg=None):
+        # 1. 이전 명령이 아직 '수락' 대기 중이면 바로 리턴 (병목 방지)
         if self.is_waiting_for_goal:
             return
 
-        action = [float(a) for a in action]
+        # 2. 값의 변화가 거의 없다면 통신하지 않음 (Deadband 필터)
+        # 10Hz에서 미세한 떨림으로 계속 Goal을 쏘는 것을 방지합니다.
+        current_states = self.get_joint_states()
+        move_threshold = vel_arg if vel_arg is not None else 0.08
+        if  current_states[0] < 0.7 and current_states is not None and all(abs(a - b) < move_threshold for a, b in zip(action, current_states)):
+            return
+        
+        if current_states[0] >= 0.7 and current_states is not None and all(abs(a - b) < move_threshold / 3 for a, b in zip(action, current_states)):
+            return
+        
+        if current_states[0] > 0.78 and action[0] > 0.78:
+            return
+        
         self.joint_actions = action
+
+        # 3. 중요: 멤버 변수 대신 '로컬 변수'로 Goal 객체 생성
+        # 여러 스레드나 루프에서 공유 변수를 수정하는 위험을 방지합니다.
+        goal_msg = get_action(self.write_topic_msg).Goal()
+        
         if self.write_topic_msg == 'control_msgs/action/GripperCommand':
-            self.write_action_goal_data.command.position = action[0]
-            self.write_action_goal_data.command.max_effort = 10.0 
+            goal_msg.command.position = float(action[0])
+            goal_msg.command.max_effort = 1.0 
 
         self.is_waiting_for_goal = True
         
-        # send_goal_async를 호출하고 응답 콜백만 연결
-        send_goal_future = self.move_robot_client.send_goal_async(self.write_action_goal_data)
+        # send_goal_async 자체가 Non-blocking이므로 그대로 사용
+        send_goal_future = self.move_robot_client.send_goal_async(goal_msg)
         send_goal_future.add_done_callback(self.goal_response_callback)
 
     def goal_response_callback(self, future):
@@ -383,15 +444,31 @@ class Agent:
             joint_positions = []
             if self.read_topic_msg == 'sensor_msgs/JointState':
                 for i, joint_name in enumerate(self.joint_names):
-                    topic_index = self.joint_states.name.index(joint_name)
-                    joint_positions.append(self.joint_states.position[topic_index])
+                    try:
+                        topic_index = self.joint_states.name.index(joint_name)
+                        joint_positions.append(self.joint_states.position[topic_index])
+                    except (ValueError, AttributeError):
+                        joint_positions.append(0.0)
             elif self.read_topic_msg == 'control_msgs/JointTrajectoryControllerState':
                 for i, joint_name in enumerate(self.joint_names):
                     topic_index = self.joint_states.joint_names.index(joint_name)
                     joint_positions.append(self.joint_states.actual.positions[topic_index])
+            elif self.read_topic_msg == 'tm_msgs/msg/FeedbackState':
+                # TM FeedbackState: joint_pos (6 arm joints) + optional gripper from DI
+                joint_positions = list(self.joint_states.joint_pos)
+                if len(self.joint_names) > len(joint_positions) and self.tool_inner:
+                    if len(self.joint_states.ee_digital_input) > 0:
+                        # Map DI 0 to 0.0 (Open) or 0.85 (Closed)
+                        gripper_val = 0.85 if self.joint_states.ee_digital_input[0] == 1 else 0.0
+                        joint_positions.append(gripper_val)
+                    else:
+                        joint_positions.append(0.0)
             else:
                 for i in range(self.joint_len):
-                    joint_positions.append(self.joint_states.data[i])
+                    if hasattr(self.joint_states, 'data'):
+                        joint_positions.append(self.joint_states.data[i])
+                    else:
+                        joint_positions.append(0.0)
         return joint_positions
     
     def get_joint_actions(self):
@@ -414,8 +491,8 @@ class Agent:
                     point = self.joint_actions.points[-1]  # 가장 최근 포인트 사용
                     for i, joint_name in enumerate(self.joint_names):
                         joint_actions.append(point.positions[i])
-        elif self.write_type == 'action':
-            joint_actions = self.joint_actions
+        elif self.write_type == 'action' or self.write_type == 'service':
+            joint_actions = self.joint_actions if self.joint_actions is not None else self.get_joint_states()
         return joint_actions
 
     def get_ee_position(self):
@@ -526,8 +603,10 @@ class Agent:
             self.joint_trajectory_point.time_from_start = rclpy.duration.Duration(seconds=duration).to_msg()
             self.write_topic_msg_data.points = [self.joint_trajectory_point]
             self.move_robot_pub.publish(self.write_topic_msg_data)
+        elif self.robot_company == 'OMRON':
+            self.move_joint_step(target_pos, velocity_arg=10)
         elif self.role == 'tool':
-            self.move_joint_step(target_pos)
+            self.move_joint_step(target_pos, velocity_arg=0)
         else:
             while True:
                 current_pos = self.get_joint_states()

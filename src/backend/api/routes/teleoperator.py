@@ -114,7 +114,10 @@ def start_leader_teleoperation():
         )
 
     except Exception as e:
-        return {'status': 'error', 'message': f'Init Failed: {str(e)}'}, 500
+        import traceback
+        traceback_msg = traceback.format_exc()
+        print(f"[ERROR] Error during episode recording:\n{traceback_msg}")
+        return {'status': 'error', 'message': f'Init Failed: {str(traceback_msg)}'}, 500
 
     # 즉시 응답 반환
     return {'status': 'success', 'message': 'Leader sync and teleop started in background'}, 200

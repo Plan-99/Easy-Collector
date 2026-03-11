@@ -772,7 +772,7 @@ function updateAllSensorResolutions(width, height) {
 
 function openSensorForm() {
     if (selectedWorkspace.value) {
-        sensorForm.value.find(e => e.key === 'sensor_ids').value = Object.keys(selectedWorkspace.value.sensors || {}).map(id => parseInt(id, 10));
+        sensorForm.value.find(e => e.key === 'sensor_ids').value = Object.keys(selectedWorkspace.value.sensors || {}).map(id => parseInt(id, 10)).filter(id => id !== 0);
     }
     showSensorForm.value = true;
 }

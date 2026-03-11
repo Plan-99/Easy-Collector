@@ -25,6 +25,7 @@ import rclpy
 import re
 
 import gc
+import threading
 
 
 def checkpoint_test(
@@ -37,6 +38,8 @@ def checkpoint_test(
     socketio_instance,
     task_control,
     max_timesteps,
+    move_homepose=False,
+    hz=10,
     ):
 
     oti_rl = False
@@ -46,6 +49,9 @@ def checkpoint_test(
     try:
         gc.collect()
         torch.cuda.empty_cache()
+
+        from concurrent.futures import ThreadPoolExecutor
+        thread_pool = ThreadPoolExecutor(max_workers=len(agents))
         executor = None
         
         # 기본 정책 로드
@@ -63,12 +69,13 @@ def checkpoint_test(
         
         policy.cuda()
         policy.eval()
-        print(f'Loaded Policy from {ckpt_dir}')
+        print(f'Loaded Policy from {ckpt_dir}, hz: {hz}')
         
         # 환경 및 RL 에이전트 초기화
         state_dim = sum(agent.joint_len for agent in agents)
         env = Env(node, agents, sensors)
         vision_backbone = policy_obj.get('vision_backbone')
+        episode_len = task.get('episode_len', 300) * 1.5
 
         # OTI-RL 관련 요소들 조건부 초기화
         if oti_rl:
@@ -120,7 +127,7 @@ def checkpoint_test(
         noise_t_raw = None
         
         # --- Find the last saved RL step to resume numbering ---
-        last_step = 22000
+        last_step = 0
         uncertainty_entered_step = 0
         uncertainty_mode_timer = 0
         if oti_rl:
@@ -150,19 +157,20 @@ def checkpoint_test(
         if home_pose is not None:
             for agent in env.agents:
                 agent.move_to(home_pose[str(agent.id)])
-        time.sleep(3)
+        time.sleep(8)
         ts = env.reset()
         print('Robot moved to homepose')
         
+        start = time.time()
         while not task_control['stop']:
-            if step_num % (max_timesteps * 2) == 0 and oti_rl and step_num != 0: 
+            if step_num % episode_len == 0 and step_num != 0 and move_homepose: 
                 print(f"Episode finished. Total Reward: {episode_reward:.4f}")
                 episode_reward = 0.0
                 policy.reset()
                 if home_pose is not None:
                     for agent in env.agents:
                         agent.move_to(home_pose[str(agent.id)])
-                time.sleep(7)
+                time.sleep(6)
                 ts = env.reset()
                 print('Robot moved to homepose')
 
@@ -221,10 +229,9 @@ def checkpoint_test(
             start_action_id = 0
             for agent in env.agents:
                 target_qpos = final_action[start_action_id : start_action_id + agent.joint_len]
-                agent.move_joint_step(target_qpos)
+                thread_pool.submit(agent.move_joint_step, target_qpos)
                 start_action_id += agent.joint_len
             
-            time.sleep(0.12)
             ts_next = env.record_step()
 
             # === d. OTI-RL 학습 ===
@@ -274,6 +281,9 @@ def checkpoint_test(
 
                 episode_reward += reward_t
 
+            time.sleep(max(0, (1.0 / hz) - (time.time() - start)))  # Loop at specified Hz
+            print(f"Time: -------------------{time.time() - start}" )
+            start = time.time()
             step_num += 1
             ts = ts_next
 
@@ -283,6 +293,7 @@ def checkpoint_test(
         print(f"Error in main loop: {error_string}")
 
     finally:
+        thread_pool.shutdown(wait=False)
         # --- 4. 종료 처리 ---
         if oti_rl and 'uncertainty_subscriber' in locals():
             uncertainty_subscriber.destroy_node()

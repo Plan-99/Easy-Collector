@@ -57,6 +57,7 @@ class Robot(Model, SoftDeletes):
         'ip_address',
         'port',
         'changer_address',
+        'serial_port',
         'ik_available',
     ]
 
@@ -187,6 +188,15 @@ class Robot(Model, SoftDeletes):
             if 'changer_address' in custom_fields:
                 return self.settings.get('changer_address', '')
         return None
+    
+    @accessor
+    def serial_port(self):
+        if self.type != 'custom':
+            custom_fields = self.get_robot_type_info().get('custom_fields', [])
+            if 'serial_port' in custom_fields:
+                return self.settings.get('serial_port', '')
+        return None
+
     
     @accessor
     def role(self):
