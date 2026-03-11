@@ -276,18 +276,7 @@ def main(args):
 if __name__ == '__main__':
     
     parser = argparse.ArgumentParser()
-    # parser.add_argument('--task_id', required=True)
-    # parser.add_argument('--policy_id', required=True)
-    # parser.add_argument('--load_model_id', default=None, required=False)
     parser.add_argument('--checkpoint_id', required=True)
-    # parser.add_argument('--dataset_ids', required=True)
-    
-    # # Add arguments for training parameters
-    # # This is a bit of a hack to get all the training parameters from the command line
-    # # A better way would be to pass a config file
-    # for key, value in ACTConfig.model_fields.items():
-    #     if key not in ['input_features', 'output_features']:
-    #         parser.add_argument(f'--{key}', type=type(value.default), default=value.default)
 
     main(parser.parse_args())
     sys.exit(0)

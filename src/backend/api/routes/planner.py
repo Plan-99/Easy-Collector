@@ -5,6 +5,36 @@ from ...database.models.planner_model import Planner as PlannerModel
 # 이 블루프린트는 플래너와 관련된 'HTTP' 라우트를 관리합니다.
 planner_bp = Blueprint('planner_bp', __name__)
 
+# 블록 타입별 설정 정의
+BLOCK_CONFIGS = {
+    'joint_position': {
+        'label': 'Joint Position',
+        'icon': 'precision_manufacturing',
+        'color': 'blue',
+        'keys': ['workspace_id', 'positions', 'name']
+    },
+    'checkpoint': {
+        'label': 'Checkpoint',
+        'icon': 'psychology',
+        'color': 'purple',
+        'keys': ['workspace_id', 'checkpoint_id', 'checkpoint_name', 'duration', 'name']
+    },
+    'timesleep': {
+        'label': 'Time Sleep',
+        'icon': 'hourglass_empty',
+        'color': 'orange',
+        'keys': ['duration', 'name']
+    }
+}
+
+
+@planner_bp.route('/planner/block_configs', methods=['GET'])
+def get_block_configs():
+    return {
+        'status': 'success',
+        'block_configs': BLOCK_CONFIGS
+    }, 200
+
 
 @planner_bp.route('/planners', methods=['GET'])
 def get_planners():
@@ -30,8 +60,7 @@ def create_planner():
     new_planner = PlannerModel.create(
         name=data.get('name'),
         task_ids=data.get('task_ids', []),
-        plan=data.get('plan', {}),
-        blocks=data.get('blocks', [])
+        plan=data.get('plan', []),
     )
     
     return {
@@ -54,7 +83,6 @@ def update_planner(id):
     planner.name = data.get('name', planner.name)
     planner.task_ids = data.get('workspace_ids', planner.task_ids)
     planner.plan = data.get('plan', planner.plan)
-    planner.blocks = data.get('blocks', planner.blocks)
     
     planner.save()
 
