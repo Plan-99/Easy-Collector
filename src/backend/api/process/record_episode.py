@@ -55,7 +55,7 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
     # vive_external: 실물 로봇 + vive, vive_only: vive tracker만 (이미지+ee_delta_action)
     vive = None
     if tele_type in ('vive_external', 'vive_only'):
-        vive = ViveController(node, socketio_instance, scale_factor=1, step_rate=20)
+        vive = ViveController(node, socketio_instance, scale_factor=1, step_rate=10)
         if not vive.wait_for_ready(timeout=30.0):
             task_control['stop'] = True
             vive.destroy()
@@ -147,26 +147,15 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
             # 에피소드 시작: vive origin 설정 및 teleop 스레드 시작
             prev_vive_offset = None
             if vive is not None:
-                on_step = None
                 if tele_type == 'vive_external':
-                    # ee_origin 계산 및 on_step 콜백 설정 (로봇 이동 전용)
-                    ee_origins = {}
-                    for agent in agents:
-                        if agent.role == 'single_arm' and agent.ik_solver is not None:
-                            arm_js, _ = agent.get_joint_and_tool_pos(agent.get_joint_states())
-                            init_q = np.array(arm_js)
-                            ee_origins[agent.id] = agent.ik_solver.get_ee_position(init_q)
-                            agent.ik_solver.reset_state(init_q)
-
-                    def on_step(offset):
+                    def on_step(_offset):
+                        delta = vive.last_step_delta
                         for agent in agents:
                             if agent.role == 'single_arm' and agent.ik_solver is not None:
                                 ee_name = agent.ee_names[0]
-                                ee_origin = ee_origins.get(agent.id, {}).get(ee_name)
-                                if ee_origin is None:
-                                    continue
-                                target_ee = agent.ik_solver.compute_target_from_origin(ee_origin, offset)
-                                agent.move_ee_step({ee_name: target_ee})
+                                agent.move_ee_delta_step({ee_name: delta})
+                else:
+                    on_step = None
 
                 vive.set_origin()
                 vive.start_teleop(on_step=on_step)

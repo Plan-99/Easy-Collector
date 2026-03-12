@@ -151,7 +151,7 @@ class Agent:
             if current_pos is None:
                 print("Current joint states are None, cannot move.")
                 return
-            second = 0.08 if vel_arg is None else vel_arg
+            second = 0.11 if vel_arg is None else vel_arg
             self.joint_trajectory_point.velocities = [(abs(t - c) / 2) for t, c in zip(action, current_pos)]
             # self.joint_trajectory_point.velocities = [0.0] * self.joint_len
             self.joint_trajectory_point.time_from_start = rclpy.duration.Duration(seconds=second).to_msg()
