@@ -24,7 +24,7 @@ e = IPython.embed
 
 
 class EpisodicDataset(torch.utils.data.Dataset):
-    def __init__(self, episode_ids, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone='resnet18', n_obs_steps=1):
+    def __init__(self, episode_ids, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone='resnet18', n_obs_steps=1, action_key='qaction'):
         super(EpisodicDataset).__init__()
         self.episode_ids = episode_ids
         self.dataset_dir = dataset_dir
@@ -34,6 +34,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self.n_obs_steps = n_obs_steps
         self.policy_type = policy_type
         self.vision_backbone = vision_backbone
+        self.action_key = action_key
         self.info = None
         self.__getitem__(0) # initialize self.is_sim
 
@@ -49,9 +50,12 @@ class EpisodicDataset(torch.utils.data.Dataset):
             # is_sim = root.attrs['sim']
 
             action_dim = 0
-            for key in root['qaction'].keys():
-                episode_len = root['qaction'][key].shape[0]
-                action_dim += root['qaction'][key].shape[1]
+            for key in root[self.action_key].keys():
+                item = root[self.action_key][key]
+                leaves = list(item.values()) if isinstance(item, h5py.Group) else [item]
+                for leaf in leaves:
+                    episode_len = leaf.shape[0]
+                    action_dim += leaf.shape[1]
 
             original_action_shape = (self.chunk_size, action_dim)
 
@@ -77,7 +81,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
                     image_dict[f"sensor_{sensor_id}"].append(root[f'/observations/images/sensor_{sensor_id}'][obs_step_start + i])
 
 
-            action = get_concatenated_pos(root['qaction'], target_id=None, target_range=[start_ts, min(episode_len, end_ts)])
+            action = get_concatenated_pos(root[self.action_key], target_id=None, target_range=[start_ts, min(episode_len, end_ts)])
             
             action_len = min(self.chunk_size, episode_len - start_ts) # hack, to make timesteps more aligned
 
@@ -141,7 +145,7 @@ def process_image(image, vision_backbone='resnet18', to_cuda=False):
     return image.cuda() if to_cuda else image  # Add batch dimension
 
 
-def get_norm_stats(dataset_dir, num_episodes):
+def get_norm_stats(dataset_dir, num_episodes, action_key='qaction'):
     all_qpos_data = []
     all_action_data = []
     # episode 길이 관련 코드 수정
@@ -151,7 +155,7 @@ def get_norm_stats(dataset_dir, num_episodes):
         dataset_path = os.path.join(dataset_dir, f'episode_{episode_idx}.hdf5')
         with h5py.File(dataset_path, 'r') as root:
             qpos = get_concatenated_pos(root['/observations/qpos'])
-            action = get_concatenated_pos(root['qaction'])
+            action = get_concatenated_pos(root[action_key])
             observation_image_keys = list(root['/observations/images'].keys())
         
         cnt += qpos.shape[0]
@@ -209,24 +213,25 @@ def get_norm_stats(dataset_dir, num_episodes):
 
 
 def get_concatenated_pos(pos_path, target_id=None, target_range=None):
+    """robot_N 키 아래 dataset이 있거나, robot_N/ee_name 처럼 한 단계 더 nested된 구조 모두 처리."""
     pos_list = []
     for key in pos_path.keys():
-        if target_id is None and target_range is None:
-            pos_list.append(pos_path[key][()])
-            if len(pos_list) > 0:
-                pos = np.concatenate(pos_list, axis=1)
-        elif target_range is None:
-            pos_list.append(pos_path[key][target_id])
-            if len(pos_list) > 0:
-                pos = np.concatenate(pos_list, axis=0)
-        else:
-            pos_list.append(pos_path[key][target_range[0]:target_range[1]])
-            if len(pos_list) > 0:
-                pos = np.concatenate(pos_list, axis=1)
-    return pos
+        item = pos_path[key]
+        leaves = list(item.values()) if isinstance(item, h5py.Group) else [item]
+        for leaf in leaves:
+            if target_id is None and target_range is None:
+                pos_list.append(leaf[()])
+            elif target_range is None:
+                pos_list.append(leaf[target_id])
+            else:
+                pos_list.append(leaf[target_range[0]:target_range[1]])
+    if not pos_list:
+        return np.array([])
+    axis = 0 if (target_range is None and target_id is not None) else 1
+    return np.concatenate(pos_list, axis=axis)
 
 
-def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_train, batch_size_val, chunk_size, vision_backbone='resnet18', num_workers=1, n_obs_steps=1):
+def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_train, batch_size_val, chunk_size, vision_backbone='resnet18', num_workers=1, n_obs_steps=1, action_key='qaction'):
     print(f'\nData from: {dataset_dir}\n')
     # obtain train test split
     train_ratio = 0.8
@@ -235,13 +240,13 @@ def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_tra
     val_indices = shuffled_indices[int(train_ratio * num_episodes):]
 
     # obtain normalization stats for qpos and action
-    norm_stats = get_norm_stats(dataset_dir, num_episodes)
+    norm_stats = get_norm_stats(dataset_dir, num_episodes, action_key=action_key)
 
     # construct dataset and dataloader
-    train_dataset = EpisodicDataset(train_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps)
-    val_dataset = EpisodicDataset(val_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps)
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train, shuffle=True, pin_memory=True, num_workers=num_workers, prefetch_factor=1)
-    val_dataloader = DataLoader(val_dataset, batch_size=batch_size_val, shuffle=True, pin_memory=True, num_workers=num_workers, prefetch_factor=1)
+    train_dataset = EpisodicDataset(train_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key)
+    val_dataset = EpisodicDataset(val_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key)
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train, shuffle=True, pin_memory=True, num_workers=num_workers)
+    val_dataloader = DataLoader(val_dataset, batch_size=batch_size_val, shuffle=True, pin_memory=True, num_workers=num_workers)
 
     input_features = {k: v for k, v in train_dataset.info.items() if k.startswith("observation")}
     output_features = {k: v for k, v in train_dataset.info.items() if k.startswith("action")}

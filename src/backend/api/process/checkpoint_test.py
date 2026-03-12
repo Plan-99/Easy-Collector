@@ -60,6 +60,8 @@ def checkpoint_test(
         else:
             ckpt_dir = os.path.join("/root/src/backend/checkpoints", str(checkpoint['id']))
 
+        action_key = checkpoint.get('train_settings', {}).get('action_type', 'qaction')
+
         if policy_obj['type'] == 'ACT':
             policy = ACTPolicy.from_pretrained(ckpt_dir)
         elif policy_obj['type'] == 'Diffusion':
@@ -228,9 +230,19 @@ def checkpoint_test(
             # === c. 로봇 제어 (필터 없이 즉시 반영) ===
             start_action_id = 0
             for agent in env.agents:
-                target_qpos = final_action[start_action_id : start_action_id + agent.joint_len]
-                thread_pool.submit(agent.move_joint_step, target_qpos)
-                start_action_id += agent.joint_len
+                if action_key == 'ee_delta_action' and agent.ik_solver is not None:
+                    ee_delta_dim = len(agent.ee_names) * 6
+                    agent_action = final_action[start_action_id : start_action_id + ee_delta_dim]
+                    ee_delta_dict = {
+                        ee_name: agent_action[i * 6 : (i + 1) * 6].tolist()
+                        for i, ee_name in enumerate(agent.ee_names)
+                    }
+                    thread_pool.submit(agent.move_ee_delta_step, ee_delta_dict)
+                    start_action_id += ee_delta_dim
+                else:
+                    target_qpos = final_action[start_action_id : start_action_id + agent.joint_len]
+                    thread_pool.submit(agent.move_joint_step, target_qpos)
+                    start_action_id += agent.joint_len
             
             ts_next = env.record_step()
 
