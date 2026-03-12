@@ -154,7 +154,7 @@ def edit_datasets_metadata(id):
             # 처리해야 할 경로 리스트
             robot_paths = [
                 "observations/qpos", "observations/eepos", 
-                "qaction", "qaction_delta", "eetarget", "eetarget_delta"
+                "qaction", "eeaction_delta"
             ]
 
             for old_name, val in robot_mappings.items():

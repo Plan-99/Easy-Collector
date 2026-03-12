@@ -191,8 +191,8 @@
                         :label="$t('rec')"
                         @click="startDataCollection"
                     >
-                        <q-badge 
-                            @click.stop="moveHomposeInDataCollection = !moveHomposeInDataCollection" 
+                        <q-badge
+                            @click.stop="moveHomposeInDataCollection = !moveHomposeInDataCollection"
                             :color="moveHomposeInDataCollection ? 'blue' : 'grey-5'"
                             floating>
                             <q-icon name="home" size="xs" class="cursor-pointer" />
@@ -235,6 +235,33 @@
                 </div>
             </div>
         </div>
+
+        <!-- Vive 모드 선택 다이얼로그 (v-if 체인 외부) -->
+        <q-dialog v-model="viveRobotDialog" persistent>
+            <q-card dark style="min-width: 360px">
+                <q-card-section>
+                    <div class="text-h6">{{ $t('viveRobotDialogTitle') }}</div>
+                    <div class="text-body2 q-mt-sm text-grey-4">{{ $t('viveRobotDialogMsg') }}</div>
+                </q-card-section>
+                <q-card-actions align="center" class="q-pb-md q-gutter-sm">
+                    <q-btn
+                        color="primary"
+                        outline
+                        :label="$t('viveWithRobot')"
+                        icon="smart_toy"
+                        @click="confirmViveMode('vive_external')"
+                    />
+                    <q-btn
+                        color="white"
+                        outline
+                        :label="$t('viveWithoutRobot')"
+                        icon="videocam"
+                        @click="confirmViveMode('vive_only')"
+                    />
+                </q-card-actions>
+            </q-card>
+        </q-dialog>
+
         <div style="position: fixed; bottom: 20px; left: 20px; z-index: 1000;">
             <q-btn
                 push
@@ -335,6 +362,7 @@ const checkpoint = computed(() => {
 
 const teleType = ref('leader')
 const viveInitializing = ref(false)
+const viveRobotDialog = ref(false)
 
 const isSingleArm = computed(() => {
     const armRobots = props.robots.filter(r => r.role === 'single_arm');
@@ -377,10 +405,24 @@ function startDataCollection() {
         });
         return;
     }
-    if (teleType.value === 'keyboard') {
+    // vive_external 선택 시: 실물 로봇 여부를 다이얼로그로 확인
+    if (teleType.value === 'vive_external') {
+        viveRobotDialog.value = true;
+        return;
+    }
+    _doStartDataCollection(teleType.value);
+}
+
+function confirmViveMode(effectiveTeleType) {
+    viveRobotDialog.value = false;
+    _doStartDataCollection(effectiveTeleType);
+}
+
+function _doStartDataCollection(effectiveTeleType) {
+    if (effectiveTeleType === 'keyboard') {
         addKeyboardListener();
     }
-    if (teleType.value === 'vive_external') {
+    if (effectiveTeleType === 'vive_external' || effectiveTeleType === 'vive_only') {
         viveInitializing.value = true;
     }
     showProcessConsole.value = true;
@@ -389,7 +431,7 @@ function startDataCollection() {
         task: props.workspace,
         robots: props.robots,
         sensors: props.sensors,
-        tele_type: teleType.value,
+        tele_type: effectiveTeleType,
         assembly_id: props.workspace.assembly_id,
         move_homepose: moveHomposeInDataCollection.value,
     }).catch((error) => {

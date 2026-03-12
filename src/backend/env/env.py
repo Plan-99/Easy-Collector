@@ -8,11 +8,12 @@ from sensor_msgs.msg import Image, CompressedImage
 from ..utils.image_parser import ros_image_to_numpy
 
 class Env:
-    def __init__(self, node, agents, sensors, language_instruction=None):
+    def __init__(self, node, agents, sensors, language_instruction=None, virtual_agents=False):
         self.sensors = sensors
         self.node = node
         self.agents = agents
         self.language_instruction = language_instruction
+        self.virtual_agents = virtual_agents
 
         for sensor in sensors:
             setattr(self, f'sensor_{sensor["id"]}', None)
@@ -63,24 +64,17 @@ class Env:
     def get_robot_states(self):
         robot_state_dict = dict()
         for agent in self.agents:
-            qpos = agent.get_joint_states()
-            qaction = agent.get_joint_actions()
-            qaction_delta = [qaction[i] - qpos[i] for i in range(len(qpos))]
-            if agent.ik_solver is None:
-                eepos = None
-                eetarget = None
-                eetarget_delta = None
+            if self.virtual_agents:
+                zeros = [0.0] * agent.joint_len
+                qpos = zeros
+                qaction = zeros
             else:
-                eepos = agent.get_ee_position()
-                eetarget = agent.get_ee_target()
-                eetarget_delta = {key: [eetarget[key][i] - eepos[key][i] for i in range(6)] for key in eetarget} if eetarget is not None else None
+                qpos = agent.get_joint_states()
+                qaction = agent.get_joint_actions()
             robot_state_dict[agent.id] = {
-                'qpos': agent.get_joint_states(),
-                'qaction': agent.get_joint_actions(),
+                'qpos': qpos,
+                'qaction': qaction,
                 'eepos': agent.get_ee_position(),
-                'eetarget': agent.get_ee_target(),
-                'qaction_delta': qaction_delta,
-                'eetarget_delta': eetarget_delta,
             }
         return robot_state_dict
     

@@ -163,8 +163,10 @@ SUPPORT_ROBOTS = [
         'ik_setting': {
             'joints_to_lock': [],
             'ee_definitions': [
-                ('ee', 'joint_7', np.array([0, 0, -0.2]).T)
+                # ('ee', 'joint_7', np.array([0, 0, -0.2]).T)
+                ('ee', 'joint_7', np.array([0, 0, 0]).T)
             ],
+            'gravity_compensate': 0.00003,  # z축 gravity 보상값 (m). 로봇이 아래로 처질 때 양수로 설정
         },
     },
     # {

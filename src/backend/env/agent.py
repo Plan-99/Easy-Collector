@@ -52,7 +52,7 @@ class Agent:
         if robot_info is not None and 'ik_setting' in robot_info:
             urdf_path = robot_info['urdf_path']
             urdf_package_dir = robot_info['urdf_package_dir']
-            ik_setting = robot_info['ik_setting']
+            ik_setting = dict(robot_info['ik_setting'])
             self.ik_solver = Common_ArmIK(urdf_path=urdf_path, urdf_package_dir=urdf_package_dir, **ik_setting)
             self.ee_names = self.ik_solver.ee_names
 
@@ -84,9 +84,10 @@ class Agent:
             self.is_waiting_for_goal = False
 
         self.ee_pos_cmd = None
+        self.last_ee_delta = None  # keyboard 모드에서 raw EE delta 저장
 
         self.joint_trajectory_point = JointTrajectoryPoint()
-            
+
         self.moved_by_ui = False
         self.move_lock = False
         self.is_waiting_for_service = False
@@ -330,7 +331,7 @@ class Agent:
         for name in self.ee_names:
             if name in target_ee_dict:
                 val_list = target_ee_dict[name]
-                
+
                 # 주석 규격에 따라 마지막 요소가 tool이라고 가정
                 if len(val_list) >= 7:
                     ik_targets[name] = val_list[:6]      # [x, y, z, r, p, y]
@@ -339,6 +340,7 @@ class Agent:
                     # tool 값이 포함되지 않은 경우 기존 로직 유지
                     ik_targets[name] = val_list
                     target_tool_values[name] = None
+
         # 2. IK 풀기 (모든 팔을 한 번에 계산)
         # current_lr_arm_motor_q에 현재 조인트 상태를 전달하여 연속성 확보
         sol_q, _ = self.ik_solver.solve_ik(ik_targets, current_lr_arm_motor_q=np.array(arm_js))
@@ -392,6 +394,12 @@ class Agent:
     def move_ee_delta_step(self, delta_ee_dict):
         if self.role == 'tool' or self.ik_solver is None:
             return
+
+        self.last_ee_delta = {
+            name: list(delta_ee_dict[name][:6])
+            for name in self.ee_names
+            if name in delta_ee_dict
+        }
 
         full_js = self.get_joint_states()
         arm_js, _ = self.get_joint_and_tool_pos(full_js)
@@ -538,7 +546,7 @@ class Agent:
                     ee_poses[name].append(tool_js[i])
         
         return ee_poses
-        
+
     def get_ee_target(self):
         """
         목표 End-Effector 포즈를 반환 (규격: {'L_ee': [x, y, z, r, p, y, tool]})

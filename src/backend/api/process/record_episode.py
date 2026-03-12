@@ -9,6 +9,7 @@ from .leader_teleoperation import Leader
 from ...utils.image_parser import fetch_image_with_config
 import time
 import h5py
+from scipy.spatial.transform import Rotation as R
 from ...database.models.teleoperator_model import Teleoperator as TeleoperatorModel
 
 def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
@@ -20,14 +21,41 @@ def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
             return i
     raise Exception(f"Error getting auto index, or more than {max_idx} episodes")
 
+def _compute_fk_delta(agent, qaction, qpos):
+    """FK(commanded) - FK(actual): 로봇이 이번 스텝에서 이동해야 할 EE 변위."""
+    if agent.ik_solver is None or qaction is None or qpos is None:
+        return None
+    arm_action, _ = agent.get_joint_and_tool_pos(qaction)
+    arm_state, _ = agent.get_joint_and_tool_pos(qpos)
+    if arm_action is None or arm_state is None:
+        return None
+    ee_action = agent.ik_solver.get_ee_position(np.array(arm_action))
+    ee_state = agent.ik_solver.get_ee_position(np.array(arm_state))
+    if ee_action is None or ee_state is None:
+        return None
+    return {
+        name: [ee_action[name][i] - ee_state[name][i] for i in range(6)]
+        for name in agent.ee_names
+        if name in ee_action and name in ee_state
+    }
+
+def _vive_offset_delta(curr_offset, prev_offset):
+    """두 vive cumulative offset의 차이를 robot frame delta로 반환."""
+    delta_xyz = [curr_offset[i] - prev_offset[i] for i in range(3)]
+    delta_rot = (
+        R.from_rotvec(curr_offset[3:6]) * R.from_rotvec(prev_offset[3:6]).inv()
+    ).as_rotvec().tolist()
+    return delta_xyz + delta_rot
+
 def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors, task, language_instruction, socketio_instance, task_control, tele_type='leader', iter=100000):
-    env = Env(node, agents=agents, sensors=sensors)
+    env = Env(node, agents=agents, sensors=sensors, virtual_agents=(tele_type == 'vive_only'))
     dataset_dir = f"{DATASET_DIR}/{dataset_id}"
 
     # --- Vive: collection 전체에서 1회 초기화 (에피소드마다 재시작하지 않음) ---
+    # vive_external: 실물 로봇 + vive, vive_only: vive tracker만 (이미지+ee_delta_action)
     vive = None
-    if tele_type == 'vive_external':
-        vive = ViveController(node, socketio_instance, scale_factor=1.5, step_rate=20)
+    if tele_type in ('vive_external', 'vive_only'):
+        vive = ViveController(node, socketio_instance, scale_factor=1, step_rate=20)
         if not vive.wait_for_ready(timeout=30.0):
             task_control['stop'] = True
             vive.destroy()
@@ -53,7 +81,7 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                 'type': 'stdout '
             })
 
-            if move_homepose and tele_type not in ('externel'):
+            if move_homepose and tele_type not in ('externel', 'vive_only'):
                 for agent in agents:
                     agent.move_lock = True
                     agent.move_to(home_pose[str(agent.id)])
@@ -88,16 +116,18 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
             if os.path.isfile(dataset_path):
                 print(f'Dataset already exist at \n{dataset_path}\nHint: set overwrite to True.')
 
-            for agent in agents:
-                if agent.joint_states is None:
-                    print(f'[ERROR] No joint states from robot {agent.id}')
-                    task_control['stop'] = True
-                    return
-                if agent.joint_actions is None:
-                    print(f'[ERROR] No joint commands from robot {agent.id}')
-                    task_control['stop'] = True
-                    return
-                agent.move_lock = False
+            # vive_only는 실물 로봇 없이 동작하므로 joint state 검증 생략
+            if tele_type != 'vive_only':
+                for agent in agents:
+                    if agent.joint_states is None:
+                        print(f'[ERROR] No joint states from robot {agent.id}')
+                        task_control['stop'] = True
+                        return
+                    if agent.joint_actions is None:
+                        print(f'[ERROR] No joint commands from robot {agent.id}')
+                        task_control['stop'] = True
+                        return
+                    agent.move_lock = False
 
             for sensor in sensors:
                 if getattr(env, f'sensor_{sensor["id"]}') is None:
@@ -105,28 +135,42 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                     task_control['stop'] = True
                     return
 
+            # reset 타임스텝: ee_delta_action = zeros
             ts = env.reset()
+            for agent in agents:
+                if agent.ik_solver is not None:
+                    ts.observation['robot_states'][agent.id]['ee_delta_action'] = {
+                        name: [0.0] * 6 for name in agent.ee_names
+                    }
             timesteps = [ts]
 
-            # 에피소드 시작: EE origin 계산 후 vive origin 설정 및 teleop 스레드 시작
+            # 에피소드 시작: vive origin 설정 및 teleop 스레드 시작
+            prev_vive_offset = None
             if vive is not None:
-                ee_origins = {}
-                for agent in agents:
-                    if agent.role == 'single_arm' and agent.ik_solver is not None:
-                        arm_js, _ = agent.get_joint_and_tool_pos(agent.get_joint_states())
-                        ee_origins[agent.id] = agent.ik_solver.get_ee_position(np.array(arm_js))
-
-                vive.set_origin()
-
-                def on_vive_step(offset):
+                on_step = None
+                if tele_type == 'vive_external':
+                    # ee_origin 계산 및 on_step 콜백 설정 (로봇 이동 전용)
+                    ee_origins = {}
                     for agent in agents:
                         if agent.role == 'single_arm' and agent.ik_solver is not None:
-                            ee_name = agent.ee_names[0]
-                            ee_origin = ee_origins.get(agent.id, {}).get(ee_name)
-                            if ee_origin is not None:
-                                agent.move_ee_from_origin(ee_origin, {ee_name: offset})
+                            arm_js, _ = agent.get_joint_and_tool_pos(agent.get_joint_states())
+                            init_q = np.array(arm_js)
+                            ee_origins[agent.id] = agent.ik_solver.get_ee_position(init_q)
+                            agent.ik_solver.reset_state(init_q)
 
-                vive.start_teleop(on_step=on_vive_step)
+                    def on_step(offset):
+                        for agent in agents:
+                            if agent.role == 'single_arm' and agent.ik_solver is not None:
+                                ee_name = agent.ee_names[0]
+                                ee_origin = ee_origins.get(agent.id, {}).get(ee_name)
+                                if ee_origin is None:
+                                    continue
+                                target_ee = agent.ik_solver.compute_target_from_origin(ee_origin, offset)
+                                agent.move_ee_step({ee_name: target_ee})
+
+                vive.set_origin()
+                vive.start_teleop(on_step=on_step)
+                prev_vive_offset = vive.get_offset()  # set_origin 직후 = [0]*6
 
             for t in range(max_timesteps):
 
@@ -147,7 +191,40 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                     return
 
                 ts = env.record_step()
+
+                # --- ee_delta_action 계산 및 타임스텝에 주입 ---
+                for agent in agents:
+                    if agent.ik_solver is None:
+                        continue
+                    a_id = agent.id
+                    robot_state = ts.observation['robot_states'][a_id]
+
+                    if tele_type == 'vive_only':
+                        # vive offset 차이로 delta 계산
+                        curr_offset = vive.get_offset()
+                        delta = _vive_offset_delta(curr_offset, prev_vive_offset)
+                        robot_state['ee_delta_action'] = {agent.ee_names[0]: delta}
+
+                    elif tele_type == 'keyboard':
+                        # 키보드 raw delta 그대로 사용
+                        if agent.last_ee_delta is not None:
+                            robot_state['ee_delta_action'] = agent.last_ee_delta
+
+                    else:
+                        # leader / vive_external: FK(joint_actions) - FK(joint_states)
+                        delta = _compute_fk_delta(
+                            agent,
+                            robot_state.get('qaction'),
+                            robot_state.get('qpos'),
+                        )
+                        if delta is not None:
+                            robot_state['ee_delta_action'] = delta
+
+                if tele_type == 'vive_only':
+                    prev_vive_offset = vive.get_offset()
+
                 timesteps.append(ts)
+
                 time.sleep(0.1)
 
                 if tele_type == 'keyboard':
@@ -184,7 +261,7 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                             }))
                         image_group.create_dataset(f"sensor_{s_id}", data=np.array(img_data), dtype='uint8')
 
-                    # 2. 로봇 데이터 저장
+                    # 2. 로봇 데이터 저장 (None인 값은 자동 스킵 — vive_only 시 전부 None)
                     obs_keys = ['qpos', 'eepos']
 
                     for agent in agents:

@@ -51,7 +51,9 @@ class ViveController:
         self._ready_event = threading.Event()
         self._teleop_running = False
         self._teleop_thread = None
-        self._on_step = None  # callback(offset: [dx, dy, dz, dax, day, daz])
+        self._on_step = None        # callback(offset: [dx, dy, dz, dax, day, daz])
+        self._prev_offset = [0.0] * 6  # 직전 step의 cumulative offset (robot frame)
+        self._last_step_delta = [0.0] * 6  # 직전 step 대비 현재 포즈 변화량
 
     def _start_ros_node(self):
         """vive_udp_bridge ROS2 노드를 서브프로세스로 실행한다."""
@@ -107,10 +109,11 @@ class ViveController:
             self._current_pose = list(msg.position[:7])  # [x, y, z, qx, qy, qz, qw]
         self._ready_event.set()
 
-    def start_teleop(self, on_step):
+    def start_teleop(self, on_step=None):
         """
         step()을 별도 스레드에서 step_rate Hz로 실행한다.
-        on_step(offset): offset = [dx, dy, dz, dax, day, daz] — vive origin 대비 현재 offset.
+        on_step(offset): offset = [dx, dy, dz, dax, day, daz] — vive origin 대비 현재 cumulative offset.
+        on_step이 None이면 last_step_delta만 갱신한다.
         """
         self._on_step = on_step
         self._teleop_running = True
@@ -134,15 +137,26 @@ class ViveController:
             self._teleop_thread = None
 
     def set_origin(self):
-        """현재 vive 포즈를 origin으로 기록한다."""
+        """현재 vive 포즈를 origin으로 기록하고 step delta를 초기화한다."""
         with self._lock:
             self._vive_origin_pose = list(self._current_pose) if self._current_pose else None
+        self._prev_offset = [0.0] * 6
+        self._last_step_delta = [0.0] * 6
         print(f'[VIVE] Origin set. vive_pos={self._vive_origin_pose[:3] if self._vive_origin_pose else None}')
+
+    @property
+    def last_step_delta(self):
+        """직전 step 대비 현재 vive 포즈 변화량 (robot frame, [dx, dy, dz, dax, day, daz])."""
+        return self._last_step_delta
+
+    def get_offset(self):
+        """origin 기준 현재 누적 offset (robot frame, [dx, dy, dz, dax, day, daz]).
+        record_episode에서 연속 두 호출의 차이로 ee_delta_action을 계산할 때 사용한다."""
+        return list(self._prev_offset)
 
     def step(self):
         """
-        현재 vive 포즈와 origin 간의 offset(XYZ + axis-angle)을 계산하여
-        move_ee_from_origin으로 EE 절대 위치를 명령한다.
+        현재 vive 포즈와 origin 간의 cumulative offset과 step-wise delta를 계산한다.
         """
         with self._lock:
             curr_pose = list(self._current_pose) if self._current_pose else None
@@ -162,6 +176,15 @@ class ViveController:
         offset_axayaz = (self._scale * R.from_matrix(dR_robot_mat).as_rotvec()).tolist()
 
         offset = offset_xyz + offset_axayaz
+
+        # step-wise delta: 이전 cumulative offset 대비 현재 변화량
+        delta_xyz = [offset[i] - self._prev_offset[i] for i in range(3)]
+        prev_R = R.from_rotvec(self._prev_offset[3:6])
+        curr_R = R.from_rotvec(offset_axayaz)
+        delta_axayaz = (curr_R * prev_R.inv()).as_rotvec().tolist()
+        self._last_step_delta = delta_xyz + delta_axayaz
+
+        self._prev_offset = offset
 
         if self._on_step is not None:
             self._on_step(offset)
