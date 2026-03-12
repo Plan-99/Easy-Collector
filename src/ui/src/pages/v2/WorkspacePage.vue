@@ -223,6 +223,7 @@
                                 <web-rtc-video
                                     :process-id="`sensor_${focused.id}`"
                                     :topic="focused.read_topic"
+                                    :msg-type="focused.read_topic_msg"
                                     class="border-rounded"
                                     :key="focused.id"
                                     :loading="focused.status !== 'on'"
