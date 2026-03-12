@@ -57,8 +57,12 @@ def start_sensor():
     type = data.get('type')
     company = data.get('company')
 
+    # Custom sensors use external ROS topics — no process to start
+    if type == 'custom':
+        return {'status': 'success', 'message': 'Custom sensor uses external topic'}, 200
+
     command = []
-    
+
     if company == 'Intel':
         serial_no = data.get('serial_no', None)
         if serial_no is None:
@@ -110,41 +114,64 @@ def stop_sensor():
 
 @sensor_bp.route('/sensor', methods=['POST'])
 def create_sensor():
-    serial_no = request.json.get('serial_no')
-    ip_address = request.json.get('ip_address')
-    device_index = request.json.get('device_index')
     name = request.json.get('name')
     type = request.json.get('type')
 
-    SensorModel.create(
-        name=name,
-        type=type,
-        settings={
+    if type == 'custom':
+        settings = {
+            'read_topic': request.json.get('read_topic', ''),
+            'read_topic_msg': request.json.get('read_topic_msg', 'sensor_msgs/CompressedImage'),
+            'resolution': [
+                request.json.get('resolution_width', 640),
+                request.json.get('resolution_height', 480)
+            ],
+        }
+    else:
+        serial_no = request.json.get('serial_no')
+        ip_address = request.json.get('ip_address')
+        device_index = request.json.get('device_index')
+        settings = {
             'serial_number': serial_no,
             'ip_address': ip_address,
             'device_index': device_index
         }
+
+    SensorModel.create(
+        name=name,
+        type=type,
+        settings=settings
     )
-    
+
     return {'status': 'success', 'message': 'Sensor Created'}, 200
 
 
 @sensor_bp.route('/sensor/<id>', methods=['PUT'])
 def update_sensor(id):
-    serial_no = request.json.get('serial_no')
-    ip_address = request.json.get('ip_address')
-    device_index = request.json.get('device_index')
     name = request.json.get('name')
     type = request.json.get('type')
 
     sensor = SensorModel.find(id)
-    sensor.settings = {
-        'serial_number': serial_no,
-        'ip_address': ip_address,
-        'device_index': device_index
-    }
     sensor.name = name
     sensor.type = type
+
+    if type == 'custom':
+        sensor.settings = {
+            'read_topic': request.json.get('read_topic', ''),
+            'read_topic_msg': request.json.get('read_topic_msg', 'sensor_msgs/CompressedImage'),
+            'resolution': [
+                request.json.get('resolution_width', 640),
+                request.json.get('resolution_height', 480)
+            ],
+        }
+    else:
+        serial_no = request.json.get('serial_no')
+        ip_address = request.json.get('ip_address')
+        device_index = request.json.get('device_index')
+        sensor.settings = {
+            'serial_number': serial_no,
+            'ip_address': ip_address,
+            'device_index': device_index
+        }
 
     sensor.save()
     return {'status': 'success', 'message': 'Sensor Updated'}, 200
