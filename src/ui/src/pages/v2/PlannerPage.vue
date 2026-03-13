@@ -82,7 +82,7 @@
                             <q-card class="bg-dark text-white">
                                 <q-card-section>
                                     <div class="text-subtitle2 q-mb-sm">Sensors</div>
-                                    <div v-for="sensor in workspace.settingd.sensors" :key="sensor.id" class="row items-center q-mb-xs">
+                                    <div v-for="sensor in workspace.settings?.sensors" :key="sensor.id" class="row items-center q-mb-xs">
                                         <div>{{ sensor.name }}</div>
                                         <q-space />
                                         <q-toggle
