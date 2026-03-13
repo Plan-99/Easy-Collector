@@ -58,6 +58,9 @@ class Robot(Model, SoftDeletes):
         'port',
         'changer_address',
         'ik_available',
+        'urdf_path',
+        'urdf_package_dir',
+        'ik_setting',
     ]
 
     def get_robot_type_info(self):
@@ -212,8 +215,27 @@ class Robot(Model, SoftDeletes):
         if self.type != 'custom':
             robot_info = self.get_robot_type_info()
             return 'ik_setting' in robot_info
-        return self.settings.get('ik_available', False)
-    
+        ik_setting = self.settings.get('ik_setting', None)
+        return bool(ik_setting and ik_setting.get('ee_definitions'))
+
+    @accessor
+    def urdf_path(self):
+        if self.type != 'custom':
+            return self.get_robot_type_info().get('urdf_path', '')
+        return self.settings.get('urdf_path', '')
+
+    @accessor
+    def urdf_package_dir(self):
+        if self.type != 'custom':
+            return self.get_robot_type_info().get('urdf_package_dir', '')
+        return self.settings.get('urdf_package_dir', '')
+
+    @accessor
+    def ik_setting(self):
+        if self.type != 'custom':
+            return None
+        return self.settings.get('ik_setting', None)
+
     # @staticmethod
     # def boot():
     #     Robot.observe(RobotObserver())

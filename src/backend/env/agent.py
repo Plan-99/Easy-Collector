@@ -55,6 +55,22 @@ class Agent:
             ik_setting = robot_info['ik_setting']
             self.ik_solver = Common_ArmIK(urdf_path=urdf_path, urdf_package_dir=urdf_package_dir, **ik_setting)
             self.ee_names = self.ik_solver.ee_names
+        elif robot.get('urdf_path') and robot.get('ik_setting'):
+            urdf_path = robot['urdf_path']
+            urdf_package_dir = robot.get('urdf_package_dir', '')
+            ik_setting_raw = robot['ik_setting']
+            ee_defs = [
+                (ee['name'], ee['joint'], None)
+                for ee in ik_setting_raw.get('ee_definitions', [])
+                if ee.get('joint')
+            ]
+            if ee_defs:
+                ik_setting = {
+                    'joints_to_lock': ik_setting_raw.get('joints_to_lock', []),
+                    'ee_definitions': ee_defs,
+                }
+                self.ik_solver = Common_ArmIK(urdf_path=urdf_path, urdf_package_dir=urdf_package_dir, **ik_setting)
+                self.ee_names = self.ik_solver.ee_names
 
         self.read_topic_msg_cls = get_message(robot['read_topic_msg'])
         self.read_topic_sub = node.create_subscription(self.read_topic_msg_cls, robot['read_topic'], self.joint_state_cb, 10)
@@ -533,6 +549,7 @@ class Agent:
                 current_pos = self.get_joint_states()
                 # 현재 위치와 목표 위치의 차이를 계산
                 pos_diff = [target - current for target, current in zip(target_pos, current_pos)]
+                print(f"Current position: {current_pos}, Target position: {target_pos}, Difference: {pos_diff}")
                 
                 # 목표 위치에 도달했는지 확인
                 if all(abs(diff) < 0.01 for diff in pos_diff):
@@ -540,7 +557,7 @@ class Agent:
                     break
 
                 # 각 관절의 위치를 step_size만큼 이동
-                next_pos = [current + step_size * diff for current, diff in zip(current_pos, pos_diff)]
+                next_pos = [current + 0.1 * diff for current, diff in zip(current_pos, pos_diff)]
                 
                 # 이동 명령을 발행
                 self.move_joint_step(next_pos)

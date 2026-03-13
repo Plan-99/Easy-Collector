@@ -203,6 +203,33 @@
                     ></q-input>
                 </div>
             </template>
+            <template v-slot:ik_setting>
+                <div class="q-mb-md">
+                    <div
+                        class="row q-col-gutter-sm q-mb-sm items-center"
+                        v-for="(ee, i) in robotForm.find((e) => e.key === 'ik_setting').value.ee_definitions"
+                        :key="i"
+                    >
+                        <q-input
+                            dense outlined dark bg-color="dark"
+                            v-model="ee.name"
+                            label="EE Name"
+                            class="col-4"
+                        />
+                        <q-select
+                            dense outlined dark bg-color="dark"
+                            v-model="ee.joint"
+                            :options="robotForm.find((e) => e.key === 'joint_names').value"
+                            label="EE Joint"
+                            class="col-6"
+                        />
+                        <div class="col-auto">
+                            <q-btn dense flat color="negative" icon="close" @click="removeEEDefinition(i)" />
+                        </div>
+                    </div>
+                    <q-btn dense outline color="primary" label="+ Add EE Definition" size="sm" @click="addEEDefinition" />
+                </div>
+            </template>
         </form-dialog>
         <tele-setting-dialog
             v-if="showTeleSetting"
@@ -328,13 +355,16 @@ const robotForm = ref([
         show: (form) => form.find((e) => e.key === 'type').value === 'custom' 
     },
     { label: 'Write Topic', key: 'write_topic', type: 'text', value: '', default: '', show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
-    { label: 'Write Topic Message Type', key: 'write_topic_msg', type: 'select', value: '', default: 'sensor_msgs/JointState', 
+    { label: 'Write Topic Message Type', key: 'write_topic_msg', type: 'select', value: '', default: 'sensor_msgs/JointState',
         options: [
             { label: 'sensor_msgs/JointState', value: 'sensor_msgs/JointState' },
             { label: 'control_msgs/action/GripperCommand', value: 'control_msgs/action/GripperCommand' },
         ],
-        show: (form) => form.find((e) => e.key === 'type').value === 'custom' 
+        show: (form) => form.find((e) => e.key === 'type').value === 'custom'
     },
+    { label: 'URDF Path', key: 'urdf_path', type: 'text', value: '', default: '', show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
+    { label: 'URDF Package Dir', key: 'urdf_package_dir', type: 'text', value: '', default: '', show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
+    { label: 'IK Setting (EE Definitions)', key: 'ik_setting', type: 'custom', value: { ee_definitions: [] }, default: { ee_definitions: [] }, show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
 ]);
 const watchingRobot = ref(null);
 
@@ -363,7 +393,9 @@ function listRobots() {
 
 function openAddSensorForm() {
     robotForm.value.forEach(field => {
-        field.value = field.default;
+        field.value = typeof field.default === 'object' && field.default !== null
+            ? JSON.parse(JSON.stringify(field.default))
+            : field.default;
     });
     showRobotForm.value = true;
 }
@@ -392,6 +424,19 @@ function removeJoint(index) {
     jointNamesField.value.splice(index, 1);
     jointLowerBoundsField.value.splice(index, 1);
     jointUpperBoundsField.value.splice(index, 1);
+}
+
+function addEEDefinition() {
+    const ikField = robotForm.value.find((e) => e.key === 'ik_setting');
+    if (!ikField.value || !ikField.value.ee_definitions) {
+        ikField.value = { ee_definitions: [] };
+    }
+    ikField.value.ee_definitions.push({ name: 'ee', joint: '' });
+}
+
+function removeEEDefinition(i) {
+    const ikField = robotForm.value.find((e) => e.key === 'ik_setting');
+    ikField.value.ee_definitions.splice(i, 1);
 }
 
 function saveRobot(formData) {

@@ -203,6 +203,12 @@ def stop_robot():
     return {'status': 'success', 'message': 'Robot process stopped'}, 200
 
 
+def _normalize_ik_setting(value):
+    if value and value.get('ee_definitions'):
+        return value
+    return None
+
+
 @robot_bp.route('/robot', methods=['POST'])
 def create_robot():
     name = request.json.get('name')
@@ -226,6 +232,9 @@ def create_robot():
             'joint_upper_bounds': request.json.get('joint_upper_bounds', []),
             'tool_index': request.json.get('tool_index', []),
             'tool_inner': len(request.json.get('tool_index', [])) > 0,
+            'urdf_path': request.json.get('urdf_path') or None,
+            'urdf_package_dir': request.json.get('urdf_package_dir') or None,
+            'ik_setting': _normalize_ik_setting(request.json.get('ik_setting')),
         }
 
     custom_fields = ['can_port', 'ip_address', 'port', 'changer_address']
@@ -277,6 +286,9 @@ def update_robot(id):
             'joint_upper_bounds': request.json.get('joint_upper_bounds', []),
             'tool_index': request.json.get('tool_index', []),
             'tool_inner': len(request.json.get('tool_index', [])) > 0,
+            'urdf_path': request.json.get('urdf_path') or None,
+            'urdf_package_dir': request.json.get('urdf_package_dir') or None,
+            'ik_setting': _normalize_ik_setting(request.json.get('ik_setting')),
         }
 
     custom_fields = ['can_port', 'ip_address', 'port', 'changer_address']
