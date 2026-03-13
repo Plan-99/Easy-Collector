@@ -315,6 +315,15 @@
                 :path="`${selectedDatasetId}/${selectedEpisode.name}`"
             ></hdf5-viewer>
         </div>
+        <!-- Inference Settings Dialog -->
+        <form-dialog
+            v-model="showInferenceDialog"
+            :title="$t('inferenceSettings')"
+            :form="inferenceForm"
+            :ok-button-label="$t('startInference')"
+            min-width="380px"
+            @submit="onInferenceSubmit"
+        />
     </div>
 </template>
 
@@ -327,6 +336,7 @@ import ProcessConsole from './ProcessConsole.vue';
 import { useSocket } from 'src/composables/useSocket.js';
 import WebRtcVideo from './WebRtcVideo.vue';
 import Hdf5Viewer from 'src/components/v2/Hdf5Viewer.vue';
+import FormDialog from './FormDialog.vue';
 
 
 const { socket } = useSocket();
@@ -538,7 +548,28 @@ function stopDataCollection() {
 }
 
 const hz = ref(10);
+const showInferenceDialog = ref(false);
+const inferenceForm = ref([
+    {
+        key: 're_inference_steps',
+        label: t('reInferenceSteps'),
+        type: 'number',
+        value: 1,
+    },
+    {
+        key: 'temporal_ensemble_coeff',
+        label: t('temporalEnsembleCoeff'),
+        type: 'number',
+        value: 0.01,
+        show: (form) => form.find(f => f.key === 're_inference_steps')?.value === 1,
+    },
+]);
+
 function startInference() {
+    showInferenceDialog.value = true;
+}
+
+function onInferenceSubmit(formData) {
     showProcessConsole.value = true;
     api.post(`/checkpoint/${selectedCheckpointId.value}/:start_test`, {
         task: props.workspace,
@@ -548,6 +579,8 @@ function startInference() {
         checkpoint: checkpoint.value,
         move_homepose: moveHomposeInDataCollection.value,
         hz: hz.value,
+        re_inference_steps: formData.re_inference_steps,
+        temporal_ensemble_coeff: formData.re_inference_steps === 1 ? formData.temporal_ensemble_coeff : null,
     }).catch((error) => {
         console.error('Error starting test:', error);
         Notify.create({

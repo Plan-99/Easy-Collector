@@ -125,8 +125,8 @@ class ACTConfig(PreTrainedConfig):
     latent_dim: int = 32
     n_vae_encoder_layers: int = 4
 
-    # Inference.
-    # Note: the value used in ACT when temporal ensembling is enabled is 0.01.
+    # Deprecated: temporal_ensemble_coeff is now an inference-time parameter, not stored in config.
+    # Kept here only for backward compatibility when loading old checkpoints.
     temporal_ensemble_coeff: float | None = None
 
     # Training and loss computation.
@@ -145,11 +145,6 @@ class ACTConfig(PreTrainedConfig):
         if not self.vision_backbone.startswith("resnet") and not self.vision_backbone.startswith("dino"):
             raise ValueError(
                 f"`vision_backbone` must be one of the ResNet variants. Got {self.vision_backbone}."
-            )
-        if self.temporal_ensemble_coeff is not None and self.n_action_steps > 1:
-            raise NotImplementedError(
-                "`n_action_steps` must be 1 when using temporal ensembling. This is "
-                "because the policy needs to be queried every step to compute the ensembled action."
             )
         if self.n_action_steps > self.chunk_size:
             raise ValueError(

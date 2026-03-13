@@ -9,6 +9,7 @@ from ...lerobot.configs.types import PolicyFeature, FeatureType
 from ...utils.image_parser import fetch_image_with_config
 
 from ...policies.utils import make_policy, VISION_BACKBONE_MAP, process_image, relative_trajectory_to_delta
+from collections import deque
 from ...env.env import Env
 
 from ...lerobot.policies.act.modeling_act import ACTPolicy
@@ -40,6 +41,9 @@ def checkpoint_test(
     max_timesteps,
     move_homepose=False,
     hz=10,
+    re_inference_steps=1,
+    temporal_ensemble_coeff=0.01,
+    action_type=None,
     ):
 
     oti_rl = False
@@ -60,19 +64,29 @@ def checkpoint_test(
         else:
             ckpt_dir = os.path.join("/root/src/backend/checkpoints", str(checkpoint['id']))
 
-        action_key = checkpoint.get('train_settings', {}).get('action_type', 'qaction')
+        action_key = action_type or checkpoint.get('train_settings', {}).get('action_type', 'qaction')
         use_relative_trajectory = checkpoint.get('train_settings', {}).get('use_relative_trajectory', False)
 
         if policy_obj['type'] == 'ACT':
             policy = ACTPolicy.from_pretrained(ckpt_dir)
+            # re_inference_steps=1: temporal ensemble 활성화 (매 스텝 추론 + 가중 평균)
+            # re_inference_steps>1: temporal ensemble 비활성화, N스텝마다 재추론
+            if re_inference_steps == 1:
+                from ...lerobot.policies.act.modeling_act import ACTTemporalEnsembler
+                policy.temporal_ensembler = ACTTemporalEnsembler(temporal_ensemble_coeff, policy.config.chunk_size)
+            else:
+                policy.config.n_action_steps = re_inference_steps
+                policy._action_queue = deque([], maxlen=re_inference_steps)
         elif policy_obj['type'] == 'Diffusion':
             policy = DiffusionPolicy.from_pretrained(ckpt_dir)
+            policy.config.n_action_steps = re_inference_steps
+            policy._queues['action'] = deque(maxlen=re_inference_steps)
         elif policy_obj['type'] == 'PI0':
             policy = PI0Policy.from_pretrained(ckpt_dir)
-        
+
         policy.cuda()
         policy.eval()
-        print(f'Loaded Policy from {ckpt_dir}, hz: {hz}')
+        print(f'Loaded Policy from {ckpt_dir}, hz: {hz}, re_inference_steps: {re_inference_steps}, action_key: {action_key}')
         
         # 환경 및 RL 에이전트 초기화
         state_dim = sum(agent.joint_len for agent in agents)

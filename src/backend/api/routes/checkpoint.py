@@ -80,7 +80,10 @@ def start_test(id):
         socketio_instance=current_app.pm.socketio,
         name=f"checkpoint_test",
         move_homepose=data.get('move_homepose', False),
-        hz=data.get('hz', 10)
+        hz=data.get('hz', 10),
+        re_inference_steps=data.get('re_inference_steps', 1),
+        temporal_ensemble_coeff=data.get('temporal_ensemble_coeff', 0.01),
+        action_type=data.get('action_type', None),
     )
     
     return {'status': 'success', 'message': 'Checkpoint test started'}, 200
