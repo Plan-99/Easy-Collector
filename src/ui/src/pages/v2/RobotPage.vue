@@ -336,7 +336,7 @@ const robotForm = ref([
         show: (form) => form.find((e) => e.key === 'type').value === 'custom' 
     },
     { label: 'Joint Names', key: 'joint_names', type: 'custom', value: [], default: [] , show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
-    { label: '', key: 'tool_index', type: 'custom', value: [], default: [], show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
+    { label: '', key: 'tool_index', type: 'custom', value: [], default: [], nullable: true, show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
     { label: 'Joint Lower Bounds', key: 'joint_lower_bounds', type: 'custom', value: [], default: [] , show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
     { label: 'Joint Upper Bounds', key: 'joint_upper_bounds', type: 'custom', value: [], default: [] , show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
     { label: 'Read Topic', key: 'read_topic', type: 'text', value: '', default: '', show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
@@ -362,9 +362,9 @@ const robotForm = ref([
         ],
         show: (form) => form.find((e) => e.key === 'type').value === 'custom'
     },
-    { label: 'URDF Path', key: 'urdf_path', type: 'text', value: '', default: '', show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
-    { label: 'URDF Package Dir', key: 'urdf_package_dir', type: 'text', value: '', default: '', show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
-    { label: 'IK Setting (EE Definitions)', key: 'ik_setting', type: 'custom', value: { ee_definitions: [] }, default: { ee_definitions: [] }, show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
+    { label: 'URDF Path', key: 'urdf_path', type: 'text', value: '', default: '', nullable: true, show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
+    { label: 'URDF Package Dir', key: 'urdf_package_dir', type: 'text', value: '', default: '', nullable: true, show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
+    { label: 'IK Setting (EE Definitions)', key: 'ik_setting', type: 'custom', value: { ee_definitions: [] }, default: { ee_definitions: [] }, nullable: true, show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
 ]);
 const watchingRobot = ref(null);
 
@@ -402,7 +402,11 @@ function openAddSensorForm() {
 
 function openEditRobotForm(robot) {
     robotForm.value.forEach(field => {
-        field.value = robot[field.key] || field.default;
+        const raw = robot[field.key];
+        const fallback = typeof field.default === 'object' && field.default !== null
+            ? JSON.parse(JSON.stringify(field.default))
+            : field.default;
+        field.value = (raw !== null && raw !== undefined && raw !== '') ? raw : fallback;
     });
     robotForm.value.find((e) => e.key === 'id').value = robot.id; // Set ID for edit
     showRobotForm.value = true;
