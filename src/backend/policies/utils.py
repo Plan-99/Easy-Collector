@@ -144,66 +144,49 @@ def process_image(image, vision_backbone='resnet18', to_cuda=False):
 def get_norm_stats(dataset_dir, num_episodes):
     all_qpos_data = []
     all_action_data = []
-    # episode 길이 관련 코드 수정
     observation_image_keys = []
     cnt = 0
+    
     for episode_idx in range(num_episodes):
         dataset_path = os.path.join(dataset_dir, f'episode_{episode_idx}.hdf5')
         with h5py.File(dataset_path, 'r') as root:
             qpos = get_concatenated_pos(root['/observations/qpos'])
             action = get_concatenated_pos(root['qaction'])
-            observation_image_keys = list(root['/observations/images'].keys())
+            if episode_idx == 0:
+                observation_image_keys = list(root['/observations/images'].keys())
         
-        cnt += qpos.shape[0]
-        all_qpos_data.append(torch.from_numpy(qpos))
-        all_action_data.append(torch.from_numpy(action))
-    all_qpos_data = torch.stack(all_qpos_data)
-    all_action_data = torch.stack(all_action_data)
+            all_qpos_data.append(torch.from_numpy(qpos))
+            all_action_data.append(torch.from_numpy(action))
+            cnt += qpos.shape[0]
 
-    # normalize action data
-    action_min = all_action_data.view(-1, action.shape[-1]).min(dim=0)[0]
-    action_max = all_action_data.view(-1, action.shape[-1]).max(dim=0)[0]
-    action_mean = all_action_data.mean(dim=[0, 1], keepdim=True)
-    action_std = all_action_data.std(dim=[0, 1], keepdim=True)
-    action_std = torch.clip(action_std, 1e-2, np.inf) # clipping
+    # cat을 사용하여 에피소드 길이 차이를 해결
+    all_qpos_combined = torch.cat(all_qpos_data, dim=0)   # (Total_T, Q_dim)
+    all_action_combined = torch.cat(all_action_data, dim=0) # (Total_T, A_dim)
 
-    # normalize qpos data
-    qpos_min = all_qpos_data.view(-1, qpos.shape[-1]).min(dim=0)[0]
-    qpos_max = all_qpos_data.view(-1, qpos.shape[-1]).max(dim=0)[0]
-    qpos_mean = all_qpos_data.mean(dim=[0, 1], keepdim=True)
-    qpos_std = all_qpos_data.std(dim=[0, 1], keepdim=True)
-    qpos_std = torch.clip(qpos_std, 1e-2, np.inf) # clipping
+    def compute_stats(data):
+        return {
+            "min": data.min(dim=0)[0].numpy(),
+            "max": data.max(dim=0)[0].numpy(),
+            "mean": data.mean(dim=0).numpy(),
+            "std": torch.clip(data.std(dim=0), 1e-2, np.inf).numpy(),
+        }
+
+    action_stats = compute_stats(all_action_combined)
+    qpos_stats = compute_stats(all_qpos_combined)
 
     stats = {
-        "action": {
-            "min": action_min.numpy(),
-            "max": action_max.numpy(),
-            "mean": action_mean.numpy().squeeze(),
-            "std": action_std.numpy().squeeze(),
-            "count": np.array([cnt]),
-        },
-        "observation.state": {
-            "min": qpos_min.numpy(),
-            "max": qpos_max.numpy(),
-            "mean": qpos_mean.numpy().squeeze(),
-            "std": qpos_std.numpy().squeeze(),
-            "count": np.array([cnt]),
-        },
+        "action": {**action_stats, "count": np.array([cnt])},
+        "observation.state": {**qpos_stats, "count": np.array([cnt])},
     }
 
     for key in observation_image_keys:
         stats[f"observation.images.{key}"] = {
-            "min": np.array([[[0.0]], [[0.0]], [[0.0]]]),  # Assuming images are normalized between 0 and 1
-            "max": np.array([[[1.0]], [[1.0]], [[1.0]]]),  # Assuming images are normalized between 0 and 1
-            "mean": np.array([[[0.5]], [[0.5]], [[0.5]]]),  # Assuming images are normalized between 0 and 1
-            "std": np.array([[[0.25]], [[0.25]], [[0.25]]]),  # Assuming images are normalized between 0 and 1
+            "min": np.array([0.0, 0.0, 0.0]).reshape(3, 1, 1),
+            "max": np.array([1.0, 1.0, 1.0]).reshape(3, 1, 1),
+            "mean": np.array([0.5, 0.5, 0.5]).reshape(3, 1, 1),
+            "std": np.array([0.25, 0.25, 0.25]).reshape(3, 1, 1),
             "count": np.array([cnt]),
         }
-    
-
-    # stats = {"qaction_mean": action_mean.numpy().squeeze(), "qaction_std": action_std.numpy().squeeze(),
-    #          "qpos_mean": qpos_mean.numpy().squeeze(), "qpos_std": qpos_std.numpy().squeeze(),
-    #          "example_qpos": qpos, 'example_action': action }
     
     return stats
 

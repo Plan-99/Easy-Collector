@@ -11,7 +11,7 @@ class Planner(Model, SoftDeletes):
 
     __casts__ = {
         'task_ids': 'json',
-        'plan': 'json'
+        'plan': 'json',
     }
     
     __timestamps__ = True
