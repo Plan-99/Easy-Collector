@@ -388,7 +388,6 @@ class Agent:
 
             # 4. 로봇에 명령 발행
             if final_action:
-                print(final_action)
                 self.move_joint_step(final_action, from_ee=True)
 
     def move_ee_delta_step(self, delta_ee_dict):

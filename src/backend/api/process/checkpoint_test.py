@@ -8,7 +8,7 @@ from einops import rearrange
 from ...lerobot.configs.types import PolicyFeature, FeatureType
 from ...utils.image_parser import fetch_image_with_config
 
-from ...policies.utils import make_policy, VISION_BACKBONE_MAP, process_image
+from ...policies.utils import make_policy, VISION_BACKBONE_MAP, process_image, relative_trajectory_to_delta
 from ...env.env import Env
 
 from ...lerobot.policies.act.modeling_act import ACTPolicy
@@ -61,6 +61,7 @@ def checkpoint_test(
             ckpt_dir = os.path.join("/root/src/backend/checkpoints", str(checkpoint['id']))
 
         action_key = checkpoint.get('train_settings', {}).get('action_type', 'qaction')
+        use_relative_trajectory = checkpoint.get('train_settings', {}).get('use_relative_trajectory', False)
 
         if policy_obj['type'] == 'ACT':
             policy = ACTPolicy.from_pretrained(ckpt_dir)
@@ -162,10 +163,10 @@ def checkpoint_test(
         time.sleep(8)
         ts = env.reset()
         print('Robot moved to homepose')
-        
+
         start = time.time()
         while not task_control['stop']:
-            if step_num % episode_len == 0 and step_num != 0 and move_homepose: 
+            if step_num % episode_len == 0 and step_num != 0 and move_homepose:
                 print(f"Episode finished. Total Reward: {episode_reward:.4f}")
                 episode_reward = 0.0
                 policy.reset()
@@ -184,6 +185,10 @@ def checkpoint_test(
             # === a. 현재 상태(state_t) 계산 ===
             obs_t = ts.observation
             with torch.no_grad():
+                # UMI relative trajectory: 매 step마다 현재 EE pose 기준으로 재예측.
+                # temporal ensemble이 다른 기준 frame의 waypoint를 섞지 않도록 policy를 reset.
+                if use_relative_trajectory and action_key == 'ee_delta_action':
+                    policy.reset()
                 qpos_t = torch.from_numpy(np.concatenate([item['qpos'] for item in obs_t['robot_states'].values()])).float().cuda().unsqueeze(0)
 
                 policy_input_t = {'observation.state': qpos_t}
@@ -198,10 +203,13 @@ def checkpoint_test(
                     image = process_image(image, vision_backbone, to_cuda=True)
                     policy_input_t[f'observation.images.sensor_{sensor["id"]}'] = image.unsqueeze(0)
 
+                # relative trajectory 모드: select_action이 반환하는 값은 chunk[0] = T_now→1 = 즉각 delta
                 state_t = policy.select_action(policy_input_t).squeeze(0).cpu().numpy()
 
                 if noise_t_raw is None:
                     noise_t_raw = np.zeros_like(state_t)
+
+            print(state_t)
 
             # === b. 최종 행동(final_action) 결정 ===
             if oti_rl:
@@ -229,8 +237,9 @@ def checkpoint_test(
 
             # === c. 로봇 제어 (필터 없이 즉시 반영) ===
             start_action_id = 0
+            executed_ee_deltas = []
             for agent in env.agents:
-                if action_key == 'ee_delta_action' and agent.ik_solver is not None:
+                if action_key == 'ee_delta_action' and agent.role != 'tool' and agent.ik_solver is not None:
                     ee_delta_dim = len(agent.ee_names) * 6
                     agent_action = final_action[start_action_id : start_action_id + ee_delta_dim]
                     ee_delta_dict = {
@@ -238,12 +247,12 @@ def checkpoint_test(
                         for i, ee_name in enumerate(agent.ee_names)
                     }
                     thread_pool.submit(agent.move_ee_delta_step, ee_delta_dict)
+                    executed_ee_deltas.append(agent_action)
                     start_action_id += ee_delta_dim
                 else:
                     target_qpos = final_action[start_action_id : start_action_id + agent.joint_len]
                     thread_pool.submit(agent.move_joint_step, target_qpos)
                     start_action_id += agent.joint_len
-            
             ts_next = env.record_step()
 
             # === d. OTI-RL 학습 ===
@@ -316,3 +325,4 @@ def checkpoint_test(
         torch.cuda.empty_cache()
 
     return
+

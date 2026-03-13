@@ -77,7 +77,26 @@
                             ></q-btn>
                         </div>
                         <q-space class="col"></q-space>
-                        <div>
+                        <div class="row items-center q-gutter-x-sm">
+                            <template v-if="status === 'pending'">
+                                <span class="text-caption text-grey">{{ $t('replayActionType') }}:</span>
+                                <q-radio
+                                    v-model="replayActionType"
+                                    val="qaction"
+                                    :label="$t('replayActionQaction')"
+                                    dense
+                                    dark
+                                    color="primary"
+                                />
+                                <q-radio
+                                    v-model="replayActionType"
+                                    val="ee_delta_action"
+                                    :label="$t('replayActionEeDelta')"
+                                    dense
+                                    dark
+                                    color="primary"
+                                />
+                            </template>
                             <q-btn
                                 color="red"
                                 text-color="white"
@@ -272,12 +291,12 @@
                 style=""
             />
             <process-console
-                process="record_episode"
+                :process="status === 'testing' ? 'checkpoint_test' : 'record_episode'"
                 class="q-mt-md"
                 style="border: 1px solid #ffffff; background-color: #1e1e1e; z-index: 1000; width: 800px; height: 400px;"
                 v-show="showProcessConsole"
             >
-            </process-console> 
+            </process-console>
         </div>
         <div style="position: fixed; top: 10px; right: 20px; z-index: 10000; width: 600px" 
                 v-if="selectedEpisode.name && selectedDatasetId"
@@ -356,6 +375,7 @@ const selectedEpisode = defineModel('selectedEpisode', {
     type: Object,
     default: {}
 });
+const replayActionType = ref('qaction');
 const checkpoint = computed(() => {
     return props.checkpoints?.find(c => c.id === selectedCheckpointId.value);
 });
@@ -553,6 +573,7 @@ function startReplay() {
         robot_ids: props.robots.map(r => r.id),
         sensors: props.sensors,
         task: props.workspace,
+        action_type: replayActionType.value,
     }).catch((error) => {
         console.error('Error starting replay:', error);
         Notify.create({

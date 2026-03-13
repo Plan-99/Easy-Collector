@@ -16,6 +16,55 @@ from ..lerobot.configs.types import PolicyFeature, FeatureType
 from torchvision import transforms
 from transformers import AutoImageProcessor
 from PIL import Image
+from scipy.spatial.transform import Rotation
+
+
+def delta_to_relative_trajectory(deltas: np.ndarray) -> np.ndarray:
+    """UMI 방식의 relative trajectory 라벨로 변환.
+
+    deltas: [T, 6] sequential ee_delta [dx, dy, dz, dax, day, daz]
+    반환값: [T, 6] 각 row i = 현재 위치 기준 i+1 step 후의 누적 displacement
+
+    UMI 방식: action[i] = T_now→t+i+1 (현재 pose 기준 절대 상대 위치)
+    모든 waypoint가 동일한 기준점(현재 EE)에서 독립적으로 계산되므로
+    오차가 누적되지 않음.
+    """
+    T = len(deltas)
+    relative = np.zeros_like(deltas)
+
+    # Translation: 단순 누적합
+    relative[:, :3] = np.cumsum(deltas[:, :3], axis=0)
+
+    # Rotation (axis-angle): proper 회전 합성
+    cumulative = Rotation.identity()
+    for i in range(T):
+        cumulative = cumulative * Rotation.from_rotvec(deltas[i, 3:])
+        relative[i, 3:] = cumulative.as_rotvec()
+
+    return relative
+
+
+def relative_trajectory_to_delta(waypoints: np.ndarray) -> np.ndarray:
+    """relative trajectory → sequential delta 역변환 (inference 시 사용).
+
+    waypoints: [T, 6] relative trajectory (T_now→t+i)
+    반환값: [T, 6] sequential deltas
+    """
+    T = len(waypoints)
+    deltas = np.zeros_like(waypoints)
+
+    # Translation: 연속 차분
+    deltas[0, :3] = waypoints[0, :3]
+    deltas[1:, :3] = np.diff(waypoints[:, :3], axis=0)
+
+    # Rotation: 연속 회전 차분
+    deltas[0, 3:] = waypoints[0, 3:]
+    for i in range(1, T):
+        r_prev = Rotation.from_rotvec(waypoints[i - 1, 3:])
+        r_curr = Rotation.from_rotvec(waypoints[i, 3:])
+        deltas[i, 3:] = (r_prev.inv() * r_curr).as_rotvec()
+
+    return deltas
 
 
 
@@ -24,7 +73,7 @@ e = IPython.embed
 
 
 class EpisodicDataset(torch.utils.data.Dataset):
-    def __init__(self, episode_ids, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone='resnet18', n_obs_steps=1, action_key='qaction'):
+    def __init__(self, episode_ids, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone='resnet18', n_obs_steps=1, action_key='qaction', use_relative_trajectory=False):
         super(EpisodicDataset).__init__()
         self.episode_ids = episode_ids
         self.dataset_dir = dataset_dir
@@ -35,6 +84,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self.policy_type = policy_type
         self.vision_backbone = vision_backbone
         self.action_key = action_key
+        self.use_relative_trajectory = use_relative_trajectory
         self.info = None
         self.__getitem__(0) # initialize self.is_sim
 
@@ -87,7 +137,10 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
         padded_action = np.zeros(original_action_shape, dtype=np.float32)
 
-        padded_action[:action_len] = action
+        if self.use_relative_trajectory and self.action_key == 'ee_delta_action':
+            padded_action[:action_len] = delta_to_relative_trajectory(action[:action_len])
+        else:
+            padded_action[:action_len] = action
         is_pad = np.zeros(self.chunk_size)
         is_pad[action_len:] = 1
 
@@ -145,7 +198,7 @@ def process_image(image, vision_backbone='resnet18', to_cuda=False):
     return image.cuda() if to_cuda else image  # Add batch dimension
 
 
-def get_norm_stats(dataset_dir, num_episodes, action_key='qaction'):
+def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative_trajectory=False):
     all_qpos_data = []
     all_action_data = []
     # episode 길이 관련 코드 수정
@@ -156,6 +209,8 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction'):
         with h5py.File(dataset_path, 'r') as root:
             qpos = get_concatenated_pos(root['/observations/qpos'])
             action = get_concatenated_pos(root[action_key])
+            if use_relative_trajectory and action_key == 'ee_delta_action':
+                action = delta_to_relative_trajectory(action)
             observation_image_keys = list(root['/observations/images'].keys())
         
         cnt += qpos.shape[0]
@@ -231,7 +286,7 @@ def get_concatenated_pos(pos_path, target_id=None, target_range=None):
     return np.concatenate(pos_list, axis=axis)
 
 
-def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_train, batch_size_val, chunk_size, vision_backbone='resnet18', num_workers=1, n_obs_steps=1, action_key='qaction'):
+def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_train, batch_size_val, chunk_size, vision_backbone='resnet18', num_workers=1, n_obs_steps=1, action_key='qaction', use_relative_trajectory=False):
     print(f'\nData from: {dataset_dir}\n')
     # obtain train test split
     train_ratio = 0.8
@@ -240,11 +295,11 @@ def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_tra
     val_indices = shuffled_indices[int(train_ratio * num_episodes):]
 
     # obtain normalization stats for qpos and action
-    norm_stats = get_norm_stats(dataset_dir, num_episodes, action_key=action_key)
+    norm_stats = get_norm_stats(dataset_dir, num_episodes, action_key=action_key, use_relative_trajectory=use_relative_trajectory)
 
     # construct dataset and dataloader
-    train_dataset = EpisodicDataset(train_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key)
-    val_dataset = EpisodicDataset(val_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key)
+    train_dataset = EpisodicDataset(train_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory)
+    val_dataset = EpisodicDataset(val_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory)
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train, shuffle=True, pin_memory=True, num_workers=num_workers)
     val_dataloader = DataLoader(val_dataset, batch_size=batch_size_val, shuffle=True, pin_memory=True, num_workers=num_workers)
 

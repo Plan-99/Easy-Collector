@@ -90,7 +90,10 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                         agent.reset_ik_solver(home_pose[str(agent.id)])
 
             # Reset the environment to get the first timestep at the home_pose
-            time.sleep(7)
+                time.sleep(7)
+            
+            else:
+                time.sleep(2)
 
             if tele_type == 'leader':
                 teleop = TeleoperatorModel.where('type', 'leader').where('assembly_id', assembly_id).first()

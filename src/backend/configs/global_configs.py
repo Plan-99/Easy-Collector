@@ -151,7 +151,7 @@ SUPPORT_ROBOTS = [
         'joint_names': ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7"],
         'joint_lower_bounds': [-3.14, -3.14, -3.14, -3.14, -3.14, -3.14, -3.14],
         'joint_upper_bounds': [3.14, 3.14, 3.14, 3.14, 3.14, 3.14, 3.14],
-        'read_topic': '/joint_trajectory_controller/state',
+        'read_topic': '/joint_trajectory_controller/controller_state',
         'read_topic_msg': 'control_msgs/JointTrajectoryControllerState',
         'write_topic': '/joint_trajectory_controller/joint_trajectory',
         'write_topic_msg': 'trajectory_msgs/JointTrajectory',

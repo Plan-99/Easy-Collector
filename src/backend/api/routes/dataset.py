@@ -215,7 +215,8 @@ def start_replay_episode(id, file_name):
         task=data.get('task', {}),
         sensors=data.get('sensors', []),
         move_robot=True,
-        sid=request.json.get('sid', None),  # Optional socket ID for real-time updates
+        action_key=data.get('action_type', 'qaction'),
+        sid=request.json.get('sid', None),
     )
     return {'status': 'success', 'message': 'HDF5 replay process started'}, 200
 

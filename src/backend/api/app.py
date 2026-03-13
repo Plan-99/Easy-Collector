@@ -28,6 +28,7 @@ from orator import DatabaseManager, Model
 
 import os
 import argparse
+import logging
 
 import threading
 from ..database.config.database import DATABASES
@@ -38,6 +39,12 @@ args = argparse.parse_args()
 # 디버그 모드 설정
 # debug = args.debug
 debug = True
+
+class _HealthzFilter(logging.Filter):
+    def filter(self, record):
+        return 'GET /api/healthz' not in record.getMessage()
+
+logging.getLogger('werkzeug').addFilter(_HealthzFilter())
 
 # Flask 앱과 SocketIO 객체 생성
 app = Flask(__name__)

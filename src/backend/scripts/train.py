@@ -222,6 +222,7 @@ def main(args):
 
         batch_size = checkpoint['train_settings']['batch_size']
         action_key = checkpoint['train_settings'].get('action_type', 'qaction')
+        use_relative_trajectory = checkpoint['train_settings'].get('use_relative_trajectory', False)
         sensor_ids = task['sensor_ids']
         if policy['type'] in ['ACT', 'VLAsEn']:
             chunk_size = policy['settings']['chunk_size']
@@ -237,7 +238,7 @@ def main(args):
 
 
         # Load data from the temporary directory
-        train_dataloader, val_dataloader, stats, input_features, output_features = load_data(temp_dir, policy['type'], episode_counter, sensor_ids, batch_size, batch_size, chunk_size, vision_backbone, num_workers, n_obs_steps, action_key=action_key)
+        train_dataloader, val_dataloader, stats, input_features, output_features = load_data(temp_dir, policy['type'], episode_counter, sensor_ids, batch_size, batch_size, chunk_size, vision_backbone, num_workers, n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory)
         # Start the training process
         best_epoch, min_val_loss, best_state_dict = train(
             train_dataloader,
