@@ -54,8 +54,9 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
     # --- Vive: collection 전체에서 1회 초기화 (에피소드마다 재시작하지 않음) ---
     # vive_external: 실물 로봇 + vive, vive_only: vive tracker만 (이미지+ee_delta_action)
     vive = None
+    hz = 20
     if tele_type in ('vive_external', 'vive_only'):
-        vive = ViveController(node, socketio_instance, scale_factor=1, step_rate=10)
+        vive = ViveController(node, socketio_instance, scale_factor=1.5, step_rate=20)
         if not vive.wait_for_ready(timeout=30.0):
             task_control['stop'] = True
             vive.destroy()
@@ -83,6 +84,8 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
 
             if move_homepose and tele_type not in ('externel', 'vive_only'):
                 for agent in agents:
+                    if tele_type == 'vive_external' and agent.role == 'tool':
+                        continue  # vive_external의 single_arm은 vive로 이동하므로 home_pose 이동 생략
                     agent.move_lock = True
                     agent.move_to(home_pose[str(agent.id)])
 
@@ -156,7 +159,7 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                         for agent in agents:
                             if agent.role == 'single_arm' and agent.ik_solver is not None:
                                 ee_name = agent.ee_names[0]
-                                agent.move_ee_delta_step({ee_name: delta})
+                                agent.move_ee_delta_step({ee_name: delta}, vel_arg=vive._step_interval)
                 else:
                     on_step = None
 
@@ -216,8 +219,8 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                     prev_vive_offset = vive.get_offset()
 
                 timesteps.append(ts)
-
-                time.sleep(0.1)
+                
+                time.sleep(1.0 / hz)
 
                 if tele_type == 'keyboard':
                     for agent in agents:

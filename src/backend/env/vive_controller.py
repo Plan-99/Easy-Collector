@@ -17,7 +17,7 @@ class ViveController:
 
     ROS2_PACKAGE = 'vive_udp_bridge'
     ROS2_NODE = 'udp_json_to_ros2'
-    TOPIC_TEMPLATE = '/vive/{role}/joint_states'
+    TOPIC_TEMPLATE = '/vive/{role}/joint_states'  # /vive/<key>/joint_states (JointState)를 구독한다.
 
     # SteamVR(Y-up)에서 로봇(Z-up) 좌표계로 변환하는 기본 행렬
     # vive X → robot X,  vive Z → -robot Y,  vive Y → robot Z

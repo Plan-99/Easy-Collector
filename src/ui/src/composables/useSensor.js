@@ -61,5 +61,6 @@ export function useSensor(sensor, sensorOnCallback=() => {}) {
     startSensor,
     stopSensor,
     status,
+    checkSensorTopic,
   };
 }
