@@ -201,6 +201,8 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                             print('Stopping episode recording as requested.')
                             task_control['stop'] = True
                             return
+                        if task_control.get('episode_complete'):
+                            break
                         time.sleep(0.1)
 
                 socketio_instance.emit('record_episode_progress', {
