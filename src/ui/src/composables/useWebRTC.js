@@ -1,29 +1,38 @@
 // composables/useWebRTC.js
 import { ref, onUnmounted } from 'vue';
-// import { api } from 'src/boot/axios';
 
 const streaming_server = 'http://localhost:5002'
 
 export function useWebRTC() {
     const pc = ref(null);
+    const streamId = ref(null);
     const streams = ref([]);
     const connectionState = ref('new');
     const error = ref(null);
 
     const connect = async (topic, config, onTrack) => {
-        const pc = new RTCPeerConnection({
+        // 이전 연결이 있으면 먼저 닫기
+        disconnect();
+
+        const peerConnection = new RTCPeerConnection({
             iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
         });
 
-        pc.addTransceiver("video", { direction: "recvonly" });
+        pc.value = peerConnection;
 
-        pc.ontrack = (event) => {
+        peerConnection.addTransceiver("video", { direction: "recvonly" });
+
+        peerConnection.ontrack = (event) => {
             console.log('Track received:', event.streams[0].id);
             onTrack(event);
         };
 
-        const offer = await pc.createOffer({ offerToReceiveVideo: true });
-        await pc.setLocalDescription(offer);
+        peerConnection.onconnectionstatechange = () => {
+            connectionState.value = peerConnection.connectionState;
+        };
+
+        const offer = await peerConnection.createOffer({ offerToReceiveVideo: true });
+        await peerConnection.setLocalDescription(offer);
 
         const response = await fetch(`${streaming_server}/offer`, {
             method: "POST",
@@ -33,10 +42,12 @@ export function useWebRTC() {
 
         const answer = await response.json();
 
-        await pc.setRemoteDescription(new RTCSessionDescription(answer));
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+
+        streamId.value = answer.stream_id;
 
         return {
-            pc,
+            pc: peerConnection,
             stream_id: answer.stream_id,
         };
     };
@@ -46,20 +57,20 @@ export function useWebRTC() {
             pc.value.close();
             pc.value = null;
         }
+        streamId.value = null;
         streams.value = [];
         connectionState.value = 'closed';
-
-        // socket.off('answer')
     };
 
-    const addConfig = async (streamId, config) => {
+    const addConfig = async (sid, config) => {
+        const id = sid || streamId.value;
+        if (!id) return;
         await fetch(`${streaming_server}/add_config`, {
             method: "POST",
-            body: JSON.stringify({ stream_id: streamId, config }),
+            body: JSON.stringify({ stream_id: id, config }),
             headers: { "Content-Type": "application/json" },
         });
     };
-
 
     onUnmounted(() => {
         disconnect();

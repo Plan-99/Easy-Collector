@@ -245,6 +245,14 @@
                     </div>
 
                     <q-btn
+                        color="green"
+                        text-color="white"
+                        :label="$t('completeEpisode')"
+                        icon="check"
+                        @click="completeEpisode"
+                        class="q-mr-sm"
+                    ></q-btn>
+                    <q-btn
                         color="white"
                         text-color="red"
                         :label="$t('stopCollection')"
@@ -537,6 +545,16 @@ function removeKeyboardListener() {
     window.removeEventListener('keydown', keyboardHandler);
 }
 
+function completeEpisode() {
+    api.post(`/dataset/${selectedDatasetId.value}/:complete_episode`).catch((error) => {
+        console.error('Error completing episode:', error);
+        Notify.create({
+            color: 'negative',
+            message: t('errorCompleteEpisode'),
+        });
+    });
+}
+
 function stopDataCollection() {
     if (teleType.value === 'keyboard') {
         removeKeyboardListener();
@@ -632,6 +650,12 @@ onMounted(() => {
 
     socket.on('stop_process', (data) => {
         if (data.id === 'record_episode') {
+            if (data.episode_saved) {
+                Notify.create({
+                    color: 'positive',
+                    message: t('episodeSaved'),
+                });
+            }
             collectingProgress.value = 0;
             viveInitializing.value = false;
         }

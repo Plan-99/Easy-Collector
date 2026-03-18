@@ -1,4 +1,9 @@
 # -*- coding: utf-8 -*-
+import faulthandler
+import sys
+
+# Segfault 발생 시 traceback을 stderr에 출력
+faulthandler.enable(file=sys.stderr, all_threads=True)
 
 from flask import Flask, request
 from flask_socketio import SocketIO, emit
@@ -225,39 +230,47 @@ def handle_offer_event(sid, data):
 
 @socketio.on('move_robot_joint')
 def handle_move_robot_joint_event(data):
-    agent = app.agents[data['robot']['id']]
-    agent.moved_by_ui = True
-    if agent.move_lock:
-        print("Move locked, ignoring EE move command.")
-        return
-    agent.move_joint_step(data['goal_pos'])
+    try:
+        agent = app.agents[data['robot']['id']]
+        agent.moved_by_ui = True
+        if agent.move_lock:
+            return
+        agent.move_joint_step(data['goal_pos'])
+    except Exception as e:
+        print(f"[ERROR] move_robot_joint: {e}")
 
 @socketio.on('move_robot_ee')
 def handle_move_robot_ee_event(data):
-    agent = app.agents[data['robot']['id']]
-    agent.moved_by_ui = True
-    if agent.move_lock:
-        print("Move locked, ignoring EE move command.")
-        return
-    agent.move_ee_step(data['goal_pos'])
+    try:
+        agent = app.agents[data['robot']['id']]
+        agent.moved_by_ui = True
+        if agent.move_lock:
+            return
+        agent.move_ee_step(data['goal_pos'])
+    except Exception as e:
+        print(f"[ERROR] move_robot_ee: {e}")
 
 @socketio.on('move_robot_joint_delta')
 def handle_move_robot_joint_delta_event(data):
-    agent = app.agents[data['robot']['id']]
-    agent.moved_by_ui = True
-    if agent.move_lock:
-        print("Move locked, ignoring joint delta move command.")
-        return
-    agent.move_joint_delta_step(data['delta_pos'])
+    try:
+        agent = app.agents[data['robot']['id']]
+        agent.moved_by_ui = True
+        if agent.move_lock:
+            return
+        agent.move_joint_delta_step(data['delta_pos'])
+    except Exception as e:
+        print(f"[ERROR] move_robot_joint_delta: {e}")
 
 @socketio.on('move_robot_ee_delta')
 def handle_move_robot_ee_delta_event(data):
-    agent = app.agents[data['robot']['id']]
-    agent.moved_by_ui = True
-    if agent.move_lock:
-        print("Move locked, ignoring EE delta move command.")
-        return
-    agent.move_ee_delta_step(data['delta_pos'])
+    try:
+        agent = app.agents[data['robot']['id']]
+        agent.moved_by_ui = True
+        if agent.move_lock:
+            return
+        agent.move_ee_delta_step(data['delta_pos'], vel_arg=0.2)
+    except Exception as e:
+        print(f"[ERROR] move_robot_ee_delta: {e}")
 
 
 def main():
@@ -280,17 +293,22 @@ def main():
             allow_unsafe_werkzeug=True,
         )
 
+
     finally:
         import subprocess
         print("\nServer is shutting down. Executing kill script...")
-        result = subprocess.run(
-            ['/bin/bash', '/root/src/kill.sh'], 
-            check=True,
-            capture_output=True, # 스크립트의 출력을 캡처합니다.
-            text=True            # 출력을 텍스트(문자열)로 다룹니다.
-        )
-        print("kill.sh script executed successfully.")
-        print(f"Script output:\n{result.stdout}")
+        try:
+            result = subprocess.run(
+                ['/bin/bash', '/root/src/kill.sh'],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            print(f"kill.sh exited with code {result.returncode}")
+            if result.stdout.strip():
+                print(f"Script output:\n{result.stdout}")
+        except Exception as e:
+            print(f"[WARN] kill.sh failed: {e}")
 
 if __name__ == '__main__':
     main()

@@ -2,13 +2,13 @@ from tqdm import tqdm
 import os
 import numpy as np
 from ...env.env import Env
-from ...env.agent import Agent
 from ...env.vive_controller import ViveController
 from ...configs.global_configs import DATASET_DIR
 from .leader_teleoperation import Leader
 from ...utils.image_parser import fetch_image_with_config
 import time
 import h5py
+from concurrent.futures import ThreadPoolExecutor
 from scipy.spatial.transform import Rotation as R
 from ...database.models.teleoperator_model import Teleoperator as TeleoperatorModel
 
@@ -29,8 +29,9 @@ def _compute_fk_delta(agent, qaction, qpos):
     arm_state, _ = agent.get_joint_and_tool_pos(qpos)
     if arm_action is None or arm_state is None:
         return None
-    ee_action = agent.ik_solver.get_ee_position(np.array(arm_action))
-    ee_state = agent.ik_solver.get_ee_position(np.array(arm_state))
+    with agent.ik_lock:
+        ee_action = agent.ik_solver.get_ee_position(np.array(arm_action))
+        ee_state = agent.ik_solver.get_ee_position(np.array(arm_state))
     if ee_action is None or ee_state is None:
         return None
     return {
@@ -50,17 +51,20 @@ def _vive_offset_delta(curr_offset, prev_offset):
 def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors, task, language_instruction, socketio_instance, task_control, tele_type='leader', iter=100000):
     env = Env(node, agents=agents, sensors=sensors, virtual_agents=(tele_type == 'vive_only'))
     dataset_dir = f"{DATASET_DIR}/{dataset_id}"
+    thread_pool = ThreadPoolExecutor(max_workers=len(agents))
 
     # --- Vive: collection 전체에서 1회 초기화 (에피소드마다 재시작하지 않음) ---
     # vive_external: 실물 로봇 + vive, vive_only: vive tracker만 (이미지+ee_delta_action)
     vive = None
     hz = 20
     if tele_type in ('vive_external', 'vive_only'):
-        vive = ViveController(node, socketio_instance, scale_factor=1.5, step_rate=20)
+        vive = ViveController(node, socketio_instance, scale_factor=2, step_rate=20)
         if not vive.wait_for_ready(timeout=30.0):
             task_control['stop'] = True
             vive.destroy()
             return
+
+    task_control['episode_complete'] = False
 
     try:
         for _ in range(iter):
@@ -69,6 +73,7 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                 break
 
             task_control['episode_stop'] = False
+
 
             dataset_name = f"episode_{get_auto_index(dataset_dir)}.hdf5"
 
@@ -96,6 +101,15 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                 time.sleep(7)
             
             else:
+                # move_homepose가 아니어도 IK solver 내부 상태를 현재 조인트에 동기화
+                for agent in agents:
+                    if agent.ik_solver is not None:
+                        js = agent.get_joint_states()
+                        if js is not None:
+                            arm_js, _ = agent.get_joint_and_tool_pos(js)
+                            if arm_js is not None:
+                                with agent.ik_lock:
+                                    agent.ik_solver.reset_state(arm_js)
                 time.sleep(2)
 
             if tele_type == 'leader':
@@ -148,6 +162,18 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                     ts.observation['robot_states'][agent.id]['ee_delta_action'] = {
                         name: [0.0] * 6 for name in agent.ee_names
                     }
+
+            # 이미지는 별도 버퍼에 저장하여 메모리 누적 방지
+            image_buffers = {str(s['id']): [] for s in sensors}
+            for s in sensors:
+                s_id = str(s['id'])
+                img = ts.observation['images'].pop(f'sensor_{s_id}', None)
+                if img is not None:
+                    image_buffers[s_id].append(fetch_image_with_config(img, {
+                        'resize': task['sensor_img_size'][s_id],
+                        'cropped_area': task['sensor_cropped_area'][s_id],
+                        'rotate': task['sensor_rotate'][s_id]
+                    }))
             timesteps = [ts]
 
             # 에피소드 시작: vive origin 설정 및 teleop 스레드 시작
@@ -159,7 +185,7 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                         for agent in agents:
                             if agent.role == 'single_arm' and agent.ik_solver is not None:
                                 ee_name = agent.ee_names[0]
-                                agent.move_ee_delta_step({ee_name: delta}, vel_arg=vive._step_interval)
+                                thread_pool.submit(agent.move_ee_delta_step, {ee_name: delta}, vel_arg=vive._step_interval)
                 else:
                     on_step = None
 
@@ -184,6 +210,10 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                     print('Stopping episode recording as requested.')
                     task_control['stop'] = True
                     return
+
+                if task_control['episode_complete']:
+                    print(f'Episode completed early at timestep {t+1}/{max_timesteps}.')
+                    break
 
                 ts = env.record_step()
 
@@ -218,6 +248,16 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                 if tele_type == 'vive_only':
                     prev_vive_offset = vive.get_offset()
 
+                # 이미지를 별도 버퍼로 이동 (메모리 절약)
+                for s in sensors:
+                    s_id = str(s['id'])
+                    img = ts.observation['images'].pop(f'sensor_{s_id}', None)
+                    if img is not None:
+                        image_buffers[s_id].append(fetch_image_with_config(img, {
+                            'resize': task['sensor_img_size'][s_id],
+                            'cropped_area': task['sensor_cropped_area'][s_id],
+                            'rotate': task['sensor_rotate'][s_id]
+                        }))
                 timesteps.append(ts)
                 
                 time.sleep(1.0 / hz)
@@ -246,15 +286,7 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                     image_group = obs_group.create_group('images')
                     for sensor in sensors:
                         s_id = str(sensor['id'])
-                        img_data = []
-                        for t_step in timesteps:
-                            img = t_step.observation['images'][f'sensor_{s_id}']
-                            img_data.append(fetch_image_with_config(img, {
-                                'resize': task['sensor_img_size'][s_id],
-                                'cropped_area': task['sensor_cropped_area'][s_id],
-                                'rotate': task['sensor_rotate'][s_id]
-                            }))
-                        image_group.create_dataset(f"sensor_{s_id}", data=np.array(img_data), dtype='uint8')
+                        image_group.create_dataset(f"sensor_{s_id}", data=np.array(image_buffers[s_id]), dtype='uint8')
 
                     # 2. 로봇 데이터 저장 (None인 값은 자동 스킵 — vive_only 시 전부 None)
                     obs_keys = ['qpos', 'eepos']
@@ -297,7 +329,18 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                 print(f"[ERROR] Error during episode recording:\n{traceback.format_exc()}")
                 task_control['stop'] = True
 
+            # episode_complete로 조기 저장된 경우 전체 collection 종료
+            if task_control.get('episode_complete'):
+                task_control['episode_complete'] = False
+                socketio_instance.emit('stop_process', {'id': 'record_episode', 'episode_saved': True})
+                print("Collection finished (episode completed early).")
+                break
+
     finally:
-        # 정상 종료, stop 신호, 예외 등 모든 경우에 vive 정리
+        # 1. vive teleop 스레드 먼저 정지 (thread_pool.submit 호출 중단)
         if vive is not None:
             vive.destroy()
+        # 2. 남은 thread_pool 작업 완료 후 종료
+        thread_pool.shutdown(wait=True)
+        # 3. 센서 구독 해제
+        env.destroy()

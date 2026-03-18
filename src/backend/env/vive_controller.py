@@ -27,11 +27,15 @@ class ViveController:
         [0,  1,  0],   # robot Z = vive Y
     ], dtype=float)
 
-    def __init__(self, node, socketio_instance, role='right_wrist', frame_transform=None, scale_factor=1.0, step_rate=30):
+    def __init__(self, node, socketio_instance, role='right_wrist', frame_transform=None, scale_factor=1.0, step_rate=30,
+                 smoothing_alpha=0.1, deadzone_pos=0.001, deadzone_rot=0.001):
         """
         frame_transform: vive 좌표계 → 로봇 좌표계 변환 3x3 행렬 (None이면 DEFAULT 사용).
         scale_factor: position/rotation delta에 곱해지는 배율.
         step_rate: start_teleop() 백그라운드 스레드의 step() 호출 주기 (Hz).
+        smoothing_alpha: EMA 필터 계수 (0~1). 작을수록 더 부드럽지만 반응이 느림.
+        deadzone_pos: position delta의 deadzone 임계값 (m). 이 이하의 움직임은 무시.
+        deadzone_rot: rotation delta의 deadzone 임계값 (rad). 이 이하의 회전은 무시.
         """
         self.node = node
         self.socketio_instance = socketio_instance
@@ -52,8 +56,12 @@ class ViveController:
         self._teleop_running = False
         self._teleop_thread = None
         self._on_step = None        # callback(offset: [dx, dy, dz, dax, day, daz])
+        self._smoothing_alpha = smoothing_alpha
+        self._deadzone_pos = deadzone_pos
+        self._deadzone_rot = deadzone_rot
         self._prev_offset = [0.0] * 6  # 직전 step의 cumulative offset (robot frame)
-        self._last_step_delta = [0.0] * 6  # 직전 step 대비 현재 포즈 변화량
+        self._last_step_delta = [0.0] * 6  # 직전 step 대비 현재 포즈 변화량 (필터 적용 후)
+        self._filtered_delta = np.zeros(6)  # EMA 필터 상태
 
     def _start_ros_node(self):
         """vive_udp_bridge ROS2 노드를 서브프로세스로 실행한다."""
@@ -105,9 +113,12 @@ class ViveController:
         return True
 
     def _callback(self, msg):
-        with self._lock:
-            self._current_pose = list(msg.position[:7])  # [x, y, z, qx, qy, qz, qw]
-        self._ready_event.set()
+        try:
+            with self._lock:
+                self._current_pose = list(msg.position[:7])  # [x, y, z, qx, qy, qz, qw]
+            self._ready_event.set()
+        except Exception as e:
+            print(f"[ERROR] vive _callback: {e}")
 
     def start_teleop(self, on_step=None):
         """
@@ -123,7 +134,10 @@ class ViveController:
     def _teleop_loop(self):
         while self._teleop_running:
             t0 = time.monotonic()
-            self.step()
+            try:
+                self.step()
+            except Exception as e:
+                print(f"[ERROR] vive _teleop_loop step: {e}")
             elapsed = time.monotonic() - t0
             sleep_time = self._step_interval - elapsed
             if sleep_time > 0:
@@ -142,6 +156,7 @@ class ViveController:
             self._vive_origin_pose = list(self._current_pose) if self._current_pose else None
         self._prev_offset = [0.0] * 6
         self._last_step_delta = [0.0] * 6
+        self._filtered_delta = np.zeros(6)
         print(f'[VIVE] Origin set. vive_pos={self._vive_origin_pose[:3] if self._vive_origin_pose else None}')
 
     @property
@@ -182,7 +197,20 @@ class ViveController:
         prev_R = R.from_rotvec(self._prev_offset[3:6])
         curr_R = R.from_rotvec(offset_axayaz)
         delta_axayaz = (curr_R * prev_R.inv()).as_rotvec().tolist()
-        self._last_step_delta = delta_xyz + delta_axayaz
+        raw_delta = np.array(delta_xyz + delta_axayaz)
+
+        # deadzone: 임계값 이하의 미세한 움직임 무시
+        pos_norm = np.linalg.norm(raw_delta[:3])
+        rot_norm = np.linalg.norm(raw_delta[3:])
+        if pos_norm < self._deadzone_pos:
+            raw_delta[:3] = 0.0
+        if rot_norm < self._deadzone_rot:
+            raw_delta[3:] = 0.0
+
+        # EMA low-pass filter: filtered = alpha * raw + (1 - alpha) * prev_filtered
+        alpha = self._smoothing_alpha
+        self._filtered_delta = alpha * raw_delta + (1.0 - alpha) * self._filtered_delta
+        self._last_step_delta = self._filtered_delta.tolist()
 
         self._prev_offset = offset
 

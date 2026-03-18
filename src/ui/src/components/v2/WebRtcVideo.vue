@@ -7,9 +7,8 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted } from 'vue';
+import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { useWebRTC } from 'src/composables/useWebRTC';
-import { useSocket } from 'src/composables/useSocket';
 
 const props = defineProps({
   topic: {
@@ -35,8 +34,7 @@ const props = defineProps({
 });
 
 const videoElement = ref(null);
-const { socket } = useSocket();
-const { connect, addConfig } = useWebRTC(socket);
+const { connect, disconnect, addConfig } = useWebRTC();
 let stream_id = '';
 
 const setupWebRTC = () => {
@@ -104,5 +102,8 @@ onMounted(() => {
   }
 });
 
+onUnmounted(() => {
+  disconnect();
+});
 
 </script>

@@ -1,7 +1,6 @@
 import collections
 import dm_env
 import time
-from ..env.agent import Agent
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image, CompressedImage
@@ -15,14 +14,18 @@ class Env:
         self.language_instruction = language_instruction
         self.virtual_agents = virtual_agents
 
+        self._sensor_subs = []
         for sensor in sensors:
             setattr(self, f'sensor_{sensor["id"]}', None)
-            node.create_subscription(CompressedImage, sensor['read_topic'], lambda msg, sid=sensor['id']: self.image_raw_cb(msg, sid), 10)
+            sub = node.create_subscription(CompressedImage, sensor['read_topic'], lambda msg, sid=sensor['id']: self.image_raw_cb(msg, sid), 10)
+            self._sensor_subs.append(sub)
 
     def image_raw_cb(self, data, sensor_id):
-        image = ros_image_to_numpy(data)
-
-        setattr(self, f'sensor_{sensor_id}', image)
+        try:
+            image = ros_image_to_numpy(data)
+            setattr(self, f'sensor_{sensor_id}', image)
+        except Exception as e:
+            print(f"[ERROR] image_raw_cb (sensor {sensor_id}): {e}")
 
                 
     def get_observation(self):
@@ -85,3 +88,9 @@ class Env:
     def get_reward(self):
         # Implement your reward logic here
         return 0.0
+
+    def destroy(self):
+        """센서 구독을 해제하여 리소스 누수를 방지한다."""
+        for sub in self._sensor_subs:
+            self.node.destroy_subscription(sub)
+        self._sensor_subs.clear()
