@@ -171,9 +171,10 @@ RUN rm -rf /usr/local/lib/python3.10/dist-packages/numpy* && \
 # 7. 소프트웨어 렌더링 강제 설정 (OpenGL 문제 해결용)
 RUN export LIBGL_ALWAYS_SOFTWARE=1
 
-
-
-
+RUN apt-get update && apt-get install --only-upgrade -y --no-install-recommends \
+    ros-humble-rclpy \
+    ros-humble-ros2cli \
+    ros-humble-ros2topic
     
 # 최종 환경 설정
 WORKDIR /root
