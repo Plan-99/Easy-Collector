@@ -57,9 +57,13 @@ class Env:
         image_dict = dict()
         for sensor in self.sensors:
             image = getattr(self, f"sensor_{sensor['id']}")
-            while image is None:
+            waited = 0.0
+            while image is None and waited < 5.0:
                 time.sleep(0.1)
+                waited += 0.1
                 image = getattr(self, f"sensor_{sensor['id']}")
+            if image is None:
+                print(f"[WARN] sensor_{sensor['id']} image timeout after 5s")
             image_dict[f"sensor_{sensor['id']}"] = image
         return image_dict
     
@@ -90,7 +94,9 @@ class Env:
         return 0.0
 
     def destroy(self):
-        """센서 구독을 해제하여 리소스 누수를 방지한다."""
-        for sub in self._sensor_subs:
-            self.node.destroy_subscription(sub)
+        """센서 콜백을 비활성화한다.
+        rclpy.spin() 중에 destroy_subscription()을 호출하면 segfault가 발생하므로
+        구독 자체는 유지하고 콜백만 무효화한다.
+        """
+        self._destroyed = True
         self._sensor_subs.clear()

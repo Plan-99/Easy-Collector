@@ -61,6 +61,7 @@ class ViveController:
         self._deadzone_rot = deadzone_rot
         self._prev_offset = [0.0] * 6  # 직전 step의 cumulative offset (robot frame)
         self._last_step_delta = [0.0] * 6  # 직전 step 대비 현재 포즈 변화량 (필터 적용 후)
+        self._destroyed = False
         self._filtered_delta = np.zeros(6)  # EMA 필터 상태
 
     def _start_ros_node(self):
@@ -218,11 +219,10 @@ class ViveController:
             self._on_step(offset)
 
     def destroy(self):
-        """텔레오퍼레이션 스레드 중지, ROS2 구독 해제, vive_node 서브프로세스를 종료한다."""
+        """텔레오퍼레이션 스레드 중지, vive_node 서브프로세스를 종료한다.
+        ROS2 구독은 rclpy.spin 중 destroy하면 segfault가 발생하므로 유지한다."""
         self.stop_teleop()
-        if self._sub is not None:
-            self.node.destroy_subscription(self._sub)
-            self._sub = None
+        self._destroyed = True
 
         if self._process is not None:
             try:
