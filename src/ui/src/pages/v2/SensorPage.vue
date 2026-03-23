@@ -37,7 +37,7 @@
                         <!-- <div class="text-grey-6 text-caption" v-if="sensor.ip_address">IP Address: {{ sensor.ip_address }}</div> -->
                         <!-- <div class="text-grey-6 text-caption" v-if="sensor.device_index">Device Index: {{ sensor.device_index }}</div> -->
                     </q-card-section>
-                    <q-card-section class="q-pa-none q-mt-sm row">
+                    <q-card-section class="q-pa-none q-mt-sm row" v-if="sensor.type !== 'custom'">
                         <div class="text-primary text-caption" v-if="sensor.status === 'on'">ONLINE</div>
                         <div class="text-orange text-caption" v-if="sensor.status === 'loading'">LOADING</div>
                         <div class="text-grey-7 text-caption" v-if="sensor.status === 'off'">OFFLINE</div>
@@ -48,6 +48,11 @@
                             dense
                             @click.stop="toggleSensor(sensor)"
                         />
+                    </q-card-section>
+                    <q-card-section class="q-pa-none q-mt-sm row" v-else>
+                        <div class="text-primary text-caption" v-if="sensor.status === 'on'">TOPIC ON</div>
+                        <div class="text-grey-7 text-caption" v-else-if="sensor.status === 'off'">TOPIC OFF</div>
+                        <div class="text-grey-7 text-caption" v-else>LOADING</div>
                     </q-card-section>
                     <q-inner-loading :showing="sensor.status === 'loading'">
                         <q-spinner-gears size="50px" color="primary" />
@@ -81,6 +86,7 @@
                     <web-rtc-video
                         :process-id="`sensor_${sensor.id}`"
                         :topic="sensor.read_topic"
+                        :msg-type="sensor.read_topic_msg"
                         ref="sensorVideo"
                         :loading="sensor.status !== 'on'"
                         style="height: 300px"
@@ -121,6 +127,8 @@ const { t } = useI18n()
 
 const sensors = ref([]);
 
+const isCustomSensor = (form) => form.find((e) => e.key === 'type').value === 'custom';
+
 const sensorForm = ref([
     { key: 'id', value: null },
     { key: 'name', label: t('sensorName'), value: '', default: '', type: 'text' },
@@ -131,6 +139,17 @@ const sensorForm = ref([
     { key: 'serial_no', label: t('serialNUmber'), value: '', default: '', type: 'text', show: (form) => getFormSensorInfo(form) && getFormSensorInfo(form).custom_fields && getFormSensorInfo(form).custom_fields.includes('serial_no') },
     { key: 'ip_address', label: t('ipAddress'), value: '', default: '192.168.50.10', type: 'text', show: (form) => getFormSensorInfo(form) && getFormSensorInfo(form).custom_fields && getFormSensorInfo(form).custom_fields.includes('ip_address') },
     { key: 'device_index', label: t('deviceIndex'), value: 0, default: 0, type: 'number', show: (form) => getFormSensorInfo(form) && getFormSensorInfo(form).custom_fields && getFormSensorInfo(form).custom_fields.includes('device_index') },
+    // Custom sensor fields
+    { key: 'read_topic', label: 'Read Topic', value: '', default: '', type: 'text', show: isCustomSensor },
+    { key: 'read_topic_msg', label: 'Read Topic Message Type', value: 'sensor_msgs/CompressedImage', default: 'sensor_msgs/CompressedImage', type: 'select',
+        options: [
+            { label: 'sensor_msgs/CompressedImage', value: 'sensor_msgs/CompressedImage' },
+            { label: 'sensor_msgs/Image', value: 'sensor_msgs/Image' },
+        ],
+        show: isCustomSensor
+    },
+    { key: 'resolution_width', label: 'Resolution Width', value: 640, default: 640, type: 'number', show: isCustomSensor },
+    { key: 'resolution_height', label: 'Resolution Height', value: 480, default: 480, type: 'number', show: isCustomSensor },
 ]);
 const showSensorForm = ref(false);
 const watchingSensor = ref(null);
@@ -141,11 +160,11 @@ const supportingSensors = ref([]);
 //     { label: 'Realsense Camera', value: 'realsense_camera' }
 // };
 
-function listSensors() {                                                                                                     
+function listSensors() {
     return api.get('/sensors').then((response) => {
         sensors.value = response.data.sensors || [];
         sensors.value.forEach(sensor => {
-            sensor.image = '/images/' + sensor.type + '.png'; // Default image if not provided
+            sensor.image = sensor.type === 'custom' ? '/images/custom_sensor.png' : '/images/' + sensor.type + '.png';
             sensor.handler = useSensor(sensor, () => {
                 watchSensor(sensor);
             });
@@ -184,7 +203,16 @@ function openEditSensorForm(sensor) {
     sensorForm.value.forEach(field => {
         field.value = sensor[field.key] || field.default;
     });
-    sensorForm.value.find((e) => e.key === 'id').value = sensor.id; // Set ID for edit
+    sensorForm.value.find((e) => e.key === 'id').value = sensor.id;
+    // Load custom sensor fields from settings
+    if (sensor.type === 'custom' && sensor.settings) {
+        const settings = typeof sensor.settings === 'string' ? JSON.parse(sensor.settings) : sensor.settings;
+        sensorForm.value.find((e) => e.key === 'read_topic').value = settings.read_topic || '';
+        sensorForm.value.find((e) => e.key === 'read_topic_msg').value = settings.read_topic_msg || 'sensor_msgs/CompressedImage';
+        const resolution = settings.resolution || [640, 480];
+        sensorForm.value.find((e) => e.key === 'resolution_width').value = resolution[0] || 640;
+        sensorForm.value.find((e) => e.key === 'resolution_height').value = resolution[1] || 480;
+    }
     showSensorForm.value = true;
 }   
 

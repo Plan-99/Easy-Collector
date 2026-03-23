@@ -5,6 +5,7 @@
                 <web-rtc-video
                     :process-id="`sensor_${sensor.id}`"
                     :topic="sensor.read_topic"
+                    :msg-type="sensor.read_topic_msg"
                     class="full-height border-rounded cursor-pointer"
                     :key="sensor.id"
                     :loading="sensor.status !== 'on'"

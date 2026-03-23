@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import CompressedImage
+from sensor_msgs.msg import CompressedImage, Image
 from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack, RTCConfiguration, RTCIceServer
 from aiohttp import web
 import aiohttp_cors
@@ -21,29 +21,57 @@ stream_config = {}
 # Node를 상속하지 않고, 생성자에서 node 객체를 전달받습니다.
 class ROSImageStreamTrack(VideoStreamTrack):
     """
-    공유된 ROS 노드를 사용하여 CompressedImage 토픽을 구독하는 클래스.
+    공유된 ROS 노드를 사용하여 CompressedImage 또는 Image 토픽을 구독하는 클래스.
     """
-    def __init__(self, node: Node, initial_topic: str, stream_id: str = None):
+    def __init__(self, node: Node, initial_topic: str, stream_id: str = None, msg_type: str = 'sensor_msgs/CompressedImage'):
         super().__init__()
-        self.node = node # 전달받은 노드 객체 저장
+        self.node = node
         self.topic = initial_topic
         self.subscriber = None
         self.frame = None
         self.stream_id = stream_id
+        self.is_compressed = msg_type != 'sensor_msgs/Image'
         self.start_subscriber()
 
     def start_subscriber(self):
         if self.subscriber:
             self.node.destroy_subscription(self.subscriber)
+        ros_msg_type = CompressedImage if self.is_compressed else Image
         self.subscriber = self.node.create_subscription(
-            CompressedImage, self.topic, self.ros_callback, 1
+            ros_msg_type, self.topic, self.ros_callback, 1
         )
-        self.node.get_logger().info(f"Stream {self.stream_id}: Subscribed to ROS topic: {self.topic}")
+        self.node.get_logger().info(f"Stream {self.stream_id}: Subscribed to ROS topic: {self.topic} ({'CompressedImage' if self.is_compressed else 'Image'})")
 
-    def ros_callback(self, msg: CompressedImage):
+    def ros_callback(self, msg):
         try:
-            np_arr = np.frombuffer(msg.data, np.uint8)
-            cv_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+            if self.is_compressed:
+                np_arr = np.frombuffer(msg.data, np.uint8)
+                cv_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+            else:
+                # sensor_msgs/Image
+                h, w = msg.height, msg.width
+                encoding = msg.encoding
+                np_arr = np.frombuffer(msg.data, np.uint8)
+                if encoding in ('rgb8', 'bgr8'):
+                    cv_image = np_arr.reshape((h, w, 3))
+                    if encoding == 'rgb8':
+                        cv_image = cv2.cvtColor(cv_image, cv2.COLOR_RGB2BGR)
+                elif encoding == 'rgba8':
+                    cv_image = np_arr.reshape((h, w, 4))
+                    cv_image = cv2.cvtColor(cv_image, cv2.COLOR_RGBA2BGR)
+                elif encoding == 'bgra8':
+                    cv_image = np_arr.reshape((h, w, 4))
+                    cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGRA2BGR)
+                elif encoding == 'mono8':
+                    cv_image = np_arr.reshape((h, w))
+                    cv_image = cv2.cvtColor(cv_image, cv2.COLOR_GRAY2BGR)
+                elif encoding == 'mono16':
+                    np_arr = np.frombuffer(msg.data, np.uint16).reshape((h, w))
+                    cv_image = (np_arr / 256).astype(np.uint8)
+                    cv_image = cv2.cvtColor(cv_image, cv2.COLOR_GRAY2BGR)
+                else:
+                    # fallback: try as bgr8
+                    cv_image = np_arr.reshape((h, w, 3))
             
             # 1. 디코딩 실패 확인
             if cv_image is None or cv_image.size == 0:
@@ -112,6 +140,7 @@ async def offer(request):
     params = await request.json()
     topic = params.get('topic')
     config = params.get('config', {})
+    msg_type = params.get('msg_type', 'sensor_msgs/CompressedImage')
     ice_servers = [RTCIceServer(urls="stun:stun.l.google.com:19302")]
     pc = RTCPeerConnection(RTCConfiguration(iceServers=ice_servers))
     pcs.add(pc)
@@ -129,12 +158,12 @@ async def offer(request):
 
     try:
         await pc.setRemoteDescription(RTCSessionDescription(sdp=params["sdp"], type=params["type"]))
-        
+
         stream_id = str(uuid.uuid4())
         stream_config[stream_id] = config
-        
+
         # 2. ROSImageStreamTrack 생성 시 공유 노드 객체 전달
-        video_track = ROSImageStreamTrack(node=node, initial_topic=topic, stream_id=stream_id)
+        video_track = ROSImageStreamTrack(node=node, initial_topic=topic, stream_id=stream_id, msg_type=msg_type)
         pc.addTrack(video_track)
 
         answer = await pc.createAnswer()

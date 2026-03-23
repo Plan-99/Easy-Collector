@@ -45,7 +45,7 @@ class WebcamPublisherNode(Node):
         self.capture_thread.start()
 
         # 5. Publisher 설정 (런치파일의 namespace는 Node 객체 생성 시 자동 적용됨)
-        self.publisher_ = self.create_publisher(CompressedImage, 'image_raw', 10)
+        self.publisher_ = self.create_publisher(CompressedImage, 'image_raw/compressed', 10)
         
         # 타이머 주기 설정
         timer_period = 1.0 / fps

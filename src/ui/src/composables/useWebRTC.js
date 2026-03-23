@@ -36,7 +36,7 @@ export function useWebRTC() {
 
         const response = await fetch(`${streaming_server}/offer`, {
             method: "POST",
-            body: JSON.stringify({ sdp: offer.sdp, type: offer.type, topic, config }),
+            body: JSON.stringify({ sdp: offer.sdp, type: offer.type, topic, config, msg_type: config.msg_type }),
             headers: { "Content-Type": "application/json" },
         });
 
