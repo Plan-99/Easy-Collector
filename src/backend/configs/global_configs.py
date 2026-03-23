@@ -300,8 +300,8 @@ SUPPORT_SENSORS = [
         'company': 'Logitec',
         'role': 'rgb_camera',
         'topic_type': 'color',
-        'read_topic': '/image_raw',
-        'read_topic_msg': 'sensor_msgs/Image',
+        'read_topic': '/image_raw/compressed',
+        'read_topic_msg': 'sensor_msgs/CompressedImage',
         'custom_fields': ['device_index'],
         'resolution': [600, 480]
     },
