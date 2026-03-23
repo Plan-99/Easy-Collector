@@ -74,6 +74,11 @@ class Agent:
             self.move_robot_client = node.create_client(self.write_service_srv_cls, robot['write_topic'])
             if not self.move_robot_client.wait_for_service(timeout_sec=5.0):
                 print(f'Service {robot["write_topic"]} not available. Please check the connection.')
+            # elif self.robot_type == 'tm_12s':
+            #     enable_req = self.write_service_srv_cls.Request()
+            #     enable_req.id = '1'
+            #     enable_req.script = 'Position(true,"J",1000,10,500)'
+            #     self.move_robot_client.call_async(enable_req)
 
         elif self.write_type == 'action':
             self.write_action_goal_cls = get_action(robot['write_topic_msg']).Goal
@@ -183,40 +188,50 @@ class Agent:
             angles_deg = [float(np.degrees(a)) for a in arm_action]
             
             # PTP("JPP", j1, j2, j3, j4, j5, j6, 속도%, 가속ms, 블렌딩%, 가상디지털출력)
-            if vel_arg is None:
-                curr_joints = self.get_joint_states()
-                if curr_joints is None:
-                    vel_arg = 10
-                else:
-                    scale_factor = 3
-                    max_speeds_deg = np.array([180, 180, 180, 225, 225, 225])
-                    # 3. 이동할 거리 계산 (도 단위)
-                    arm_action = action[:6]
-                    target_deg = np.degrees(arm_action)
-                    curr_deg = np.degrees(curr_joints[:6])
-                    diff_deg = np.abs(target_deg - curr_deg)
+            if self.robot_type == 'tm_12':
+                if vel_arg is None:
+                    curr_joints = self.get_joint_states()
+                    if curr_joints is None:
+                        vel_arg = 10
+                    else:
+                        scale_factor = 3
+                        max_speeds_deg = np.array([180, 180, 180, 225, 225, 225])
+                        # 3. 이동할 거리 계산 (도 단위)
+                        arm_action = action[:6]
+                        target_deg = np.degrees(arm_action)
+                        curr_deg = np.degrees(curr_joints[:6])
+                        diff_deg = np.abs(target_deg - curr_deg)
 
-                    # 4. 0.1초 내에 도달하기 위해 필요한 속도 비율(%) 계산
-                    # 공식: (거리 / 시간) / 최대속도 * 100
-                    # 25ms의 가속 시간(acc_ms)을 고려하면 실제 가용 시간은 더 짧아질 수 있습니다.
-                    required_speed_pct = (diff_deg / 0.1) / max_speeds_deg * scale_factor * 100
+                        # 4. 0.1초 내에 도달하기 위해 필요한 속도 비율(%) 계산
+                        # 공식: (거리 / 시간) / 최대속도 * 100
+                        # 25ms의 가속 시간(acc_ms)을 고려하면 실제 가용 시간은 더 짧아질 수 있습니다.
+                        required_speed_pct = (diff_deg / 0.1) / max_speeds_deg * scale_factor * 100
 
-                    # 5. 모든 관절 중 가장 큰 비율을 선택하고 1~100 사이로 제한
-                    vel_arg = int(np.max(required_speed_pct))
-                    vel_arg = max(1, min(100, vel_arg))
+                        # 5. 모든 관절 중 가장 큰 비율을 선택하고 1~100 사이로 제한
+                        vel_arg = int(np.max(required_speed_pct))
+                        vel_arg = max(1, min(100, vel_arg))
 
-            script = 'PTP("JPP",{},{},{},{},{},{},{},25,100,false)'.format(*[f"{a:.4f}" for a in angles_deg] + [vel_arg])  # 속도 인자 추가, 기본값은 50%
-            
-            # Gripper control: Append SET command to the same script string
-            # Module 1 (EndEffector), Type 1 (Digital Out), Pin 0
-            if len(action) > 6 and self.tool_inner:
-                gripper_state = 1 if action[6] > 0.4 else 0
-                script += '\r\nSET(1,1,0,{})'.format(gripper_state)
-            
-            req.id = '1'
-            req.script = script
-            self.is_waiting_for_service = True
-            self.move_robot_client.call_async(req)
+                script = 'PTP("JPP",{},{},{},{},{},{},{},25,100,false)'.format(*[f"{a:.4f}" for a in angles_deg] + [vel_arg])  # 속도 인자 추가, 기본값은 50%
+                
+                # Gripper control: Append SET command to the same script string
+                # Module 1 (EndEffector), Type 1 (Digital Out), Pin 0
+                if len(action) > 6 and self.tool_inner:
+                    gripper_state = 1 if action[6] > 0.4 else 0
+                    script += '\r\nSET(1,1,0,{})'.format(gripper_state)
+                
+                req.id = '1'
+                req.script = script
+                self.is_waiting_for_service = True
+                self.move_robot_client.call_async(req)
+
+            elif self.robot_type == 'tm_12s':
+                arm_action = action[:6]
+                angles_deg = [float(np.degrees(a)) for a in arm_action]
+                script = 'Position({},{},{},{},{},{})'.format(*[f"{a:.4f}" for a in angles_deg])
+
+                req.id = '1'
+                req.script = script
+                self.move_robot_client.call_async(req)
 
     def service_response_callback(self, future):
         """서비스 응답이 도착했을 때 호출되는 콜백"""
