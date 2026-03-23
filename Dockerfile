@@ -29,13 +29,18 @@ RUN mkdir -p /opt/easytrainer/logs /tmp/easytrainer/logs && chmod -R 777 /opt/ea
 
 # 2. 필수 시스템 패키지 설치
 RUN sed -i 's/archive.ubuntu.com/mirror.kakao.com/g' /etc/apt/sources.list && \
-    apt-get update && apt-get install -y --no-install-recommends \
+    sed -i 's/security.ubuntu.com/mirror.kakao.com/g' /etc/apt/sources.list && \
+    echo 'Acquire::http::Pipeline-Depth "32";' > /etc/apt/apt.conf.d/99parallel && \
+    echo 'Acquire::http::No-Cache "true";' >> /etc/apt/apt.conf.d/99parallel && \
+    echo 'Acquire::Retries "10";' >> /etc/apt/apt.conf.d/99parallel
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
     apt-utils curl gnupg lsb-release ca-certificates software-properties-common apt-transport-https \
     && rm -rf /var/lib/apt/lists/*
 
 # 3. ROS 2 및 RealSense 저장소 설정
-RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | gpg --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg && \
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(lsb_release -sc) main" | tee /etc/apt/sources.list.d/ros2-latest.list > /dev/null
+RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] https://mirrors.ustc.edu.cn/ros2/ubuntu jammy main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
 
 RUN curl -sSL "http://keyserver.ubuntu.com/pks/lookup?op=get&search=0xF6E65AC044F831AC80A06380C8B3A55A6F3EFCDE" | gpg --dearmor -o /usr/share/keyrings/intel-librealsense.gpg && \
     echo "deb [signed-by=/usr/share/keyrings/intel-librealsense.gpg] https://librealsense.intel.com/Debian/apt-repo $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/librealsense.list > /dev/null
