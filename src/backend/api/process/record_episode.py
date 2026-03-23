@@ -281,41 +281,69 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
             print(f'Saving Data: {dataset_name}')
 
             # =========================================================
-            # [추가할 부분] 저장 직전 Delta Action 일괄 계산 (Post-processing)
-            # =========================================================            
+            # [추가] 절대 좌표를 Observation Delta와 Action Delta로 일괄 변환
+            # =========================================================
+            from scipy.spatial.transform import Rotation as R
+            
             for agent in agents:
                 if agent.ik_solver is None:
                     continue
                 
                 a_id = agent.id
+                
+                # 1. 덮어쓰기 전에 '원본 절대 좌표'를 배열에 안전하게 백업해둡니다.
+                # (계산 도중에 eepos 값이 바뀌어버리면 다음 스텝 계산이 망가지기 때문입니다)
+                abs_eepos_list = []
+                for t in range(len(timesteps)):
+                    abs_eepos_list.append(timesteps[t].observation['robot_states'][a_id].get('eepos'))
+                
+                # 2. Delta 계산 및 덮어쓰기
                 for t in range(len(timesteps)):
                     robot_state = timesteps[t].observation['robot_states'][a_id]
+                    curr_ee = abs_eepos_list[t]
                     
-                    # 마지막 스텝이 아닐 때: (t+1) 스텝의 위치 - (t) 스텝의 위치
-                    if t < len(timesteps) - 1:
-                        curr_ee = timesteps[t].observation['robot_states'][a_id].get('eepos')
-                        next_ee = timesteps[t+1].observation['robot_states'][a_id].get('eepos')
+                    if curr_ee is not None:
+                        obs_delta_dict = {}
+                        act_delta_dict = {}
                         
-                        if curr_ee is not None and next_ee is not None:
-                            delta_dict = {}
-                            for name in agent.ee_names:
-                                if name in curr_ee and name in next_ee:
-                                    # 1. 위치(Position) Delta
-                                    pos_delta = [next_ee[name][i] - curr_ee[name][i] for i in range(3)]
+                        for name in agent.ee_names:
+                            if name in curr_ee:
+                                # -------------------------------------------------
+                                # A. Observation Delta (과거 t-1 -> 현재 t)
+                                # -------------------------------------------------
+                                if t > 0 and abs_eepos_list[t-1] is not None:
+                                    prev_ee = abs_eepos_list[t-1]
                                     
-                                    # 2. 회전(Rotation) Delta (R_next * R_curr^-1)
+                                    pos_obs = [curr_ee[name][i] - prev_ee[name][i] for i in range(3)]
+                                    r_prev = R.from_rotvec(prev_ee[name][3:6])
                                     r_curr = R.from_rotvec(curr_ee[name][3:6])
-                                    r_next = R.from_rotvec(next_ee[name][3:6])
-                                    r_delta = (r_next * r_curr.inv()).as_rotvec().tolist()
+                                    rot_obs = (r_curr * r_prev.inv()).as_rotvec().tolist()
                                     
-                                    delta_dict[name] = pos_delta + r_delta
-                            
-                            robot_state['ee_delta_action'] = delta_dict
-                    else:
-                        # 마지막 스텝: 다음 미래가 없으므로 움직이지 않음(0)으로 채움
-                        robot_state['ee_delta_action'] = {
-                            name: [0.0] * 6 for name in agent.ee_names
-                        }
+                                    obs_delta_dict[name] = pos_obs + rot_obs
+                                else:
+                                    # 첫 스텝(t=0)은 과거가 없으므로 0으로 채움
+                                    obs_delta_dict[name] = [0.0] * 6
+                                    
+                                # -------------------------------------------------
+                                # B. Action Delta (현재 t -> 미래 t+1)
+                                # -------------------------------------------------
+                                if t < len(timesteps) - 1 and abs_eepos_list[t+1] is not None:
+                                    next_ee = abs_eepos_list[t+1]
+                                    
+                                    pos_act = [next_ee[name][i] - curr_ee[name][i] for i in range(3)]
+                                    r_curr_act = R.from_rotvec(curr_ee[name][3:6])
+                                    r_next = R.from_rotvec(next_ee[name][3:6])
+                                    rot_act = (r_next * r_curr_act.inv()).as_rotvec().tolist()
+                                    
+                                    act_delta_dict[name] = pos_act + rot_act
+                                else:
+                                    # 마지막 스텝은 미래가 없으므로 0으로 채움
+                                    act_delta_dict[name] = [0.0] * 6
+                        
+                        # 3. 계산된 Delta 값들로 기존 타임스텝 데이터 덮어쓰기!
+                        # 이제 HDF5의 'eepos'에는 절대좌표가 아니라 Observation Delta가 저장됩니다.
+                        robot_state['eepos'] = obs_delta_dict
+                        robot_state['ee_delta_action'] = act_delta_dict
             # =========================================================
 
             try:
