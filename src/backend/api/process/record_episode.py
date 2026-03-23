@@ -229,8 +229,9 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                     if tele_type == 'vive_only':
                         # vive offset 차이로 delta 계산
                         curr_offset = vive.get_offset()
-                        delta = _vive_offset_delta(curr_offset, prev_vive_offset)
-                        robot_state['ee_delta_action'] = {agent.ee_names[0]: delta}
+                        # delta = _vive_offset_delta(curr_offset, prev_vive_offset)
+                        # robot_state['ee_delta_action'] = {agent.ee_names[0]: delta}
+                        robot_state['eepos'] = {agent.ee_names[0]: curr_offset}
 
                     elif tele_type == 'keyboard':
                         # 키보드 raw delta 그대로 사용
@@ -246,6 +247,7 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                         )
                         if delta is not None:
                             robot_state['ee_delta_action'] = delta
+
 
                 if tele_type == 'vive_only':
                     prev_vive_offset = vive.get_offset()
@@ -277,6 +279,44 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                 time.sleep(0.5)
 
             print(f'Saving Data: {dataset_name}')
+
+            # =========================================================
+            # [추가할 부분] 저장 직전 Delta Action 일괄 계산 (Post-processing)
+            # =========================================================            
+            for agent in agents:
+                if agent.ik_solver is None:
+                    continue
+                
+                a_id = agent.id
+                for t in range(len(timesteps)):
+                    robot_state = timesteps[t].observation['robot_states'][a_id]
+                    
+                    # 마지막 스텝이 아닐 때: (t+1) 스텝의 위치 - (t) 스텝의 위치
+                    if t < len(timesteps) - 1:
+                        curr_ee = timesteps[t].observation['robot_states'][a_id].get('eepos')
+                        next_ee = timesteps[t+1].observation['robot_states'][a_id].get('eepos')
+                        
+                        if curr_ee is not None and next_ee is not None:
+                            delta_dict = {}
+                            for name in agent.ee_names:
+                                if name in curr_ee and name in next_ee:
+                                    # 1. 위치(Position) Delta
+                                    pos_delta = [next_ee[name][i] - curr_ee[name][i] for i in range(3)]
+                                    
+                                    # 2. 회전(Rotation) Delta (R_next * R_curr^-1)
+                                    r_curr = R.from_rotvec(curr_ee[name][3:6])
+                                    r_next = R.from_rotvec(next_ee[name][3:6])
+                                    r_delta = (r_next * r_curr.inv()).as_rotvec().tolist()
+                                    
+                                    delta_dict[name] = pos_delta + r_delta
+                            
+                            robot_state['ee_delta_action'] = delta_dict
+                    else:
+                        # 마지막 스텝: 다음 미래가 없으므로 움직이지 않음(0)으로 채움
+                        robot_state['ee_delta_action'] = {
+                            name: [0.0] * 6 for name in agent.ee_names
+                        }
+            # =========================================================
 
             try:
                 # --- 데이터 재구성 및 HDF5 쓰기 ---
