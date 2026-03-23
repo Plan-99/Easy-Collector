@@ -229,8 +229,13 @@ def checkpoint_test(
             start_action_id = 0
             for agent in env.agents:
                 target_qpos = final_action[start_action_id : start_action_id + agent.joint_len]
-                thread_pool.submit(agent.move_joint_step, target_qpos)
+                if step_num % episode_len == 0 and step_num != 0 and move_homepose:
+                    agent.move_to(target_qpos)
+                    time.sleep(4)
+                else:
+                    thread_pool.submit(agent.move_joint_step, target_qpos)
                 start_action_id += agent.joint_len
+
             
             ts_next = env.record_step()
 
