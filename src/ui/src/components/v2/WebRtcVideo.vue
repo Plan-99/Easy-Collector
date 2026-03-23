@@ -30,6 +30,10 @@ const props = defineProps({
   rotate: {
     type: Number,
     default: 0,
+  },
+  msgType: {
+    type: String,
+    default: 'sensor_msgs/CompressedImage',
   }
 });
 
@@ -42,6 +46,7 @@ const setupWebRTC = () => {
     resize: props.resize.length ? props.resize : null,
     cropped_area: props.cropped_area.length ? props.cropped_area : null,
     rotate: props.rotate,
+    msg_type: props.msgType,
   }, (event) => {
     if (videoElement.value) {
       const newStream = new MediaStream();

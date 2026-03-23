@@ -252,7 +252,7 @@ class Leader():
             if is_joint_trajectory:
                 rate = self.node.create_rate(3)  # 50Hz
             else:
-                rate = self.node.create_rate(10)  # 10Hz
+                rate = self.node.create_rate(50)  # 50Hz
             while rclpy.ok() and not task_control.get('stop', False) and not task_control.get('episode_stop', False):
                 
                 # 1. 하드웨어 읽기 작업 (여기서 SerialException 등이 발생할 확률이 높음)
