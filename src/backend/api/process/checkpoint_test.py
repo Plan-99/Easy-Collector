@@ -46,9 +46,10 @@ def checkpoint_test(
     action_type=None,
     ):
 
+    agents = sorted(agents, key=lambda a: a.id)
     oti_rl = False
     move_reward = 1.0
-    
+
     # --- 1. 초기 설정 ---
     try:
         gc.collect()

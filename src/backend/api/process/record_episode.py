@@ -21,6 +21,7 @@ def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
     raise Exception(f"Error getting auto index, or more than {max_idx} episodes")
 
 def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors, task, language_instruction, socketio_instance, task_control, tele_type='leader', iter=100000):
+    agents = sorted(agents, key=lambda a: a.id)
     env = Env(node, agents=agents, sensors=sensors, virtual_agents=(tele_type == 'vive_only'))
     dataset_dir = f"{DATASET_DIR}/{dataset_id}"
     thread_pool = ThreadPoolExecutor(max_workers=len(agents))
