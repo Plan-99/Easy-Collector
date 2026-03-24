@@ -16,6 +16,7 @@ ENV PIP_DEFAULT_TIMEOUT=300
 ENV EC_SKIP_TORCHVISION_COMPAT=1
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
 # Regional PyPI mirror (Kakao)
 ARG PIP_INDEX_URL=https://mirror.kakao.com/pypi/simple
@@ -42,8 +43,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg && \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] https://mirrors.ustc.edu.cn/ros2/ubuntu jammy main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
 
-RUN curl -sSL "http://keyserver.ubuntu.com/pks/lookup?op=get&search=0xF6E65AC044F831AC80A06380C8B3A55A6F3EFCDE" | gpg --dearmor -o /usr/share/keyrings/intel-librealsense.gpg && \
-    echo "deb [signed-by=/usr/share/keyrings/intel-librealsense.gpg] https://librealsense.intel.com/Debian/apt-repo $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/librealsense.list > /dev/null
+RUN apt-key adv --keyserver keyserver.ubuntu.com --recv-keys FB0B24895113F120 && \
+    echo "deb https://librealsense.intel.com/Debian/apt-repo $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/librealsense.list > /dev/null
 
 # 4. ROS 2 Humble 및 관련 종속성 설치
 # ROS 2 Humble (Desktop-Full) 및 관련 패키지 설치
