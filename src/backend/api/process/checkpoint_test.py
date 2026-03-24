@@ -72,8 +72,14 @@ def checkpoint_test(
             # re_inference_steps=1: temporal ensemble 활성화 (매 스텝 추론 + 가중 평균)
             # re_inference_steps>1: temporal ensemble 비활성화, N스텝마다 재추론
             if re_inference_steps == 1:
-                from ...lerobot.policies.act.modeling_act import ACTTemporalEnsembler
-                policy.temporal_ensembler = ACTTemporalEnsembler(temporal_ensemble_coeff, policy.config.chunk_size)
+                if use_relative_trajectory or action_key == 'ee_delta_action':
+                    print("Relative trajectory 모드 감지: Temporal Ensembling을 비활성화하고 첫 스텝만 사용합니다.")
+                    # Temporal Ensembler 대신 그냥 큐를 1로 줄여서 매 스텝 새로 예측한 첫 값만 쓰게 만듭니다.
+                    policy.config.n_action_steps = 1
+                    policy._action_queue = deque([], maxlen=1)
+                else:
+                    from ...lerobot.policies.act.modeling_act import ACTTemporalEnsembler
+                    policy.temporal_ensembler = ACTTemporalEnsembler(temporal_ensemble_coeff, policy.config.chunk_size)
             else:
                 policy.config.n_action_steps = re_inference_steps
                 policy._action_queue = deque([], maxlen=re_inference_steps)
@@ -178,6 +184,8 @@ def checkpoint_test(
         ts = env.reset()
         print('Robot moved to homepose')
 
+        prev_eepos_dict = None # 루프 시작 전에 과거의 eepos를 저장할 딕셔너리 
+
         start = time.time()
         while not task_control['stop']:
             if step_num % episode_len == 0 and step_num != 0 and move_homepose:
@@ -199,31 +207,83 @@ def checkpoint_test(
             # === a. 현재 상태(state_t) 계산 ===
             obs_t = ts.observation
             with torch.no_grad():
-                # UMI relative trajectory: 매 step마다 현재 EE pose 기준으로 재예측.
-                # temporal ensemble이 다른 기준 frame의 waypoint를 섞지 않도록 policy를 reset.
-                if use_relative_trajectory and action_key == 'ee_delta_action':
+                
+                # -----------------------------------------------------------------
+                # 1. Observation State 구성 (Delta vs Absolute)
+                # -----------------------------------------------------------------
+                if action_key == 'ee_delta_action':
+                    # Relative trajectory 모드: 앙상블 꼬임 방지를 위해 매 스텝 초기화
                     policy.reset()
-                qpos_t = torch.from_numpy(np.concatenate([item['qpos'] for item in obs_t['robot_states'].values()])).float().cuda().unsqueeze(0)
+                    
+                    from scipy.spatial.transform import Rotation as R
+                    obs_delta_list = []
+                    curr_eepos_dict = {}
+                    
+                    for agent in agents:
+                        if agent.ik_solver is not None:
+                            # 현재 스텝의 절대 위치(eepos) 가져오기
+                            curr_ee = obs_t['robot_states'][agent.id].get('eepos', {})
+                            curr_eepos_dict[agent.id] = curr_ee
+                            
+                            if prev_eepos_dict is not None and agent.id in prev_eepos_dict:
+                                prev_ee = prev_eepos_dict[agent.id]
+                                
+                                for name in agent.ee_names:
+                                    if name in curr_ee and name in prev_ee:
+                                        # 위치(Position) Delta
+                                        pos_obs = [curr_ee[name][i] - prev_ee[name][i] for i in range(3)]
+                                        # 회전(Rotation) Delta (R_curr * R_prev^-1)
+                                        r_prev = R.from_rotvec(prev_ee[name][3:6])
+                                        r_curr = R.from_rotvec(curr_ee[name][3:6])
+                                        rot_obs = (r_curr * r_prev.inv()).as_rotvec().tolist()
+                                        
+                                        obs_delta_list.extend(pos_obs + rot_obs)
+                                    else:
+                                        obs_delta_list.extend([0.0] * 6)
+                            else:
+                                # 첫 스텝(t=0)은 과거가 없으므로 속도 0으로 간주
+                                obs_delta_list.extend([0.0] * 6 * len(agent.ee_names))
+                        else:
+                            # IK가 없는 그리퍼 등의 로봇은 기존처럼 qpos 사용
+                            obs_delta_list.extend(obs_t['robot_states'][agent.id].get('qpos', []))
+                    
+                    # 계산된 Observation Delta를 텐서로 변환
+                    state_tensor = torch.tensor(obs_delta_list).float().cuda().unsqueeze(0)
+                    
+                    # 다음 스텝을 위해 현재 위치 덮어쓰기
+                    prev_eepos_dict = curr_eepos_dict
+                    
+                else:
+                    # 절대 좌표 모드 (기존 동작 유지)
+                    state_tensor = torch.from_numpy(np.concatenate([item['qpos'] for item in obs_t['robot_states'].values()])).float().cuda().unsqueeze(0)
 
-                policy_input_t = {'observation.state': qpos_t}
+                policy_input_t = {'observation.state': state_tensor}
+                
+                # -----------------------------------------------------------------
+                # 2. Vision Image 처리
+                # -----------------------------------------------------------------
                 for sensor in sensors:
                     image = obs_t['images'][f'sensor_{sensor["id"]}']
                     sensor_id = str(sensor['id'])
                     image = fetch_image_with_config(image, {
-                        'resize': task['sensor_img_size'][str(sensor_id)],
-                        'cropped_area': task['sensor_cropped_area'][str(sensor_id)],
-                        'rotate': task['sensor_rotate'][str(sensor_id)]
+                        'resize': task['sensor_img_size'][sensor_id],
+                        'cropped_area': task['sensor_cropped_area'][sensor_id],
+                        'rotate': task['sensor_rotate'][sensor_id]
                     })
                     image = process_image(image, vision_backbone, to_cuda=True)
-                    policy_input_t[f'observation.images.sensor_{sensor["id"]}'] = image.unsqueeze(0)
+                    policy_input_t[f'observation.images.sensor_{sensor_id}'] = image.unsqueeze(0)
 
-                # relative trajectory 모드: select_action이 반환하는 값은 chunk[0] = T_now→1 = 즉각 delta
+                # -----------------------------------------------------------------
+                # 3. 모델 추론 (Select Action)
+                # -----------------------------------------------------------------
+                # action_key == 'ee_delta_action'일 경우 Temporal Ensembling이 
+                # 꺼져 있으므로 반환값은 순수한 "현재 기준 다음 스텝의 Delta"가 됨
                 state_t = policy.select_action(policy_input_t).squeeze(0).cpu().numpy()
 
                 if noise_t_raw is None:
                     noise_t_raw = np.zeros_like(state_t)
 
-            print(state_t)
+            # print(f"Predicted Action (Delta): {state_t}")
 
             # === b. 최종 행동(final_action) 결정 ===
             if oti_rl:
