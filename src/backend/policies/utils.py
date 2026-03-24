@@ -121,11 +121,12 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
             obs_step_start = start_ts - self.n_obs_steps + 1
             qpos = []
+            if self.action_key == 'ee_delta_action':
+                obs_state_path = '/observations/ee_delta'
+            else:
+                obs_state_path = '/observations/qpos'
             for i in range(self.n_obs_steps):
-                q = get_concatenated_pos(root['/observations/qpos'], target_id=obs_step_start + i)
-                if self.action_key == 'ee_delta_action':
-                    q = np.zeros_like(q)
-                qpos.append(q)
+                qpos.append(get_concatenated_pos(root[obs_state_path], target_id=obs_step_start + i))
 
             image_dict = dict()
             for sensor_id in self.sensor_ids:
@@ -210,7 +211,10 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
     for episode_idx in range(num_episodes):
         dataset_path = os.path.join(dataset_dir, f'episode_{episode_idx}.hdf5')
         with h5py.File(dataset_path, 'r') as root:
-            qpos = get_concatenated_pos(root['/observations/qpos'])
+            if action_key == 'ee_delta_action':
+                qpos = get_concatenated_pos(root['/observations/ee_delta'])
+            else:
+                qpos = get_concatenated_pos(root['/observations/qpos'])
             action = get_concatenated_pos(root[action_key])
             if use_relative_trajectory and action_key == 'ee_delta_action':
                 action = delta_to_relative_trajectory(action)

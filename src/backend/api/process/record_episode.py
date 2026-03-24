@@ -132,13 +132,13 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                     task_control['stop'] = True
                     return
 
-            # reset 타임스텝: ee_delta_action = zeros
+            # reset 타임스텝: ee_delta_action, ee_delta = zeros
             ts = env.reset()
             for agent in agents:
                 if agent.ik_solver is not None:
-                    ts.observation['robot_states'][agent.id]['ee_delta_action'] = {
-                        name: [0.0] * 6 for name in agent.ee_names
-                    }
+                    zeros = {name: [0.0] * 6 for name in agent.ee_names}
+                    ts.observation['robot_states'][agent.id]['ee_delta_action'] = zeros
+                    ts.observation['robot_states'][agent.id]['ee_delta'] = zeros
 
             timesteps = [ts]
 
@@ -183,21 +183,22 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                     if tele_type in ('vive_external', 'vive_only'):
                         # 마지막 consume 이후 누적된 delta를 소비
                         delta = vive.consume_delta()
-                        robot_state['ee_delta_action'] = {agent.ee_names[0]: delta}
+                        ee_delta = {agent.ee_names[0]: delta}
 
                     elif tele_type == 'keyboard':
                         # 키보드 raw delta 그대로 사용
-                        if agent.last_ee_delta is not None:
-                            robot_state['ee_delta_action'] = agent.last_ee_delta
+                        ee_delta = agent.last_ee_delta if agent.last_ee_delta is not None else None
 
                     else:
                         # leader: FK(joint_actions) - FK(joint_states)
-                        delta = agent.compute_fk_delta(
+                        ee_delta = agent.compute_fk_delta(
                             robot_state.get('qaction'),
                             robot_state.get('qpos'),
                         )
-                        if delta is not None:
-                            robot_state['ee_delta_action'] = delta
+
+                    if ee_delta is not None:
+                        robot_state['ee_delta_action'] = ee_delta
+                        robot_state['ee_delta'] = ee_delta
 
                 timesteps.append(ts)
                 
@@ -237,7 +238,7 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                         image_group.create_dataset(f"sensor_{s_id}", data=np.array(images), dtype='uint8')
 
                     # 2. 로봇 데이터 저장 (None인 값은 자동 스킵 — vive_only 시 전부 None)
-                    obs_keys = ['qpos', 'eepos']
+                    obs_keys = ['qpos', 'eepos', 'ee_delta']
 
                     for agent in agents:
                         a_id = agent.id
@@ -254,8 +255,16 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                                 agent_group = data_group.require_group(f'robot_{a_id}')
                                 for ee_name in value.keys():
                                     series_data = []
-                                    for t_step in timesteps:
-                                        series_data.append(t_step.observation['robot_states'][a_id][key][ee_name])
+                                    if key == 'ee_delta_action':
+                                        # action을 1스텝 shift: obs_t와 delta(t→t+1)을 짝짓기
+                                        for i in range(len(timesteps)):
+                                            if i + 1 < len(timesteps):
+                                                series_data.append(timesteps[i + 1].observation['robot_states'][a_id][key][ee_name])
+                                            else:
+                                                series_data.append([0.0] * len(value[ee_name]))
+                                    else:
+                                        for t_step in timesteps:
+                                            series_data.append(t_step.observation['robot_states'][a_id][key][ee_name])
                                     agent_group.create_dataset(ee_name, data=np.array(series_data))
                             else:
                                 series_data = []

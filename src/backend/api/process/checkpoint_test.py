@@ -178,6 +178,7 @@ def checkpoint_test(
         ts = env.reset()
         print('Robot moved to homepose')
 
+        executed_ee_deltas = []
         start = time.time()
         while not task_control['stop']:
             if step_num % episode_len == 0 and step_num != 0 and move_homepose:
@@ -203,9 +204,13 @@ def checkpoint_test(
                 # temporal ensemble이 다른 기준 frame의 waypoint를 섞지 않도록 policy를 reset.
                 if use_relative_trajectory and action_key == 'ee_delta_action':
                     policy.reset()
-                qpos_np = np.concatenate([item['qpos'] for item in obs_t['robot_states'].values()])
                 if action_key == 'ee_delta_action':
-                    qpos_np = np.zeros_like(qpos_np)
+                    # observation.state = 직전 스텝에서 실행한 ee_delta
+                    qpos_np = np.concatenate(executed_ee_deltas) if executed_ee_deltas else np.zeros(sum(
+                        len(a.ee_names) * 6 for a in env.agents if a.role != 'tool' and a.ik_solver is not None
+                    ))
+                else:
+                    qpos_np = np.concatenate([item['qpos'] for item in obs_t['robot_states'].values()])
                 qpos_t = torch.from_numpy(qpos_np).float().cuda().unsqueeze(0)
                 policy_input_t = {'observation.state': qpos_t}
                 for sensor in sensors:
