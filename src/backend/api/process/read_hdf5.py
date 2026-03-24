@@ -139,7 +139,7 @@ def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=
                     if move_robot:
                         for agent in agents:
                             if str(agent.id) == robot_name.replace("robot_", ""):
-                                if action_key == 'ee_delta_action' and agent.ik_solver is not None:
+                                if action_key == 'ee_delta_action' and agent.role != 'tool' and agent.ik_solver is not None:
                                     ee_name = agent.ee_names[0]
                                     agent.move_ee_delta_step({ee_name: qaction_array.tolist()})
                                 else:

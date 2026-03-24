@@ -178,7 +178,7 @@ def checkpoint_test(
         ts = env.reset()
         print('Robot moved to homepose')
 
-        executed_ee_deltas = []
+        executed_ee_deltas = {}
         start = time.time()
         while not task_control['stop']:
             if step_num % episode_len == 0 and step_num != 0 and move_homepose:
@@ -205,10 +205,17 @@ def checkpoint_test(
                 if use_relative_trajectory and action_key == 'ee_delta_action':
                     policy.reset()
                 if action_key == 'ee_delta_action':
-                    # observation.state = 직전 스텝에서 실행한 ee_delta
-                    qpos_np = np.concatenate(executed_ee_deltas) if executed_ee_deltas else np.zeros(sum(
-                        len(a.ee_names) * 6 for a in env.agents if a.role != 'tool' and a.ik_solver is not None
-                    ))
+                    # single_arm: 직전 스텝에서 실행한 ee_delta, tool: 현재 qpos
+                    obs_parts = []
+                    for agent in env.agents:
+                        if agent.role != 'tool' and agent.ik_solver is not None:
+                            if agent.id in executed_ee_deltas:
+                                obs_parts.append(executed_ee_deltas[agent.id])
+                            else:
+                                obs_parts.append(np.zeros(len(agent.ee_names) * 6))
+                        else:
+                            obs_parts.append(obs_t['robot_states'][agent.id]['qpos'])
+                    qpos_np = np.concatenate(obs_parts)
                 else:
                     qpos_np = np.concatenate([item['qpos'] for item in obs_t['robot_states'].values()])
                 qpos_t = torch.from_numpy(qpos_np).float().cuda().unsqueeze(0)
@@ -258,7 +265,7 @@ def checkpoint_test(
 
             # === c. 로봇 제어 (필터 없이 즉시 반영) ===
             start_action_id = 0
-            executed_ee_deltas = []
+            executed_ee_deltas = {}
             for agent in env.agents:
                 if action_key == 'ee_delta_action' and agent.role != 'tool' and agent.ik_solver is not None:
                     ee_delta_dim = len(agent.ee_names) * 6
@@ -268,7 +275,7 @@ def checkpoint_test(
                         for i, ee_name in enumerate(agent.ee_names)
                     }
                     thread_pool.submit(agent.move_ee_delta_step, ee_delta_dict)
-                    executed_ee_deltas.append(agent_action)
+                    executed_ee_deltas[agent.id] = agent_action
                     start_action_id += ee_delta_dim
                 else:
                     target_qpos = final_action[start_action_id : start_action_id + agent.joint_len]

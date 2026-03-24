@@ -100,19 +100,30 @@ class EpisodicDataset(torch.utils.data.Dataset):
             # is_sim = root.attrs['sim']
 
             action_dim = 0
-            for key in root[self.action_key].keys():
-                item = root[self.action_key][key]
-                leaves = list(item.values()) if isinstance(item, h5py.Group) else [item]
-                for leaf in leaves:
-                    episode_len = leaf.shape[0]
-                    action_dim += leaf.shape[1]
+            is_mixed = (self.action_key == 'ee_delta_action')
+            if is_mixed:
+                ee_robots = set(root['ee_delta_action'].keys()) if 'ee_delta_action' in root else set()
+                for robot_key in root['qaction'].keys():
+                    src = root['ee_delta_action'] if robot_key in ee_robots else root['qaction']
+                    item = src[robot_key]
+                    leaves = list(item.values()) if isinstance(item, h5py.Group) else [item]
+                    for leaf in leaves:
+                        episode_len = leaf.shape[0]
+                        action_dim += leaf.shape[1]
+            else:
+                for key in root[self.action_key].keys():
+                    item = root[self.action_key][key]
+                    leaves = list(item.values()) if isinstance(item, h5py.Group) else [item]
+                    for leaf in leaves:
+                        episode_len = leaf.shape[0]
+                        action_dim += leaf.shape[1]
 
             original_action_shape = (self.chunk_size, action_dim)
 
             language_instruction = root['language_instruction'][()]
             if isinstance(language_instruction, bytes):
                 language_instruction = language_instruction.decode('utf-8')
-                
+
             if sample_full_episode:
                 start_ts = 0
             else:
@@ -121,12 +132,13 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
             obs_step_start = start_ts - self.n_obs_steps + 1
             qpos = []
-            if self.action_key == 'ee_delta_action':
-                obs_state_path = '/observations/ee_delta'
+            if is_mixed:
+                for i in range(self.n_obs_steps):
+                    qpos.append(get_concatenated_mixed_pos(root, '/observations/ee_delta', '/observations/qpos', target_id=obs_step_start + i))
             else:
                 obs_state_path = '/observations/qpos'
-            for i in range(self.n_obs_steps):
-                qpos.append(get_concatenated_pos(root[obs_state_path], target_id=obs_step_start + i))
+                for i in range(self.n_obs_steps):
+                    qpos.append(get_concatenated_pos(root[obs_state_path], target_id=obs_step_start + i))
 
             image_dict = dict()
             for sensor_id in self.sensor_ids:
@@ -135,7 +147,10 @@ class EpisodicDataset(torch.utils.data.Dataset):
                     image_dict[f"sensor_{sensor_id}"].append(root[f'/observations/images/sensor_{sensor_id}'][obs_step_start + i])
 
 
-            action = get_concatenated_pos(root[self.action_key], target_id=None, target_range=[start_ts, min(episode_len, end_ts)])
+            if is_mixed:
+                action = get_concatenated_mixed_pos(root, 'ee_delta_action', 'qaction', target_id=None, target_range=[start_ts, min(episode_len, end_ts)])
+            else:
+                action = get_concatenated_pos(root[self.action_key], target_id=None, target_range=[start_ts, min(episode_len, end_ts)])
             
             action_len = min(self.chunk_size, episode_len - start_ts) # hack, to make timesteps more aligned
 
@@ -208,14 +223,16 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
     # episode 길이 관련 코드 수정
     observation_image_keys = []
     cnt = 0
+    is_mixed = (action_key == 'ee_delta_action')
     for episode_idx in range(num_episodes):
         dataset_path = os.path.join(dataset_dir, f'episode_{episode_idx}.hdf5')
         with h5py.File(dataset_path, 'r') as root:
-            if action_key == 'ee_delta_action':
-                qpos = get_concatenated_pos(root['/observations/ee_delta'])
+            if is_mixed:
+                qpos = get_concatenated_mixed_pos(root, '/observations/ee_delta', '/observations/qpos')
+                action = get_concatenated_mixed_pos(root, 'ee_delta_action', 'qaction')
             else:
                 qpos = get_concatenated_pos(root['/observations/qpos'])
-            action = get_concatenated_pos(root[action_key])
+                action = get_concatenated_pos(root[action_key])
             if use_relative_trajectory and action_key == 'ee_delta_action':
                 action = delta_to_relative_trajectory(action)
             observation_image_keys = list(root['/observations/images'].keys())
@@ -279,6 +296,32 @@ def get_concatenated_pos(pos_path, target_id=None, target_range=None):
     pos_list = []
     for key in pos_path.keys():
         item = pos_path[key]
+        leaves = list(item.values()) if isinstance(item, h5py.Group) else [item]
+        for leaf in leaves:
+            if target_id is None and target_range is None:
+                pos_list.append(leaf[()])
+            elif target_range is None:
+                pos_list.append(leaf[target_id])
+            else:
+                pos_list.append(leaf[target_range[0]:target_range[1]])
+    if not pos_list:
+        return np.array([])
+    axis = 0 if (target_range is None and target_id is not None) else 1
+    return np.concatenate(pos_list, axis=axis)
+
+
+def get_concatenated_mixed_pos(root, primary_path, fallback_path, target_id=None, target_range=None):
+    """ee_delta_action 학습 시, single_arm은 primary_path(ee_delta_action/ee_delta)에서,
+    tool은 fallback_path(qaction/qpos)에서 읽어 concatenate."""
+    primary_robots = set(root[primary_path].keys()) if primary_path in root else set()
+
+    pos_list = []
+    for robot_key in root[fallback_path].keys():
+        if robot_key in primary_robots:
+            item = root[primary_path][robot_key]
+        else:
+            item = root[fallback_path][robot_key]
+
         leaves = list(item.values()) if isinstance(item, h5py.Group) else [item]
         for leaf in leaves:
             if target_id is None and target_range is None:
