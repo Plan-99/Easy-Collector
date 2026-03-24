@@ -178,7 +178,7 @@ class Agent:
             if current_pos is None:
                 print("Current joint states are None, cannot move.")
                 return
-            second = 20 if vel_arg is None else vel_arg
+            second = 0.2 if vel_arg is None else vel_arg
             self.joint_trajectory_point.velocities = [(abs(t - c) / 2) for t, c in zip(action, current_pos)]
             # self.joint_trajectory_point.velocities = [0.0] * self.joint_len
             self.joint_trajectory_point.time_from_start = rclpy.duration.Duration(seconds=second).to_msg()
@@ -424,6 +424,25 @@ class Agent:
             if final_action:
                 self.move_joint_step(final_action, from_ee=True, velocity_arg=vel_arg)
 
+    def compute_fk_delta(self, qaction, qpos):
+        """FK(commanded) - FK(actual): 로봇이 이번 스텝에서 이동해야 할 EE 변위."""
+        if self.ik_solver is None or qaction is None or qpos is None:
+            return None
+        arm_action, _ = self.get_joint_and_tool_pos(qaction)
+        arm_state, _ = self.get_joint_and_tool_pos(qpos)
+        if arm_action is None or arm_state is None:
+            return None
+        with self.ik_lock:
+            ee_action = self.ik_solver.get_ee_position(np.array(arm_action))
+            ee_state = self.ik_solver.get_ee_position(np.array(arm_state))
+        if ee_action is None or ee_state is None:
+            return None
+        return {
+            name: [ee_action[name][i] - ee_state[name][i] for i in range(6)]
+            for name in self.ee_names
+            if name in ee_action and name in ee_state
+        }
+
     def move_ee_delta_step(self, delta_ee_dict, vel_arg=None):
         if self.role == 'tool' or self.ik_solver is None:
             return
@@ -456,6 +475,7 @@ class Agent:
                     target_ee_dict[name] = target_pose
 
         # 계산된 절대 좌표 타겟으로 이동 명령
+        print(f"Moving EE with delta step. Target EE dict: {target_ee_dict}")
         self.move_ee_step(target_ee_dict, vel_arg=vel_arg)
 
     def move_ee_from_origin(self, origin, offset_ee_dict):

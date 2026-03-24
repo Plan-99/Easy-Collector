@@ -122,7 +122,10 @@ class EpisodicDataset(torch.utils.data.Dataset):
             obs_step_start = start_ts - self.n_obs_steps + 1
             qpos = []
             for i in range(self.n_obs_steps):
-                qpos.append(get_concatenated_pos(root['/observations/qpos'], target_id=obs_step_start + i))
+                q = get_concatenated_pos(root['/observations/qpos'], target_id=obs_step_start + i)
+                if self.action_key == 'ee_delta_action':
+                    q = np.zeros_like(q)
+                qpos.append(q)
 
             image_dict = dict()
             for sensor_id in self.sensor_ids:

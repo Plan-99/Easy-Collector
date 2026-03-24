@@ -203,8 +203,10 @@ def checkpoint_test(
                 # temporal ensemble이 다른 기준 frame의 waypoint를 섞지 않도록 policy를 reset.
                 if use_relative_trajectory and action_key == 'ee_delta_action':
                     policy.reset()
-                qpos_t = torch.from_numpy(np.concatenate([item['qpos'] for item in obs_t['robot_states'].values()])).float().cuda().unsqueeze(0)
-
+                qpos_np = np.concatenate([item['qpos'] for item in obs_t['robot_states'].values()])
+                if action_key == 'ee_delta_action':
+                    qpos_np = np.zeros_like(qpos_np)
+                qpos_t = torch.from_numpy(qpos_np).float().cuda().unsqueeze(0)
                 policy_input_t = {'observation.state': qpos_t}
                 for sensor in sensors:
                     image = obs_t['images'][f'sensor_{sensor["id"]}']

@@ -4,6 +4,31 @@ import numpy as np
 
 SUPPORT_ROBOTS = [
     {
+        'name': 'test_arm',
+        'role': 'single_arm',
+        'company': 'Test',
+        'joint_dim': 7,
+        'joint_names': ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"],
+        'joint_lower_bounds': [-2.618, 0, -2.618, -1.745, -1.22, -2.094, 0],
+        'joint_upper_bounds': [2.618, 2.618, 0, 1.745, 1.22, 2.094, 0.087],
+        'read_topic': '/joint_states_single',
+        'read_topic_msg': 'sensor_msgs/JointState',
+        'write_type': 'topic',
+        'write_topic': '/joint_states',
+        'write_topic_msg': 'sensor_msgs/JointState',
+        'tool_inner': True,
+        'tool_index': [6],
+        'custom_fields': [],
+        'urdf_path': '/root/ros2_ws/src/piper_ros/src/piper_description/urdf/piper_description.urdf',
+        'urdf_package_dir': '/root/ros2_ws/src/piper_ros/src/piper_description/',
+        'ik_setting': {
+            'joints_to_lock': [
+                'joint6_to_gripper_base', 'joint7', 'joint8'
+            ],
+            'ee_definitions': [('ee', 'joint7', None)],
+        },
+    },
+    {
         'name': 'piper',
         'role': 'single_arm',
         'company': 'Piper',

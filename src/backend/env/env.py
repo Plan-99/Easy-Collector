@@ -71,7 +71,7 @@ class Env:
     def get_robot_states(self):
         robot_state_dict = dict()
         for agent in self.agents:
-            if self.virtual_agents:
+            if self.virtual_agents and agent.role == 'single_arm':
                 zeros = [0.0] * agent.joint_len
                 qpos = zeros
                 qaction = zeros

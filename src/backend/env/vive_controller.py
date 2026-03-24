@@ -5,6 +5,7 @@ import threading
 import time
 import numpy as np
 from scipy.spatial.transform import Rotation as R
+from concurrent.futures import ThreadPoolExecutor
 
 
 class ViveController:
@@ -27,11 +28,15 @@ class ViveController:
         [0,  1,  0],   # robot Z = vive Y
     ], dtype=float)
 
-    def __init__(self, node, socketio_instance, role='right_wrist', frame_transform=None, scale_factor=1.0, step_rate=30,
-                 smoothing_alpha=0.1, deadzone_pos=0.001, deadzone_rot=0.001):
+    def __init__(self, node, socketio_instance, agents=None, move_robot=False,
+                 role='right_wrist', frame_transform=None, scale_factor=1.0, rotation_scale_factor=1.0,
+                 step_rate=30, smoothing_alpha=0.1, deadzone_pos=0.001, deadzone_rot=0.001):
         """
+        agents: 제어 대상 Agent 리스트 (move_robot=True일 때 필요).
+        move_robot: True이면 step마다 agent.move_ee_delta_step으로 로봇을 실제 제어한다.
         frame_transform: vive 좌표계 → 로봇 좌표계 변환 3x3 행렬 (None이면 DEFAULT 사용).
-        scale_factor: position/rotation delta에 곱해지는 배율.
+        scale_factor: position delta에 곱해지는 배율.
+        rotation_scale_factor: rotation delta에 곱해지는 배율.
         step_rate: start_teleop() 백그라운드 스레드의 step() 호출 주기 (Hz).
         smoothing_alpha: EMA 필터 계수 (0~1). 작을수록 더 부드럽지만 반응이 느림.
         deadzone_pos: position delta의 deadzone 임계값 (m). 이 이하의 움직임은 무시.
@@ -40,11 +45,19 @@ class ViveController:
         self.node = node
         self.socketio_instance = socketio_instance
         self.role = role
+        self._agents = agents or []
+        self._move_robot = move_robot
+
+        if move_robot and self._agents:
+            self._thread_pool = ThreadPoolExecutor(max_workers=len(self._agents))
+        else:
+            self._thread_pool = None
 
         T = self.DEFAULT_FRAME_TRANSFORM if frame_transform is None else np.array(frame_transform, dtype=float)
         self._T = T
         self._T_inv = T.T  # T는 orthogonal 행렬이므로 T^-1 = T^T
         self._scale = scale_factor
+        self._rot_scale = rotation_scale_factor
         self._step_interval = 1.0 / step_rate
 
         self._sub = None
@@ -55,14 +68,14 @@ class ViveController:
         self._ready_event = threading.Event()
         self._teleop_running = False
         self._teleop_thread = None
-        self._on_step = None        # callback(offset: [dx, dy, dz, dax, day, daz])
         self._smoothing_alpha = smoothing_alpha
         self._deadzone_pos = deadzone_pos
         self._deadzone_rot = deadzone_rot
         self._prev_offset = [0.0] * 6  # 직전 step의 cumulative offset (robot frame)
         self._last_step_delta = [0.0] * 6  # 직전 step 대비 현재 포즈 변화량 (필터 적용 후)
-        self._destroyed = False
         self._filtered_delta = np.zeros(6)  # EMA 필터 상태
+        self._accumulated_delta = np.zeros(6)  # consume_delta() 호출 사이 누적 delta
+        self._acc_lock = threading.Lock()
 
     def _start_ros_node(self):
         """vive_udp_bridge ROS2 노드를 서브프로세스로 실행한다."""
@@ -121,13 +134,9 @@ class ViveController:
         except Exception as e:
             print(f"[ERROR] vive _callback: {e}")
 
-    def start_teleop(self, on_step=None):
-        """
-        step()을 별도 스레드에서 step_rate Hz로 실행한다.
-        on_step(offset): offset = [dx, dy, dz, dax, day, daz] — vive origin 대비 현재 cumulative offset.
-        on_step이 None이면 last_step_delta만 갱신한다.
-        """
-        self._on_step = on_step
+    def start_teleop(self):
+        """step()을 별도 스레드에서 step_rate Hz로 실행한다.
+        move_robot=True이면 step마다 agent를 직접 제어한다."""
         self._teleop_running = True
         self._teleop_thread = threading.Thread(target=self._teleop_loop, daemon=True)
         self._teleop_thread.start()
@@ -158,6 +167,8 @@ class ViveController:
         self._prev_offset = [0.0] * 6
         self._last_step_delta = [0.0] * 6
         self._filtered_delta = np.zeros(6)
+        with self._acc_lock:
+            self._accumulated_delta = np.zeros(6)
         print(f'[VIVE] Origin set. vive_pos={self._vive_origin_pose[:3] if self._vive_origin_pose else None}')
 
     @property
@@ -166,9 +177,16 @@ class ViveController:
         return self._last_step_delta
 
     def get_offset(self):
-        """origin 기준 현재 누적 offset (robot frame, [dx, dy, dz, dax, day, daz]).
-        record_episode에서 연속 두 호출의 차이로 ee_delta_action을 계산할 때 사용한다."""
+        """origin 기준 현재 누적 offset (robot frame, [dx, dy, dz, dax, day, daz])."""
         return list(self._prev_offset)
+
+    def consume_delta(self):
+        """마지막 consume 이후 누적된 delta를 반환하고 초기화한다.
+        recording 루프에서 호출하여 step 누락 없이 delta를 얻는다."""
+        with self._acc_lock:
+            delta = self._accumulated_delta.tolist()
+            self._accumulated_delta = np.zeros(6)
+        return delta
 
     def step(self):
         """
@@ -189,7 +207,7 @@ class ViveController:
         r_curr = R.from_quat(curr_pose[3:7])
         dR_vive_mat = (r_curr * r_origin.inv()).as_matrix()
         dR_robot_mat = self._T @ dR_vive_mat @ self._T_inv
-        offset_axayaz = (self._scale * R.from_matrix(dR_robot_mat).as_rotvec()).tolist()
+        offset_axayaz = (self._rot_scale * R.from_matrix(dR_robot_mat).as_rotvec()).tolist()
 
         offset = offset_xyz + offset_axayaz
 
@@ -213,16 +231,34 @@ class ViveController:
         self._filtered_delta = alpha * raw_delta + (1.0 - alpha) * self._filtered_delta
         self._last_step_delta = self._filtered_delta.tolist()
 
+        # recording용 delta 누적
+        with self._acc_lock:
+            self._accumulated_delta += self._filtered_delta
+
         self._prev_offset = offset
 
-        if self._on_step is not None:
-            self._on_step(offset)
+        # move_robot=True이면 delta를 이용해 로봇을 직접 제어
+        if self._move_robot and self._thread_pool is not None:
+            delta = self._last_step_delta
+            for agent in self._agents:
+                if agent.role == 'single_arm' and agent.ik_solver is not None:
+                    ee_name = agent.ee_names[0]
+                    self._thread_pool.submit(
+                        agent.move_ee_delta_step,
+                        {ee_name: delta},
+                        vel_arg=self._step_interval
+                    )
 
     def destroy(self):
         """텔레오퍼레이션 스레드 중지, vive_node 서브프로세스를 종료한다.
         ROS2 구독은 rclpy.spin 중 destroy하면 segfault가 발생하므로 유지한다."""
         self.stop_teleop()
-        self._destroyed = True
+        if self._thread_pool is not None:
+            self._thread_pool.shutdown(wait=True)
+            self._thread_pool = None
+        if self._sub is not None:
+            self.node.destroy_subscription(self._sub)
+            self._sub = None
 
         if self._process is not None:
             try:
