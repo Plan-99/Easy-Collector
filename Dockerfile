@@ -62,7 +62,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-moveit-resources-panda-moveit-config \
     ros-humble-ompl \
     ros-humble-warehouse-ros \
-    ros-humble-eigenpy \
     ros-humble-moveit-msgs \
     # for jaka robot
     ros-humble-moveit-visual-tools \
@@ -78,7 +77,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-moveit \
     ros-humble-pluginlib \
     ros-humble-robot-state-publisher \
-    ros-humble-urdf-launch \
+    ros-humble-urdf \
     ros-humble-xacro \
     python3-pip \
     python3-rosdep \
