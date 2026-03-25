@@ -52,6 +52,7 @@ class Leader():
             )
 
         self.is_paused = [False] * len(self.dxl_controllers)
+        self.is_cleaned_up = False
         
 
         self.ema = float(teleop_setting.get('ema', 0.0)) # EMA 필터 값
@@ -252,9 +253,9 @@ class Leader():
             if is_joint_trajectory:
                 rate = self.node.create_rate(3)  # 50Hz
             else:
-                rate = self.node.create_rate(10)  # 10Hz
+                rate = self.node.create_rate(50)  # 50Hz
             while rclpy.ok() and not task_control.get('stop', False) and not task_control.get('episode_stop', False):
-                
+
                 # 1. 하드웨어 읽기 작업 (여기서 SerialException 등이 발생할 확률이 높음)
                 try:
                     self.read_dxl_and_write_to_joint_map()
@@ -289,7 +290,7 @@ class Leader():
 
                     action = agent.fetch_joint_map_to_action(joint_list)
                     self.thread_pool.submit(agent.move_joint_step, action)
-                    
+
                     end = time.time()
                 # self.target_pos[-1] = self.get_gripper_pos()
                 #-----------------------------------------
@@ -329,8 +330,10 @@ class Leader():
                     dxl_contoller_index += 1
 
 
-                print("Time---------------: " + str(time.time() - self.time), flush=True)
+                dt = time.time() - self.time
                 self.time = time.time()
+                if dt > 0:
+                    print(f"[Teleop] {1.0/dt:.1f} Hz", flush=True)
                 rate.sleep()
 
         except Exception as e:
@@ -344,6 +347,11 @@ class Leader():
         finally:
             # 에러가 나든 정상 종료되든 반드시 실행되는 블록
             print("Cleaning up Leader Robot resources...", flush=True)
+            try:
+                self.thread_pool.shutdown(wait=False)
+                print("ThreadPoolExecutor shut down.", flush=True)
+            except:
+                print("Failed to shut down ThreadPoolExecutor.", flush=True)
             for port, dxl_controller in self.dxl_controllers.items():
                 try:
                     # 포트 닫기
@@ -351,6 +359,7 @@ class Leader():
                     print(f"Port {port} closed safely.", flush=True)
                 except:
                     print(f"Failed to close port {port} cleanly.", flush=True)
+            self.is_cleaned_up = True
 
 
     def leader_teleop_workflow(self, task_control):

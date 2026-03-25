@@ -16,6 +16,7 @@ ENV PIP_DEFAULT_TIMEOUT=300
 ENV EC_SKIP_TORCHVISION_COMPAT=1
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
 # Regional PyPI mirror (Kakao)
 ARG PIP_INDEX_URL=https://mirror.kakao.com/pypi/simple
@@ -29,16 +30,21 @@ RUN mkdir -p /opt/easytrainer/logs /tmp/easytrainer/logs && chmod -R 777 /opt/ea
 
 # 2. 필수 시스템 패키지 설치
 RUN sed -i 's/archive.ubuntu.com/mirror.kakao.com/g' /etc/apt/sources.list && \
-    apt-get update && apt-get install -y --no-install-recommends \
+    sed -i 's/security.ubuntu.com/mirror.kakao.com/g' /etc/apt/sources.list && \
+    echo 'Acquire::http::Pipeline-Depth "32";' > /etc/apt/apt.conf.d/99parallel && \
+    echo 'Acquire::http::No-Cache "true";' >> /etc/apt/apt.conf.d/99parallel && \
+    echo 'Acquire::Retries "10";' >> /etc/apt/apt.conf.d/99parallel
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
     apt-utils curl gnupg lsb-release ca-certificates software-properties-common apt-transport-https \
     && rm -rf /var/lib/apt/lists/*
 
 # 3. ROS 2 및 RealSense 저장소 설정
-RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | gpg --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg && \
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(lsb_release -sc) main" | tee /etc/apt/sources.list.d/ros2-latest.list > /dev/null
+RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] https://mirrors.ustc.edu.cn/ros2/ubuntu jammy main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
 
-RUN curl -sSL "http://keyserver.ubuntu.com/pks/lookup?op=get&search=0xF6E65AC044F831AC80A06380C8B3A55A6F3EFCDE" | gpg --dearmor -o /usr/share/keyrings/intel-librealsense.gpg && \
-    echo "deb [signed-by=/usr/share/keyrings/intel-librealsense.gpg] https://librealsense.intel.com/Debian/apt-repo $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/librealsense.list > /dev/null
+RUN apt-key adv --keyserver keyserver.ubuntu.com --recv-keys FB0B24895113F120 && \
+    echo "deb https://librealsense.intel.com/Debian/apt-repo $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/librealsense.list > /dev/null
 
 # 4. ROS 2 Humble 및 관련 종속성 설치
 # ROS 2 Humble (Desktop-Full) 및 관련 패키지 설치
@@ -56,7 +62,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-moveit-resources-panda-moveit-config \
     ros-humble-ompl \
     ros-humble-warehouse-ros \
-    ros-humble-eigenpy \
     ros-humble-moveit-msgs \
     # for jaka robot
     ros-humble-moveit-visual-tools \
@@ -72,7 +77,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-moveit \
     ros-humble-pluginlib \
     ros-humble-robot-state-publisher \
-    ros-humble-urdf-launch \
+    ros-humble-urdf \
     ros-humble-xacro \
     python3-pip \
     python3-rosdep \
@@ -171,9 +176,10 @@ RUN rm -rf /usr/local/lib/python3.10/dist-packages/numpy* && \
 # 7. 소프트웨어 렌더링 강제 설정 (OpenGL 문제 해결용)
 RUN export LIBGL_ALWAYS_SOFTWARE=1
 
-
-
-
+RUN apt-get update && apt-get install --only-upgrade -y --no-install-recommends \
+    ros-humble-rclpy \
+    ros-humble-ros2cli \
+    ros-humble-ros2topic
     
 # 최종 환경 설정
 WORKDIR /root

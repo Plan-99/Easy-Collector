@@ -16,6 +16,7 @@ def _strip_flag(flag: str, drop_value: bool = False) -> None:
     sys.argv[:] = [arg for arg in sys.argv if not arg.startswith(f"{flag}=")]
 
 _strip_flag('--editable')
+_strip_flag('--uninstall')
 _strip_flag('--build-directory', drop_value=True)
 
 setup(
