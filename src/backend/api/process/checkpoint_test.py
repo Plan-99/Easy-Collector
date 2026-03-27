@@ -179,7 +179,10 @@ def checkpoint_test(
         ts = env.reset()
         print('Robot moved to homepose')
 
-        executed_ee_deltas = {}
+        prev_qpos_dict = {}
+        for agent in agents:
+            if agent.role != 'tool' and agent.ik_solver is not None:
+                prev_qpos_dict[agent.id] = ts.observation['robot_states'][agent.id]['qpos']
         start = time.time()
         while not task_control['stop']:
             if step_num % episode_len == 0 and step_num != 0 and move_homepose:
@@ -191,6 +194,9 @@ def checkpoint_test(
                         agent.move_to(home_pose[str(agent.id)])
                 time.sleep(6)
                 ts = env.reset()
+                for agent in agents:
+                    if agent.role != 'tool' and agent.ik_solver is not None:
+                        prev_qpos_dict[agent.id] = ts.observation['robot_states'][agent.id]['qpos']
                 print('Robot moved to homepose')
 
             # 일정 스텝마다 강제 메모리 정리 (예: 100스텝마다)
@@ -206,14 +212,25 @@ def checkpoint_test(
                 if use_relative_trajectory and action_key == 'ee_delta_action':
                     policy.reset()
                 if action_key == 'ee_delta_action':
-                    # single_arm: 직전 스텝에서 실행한 ee_delta, tool: 현재 qpos
+                    # single_arm: 실제 EE 포즈 변화량 (closed-loop) + tool qpos, tool-only: 현재 qpos
                     obs_parts = []
                     for agent in env.agents:
                         if agent.role != 'tool' and agent.ik_solver is not None:
-                            if agent.id in executed_ee_deltas:
-                                obs_parts.append(executed_ee_deltas[agent.id])
+                            current_qpos = obs_t['robot_states'][agent.id]['qpos']
+                            if agent.id in prev_qpos_dict:
+                                fk_delta = agent.compute_fk_delta(current_qpos, prev_qpos_dict[agent.id])
+                                if fk_delta is not None:
+                                    ee_obs = np.concatenate([fk_delta[name] for name in agent.ee_names])
+                                else:
+                                    ee_obs = np.zeros(len(agent.ee_names) * 6)
                             else:
-                                obs_parts.append(np.zeros(len(agent.ee_names) * 6))
+                                ee_obs = np.zeros(len(agent.ee_names) * 6)
+                            # tool_inner: tool joint qpos를 proprioception에 append
+                            if agent.tool_inner:
+                                _, tool_pos = agent.get_joint_and_tool_pos(current_qpos)
+                                if tool_pos is not None:
+                                    ee_obs = np.concatenate([ee_obs, np.array(tool_pos)])
+                            obs_parts.append(ee_obs)
                         else:
                             obs_parts.append(obs_t['robot_states'][agent.id]['qpos'])
                     qpos_np = np.concatenate(obs_parts)
@@ -265,19 +282,29 @@ def checkpoint_test(
                 final_action = state_t
 
             # === c. 로봇 제어 (필터 없이 즉시 반영) ===
+            # prev_qpos 갱신: 다음 스텝에서 실제 delta 계산에 사용
+            for agent in env.agents:
+                if agent.role != 'tool' and agent.ik_solver is not None:
+                    prev_qpos_dict[agent.id] = obs_t['robot_states'][agent.id]['qpos']
+
             start_action_id = 0
-            executed_ee_deltas = {}
             for agent in env.agents:
                 if action_key == 'ee_delta_action' and agent.role != 'tool' and agent.ik_solver is not None:
                     ee_delta_dim = len(agent.ee_names) * 6
-                    agent_action = final_action[start_action_id : start_action_id + ee_delta_dim]
+                    # tool_inner: ee_delta(6) + tool_abs 차원 추가
+                    _, sample_tool = agent.get_joint_and_tool_pos([0.0] * agent.joint_len)
+                    tool_dim = len(sample_tool) if agent.tool_inner and sample_tool else 0
+                    total_dim = ee_delta_dim + tool_dim
+                    agent_action = final_action[start_action_id : start_action_id + total_dim]
+
                     ee_delta_dict = {
                         ee_name: agent_action[i * 6 : (i + 1) * 6].tolist()
                         for i, ee_name in enumerate(agent.ee_names)
                     }
-                    thread_pool.submit(agent.move_ee_delta_step, ee_delta_dict)
-                    executed_ee_deltas[agent.id] = agent_action
-                    start_action_id += ee_delta_dim
+
+                    tool_positions = agent_action[ee_delta_dim:].tolist() if tool_dim > 0 else None
+                    thread_pool.submit(agent.move_ee_delta_step, ee_delta_dict, None, tool_positions)
+                    start_action_id += total_dim
                 else:
                     target_qpos = final_action[start_action_id : start_action_id + agent.joint_len]
                     thread_pool.submit(agent.move_joint_step, target_qpos)

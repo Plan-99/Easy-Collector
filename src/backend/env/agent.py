@@ -96,6 +96,9 @@ class Agent:
 
         self.moved_by_ui = False
         self.move_lock = False
+        self.is_moving = False
+        self._move_target = None
+        self._move_threshold = 0.01
         self.is_waiting_for_service = False
         time.sleep(0.1)  # Wait for subscriber to be ready
 
@@ -443,7 +446,12 @@ class Agent:
             if name in ee_action and name in ee_state
         }
 
-    def move_ee_delta_step(self, delta_ee_dict, vel_arg=None):
+    def move_ee_delta_step(self, delta_ee_dict, vel_arg=None, tool_positions=None):
+        """EE delta를 적용하여 로봇을 이동.
+
+        tool_positions: 제공 시 tool joint를 해당 절대 위치로 이동 (inference용).
+                        None이면 delta_ee_dict의 7번째 이후 값을 delta로 사용 (keyboard teleop용).
+        """
         if self.role == 'tool' or self.ik_solver is None:
             return
 
@@ -468,7 +476,9 @@ class Agent:
                     )
 
                     # 툴(그리퍼) 값 처리
-                    if len(delta_ee_dict[name]) >= 7:
+                    if tool_positions is not None:
+                        target_pose.extend(tool_positions)
+                    elif len(delta_ee_dict[name]) >= 7:
                         _, tool_js = self.get_joint_and_tool_pos(full_js)
                         target_pose.append(tool_js[0] + delta_ee_dict[name][6])
 
@@ -505,6 +515,14 @@ class Agent:
                 self.last_joint_update = time.time()
         except Exception as e:
             print(f"[ERROR] joint_state_cb: {e}")
+
+        if self.is_moving and self._move_target is not None:
+            current = self.get_joint_states()
+            if current is not None:
+                diff = np.linalg.norm(np.array(self._move_target) - np.array(current))
+                if diff < self._move_threshold:
+                    self.is_moving = False
+                    self._move_target = None
 
     def joint_action_cb(self, msg):
         try:
@@ -681,6 +699,9 @@ class Agent:
         return full_joint_positions, None
 
     def move_to(self, target_pos, step_size=0.1, duration=5.0):
+        self._move_target = list(target_pos)
+        self.is_moving = True
+
         if self.robot_company == 'Piper':
             print("Moving to target position:", target_pos)
             self.move_joint_step(target_pos)

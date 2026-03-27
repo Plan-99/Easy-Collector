@@ -230,7 +230,31 @@
                         @click="cancelViveInit"
                     ></q-btn>
                 </div>
+                <div class="row flex flex-center full-height" v-else-if="movingHomepose">
+                    <q-spinner-dots color="primary" size="2em" class="q-mr-md" />
+                    <div class="text-white q-mr-lg">{{ $t('movingToHomepose') }}</div>
+                    <q-btn
+                        color="white"
+                        text-color="red"
+                        :label="$t('stopCollection')"
+                        icon="stop"
+                        @click="stopDataCollection"
+                    ></q-btn>
+                </div>
                 <div class="row flex flex-center full-height" v-else>
+                    <q-input
+                        v-if="teleType === 'keyboard'"
+                        v-model.number="eeStepSize"
+                        dense
+                        outlined
+                        dark
+                        bg-color="dark"
+                        label="Step Size"
+                        type="number"
+                        step="0.0001"
+                        style="width: 140px"
+                        class="q-mr-md"
+                    />
                     <div class="col q-pr-md">
                         <q-linear-progress
                             :value="collectingProgress"
@@ -435,6 +459,7 @@ const collectingProgress = ref(0);
 const showProcessConsole = ref(false);
 
 const moveHomposeInDataCollection = ref(false);
+const movingHomepose = ref(false);
 
 function startDataCollection() {
     if (!selectedDatasetId.value) {
@@ -561,6 +586,7 @@ function stopDataCollection() {
         removeKeyboardListener();
     }
     viveInitializing.value = false;
+    movingHomepose.value = false;
     api.post(`/dataset/${selectedDatasetId.value}/:stop_collection`).then(() => {
         collectingProgress.value = 0;
     })
@@ -659,6 +685,7 @@ onMounted(() => {
             }
             collectingProgress.value = 0;
             viveInitializing.value = false;
+            movingHomepose.value = false;
         }
         if (data.id === 'checkpoint_test') {
             Notify.create({
@@ -670,6 +697,10 @@ onMounted(() => {
 
     socket.on('record_episode_progress', (data) => {
         collectingProgress.value = data.progress;
+    });
+
+    socket.on('moving_homepose', (data) => {
+        movingHomepose.value = data.moving;
     });
 
     socket.on('vive_node_ready', () => {

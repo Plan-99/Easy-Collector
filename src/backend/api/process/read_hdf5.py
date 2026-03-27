@@ -20,6 +20,8 @@ def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=
         from ...env.env import Env
         env = Env(node, agents, sensors)
 
+    hz = 20
+
     while True:
         image_data = {}
         qpos_data = {}
@@ -141,12 +143,13 @@ def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=
                             if str(agent.id) == robot_name.replace("robot_", ""):
                                 if action_key == 'ee_delta_action' and agent.role != 'tool' and agent.ik_solver is not None:
                                     ee_name = agent.ee_names[0]
-                                    agent.move_ee_delta_step({ee_name: qaction_array.tolist()})
+                                    action_list = qaction_array.tolist()
+                                    ee_delta = {ee_name: action_list[:6]}
+                                    tool_positions = action_list[6:] if agent.tool_inner and len(action_list) > 6 else None
+                                    agent.move_ee_delta_step(ee_delta, tool_positions=tool_positions)
                                 else:
                                     agent.move_joint_step(qaction_array)
 
-
-                time.sleep(0.1)
                 socketio_instance.emit('show_episode_step', {
                     'hdf5_path': hdf5_path,
                     'images': encoded_images,
@@ -157,6 +160,9 @@ def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=
                     # 'xpos': xpos_data[i].tolist(),
                     # 'xvel': xvel_data[i].tolist()
                 }, to=sid)
+
+                time.sleep(1.0 / hz)
+
 
 
 def add_config(config_data):

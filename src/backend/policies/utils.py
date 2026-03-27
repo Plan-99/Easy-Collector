@@ -22,8 +22,9 @@ from scipy.spatial.transform import Rotation
 def delta_to_relative_trajectory(deltas: np.ndarray) -> np.ndarray:
     """UMI 방식의 relative trajectory 라벨로 변환.
 
-    deltas: [T, 6] sequential ee_delta [dx, dy, dz, dax, day, daz]
-    반환값: [T, 6] 각 row i = 현재 위치 기준 i+1 step 후의 누적 displacement
+    deltas: [T, D] sequential ee_delta. 앞 6차원은 [dx, dy, dz, dax, day, daz],
+            7차원 이후는 tool joint (absolute 값)으로 변환 없이 그대로 유지.
+    반환값: [T, D] 각 row i = 현재 위치 기준 i+1 step 후의 누적 displacement + tool
 
     UMI 방식: action[i] = T_now→t+i+1 (현재 pose 기준 절대 상대 위치)
     모든 waypoint가 동일한 기준점(현재 EE)에서 독립적으로 계산되므로
@@ -38,8 +39,12 @@ def delta_to_relative_trajectory(deltas: np.ndarray) -> np.ndarray:
     # Rotation (axis-angle): proper 회전 합성
     cumulative = Rotation.identity()
     for i in range(T):
-        cumulative = cumulative * Rotation.from_rotvec(deltas[i, 3:])
-        relative[i, 3:] = cumulative.as_rotvec()
+        cumulative = cumulative * Rotation.from_rotvec(deltas[i, 3:6])
+        relative[i, 3:6] = cumulative.as_rotvec()
+
+    # Tool 차원 (6 이후): absolute 값이므로 변환 없이 그대로 복사
+    if deltas.shape[1] > 6:
+        relative[:, 6:] = deltas[:, 6:]
 
     return relative
 
@@ -47,8 +52,9 @@ def delta_to_relative_trajectory(deltas: np.ndarray) -> np.ndarray:
 def relative_trajectory_to_delta(waypoints: np.ndarray) -> np.ndarray:
     """relative trajectory → sequential delta 역변환 (inference 시 사용).
 
-    waypoints: [T, 6] relative trajectory (T_now→t+i)
-    반환값: [T, 6] sequential deltas
+    waypoints: [T, D] relative trajectory. 앞 6차원은 (T_now→t+i),
+               7차원 이후는 tool joint (absolute 값)으로 변환 없이 그대로 유지.
+    반환값: [T, D] sequential deltas + tool
     """
     T = len(waypoints)
     deltas = np.zeros_like(waypoints)
@@ -58,11 +64,15 @@ def relative_trajectory_to_delta(waypoints: np.ndarray) -> np.ndarray:
     deltas[1:, :3] = np.diff(waypoints[:, :3], axis=0)
 
     # Rotation: 연속 회전 차분
-    deltas[0, 3:] = waypoints[0, 3:]
+    deltas[0, 3:6] = waypoints[0, 3:6]
     for i in range(1, T):
-        r_prev = Rotation.from_rotvec(waypoints[i - 1, 3:])
-        r_curr = Rotation.from_rotvec(waypoints[i, 3:])
-        deltas[i, 3:] = (r_prev.inv() * r_curr).as_rotvec()
+        r_prev = Rotation.from_rotvec(waypoints[i - 1, 3:6])
+        r_curr = Rotation.from_rotvec(waypoints[i, 3:6])
+        deltas[i, 3:6] = (r_prev.inv() * r_curr).as_rotvec()
+
+    # Tool 차원: 그대로 복사
+    if waypoints.shape[1] > 6:
+        deltas[:, 6:] = waypoints[:, 6:]
 
     return deltas
 

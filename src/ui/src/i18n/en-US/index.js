@@ -97,6 +97,7 @@ export default {
   viveWithRobot: 'Yes (with real robot)',
   viveWithoutRobot: 'No (Vive only, images + EE delta)',
   viveWaiting: 'Waiting for VIVE controller...',
+  movingToHomepose: 'Moving to home pose...',
   stopCollection: 'STOP',
   completeEpisode: 'DONE',
   episodeSaved: 'Episode saved successfully.',

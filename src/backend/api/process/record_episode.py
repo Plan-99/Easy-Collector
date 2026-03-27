@@ -66,6 +66,7 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
             })
 
             if move_homepose and tele_type not in ('externel', 'vive_only'):
+                socketio_instance.emit('moving_homepose', {'moving': True})
                 for agent in agents:
                     if tele_type == 'vive_external' and agent.role == 'tool':
                         continue  # vive_external의 single_arm은 vive로 이동하므로 home_pose 이동 생략
@@ -75,9 +76,20 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                     if agent.ik_solver is not None:
                         agent.reset_ik_solver(home_pose[str(agent.id)])
 
-            # Reset the environment to get the first timestep at the home_pose
-                time.sleep(7)
-            
+                # is_moving 플래그로 도달 대기 (타임아웃 30초)
+                timeout = 30.0
+                start_wait = time.time()
+                while time.time() - start_wait < timeout:
+                    if task_control['stop']:
+                        socketio_instance.emit('moving_homepose', {'moving': False})
+                        return
+                    moving_agents = [a for a in agents if a.is_moving]
+                    if not moving_agents:
+                        break
+                    time.sleep(0.1)
+                socketio_instance.emit('moving_homepose', {'moving': False})
+                time.sleep(0.5)  # 안정화 대기
+
             else:
                 # move_homepose가 아니어도 IK solver 내부 상태를 현재 조인트에 동기화
                 for agent in agents:
@@ -88,7 +100,7 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                             if arm_js is not None:
                                 with agent.ik_lock:
                                     agent.ik_solver.reset_state(arm_js)
-                time.sleep(2)
+                time.sleep(1)
 
             if tele_type == 'leader':
                 teleop = TeleoperatorModel.where('type', 'leader').where('assembly_id', assembly_id).first()
@@ -133,13 +145,24 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                     task_control['stop'] = True
                     return
 
-            # reset 타임스텝: ee_delta_action, ee_delta = zeros
+            # reset 타임스텝: ee_delta_action, ee_delta = zeros (tool_inner인 경우 tool joint 포함)
             ts = env.reset()
             for agent in agents:
                 if agent.ik_solver is not None:
-                    zeros = {name: [0.0] * 6 for name in agent.ee_names}
-                    ts.observation['robot_states'][agent.id]['ee_delta_action'] = zeros
-                    ts.observation['robot_states'][agent.id]['ee_delta'] = zeros
+                    if agent.tool_inner:
+                        qpos = ts.observation['robot_states'][agent.id].get('qpos')
+                        _, tool_qpos = agent.get_joint_and_tool_pos(qpos) if qpos is not None else (None, None)
+                        tool_vals = list(tool_qpos) if tool_qpos else []
+                        ts.observation['robot_states'][agent.id]['ee_delta_action'] = {
+                            name: [0.0] * (6 + len(tool_vals)) for name in agent.ee_names
+                        }
+                        ts.observation['robot_states'][agent.id]['ee_delta'] = {
+                            name: [0.0] * 6 + tool_vals for name in agent.ee_names
+                        }
+                    else:
+                        zeros = {name: [0.0] * 6 for name in agent.ee_names}
+                        ts.observation['robot_states'][agent.id]['ee_delta_action'] = zeros
+                        ts.observation['robot_states'][agent.id]['ee_delta'] = zeros
 
             timesteps = [ts]
 
@@ -198,8 +221,22 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                         )
 
                     if ee_delta is not None:
-                        robot_state['ee_delta_action'] = ee_delta
-                        robot_state['ee_delta'] = ee_delta
+                        if agent.tool_inner:
+                            qpos = robot_state.get('qpos')
+                            qaction = robot_state.get('qaction')
+                            _, tool_qpos = agent.get_joint_and_tool_pos(qpos) if qpos is not None else (None, None)
+                            _, tool_qaction = agent.get_joint_and_tool_pos(qaction) if qaction is not None else (None, None)
+                            robot_state['ee_delta'] = {
+                                name: list(ee_delta[name]) + list(tool_qpos or [])
+                                for name in ee_delta
+                            }
+                            robot_state['ee_delta_action'] = {
+                                name: list(ee_delta[name]) + list(tool_qaction or [])
+                                for name in ee_delta
+                            }
+                        else:
+                            robot_state['ee_delta_action'] = ee_delta
+                            robot_state['ee_delta'] = ee_delta
 
                 timesteps.append(ts)
                 
