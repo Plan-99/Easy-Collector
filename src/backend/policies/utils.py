@@ -130,9 +130,12 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
             original_action_shape = (self.chunk_size, action_dim)
 
-            language_instruction = root['language_instruction'][()]
-            if isinstance(language_instruction, bytes):
-                language_instruction = language_instruction.decode('utf-8')
+            if 'language_instruction' in root:
+                language_instruction = root['language_instruction'][()]
+                if isinstance(language_instruction, bytes):
+                    language_instruction = language_instruction.decode('utf-8')
+            else:
+                language_instruction = ''
 
             if sample_full_episode:
                 start_ts = 0
@@ -250,21 +253,22 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
         cnt += qpos.shape[0]
         all_qpos_data.append(torch.from_numpy(qpos))
         all_action_data.append(torch.from_numpy(action))
-    all_qpos_data = torch.stack(all_qpos_data)
-    all_action_data = torch.stack(all_action_data)
+    # 에피소드 길이가 다를 수 있으므로 cat으로 합침
+    all_qpos_data = torch.cat(all_qpos_data, dim=0)     # (total_steps, dim)
+    all_action_data = torch.cat(all_action_data, dim=0)  # (total_steps, dim)
 
     # normalize action data
-    action_min = all_action_data.view(-1, action.shape[-1]).min(dim=0)[0]
-    action_max = all_action_data.view(-1, action.shape[-1]).max(dim=0)[0]
-    action_mean = all_action_data.mean(dim=[0, 1], keepdim=True)
-    action_std = all_action_data.std(dim=[0, 1], keepdim=True)
+    action_min = all_action_data.min(dim=0)[0]
+    action_max = all_action_data.max(dim=0)[0]
+    action_mean = all_action_data.mean(dim=0, keepdim=True)
+    action_std = all_action_data.std(dim=0, keepdim=True)
     action_std = torch.clip(action_std, 1e-2, np.inf) # clipping
 
     # normalize qpos data
-    qpos_min = all_qpos_data.view(-1, qpos.shape[-1]).min(dim=0)[0]
-    qpos_max = all_qpos_data.view(-1, qpos.shape[-1]).max(dim=0)[0]
-    qpos_mean = all_qpos_data.mean(dim=[0, 1], keepdim=True)
-    qpos_std = all_qpos_data.std(dim=[0, 1], keepdim=True)
+    qpos_min = all_qpos_data.min(dim=0)[0]
+    qpos_max = all_qpos_data.max(dim=0)[0]
+    qpos_mean = all_qpos_data.mean(dim=0, keepdim=True)
+    qpos_std = all_qpos_data.std(dim=0, keepdim=True)
     qpos_std = torch.clip(qpos_std, 1e-2, np.inf) # clipping
 
     stats = {
