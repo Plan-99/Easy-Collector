@@ -37,6 +37,10 @@ from ...constants import ACTION, OBS_IMAGES
 from ...policies.act.configuration_act import ACTConfig
 from ...policies.normalize import Normalize, Unnormalize
 from ...policies.pretrained import PreTrainedPolicy
+from ....policies.temporal_ensembler import TemporalEnsembler
+
+# Backward-compatible alias
+ACTTemporalEnsembler = TemporalEnsembler
 
 
 class ACTPolicy(PreTrainedPolicy):
@@ -76,9 +80,6 @@ class ACTPolicy(PreTrainedPolicy):
         self.model = ACT(config)
         self.uncertainty = 0
 
-        if config.temporal_ensemble_coeff is not None:
-            self.temporal_ensembler = ACTTemporalEnsembler(config.temporal_ensemble_coeff, config.chunk_size)
-
         self.reset()
 
     def get_optim_params(self) -> dict:
@@ -104,7 +105,7 @@ class ACTPolicy(PreTrainedPolicy):
 
     def reset(self):
         """This should be called whenever the environment is reset."""
-        if self.config.temporal_ensemble_coeff is not None:
+        if hasattr(self, 'temporal_ensembler'):
             self.temporal_ensembler.reset()
         else:
             self._action_queue = deque([], maxlen=self.config.n_action_steps)
@@ -119,7 +120,7 @@ class ACTPolicy(PreTrainedPolicy):
         """
         self.eval()  # keeping the policy in eval mode as it could be set to train mode while queue is consumed
 
-        if self.config.temporal_ensemble_coeff is not None:  # dummy batch to satisfy the interface
+        if hasattr(self, 'temporal_ensembler'):
             actions = self.predict_action_chunk(batch)
             action, action_std = self.temporal_ensembler.update(actions)
             self.uncertainty = action_std.mean().item()
@@ -178,144 +179,6 @@ class ACTPolicy(PreTrainedPolicy):
             loss = l1_loss
 
         return loss, loss_dict
-
-
-class ACTTemporalEnsembler:
-    def __init__(self, temporal_ensemble_coeff: float, chunk_size: int) -> None:
-        """Temporal ensembling as described in Algorithm 2 of https://huggingface.co/papers/2304.13705.
-
-        The weights are calculated as wᵢ = exp(-temporal_ensemble_coeff * i) where w₀ is the oldest action.
-        They are then normalized to sum to 1 by dividing by Σwᵢ. Here's some intuition around how the
-        coefficient works:
-            - Setting it to 0 uniformly weighs all actions.
-            - Setting it positive gives more weight to older actions.
-            - Setting it negative gives more weight to newer actions.
-        NOTE: The default value for `temporal_ensemble_coeff` used by the original ACT work is 0.01. This
-        results in older actions being weighed more highly than newer actions (the experiments documented in
-        https://github.com/huggingface/lerobot/pull/319 hint at why highly weighing new actions might be
-        detrimental: doing so aggressively may diminish the benefits of action chunking).
-
-        Here we use an online method for computing the average rather than caching a history of actions in
-        order to compute the average offline. For a simple 1D sequence it looks something like:
-
-        ```
-        import torch
-
-        seq = torch.linspace(8, 8.5, 100)
-        print(seq)
-
-        m = 0.01
-        exp_weights = torch.exp(-m * torch.arange(len(seq)))
-        print(exp_weights)
-
-        # Calculate offline
-        avg = (exp_weights * seq).sum() / exp_weights.sum()
-        print("offline", avg)
-
-        # Calculate online
-        for i, item in enumerate(seq):
-            if i == 0:
-                avg = item
-                continue
-            avg *= exp_weights[:i].sum()
-            avg += item * exp_weights[i]
-            avg /= exp_weights[: i + 1].sum()
-        print("online", avg)
-        ```
-        """
-        self.chunk_size = chunk_size
-        self.ensemble_weights = torch.exp(-temporal_ensemble_coeff * torch.arange(chunk_size))
-        self.ensemble_weights_cumsum = torch.cumsum(self.ensemble_weights, dim=0)
-        self.reset()
-
-    def reset(self):
-        """Resets the online computation variables."""
-        self.ensembled_actions = None
-        # (chunk_size,) count of how many actions are in the ensemble for each time step in the sequence.
-        self.ensembled_actions_count = None
-        self.ensembled_actions_m2 = None
-
-    def update(self, actions: Tensor) -> Tensor:
-        """
-        Takes a (batch, chunk_size, action_dim) sequence of actions, update the temporal ensemble for all
-        time steps, and pop/return the next batch of actions in the sequence.
-        """
-        self.ensemble_weights = self.ensemble_weights.to(device=actions.device)
-        self.ensemble_weights_cumsum = self.ensemble_weights_cumsum.to(device=actions.device)
-        if self.ensembled_actions is None:
-            # Initializes `self._ensembled_action` to the sequence of actions predicted during the first
-            # time step of the episode.
-            self.ensembled_actions = actions.clone()
-            # Note: The last dimension is unsqueeze to make sure we can broadcast properly for tensor
-            # operations later.
-            self.ensembled_actions_count = torch.ones(
-                (self.chunk_size, 1), dtype=torch.long, device=self.ensembled_actions.device
-            )
-            self.ensembled_actions_m2 = torch.zeros_like(self.ensembled_actions)
-        else:
-            # 온라인 업데이트를 수행할 액션들 (마지막 액션 제외)
-            new_actions_chunk = actions[:, :-1]
-            
-            # 현재 가중치 (업데이트 전)
-            current_weights = self.ensemble_weights[self.ensembled_actions_count]
-            
-            # 평균 업데이트 전 이전 평균값 저장
-            old_mean = self.ensembled_actions.clone()
-
-            # self.ensembled_actions will have shape (batch_size, chunk_size - 1, action_dim). Compute
-            # the online update for those entries.
-            self.ensembled_actions *= self.ensemble_weights_cumsum[self.ensembled_actions_count - 1]
-            self.ensembled_actions += actions[:, :-1] * self.ensemble_weights[self.ensembled_actions_count]
-            self.ensembled_actions /= self.ensemble_weights_cumsum[self.ensembled_actions_count]
-
-            # Welford's algorithm의 가중치 버전 적용
-            # M2_new = M2_old + w_new * (x_new - mean_old) * (x_new - mean_new)
-            self.ensembled_actions_m2 += current_weights * (new_actions_chunk - old_mean) * (new_actions_chunk - self.ensembled_actions)
-            
-            self.ensembled_actions_count = torch.clamp(self.ensembled_actions_count + 1, max=self.chunk_size)
-            # The last action, which has no prior online average, needs to get concatenated onto the end.
-            self.ensembled_actions = torch.cat([self.ensembled_actions, actions[:, -1:]], dim=1)
-            self.ensembled_actions_count = torch.cat(
-                [self.ensembled_actions_count, torch.ones_like(self.ensembled_actions_count[-1:])]
-            )
-
-            # <<< 새로 추가된 액션의 M2는 0으로 초기화 >>>
-            self.ensembled_actions_m2 = torch.cat(
-                [self.ensembled_actions_m2, torch.zeros_like(actions[:, -1:])], dim=1
-            )
-
-        # # "Consume" the first action.
-        # action, self.ensembled_actions, self.ensembled_actions_count = (
-        #     self.ensembled_actions[:, 0],
-        #     self.ensembled_actions[:, 1:],
-        #     self.ensembled_actions_count[1:],
-        # )
-        # return action
-
-        # "소비"할 첫 번째 액션 분리
-        action = self.ensembled_actions[:, 0]
-        action_m2 = self.ensembled_actions_m2[:, 0]
-        action_count = self.ensembled_actions_count[0]
-
-        # <<< 표준편차 계산 >>>
-        # 분산 = M2 / (가중치의 합)
-        # action_count가 1보다 작거나 같으면 (샘플이 하나) 분산은 0입니다.
-        if action_count.item() <= 1:
-            variance = torch.zeros_like(action_m2)
-        else:
-            # ensembled_actions_count는 1부터 시작하므로 인덱싱을 위해 -1
-            sum_of_weights = self.ensemble_weights_cumsum[action_count - 1]
-            variance = action_m2 / sum_of_weights
-        
-        # 수치적 안정성을 위해 작은 epsilon 값을 더해줍니다.
-        std_dev = torch.sqrt(variance + 1e-8)
-
-        # 사용한 액션을 시퀀스에서 제거
-        self.ensembled_actions = self.ensembled_actions[:, 1:]
-        self.ensembled_actions_count = self.ensembled_actions_count[1:]
-        self.ensembled_actions_m2 = self.ensembled_actions_m2[:, 1:]
-        
-        return action, std_dev
 
 
 class ACT(nn.Module):

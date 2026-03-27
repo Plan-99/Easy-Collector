@@ -7,7 +7,7 @@ cwd = os.getcwd()  # 예: /root/src
 parent_of_cwd = os.path.dirname(cwd)  # 예: /root
 
 class Common_ArmIK(IK_Solver):
-    def __init__(self, urdf_path=None, urdf_package_dir=None, joints_to_lock=None, ee_definitions=None):
+    def __init__(self, urdf_path=None, urdf_package_dir=None, joints_to_lock=None, ee_definitions=None, gravity_compensate=0.0):
 
         base = Path(parent_of_cwd)
 
@@ -42,6 +42,10 @@ class Common_ArmIK(IK_Solver):
             'smooth': 1.0     # 낮음
         }
 
+        self.gravity_compensate = gravity_compensate
+
+        print(f'[IK_Solver] Initialized with urdf_path={urdf_path}, package_dir={package_dir}, joints_to_lock={joints_to_lock}, ee_definitions={ee_definitions}, gravity_compensate={gravity_compensate}')
+
         # 4. 부모 클래스 생성자 호출
         super().__init__(
             urdf_path=urdf_path,
@@ -52,3 +56,11 @@ class Common_ArmIK(IK_Solver):
             use_scaling=False,
             Visualization=False
         )
+
+    def solve_ik(self, target_poses: dict, **kwargs):
+        if self.gravity_compensate != 0.0:
+            target_poses = {
+                name: [pose[0], pose[1], pose[2] + self.gravity_compensate] + list(pose[3:])
+                for name, pose in target_poses.items()
+            }
+        return super().solve_ik(target_poses, **kwargs)

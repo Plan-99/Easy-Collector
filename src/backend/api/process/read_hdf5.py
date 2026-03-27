@@ -12,13 +12,15 @@ from PIL import Image
 
 config = {}
 
-def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=False, sensors=None, agents=None, task=None):
+def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=False, sensors=None, agents=None, task=None, action_key='qaction'):
 
     global config
     config = {}
     if move_robot:
         from ...env.env import Env
         env = Env(node, agents, sensors)
+
+    hz = 20
 
     while True:
         image_data = {}
@@ -49,7 +51,13 @@ def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=
 
             for i, name in enumerate(robot_names):
                 qpos_data[name] = f[f"observations/qpos/{name}"][:]
-                qaction_data[name] = f[f"qaction/{name}"][:]
+                if action_key == 'ee_delta_action' and 'ee_delta_action' in f and name in f['ee_delta_action']:
+                    # ee_delta_action/robot_N/ee_name → 첫 번째 ee_name의 데이터 사용
+                    ee_group = f[f'ee_delta_action/{name}']
+                    first_ee = list(ee_group.keys())[0]
+                    qaction_data[name] = ee_group[first_ee][:]
+                else:
+                    qaction_data[name] = f[f"qaction/{name}"][:]
 
             if "language_instruction" in f:
                 language_instruction = f["language_instruction"][()].decode('utf-8')
@@ -133,10 +141,15 @@ def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=
                     if move_robot:
                         for agent in agents:
                             if str(agent.id) == robot_name.replace("robot_", ""):
-                                agent.move_joint_step(qaction_array)
+                                if action_key == 'ee_delta_action' and agent.role != 'tool' and agent.ik_solver is not None:
+                                    ee_name = agent.ee_names[0]
+                                    action_list = qaction_array.tolist()
+                                    ee_delta = {ee_name: action_list[:6]}
+                                    tool_positions = action_list[6:] if agent.tool_inner and len(action_list) > 6 else None
+                                    agent.move_ee_delta_step(ee_delta, tool_positions=tool_positions)
+                                else:
+                                    agent.move_joint_step(qaction_array)
 
-
-                time.sleep(0.2)
                 socketio_instance.emit('show_episode_step', {
                     'hdf5_path': hdf5_path,
                     'images': encoded_images,
@@ -147,6 +160,9 @@ def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=
                     # 'xpos': xpos_data[i].tolist(),
                     # 'xvel': xvel_data[i].tolist()
                 }, to=sid)
+
+                time.sleep(1.0 / hz)
+
 
 
 def add_config(config_data):

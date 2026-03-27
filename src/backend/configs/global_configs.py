@@ -4,6 +4,31 @@ import numpy as np
 
 SUPPORT_ROBOTS = [
     {
+        'name': 'test_arm',
+        'role': 'single_arm',
+        'company': 'Test',
+        'joint_dim': 7,
+        'joint_names': ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"],
+        'joint_lower_bounds': [-2.618, 0, -2.618, -1.745, -1.22, -2.094, 0],
+        'joint_upper_bounds': [2.618, 2.618, 0, 1.745, 1.22, 2.094, 0.087],
+        'read_topic': '/joint_states_single',
+        'read_topic_msg': 'sensor_msgs/JointState',
+        'write_type': 'topic',
+        'write_topic': '/joint_states',
+        'write_topic_msg': 'sensor_msgs/JointState',
+        'tool_inner': True,
+        'tool_index': [6],
+        'custom_fields': [],
+        'urdf_path': '/root/ros2_ws/src/piper_ros/src/piper_description/urdf/piper_description.urdf',
+        'urdf_package_dir': '/root/ros2_ws/src/piper_ros/src/piper_description/',
+        'ik_setting': {
+            'joints_to_lock': [
+                'joint6_to_gripper_base', 'joint7', 'joint8'
+            ],
+            'ee_definitions': [('ee', 'joint7', None)],
+        },
+    },
+    {
         'name': 'piper',
         'role': 'single_arm',
         'company': 'Piper',
@@ -174,7 +199,7 @@ SUPPORT_ROBOTS = [
         'joint_names': ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7"],
         'joint_lower_bounds': [-3.14, -3.14, -3.14, -3.14, -3.14, -3.14, -3.14],
         'joint_upper_bounds': [3.14, 3.14, 3.14, 3.14, 3.14, 3.14, 3.14],
-        'read_topic': '/joint_trajectory_controller/state',
+        'read_topic': '/joint_trajectory_controller/controller_state',
         'read_topic_msg': 'control_msgs/JointTrajectoryControllerState',
         'write_topic': '/joint_trajectory_controller/joint_trajectory',
         'write_topic_msg': 'trajectory_msgs/JointTrajectory',
@@ -186,8 +211,10 @@ SUPPORT_ROBOTS = [
         'ik_setting': {
             'joints_to_lock': [],
             'ee_definitions': [
-                ('ee', 'joint_7', np.array([0, 0, -0.2]).T)
+                # ('ee', 'joint_7', np.array([0, 0, -0.2]).T)
+                ('ee', 'joint_7', np.array([0, 0, 0]).T)
             ],
+            'gravity_compensate': 0.00003,  # z축 gravity 보상값 (m). 로봇이 아래로 처질 때 양수로 설정
         },
     },
     # {

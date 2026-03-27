@@ -148,9 +148,13 @@ async def offer(request):
     @pc.on("connectionstatechange")
     async def on_connectionstatechange():
         print(f"Connection state is {pc.connectionState}")
-        if pc.connectionState == "failed" or pc.connectionState == "closed":
+        if pc.connectionState in ("failed", "closed", "disconnected"):
             await pc.close()
             pcs.discard(pc)
+            # stream_config에서도 정리
+            for track in pc.getTransceivers():
+                if hasattr(track.receiver, 'track') and hasattr(track.receiver.track, 'stream_id'):
+                    stream_config.pop(track.receiver.track.stream_id, None)
 
     try:
         await pc.setRemoteDescription(RTCSessionDescription(sdp=params["sdp"], type=params["type"]))

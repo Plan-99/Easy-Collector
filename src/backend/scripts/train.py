@@ -63,6 +63,7 @@ def train(
     del train_settings['num_epochs'] # Remove num_epochs from train_settings
     del train_settings['batch_size'] # Remove batch_size from train_settings
     del train_settings['num_workers'] # Remove num_workers from train_settings
+    train_settings.pop('action_type', None) # Remove action_type (not a policy config param)
 
     
     if policy_obj['type'] == 'ACT':
@@ -220,6 +221,8 @@ def main(args):
         checkpoint = checkpoint.to_dict()
 
         batch_size = checkpoint['train_settings']['batch_size']
+        action_key = checkpoint['train_settings'].get('action_type', 'qaction')
+        use_relative_trajectory = checkpoint['train_settings'].get('use_relative_trajectory', False)
         sensor_ids = task['sensor_ids']
         if policy['type'] in ['ACT', 'VLAsEn']:
             chunk_size = policy['settings']['chunk_size']
@@ -232,10 +235,10 @@ def main(args):
             vision_backbone = None
         num_workers = checkpoint['train_settings']['num_workers']
         n_obs_steps = policy['settings']['n_obs_steps']  # Default to 1 if not specified
-        
-        
+
+
         # Load data from the temporary directory
-        train_dataloader, val_dataloader, stats, input_features, output_features = load_data(temp_dir, policy['type'], episode_counter, sensor_ids, batch_size, batch_size, chunk_size, vision_backbone, num_workers, n_obs_steps)
+        train_dataloader, val_dataloader, stats, input_features, output_features = load_data(temp_dir, policy['type'], episode_counter, sensor_ids, batch_size, batch_size, chunk_size, vision_backbone, num_workers, n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory)
         # Start the training process
         best_epoch, min_val_loss, best_state_dict = train(
             train_dataloader,

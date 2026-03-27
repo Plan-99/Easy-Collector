@@ -169,5 +169,6 @@ export const TRAIN_CONFIGS = {
         'num_epochs': { 'label': 'Number of Epochs', 'value': 1000, 'type': 'number' },
         'batch_size': { 'label': 'Batch Size', 'value': 32, 'type': 'number' },
         'num_workers': { 'label': 'Number of Workers', 'value': 4, 'type': 'number' },
+        'action_type': { 'label': 'Action Type', 'value': 'qaction', 'type': 'select', 'options': ['qaction', 'ee_delta_action'] },
     }
 };

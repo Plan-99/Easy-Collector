@@ -1,27 +1,31 @@
 import collections
 import dm_env
 import time
-from ..env.agent import Agent
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image, CompressedImage
 from ..utils.image_parser import ros_image_to_numpy
 
 class Env:
-    def __init__(self, node, agents, sensors, language_instruction=None):
+    def __init__(self, node, agents, sensors, language_instruction=None, virtual_agents=False):
         self.sensors = sensors
         self.node = node
         self.agents = agents
         self.language_instruction = language_instruction
+        self.virtual_agents = virtual_agents
 
+        self._sensor_subs = []
         for sensor in sensors:
             setattr(self, f'sensor_{sensor["id"]}', None)
-            node.create_subscription(CompressedImage, sensor['read_topic'], lambda msg, sid=sensor['id']: self.image_raw_cb(msg, sid), 10)
+            sub = node.create_subscription(CompressedImage, sensor['read_topic'], lambda msg, sid=sensor['id']: self.image_raw_cb(msg, sid), 10)
+            self._sensor_subs.append(sub)
 
     def image_raw_cb(self, data, sensor_id):
-        image = ros_image_to_numpy(data)
-
-        setattr(self, f'sensor_{sensor_id}', image)
+        try:
+            image = ros_image_to_numpy(data)
+            setattr(self, f'sensor_{sensor_id}', image)
+        except Exception as e:
+            print(f"[ERROR] image_raw_cb (sensor {sensor_id}): {e}")
 
                 
     def get_observation(self):
@@ -53,9 +57,13 @@ class Env:
         image_dict = dict()
         for sensor in self.sensors:
             image = getattr(self, f"sensor_{sensor['id']}")
-            while image is None:
+            waited = 0.0
+            while image is None and waited < 5.0:
                 time.sleep(0.1)
+                waited += 0.1
                 image = getattr(self, f"sensor_{sensor['id']}")
+            if image is None:
+                print(f"[WARN] sensor_{sensor['id']} image timeout after 5s")
             image_dict[f"sensor_{sensor['id']}"] = image
         return image_dict
     
@@ -63,24 +71,17 @@ class Env:
     def get_robot_states(self):
         robot_state_dict = dict()
         for agent in self.agents:
-            qpos = agent.get_joint_states()
-            qaction = agent.get_joint_actions()
-            qaction_delta = [qaction[i] - qpos[i] for i in range(len(qpos))]
-            if agent.ik_solver is None:
-                eepos = None
-                eetarget = None
-                eetarget_delta = None
+            if self.virtual_agents and agent.role == 'single_arm':
+                zeros = [0.0] * agent.joint_len
+                qpos = zeros
+                qaction = zeros
             else:
-                eepos = agent.get_ee_position()
-                eetarget = agent.get_ee_target()
-                eetarget_delta = {key: [eetarget[key][i] - eepos[key][i] for i in range(6)] for key in eetarget} if eetarget is not None else None
+                qpos = agent.get_joint_states()
+                qaction = agent.get_joint_actions()
             robot_state_dict[agent.id] = {
-                'qpos': agent.get_joint_states(),
-                'qaction': agent.get_joint_actions(),
+                'qpos': qpos,
+                'qaction': qaction,
                 'eepos': agent.get_ee_position(),
-                'eetarget': agent.get_ee_target(),
-                'qaction_delta': qaction_delta,
-                'eetarget_delta': eetarget_delta,
             }
         return robot_state_dict
     
@@ -91,3 +92,11 @@ class Env:
     def get_reward(self):
         # Implement your reward logic here
         return 0.0
+
+    def destroy(self):
+        """센서 콜백을 비활성화한다.
+        rclpy.spin() 중에 destroy_subscription()을 호출하면 segfault가 발생하므로
+        구독 자체는 유지하고 콜백만 무효화한다.
+        """
+        self._destroyed = True
+        self._sensor_subs.clear()

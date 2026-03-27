@@ -145,9 +145,13 @@ def start_robot():
                    f'robot_ip:={settings.get("ip_address", "192.168.1.10")}']
         
     if company == 'JAKA':
-        command = ['ros2', 'launch', 'jaka_driver', 'robot_start.launch.py', 
-                   f'namespace:=ec_robot_{id}', 
+        command = ['ros2', 'launch', 'jaka_driver', 'robot_start.launch.py',
+                   f'namespace:=ec_robot_{id}',
                    f'ip:={settings.get("ip_address", "192.168.1.10")}']
+
+    if company == 'Test':
+        command = ['ros2', 'launch', 'test_arm', 'test_arm.launch.py',
+                   f'namespace:=ec_robot_{id}']
 
     print(f"Attempting to start robot")
 
@@ -320,14 +324,30 @@ def move_robot(id):
 
 @robot_bp.route('/robot/<id>/:subscribe_robot', methods=['POST'])
 def subscribe_robot(id):
+    int_id = int(id)
+    func_name = 'subscribe_robot_' + str(id)
+
+    # 기존 Agent가 있으면 재사용 (rclpy.spin 중 destroy_subscription → segfault 방지)
+    existing_agent = current_app.agents.get(int_id)
+    if existing_agent is not None:
+        # background task만 재시작
+        if func_name in current_app.pm.processes:
+            return {'status': 'success', 'message': 'Already subscribed'}, 200
+        current_app.pm.start_function(
+            name=func_name,
+            node=current_app.node,
+            func=subscribe_robot_topic,
+            socketio_instance=current_app.pm.socketio,
+            agent=existing_agent,
+        )
+        return {'status': 'success', 'message': 'Subscribed to robot topic'}, 200
 
     robot = RobotModel.find(id).to_dict()
     agent = Agent(current_app.node, robot)
-
-    current_app.agents[int(id)] = agent
+    current_app.agents[int_id] = agent
 
     current_app.pm.start_function(
-        name='subscribe_robot_' + str(id),
+        name=func_name,
         node=current_app.node,
         func=subscribe_robot_topic,
         socketio_instance=current_app.pm.socketio,
@@ -339,6 +359,8 @@ def subscribe_robot(id):
 @robot_bp.route('/robot/<id>/:unsubscribe_robot', methods=['POST'])
 def unsubscribe_robot(id):
     current_app.pm.stop_function('subscribe_robot_' + str(id))
+    # Agent와 ROS2 구독은 유지 — rclpy.spin 중 destroy하면 segfault
+    # Agent는 다음 subscribe 시 재사용됨
     return {'status': 'success', 'message': 'Unsubscribed from robot topic'}, 200
 
 

@@ -154,7 +154,7 @@ def edit_datasets_metadata(id):
             # 처리해야 할 경로 리스트
             robot_paths = [
                 "observations/qpos", "observations/eepos", 
-                "qaction", "qaction_delta", "eetarget", "eetarget_delta"
+                "qaction", "eeaction_delta"
             ]
 
             for old_name, val in robot_mappings.items():
@@ -215,7 +215,8 @@ def start_replay_episode(id, file_name):
         task=data.get('task', {}),
         sensors=data.get('sensors', []),
         move_robot=True,
-        sid=request.json.get('sid', None),  # Optional socket ID for real-time updates
+        action_key=data.get('action_type', 'qaction'),
+        sid=request.json.get('sid', None),
     )
     return {'status': 'success', 'message': 'HDF5 replay process started'}, 200
 
@@ -238,6 +239,7 @@ def read_hdf5_add_config(id, file_name):
 def start_collection(id):
     data = request.json
     agents = [current_app.agents[robot['id']] for robot in data.get('robots', [])]
+    tele_type = data.get('tele_type', 'leader')
 
     current_app.pm.start_function(
         func=record_episode,
@@ -249,7 +251,7 @@ def start_collection(id):
         sensors=data.get('sensors'),
         task=data.get('task'),
         language_instruction=data.get('language_instruction'),
-        tele_type=data.get('tele_type', 'leader'),
+        tele_type=tele_type,
         socketio_instance=current_app.pm.socketio,
         iter=data.get('iter', 100000),
         name=f"record_episode",
@@ -263,6 +265,15 @@ def stop_collection(id):
         name=f"record_episode",
     )
     return {'status': 'success', 'message': 'Data collection stopped'}, 200
+
+@dataset_bp.route('/dataset/<id>/:complete_episode', methods=['POST'])
+def complete_episode(id):
+    task = current_app.pm.processes.get('record_episode')
+    if not task or task['type'] != 'function':
+        return {'status': 'error', 'message': 'record_episode is not running'}, 404
+    print(task['obj'])
+    task['obj']['episode_complete'] = True
+    return {'status': 'success', 'message': 'Episode complete signal sent'}, 200
 
 @dataset_bp.route('/dataset/<id>/augment', methods=['POST'])
 def augment_dataset_route(id):

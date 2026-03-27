@@ -187,6 +187,21 @@ class IK_Solver:
         """
         self.q = np.array(current_q).flatten()
 
+    def compute_target_from_origin(self, origin_xyzaxayaz, offset_xyzaxayaz):
+        """
+        origin 포즈에 offset을 global frame으로 합성하여 target 포즈를 반환한다.
+
+        origin_xyzaxayaz:  [x, y, z, ax, ay, az] - 기준 EE 포즈
+        offset_xyzaxayaz:  [dx, dy, dz, dax, day, daz] - origin 기준 offset
+        반환값: [x, y, z, ax, ay, az]
+        """
+        o_xyz = np.array(origin_xyzaxayaz[:3])
+        o_R = pin.exp3(np.array(origin_xyzaxayaz[3:6]))
+        d_xyz = np.array(offset_xyzaxayaz[:3])
+        d_R = pin.exp3(np.array(offset_xyzaxayaz[3:6]))
+        new_se3 = pin.SE3(d_R @ o_R, o_xyz + d_xyz)
+        return se3_to_xyzaxayaz(new_se3)
+
     def compute_delta_target(self, name, current_q, delta_xyzaxayaz, frame='global'):
         """
         Computes the next target pose based on a delta from the current pose.

@@ -48,11 +48,12 @@ class Agent:
         # )
 
         self.ik_solver = None
+        self.ik_lock = threading.RLock()
         robot_info = get_robot_by_name(self.robot_type)
         if robot_info is not None and 'ik_setting' in robot_info:
             urdf_path = robot_info['urdf_path']
             urdf_package_dir = robot_info['urdf_package_dir']
-            ik_setting = robot_info['ik_setting']
+            ik_setting = dict(robot_info['ik_setting'])
             self.ik_solver = Common_ArmIK(urdf_path=urdf_path, urdf_package_dir=urdf_package_dir, **ik_setting)
             self.ee_names = self.ik_solver.ee_names
 
@@ -89,14 +90,39 @@ class Agent:
             self.is_waiting_for_goal = False
 
         self.ee_pos_cmd = None
+        self.last_ee_delta = None  # keyboard 모드에서 raw EE delta 저장
 
         self.joint_trajectory_point = JointTrajectoryPoint()
-            
+
         self.moved_by_ui = False
         self.move_lock = False
+        self.is_moving = False
+        self._move_target = None
+        self._move_threshold = 0.01
         self.is_waiting_for_service = False
         time.sleep(0.1)  # Wait for subscriber to be ready
 
+    def destroy(self):
+        """ROS2 구독/퍼블리셔/클라이언트를 해제하여 리소스 누수를 방지한다."""
+        if hasattr(self, 'read_topic_sub') and self.read_topic_sub is not None:
+            self.node.destroy_subscription(self.read_topic_sub)
+            self.read_topic_sub = None
+
+        if self.write_type == 'topic':
+            if hasattr(self, 'write_topic_sub') and self.write_topic_sub is not None:
+                self.node.destroy_subscription(self.write_topic_sub)
+                self.write_topic_sub = None
+            if hasattr(self, 'move_robot_pub') and self.move_robot_pub is not None:
+                self.node.destroy_publisher(self.move_robot_pub)
+                self.move_robot_pub = None
+        elif self.write_type == 'service':
+            if hasattr(self, 'move_robot_client') and self.move_robot_client is not None:
+                self.node.destroy_client(self.move_robot_client)
+                self.move_robot_client = None
+        elif self.write_type == 'action':
+            if hasattr(self, 'move_robot_client') and self.move_robot_client is not None:
+                self.move_robot_client.destroy()
+                self.move_robot_client = None
 
     def fetch_joint_map_to_action(self, joint_map):
         action = [0] * self.joint_len
@@ -155,9 +181,10 @@ class Agent:
             if current_pos is None:
                 print("Current joint states are None, cannot move.")
                 return
+            second = 0.2 if vel_arg is None else vel_arg
             self.joint_trajectory_point.velocities = [(abs(t - c) / 2) for t, c in zip(action, current_pos)]
             # self.joint_trajectory_point.velocities = [0.0] * self.joint_len
-            self.joint_trajectory_point.time_from_start = rclpy.duration.Duration(seconds=0.2).to_msg()
+            self.joint_trajectory_point.time_from_start = rclpy.duration.Duration(seconds=second).to_msg()
             self.write_topic_msg_data.points = [self.joint_trajectory_point]
             self.move_robot_pub.publish(self.write_topic_msg_data)
         else:
@@ -265,15 +292,17 @@ class Agent:
         # 2. 값의 변화가 거의 없다면 통신하지 않음 (Deadband 필터)
         # 10Hz에서 미세한 떨림으로 계속 Goal을 쏘는 것을 방지합니다.
         current_states = self.get_joint_states()
-        move_threshold = vel_arg if vel_arg is not None else 0.08
-        if  current_states[0] < 0.7 and current_states is not None and all(abs(a - b) < move_threshold for a, b in zip(action, current_states)):
-            return
-        
-        if current_states[0] >= 0.7 and current_states is not None and all(abs(a - b) < move_threshold / 3 for a, b in zip(action, current_states)):
-            return
-        
-        if current_states[0] > 0.78 and action[0] > 0.78:
-            return
+
+        if self.write_topic_msg == 'control_msgs/action/GripperCommand':
+            move_threshold = vel_arg if vel_arg is not None else 0.08
+            if  current_states[0] < 0.7 and current_states is not None and all(abs(a - b) < move_threshold for a, b in zip(action, current_states)):
+                return
+            
+            if current_states[0] >= 0.7 and current_states is not None and all(abs(a - b) < move_threshold / 3 for a, b in zip(action, current_states)):
+                return
+            
+            if current_states[0] > 0.78 and action[0] > 0.78:
+                return
         
         self.joint_actions = action
 
@@ -321,7 +350,7 @@ class Agent:
         self.move_joint_step(target_js)
         
 
-    def move_ee_step(self, target_ee_dict):
+    def move_ee_step(self, target_ee_dict, vel_arg=None):
         """
         입력 규격: target_ee_dict = {'L_ee': [x, y, z, r, p, y, tool], 'R_ee': [x, y, z, r, p, y, tool]}
         """
@@ -339,7 +368,7 @@ class Agent:
         for name in self.ee_names:
             if name in target_ee_dict:
                 val_list = target_ee_dict[name]
-                
+
                 # 주석 규격에 따라 마지막 요소가 tool이라고 가정
                 if len(val_list) >= 7:
                     ik_targets[name] = val_list[:6]      # [x, y, z, r, p, y]
@@ -348,11 +377,12 @@ class Agent:
                     # tool 값이 포함되지 않은 경우 기존 로직 유지
                     ik_targets[name] = val_list
                     target_tool_values[name] = None
+
         # 2. IK 풀기 (모든 팔을 한 번에 계산)
         # current_lr_arm_motor_q에 현재 조인트 상태를 전달하여 연속성 확보
-        sol_q, _ = self.ik_solver.solve_ik(ik_targets, current_lr_arm_motor_q=np.array(arm_js))
-
-        sol_q_fk = self.ik_solver.get_ee_position(sol_q)
+        with self.ik_lock:
+            sol_q, _ = self.ik_solver.solve_ik(ik_targets, current_lr_arm_motor_q=np.array(arm_js))
+            sol_q_fk = self.ik_solver.get_ee_position(sol_q)
 
 
         if sol_q is not None:
@@ -366,7 +396,7 @@ class Agent:
                     ee_name = self.ee_names[0]
                     t_val = target_tool_values.get(ee_name)
                     if t_val is None: t_val = tool_js[0]
-                    
+
                     final_action = sol_q_list + [t_val]
                 else:
                     final_action = sol_q_list
@@ -382,12 +412,12 @@ class Agent:
                     l_ee_name = self.ee_names[0]
                     l_tool = target_tool_values.get(l_ee_name)
                     if l_tool is None: l_tool = tool_js[0]
-                    
+
                     # 오른쪽 툴 처리
                     r_ee_name = self.ee_names[1]
                     r_tool = target_tool_values.get(r_ee_name)
                     if r_tool is None: r_tool = tool_js[1]
-                    
+
                     # 최종 배열 조립: [L_arm, L_tool, R_arm, R_tool]
                     final_action = left_sol + [l_tool] + right_sol + [r_tool]
                 else:
@@ -395,59 +425,125 @@ class Agent:
 
             # 4. 로봇에 명령 발행
             if final_action:
-                print(final_action)
-                self.move_joint_step(final_action, from_ee=True)
+                self.move_joint_step(final_action, from_ee=True, velocity_arg=vel_arg)
 
-    def move_ee_delta_step(self, delta_ee_dict):
+    def compute_fk_delta(self, qaction, qpos):
+        """FK(commanded) - FK(actual): 로봇이 이번 스텝에서 이동해야 할 EE 변위."""
+        if self.ik_solver is None or qaction is None or qpos is None:
+            return None
+        arm_action, _ = self.get_joint_and_tool_pos(qaction)
+        arm_state, _ = self.get_joint_and_tool_pos(qpos)
+        if arm_action is None or arm_state is None:
+            return None
+        with self.ik_lock:
+            ee_action = self.ik_solver.get_ee_position(np.array(arm_action))
+            ee_state = self.ik_solver.get_ee_position(np.array(arm_state))
+        if ee_action is None or ee_state is None:
+            return None
+        return {
+            name: [ee_action[name][i] - ee_state[name][i] for i in range(6)]
+            for name in self.ee_names
+            if name in ee_action and name in ee_state
+        }
+
+    def move_ee_delta_step(self, delta_ee_dict, vel_arg=None, tool_positions=None):
+        """EE delta를 적용하여 로봇을 이동.
+
+        tool_positions: 제공 시 tool joint를 해당 절대 위치로 이동 (inference용).
+                        None이면 delta_ee_dict의 7번째 이후 값을 delta로 사용 (keyboard teleop용).
+        """
         if self.role == 'tool' or self.ik_solver is None:
             return
+
+        self.last_ee_delta = {
+            name: list(delta_ee_dict[name][:6])
+            for name in self.ee_names
+            if name in delta_ee_dict
+        }
 
         full_js = self.get_joint_states()
         arm_js, _ = self.get_joint_and_tool_pos(full_js)
 
         target_ee_dict = {}
-        for name in self.ee_names:
-            if name in delta_ee_dict:
-                # 1. Solver에게 "다음 목표 계산해줘"라고 요청
-                # 여기서 frame='global' 또는 'local'을 선택할 수 있습니다.
-                target_pose = self.ik_solver.compute_delta_target(
-                    name, 
-                    np.array(arm_js), 
-                    delta_ee_dict[name][:6],
-                    frame='global' 
-                )
-                
-                # 2. 툴(그리퍼) 값 처리
-                if len(delta_ee_dict[name]) >= 7:
-                    # 현재 툴 값 + 델타 툴 (툴은 단순 덧셈 가능)
-                    _, tool_js = self.get_joint_and_tool_pos(full_js)
-                    target_pose.append(tool_js[0] + delta_ee_dict[name][6])
-                
-                target_ee_dict[name] = target_pose
+        with self.ik_lock:
+            for name in self.ee_names:
+                if name in delta_ee_dict:
+                    target_pose = self.ik_solver.compute_delta_target(
+                        name,
+                        np.array(arm_js),
+                        delta_ee_dict[name][:6],
+                        frame='global'
+                    )
 
-        # 3. 계산된 절대 좌표 타겟으로 이동 명령
+                    # 툴(그리퍼) 값 처리
+                    if tool_positions is not None:
+                        target_pose.extend(tool_positions)
+                    elif len(delta_ee_dict[name]) >= 7:
+                        _, tool_js = self.get_joint_and_tool_pos(full_js)
+                        target_pose.append(tool_js[0] + delta_ee_dict[name][6])
+
+                    target_ee_dict[name] = target_pose
+
+        # 계산된 절대 좌표 타겟으로 이동 명령
+        print(f"Moving EE with delta step. Target EE dict: {target_ee_dict}")
+        self.move_ee_step(target_ee_dict, vel_arg=vel_arg)
+
+    def move_ee_from_origin(self, origin, offset_ee_dict):
+        """
+        origin으로부터 offset만큼 떨어진 절대 EE 포즈를 계산하여 이동한다.
+
+        origin:          [x, y, z, ax, ay, az] - 기준 EE 포즈 (월드 프레임, axis-angle)
+        offset_ee_dict:  {ee_name: [dx, dy, dz, dax, day, daz]} - origin 기준 offset
+        """
+        if self.role == 'tool' or self.ik_solver is None:
+            return
+
+        target_ee_dict = {}
+        with self.ik_lock:
+            for name, offset in offset_ee_dict.items():
+                target = self.ik_solver.compute_target_from_origin(origin, offset)
+                if len(offset) >= 7:
+                    target.append(offset[6])
+                target_ee_dict[name] = target
+
         self.move_ee_step(target_ee_dict)
-        
+
     def joint_state_cb(self, msg):
-        with self.js_mutex:
-            self.joint_states = msg
-            try:
-                import time as _t
-                self.last_joint_update = _t.time()
-            except Exception:
-                self.last_joint_update = None
+        try:
+            with self.js_mutex:
+                self.joint_states = msg
+                self.last_joint_update = time.time()
+        except Exception as e:
+            print(f"[ERROR] joint_state_cb: {e}")
+
+        if self.is_moving and self._move_target is not None:
+            current = self.get_joint_states()
+            if current is not None:
+                diff = np.linalg.norm(np.array(self._move_target) - np.array(current))
+                if diff < self._move_threshold:
+                    self.is_moving = False
+                    self._move_target = None
 
     def joint_action_cb(self, msg):
-        with self.js_mutex:
-            self.joint_actions = msg
+        try:
+            with self.js_mutex:
+                self.joint_actions = msg
+        except Exception as e:
+            print(f"[ERROR] joint_action_cb: {e}")
 
     def tool_state_cb(self, msg):
-        with self.js_mutex:
-            self.tool_states = msg
+        try:
+            with self.js_mutex:
+                self.tool_states = msg
+        except Exception as e:
+            print(f"[ERROR] tool_state_cb: {e}")
 
     def tool_action_cb(self, msg):
-        with self.js_mutex:
-            self.tool_actions = msg
+        try:
+            with self.js_mutex:
+                self.tool_actions = msg
+        except Exception as e:
+            print(f"[ERROR] tool_action_cb: {e}")
             
     def get_joint_states(self):
         with self.js_mutex:
@@ -519,16 +615,17 @@ class Agent:
         if arm_js is None:
             return None
         
-        ee_poses = self.ik_solver.get_ee_position(arm_js)
-        
+        with self.ik_lock:
+            ee_poses = self.ik_solver.get_ee_position(arm_js)
+
         # 툴 상태를 딕셔너리에 병합
         if tool_js is not None:
             for i, name in enumerate(self.ee_names):
                 if i < len(tool_js):
                     ee_poses[name].append(tool_js[i])
-        
+
         return ee_poses
-        
+
     def get_ee_target(self):
         """
         목표 End-Effector 포즈를 반환 (규격: {'L_ee': [x, y, z, r, p, y, tool]})
@@ -551,7 +648,8 @@ class Agent:
         arm_joints, tools = self.get_joint_and_tool_pos(actions)
         
         # IK Solver를 통해 각 팔의 EE 포즈 계산 (결과: {'L_ee': [x,y,z,r,p,y], ...})
-        ee_poses_dict = self.ik_solver.get_ee_position(arm_joints)
+        with self.ik_lock:
+            ee_poses_dict = self.ik_solver.get_ee_position(arm_joints)
         
         if ee_poses_dict is None:
             return None
@@ -601,6 +699,9 @@ class Agent:
         return full_joint_positions, None
 
     def move_to(self, target_pos, step_size=0.1, duration=5.0):
+        self._move_target = list(target_pos)
+        self.is_moving = True
+
         if self.robot_company == 'Piper':
             print("Moving to target position:", target_pos)
             self.move_joint_step(target_pos)
@@ -642,14 +743,13 @@ class Agent:
         if self.ik_solver is not None:
             # 1. home_pose에서 IK에 사용되는 조인트만 추출 (예: 7개 중 앞의 6개)
             arm_home, _ = self.get_joint_and_tool_pos(q)
-            
-            # dual_arm인 경우 arm_home은 [[left], [right]] 형태이므로 평탄화(flatten) 필요
-            if self.role == 'dual_arm':
-                # arm_home[0] + arm_home[1] 등을 통해 하나의 리스트로 만듦
-                flat_arm_home = []
-                for joints in arm_home:
-                    flat_arm_home.extend(joints)
-                self.ik_solver.reset_state(flat_arm_home)
-            else:
-                # single_arm인 경우 arm_home[0]이 [j1, j2, j3, j4, j5, j6] 형태
-                self.ik_solver.reset_state(arm_home)
+
+            with self.ik_lock:
+                # dual_arm인 경우 arm_home은 [[left], [right]] 형태이므로 평탄화(flatten) 필요
+                if self.role == 'dual_arm':
+                    flat_arm_home = []
+                    for joints in arm_home:
+                        flat_arm_home.extend(joints)
+                    self.ik_solver.reset_state(flat_arm_home)
+                else:
+                    self.ik_solver.reset_state(arm_home)

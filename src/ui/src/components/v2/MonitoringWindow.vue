@@ -21,11 +21,11 @@
                 <div class="full-height border-white bg-dark border-rounded flex flex-center" v-else>
                     <q-btn round flat icon="play_arrow" text-color="white" size="xl" @click="sensor.handler.startSensor(sensor)"></q-btn>
                 </div>
-                <q-chip color="blue-10" text-color="white" class="absolute-top-left" style="top: 20px; left: 15px">{{ sensor.name }} sensor</q-chip>
+                <q-chip color="blue-10" text-color="white" class="absolute-top-left" style="top: 20px; left: 15px">{{ sensor.name }} {{ $t('sensorSuffix') }}</q-chip>
             </div>
         </div>
         <div v-else class="col-6 q-py-sm">
-            <div class="text-white border-rounded border-white bg-dark full-height flex flex-center">No sensors available. Please add sensors to the workspace.</div>
+            <div class="text-white border-rounded border-white bg-dark full-height flex flex-center">{{ $t('noSensorsMsg') }}</div>
         </div>
         <div class="col-5 row q-gutter-x-sm" v-if="robots.length > 0">
             <div v-for="robot in robots" :key="robot.id" class="col column q-pa-md relative-position border-rounded border-white text-white cursor-pointer"
@@ -36,9 +36,9 @@
                     @click="focusSensorRobot(robot, 'robot')"
                 >
                 <div v-for="(j, i) in robot.joint_names" :key="i" class="col flex flex-center q-gutter-x-md">
-                    <div class="border-rounded border-white q-px-md q-py-xs text-center">{{ j }} {{ robot.jointState ? robot.jointState[i]?.toFixed(4) : 'Unreadable' }}</div>
+                    <div class="border-rounded border-white q-px-md q-py-xs text-center">{{ j }} {{ robot.jointState ? robot.jointState[i]?.toFixed(4) : $t('unreadable') }}</div>
                     <q-icon name="arrow_forward"></q-icon>
-                    <div class="border-rounded border-primary q-px-md q-py-xs text-center text-primary">{{ j }} {{ robot.jointAction ? robot.jointAction[i]?.toFixed(4) : 'Unreadable' }}</div>
+                    <div class="border-rounded border-primary q-px-md q-py-xs text-center text-primary">{{ j }} {{ robot.jointAction ? robot.jointAction[i]?.toFixed(4) : $t('unreadable') }}</div>
                 </div>
                 <q-btn
                     class="absolute-center q-mb-md q-mr-md"
@@ -50,14 +50,14 @@
                     @click="robot.handler.startRobot(robot)"
                     v-if="robot.status === 'off'"
                 ></q-btn>
-                <q-chip color="green-10" text-color="white" class="absolute-top-left" style="top: 20px; left: 15px">{{ robot.name }} body</q-chip>
+                <q-chip color="green-10" text-color="white" class="absolute-top-left" style="top: 20px; left: 15px">{{ robot.name }} {{ $t('robotSuffix') }}</q-chip>
             </div>
         </div>
         <div v-else class="col-5 border-rounded border-white bg-dark flex flex-center">
-            <div class="text-white">No robots available. Please add robots to the workspace.</div>
+            <div class="text-white">{{ $t('noRobotsMsg') }}</div>
         </div>
         <div class="flex flex-center col" v-if="!isRobotSensorAllOn">
-            <div class="text-yellow">Start all sensors and robots to view live data streams.</div>
+            <div class="text-yellow">{{ $t('startAllDevices') }}</div>
         </div>
         <div class="col q-py-sm" v-else>
             <div v-if="selectedEpisode.name && selectedDatasetId">
@@ -78,11 +78,30 @@
                             ></q-btn>
                         </div>
                         <q-space class="col"></q-space>
-                        <div>
+                        <div class="row items-center q-gutter-x-sm">
+                            <template v-if="status === 'pending'">
+                                <span class="text-caption text-grey">{{ $t('replayActionType') }}:</span>
+                                <q-radio
+                                    v-model="replayActionType"
+                                    val="qaction"
+                                    :label="$t('replayActionQaction')"
+                                    dense
+                                    dark
+                                    color="primary"
+                                />
+                                <q-radio
+                                    v-model="replayActionType"
+                                    val="ee_delta_action"
+                                    :label="$t('replayActionEeDelta')"
+                                    dense
+                                    dark
+                                    color="primary"
+                                />
+                            </template>
                             <q-btn
                                 color="red"
                                 text-color="white"
-                                label="Play"
+                                :label="$t('replayPlay')"
                                 icon="play_arrow"
                                 @click="startReplay"
                                 v-if="status === 'pending'"
@@ -90,7 +109,7 @@
                             <q-btn
                                 color="white"
                                 text-color="red"
-                                label="Stop"
+                                :label="$t('replayStop')"
                                 icon="stop"
                                 @click="stopReplay"
                                 v-else
@@ -123,7 +142,7 @@
                             outlined
                             dark
                             bg-color="dark"
-                            label="Frequency (Hz)"
+                            :label="$t('frequencyHz')"
                         >
                         </q-input>
                     </div>
@@ -131,7 +150,7 @@
                         <q-btn
                             color="red"
                             text-color="white"
-                            label="Start Inference"
+                            :label="$t('startInference')"
                             icon="play_arrow"
                             @click="startInference"
                             v-if="status === 'pending'"
@@ -153,7 +172,7 @@
                     <q-btn
                         color="white"
                         text-color="red"
-                        label="Stop Inference"
+                        :label="$t('stopInference')"
                         icon="stop"
                         @click="stopInference"
                     ></q-btn>
@@ -167,7 +186,7 @@
                         outlined
                         dark
                         bg-color="dark"
-                        label="Select Dataset for Data Collection"
+                        :label="$t('selectDataset')"
                         style="width: 200px"
                         :options="datasets"
                         option-label="name"
@@ -176,28 +195,66 @@
                         emit-value
                     ></q-select>
                     <q-space></q-space>
-                    <div class="q-mr-md">Teleoparation Type: </div>
+                    <div class="q-mr-md">{{ $t('teleoperationType') }}</div>
                     <div class="q-gutter-sm q-mr-xl">
                         <q-radio dark v-model="teleType" val="leader" :label="$t('leaderTele')" />
                         <q-radio dark v-model="teleType" val="keyboard" :label="$t('keyboardTele')" />
                         <q-radio dark v-model="teleType" val="externel" :label="$t('externalTele')" />
+                        <q-radio dark v-model="teleType" val="vive_external" :label="$t('viveTele')" :disable="!isSingleArm">
+                            <q-tooltip v-if="!isSingleArm">{{ $t('viveOnlySingleArm') }}</q-tooltip>
+                        </q-radio>
                     </div>
                     <q-btn
                         color="red"
                         icon="fiber_manual_record"
                         text-color="white"
-                        label="REC"
+                        :label="$t('rec')"
                         @click="startDataCollection"
                     >
-                        <q-badge 
-                            @click.stop="moveHomposeInDataCollection = !moveHomposeInDataCollection" 
+                        <q-badge
+                            @click.stop="moveHomposeInDataCollection = !moveHomposeInDataCollection"
                             :color="moveHomposeInDataCollection ? 'blue' : 'grey-5'"
                             floating>
                             <q-icon name="home" size="xs" class="cursor-pointer" />
                         </q-badge>
                     </q-btn>
                 </div>
+                <div class="row flex flex-center full-height" v-else-if="viveInitializing">
+                    <q-spinner-dots color="primary" size="2em" class="q-mr-md" />
+                    <div class="text-white q-mr-lg">{{ $t('viveWaiting') }}</div>
+                    <q-btn
+                        color="white"
+                        text-color="red"
+                        :label="$t('cancel')"
+                        icon="close"
+                        @click="cancelViveInit"
+                    ></q-btn>
+                </div>
+                <div class="row flex flex-center full-height" v-else-if="movingHomepose">
+                    <q-spinner-dots color="primary" size="2em" class="q-mr-md" />
+                    <div class="text-white q-mr-lg">{{ $t('movingToHomepose') }}</div>
+                    <q-btn
+                        color="white"
+                        text-color="red"
+                        :label="$t('stopCollection')"
+                        icon="stop"
+                        @click="stopDataCollection"
+                    ></q-btn>
+                </div>
                 <div class="row flex flex-center full-height" v-else>
+                    <q-input
+                        v-if="teleType === 'keyboard'"
+                        v-model.number="eeStepSize"
+                        dense
+                        outlined
+                        dark
+                        bg-color="dark"
+                        label="Step Size"
+                        type="number"
+                        step="0.0001"
+                        style="width: 140px"
+                        class="q-mr-md"
+                    />
                     <div class="col q-pr-md">
                         <q-linear-progress
                             :value="collectingProgress"
@@ -213,31 +270,66 @@
                     </div>
 
                     <q-btn
+                        color="green"
+                        text-color="white"
+                        :label="$t('completeEpisode')"
+                        icon="check"
+                        @click="completeEpisode"
+                        class="q-mr-sm"
+                    ></q-btn>
+                    <q-btn
                         color="white"
                         text-color="red"
-                        label="STOP"
+                        :label="$t('stopCollection')"
                         icon="stop"
                         @click="stopDataCollection"
                     ></q-btn>
                 </div>
             </div>
         </div>
+
+        <!-- Vive 모드 선택 다이얼로그 (v-if 체인 외부) -->
+        <q-dialog v-model="viveRobotDialog" persistent>
+            <q-card dark style="min-width: 360px">
+                <q-card-section>
+                    <div class="text-h6">{{ $t('viveRobotDialogTitle') }}</div>
+                    <div class="text-body2 q-mt-sm text-grey-4">{{ $t('viveRobotDialogMsg') }}</div>
+                </q-card-section>
+                <q-card-actions align="center" class="q-pb-md q-gutter-sm">
+                    <q-btn
+                        color="primary"
+                        outline
+                        :label="$t('viveWithRobot')"
+                        icon="smart_toy"
+                        @click="confirmViveMode('vive_external')"
+                    />
+                    <q-btn
+                        color="white"
+                        outline
+                        :label="$t('viveWithoutRobot')"
+                        icon="videocam"
+                        @click="confirmViveMode('vive_only')"
+                    />
+                </q-card-actions>
+            </q-card>
+        </q-dialog>
+
         <div style="position: fixed; bottom: 20px; left: 20px; z-index: 1000;">
             <q-btn
                 push
                 color="white"
-                label="Terminal"
+                :label="$t('terminal')"
                 text-color="dark"
                 @click="showProcessConsole = !showProcessConsole"
                 style=""
             />
             <process-console
-                process="record_episode"
+                :process="status === 'testing' ? 'checkpoint_test' : 'record_episode'"
                 class="q-mt-md"
                 style="border: 1px solid #ffffff; background-color: #1e1e1e; z-index: 1000; width: 800px; height: 400px;"
                 v-show="showProcessConsole"
             >
-            </process-console> 
+            </process-console>
         </div>
         <div style="position: fixed; top: 10px; right: 20px; z-index: 10000; width: 600px" 
                 v-if="selectedEpisode.name && selectedDatasetId"
@@ -256,20 +348,32 @@
                 :path="`${selectedDatasetId}/${selectedEpisode.name}`"
             ></hdf5-viewer>
         </div>
+        <!-- Inference Settings Dialog -->
+        <form-dialog
+            v-model="showInferenceDialog"
+            :title="$t('inferenceSettings')"
+            :form="inferenceForm"
+            :ok-button-label="$t('startInference')"
+            min-width="380px"
+            @submit="onInferenceSubmit"
+        />
     </div>
 </template>
 
 <script setup>
-import { defineProps, ref, computed, defineModel, onMounted } from 'vue';
+import { defineProps, ref, computed, defineModel, onMounted, onUnmounted } from 'vue';
 import { Notify } from 'quasar';
+import { useI18n } from 'vue-i18n';
 import { api } from 'src/boot/axios';
 import ProcessConsole from './ProcessConsole.vue';
 import { useSocket } from 'src/composables/useSocket.js';
 import WebRtcVideo from './WebRtcVideo.vue';
 import Hdf5Viewer from 'src/components/v2/Hdf5Viewer.vue';
+import FormDialog from './FormDialog.vue';
 
 
 const { socket } = useSocket();
+const { t } = useI18n();
 
 const props = defineProps({
     workspace: {
@@ -314,11 +418,21 @@ const selectedEpisode = defineModel('selectedEpisode', {
     type: Object,
     default: {}
 });
+const replayActionType = ref('qaction');
 const checkpoint = computed(() => {
     return props.checkpoints?.find(c => c.id === selectedCheckpointId.value);
 });
 
 const teleType = ref('leader')
+const viveInitializing = ref(false)
+const viveRobotDialog = ref(false)
+
+const isSingleArm = computed(() => {
+    const armRobots = props.robots.filter(r => r.role === 'single_arm');
+    const hasDualArm = props.robots.some(r => r.role === 'dual_arm');
+    return armRobots.length >= 1 && !hasDualArm;
+});
+
 const isRobotSensorAllOn = computed(() => {
     const allRobotsOn = props.robots.every(r => r.status === 'on');
     const allSensorsOn = props.sensors.every(s => s.status === 'on');
@@ -345,17 +459,35 @@ const collectingProgress = ref(0);
 const showProcessConsole = ref(false);
 
 const moveHomposeInDataCollection = ref(false);
+const movingHomepose = ref(false);
 
 function startDataCollection() {
     if (!selectedDatasetId.value) {
         Notify.create({
             color: 'negative',
-            message: 'Please select a dataset for data collection'
+            message: t('selectDatasetRequired')
         });
         return;
     }
-    if (teleType.value === 'keyboard') {
+    // vive_external 선택 시: 실물 로봇 여부를 다이얼로그로 확인
+    if (teleType.value === 'vive_external') {
+        viveRobotDialog.value = true;
+        return;
+    }
+    _doStartDataCollection(teleType.value);
+}
+
+function confirmViveMode(effectiveTeleType) {
+    viveRobotDialog.value = false;
+    _doStartDataCollection(effectiveTeleType);
+}
+
+function _doStartDataCollection(effectiveTeleType) {
+    if (effectiveTeleType === 'keyboard') {
         addKeyboardListener();
+    }
+    if (effectiveTeleType === 'vive_external' || effectiveTeleType === 'vive_only') {
+        viveInitializing.value = true;
     }
     showProcessConsole.value = true;
     collectingProgress.value = 0;
@@ -363,15 +495,23 @@ function startDataCollection() {
         task: props.workspace,
         robots: props.robots,
         sensors: props.sensors,
-        tele_type: teleType.value,
+        tele_type: effectiveTeleType,
         assembly_id: props.workspace.assembly_id,
         move_homepose: moveHomposeInDataCollection.value,
     }).catch((error) => {
+        viveInitializing.value = false;
         console.error('Error starting data collection:', error);
         Notify.create({
             color: 'negative',
-            message: 'Error starting data collection'
+            message: t('errorStartCollection')
         });
+    });
+}
+
+function cancelViveInit() {
+    viveInitializing.value = false;
+    api.post(`/dataset/${selectedDatasetId.value}/:stop_collection`).then(() => {
+        collectingProgress.value = 0;
     });
 }
 
@@ -431,17 +571,50 @@ function removeKeyboardListener() {
     window.removeEventListener('keydown', keyboardHandler);
 }
 
+function completeEpisode() {
+    api.post(`/dataset/${selectedDatasetId.value}/:complete_episode`).catch((error) => {
+        console.error('Error completing episode:', error);
+        Notify.create({
+            color: 'negative',
+            message: t('errorCompleteEpisode'),
+        });
+    });
+}
+
 function stopDataCollection() {
     if (teleType.value === 'keyboard') {
         removeKeyboardListener();
     }
+    viveInitializing.value = false;
+    movingHomepose.value = false;
     api.post(`/dataset/${selectedDatasetId.value}/:stop_collection`).then(() => {
         collectingProgress.value = 0;
     })
 }
 
 const hz = ref(10);
+const showInferenceDialog = ref(false);
+const inferenceForm = ref([
+    {
+        key: 're_inference_steps',
+        label: t('reInferenceSteps'),
+        type: 'number',
+        value: 1,
+    },
+    {
+        key: 'temporal_ensemble_coeff',
+        label: t('temporalEnsembleCoeff'),
+        type: 'number',
+        value: 0.01,
+        show: (form) => form.find(f => f.key === 're_inference_steps')?.value === 1,
+    },
+]);
+
 function startInference() {
+    showInferenceDialog.value = true;
+}
+
+function onInferenceSubmit(formData) {
     showProcessConsole.value = true;
     api.post(`/checkpoint/${selectedCheckpointId.value}/:start_test`, {
         task: props.workspace,
@@ -451,11 +624,13 @@ function startInference() {
         checkpoint: checkpoint.value,
         move_homepose: moveHomposeInDataCollection.value,
         hz: hz.value,
+        re_inference_steps: formData.re_inference_steps,
+        temporal_ensemble_coeff: formData.re_inference_steps === 1 ? formData.temporal_ensemble_coeff : null,
     }).catch((error) => {
         console.error('Error starting test:', error);
         Notify.create({
             color: 'negative',
-            message: 'Error starting test'
+            message: t('errorStartTest')
         });
     });
 }
@@ -465,7 +640,7 @@ function stopInference() {
         console.error('Error stopping test:', error);
         Notify.create({
             color: 'negative',
-            message: 'Error stopping test'
+            message: t('errorStopTest')
         });
     });
 }
@@ -476,11 +651,12 @@ function startReplay() {
         robot_ids: props.robots.map(r => r.id),
         sensors: props.sensors,
         task: props.workspace,
+        action_type: replayActionType.value,
     }).catch((error) => {
         console.error('Error starting replay:', error);
         Notify.create({
             color: 'negative',
-            message: 'Error starting replay'
+            message: t('errorStartReplay')
         });
     });
 }
@@ -490,7 +666,7 @@ function stopReplay() {
         console.error('Error stopping replay:', error);
         Notify.create({
             color: 'negative',
-            message: 'Error stopping replay'
+            message: t('errorStopReplay')
         });
     });
 }
@@ -501,12 +677,20 @@ onMounted(() => {
 
     socket.on('stop_process', (data) => {
         if (data.id === 'record_episode') {
+            if (data.episode_saved) {
+                Notify.create({
+                    color: 'positive',
+                    message: t('episodeSaved'),
+                });
+            }
             collectingProgress.value = 0;
+            viveInitializing.value = false;
+            movingHomepose.value = false;
         }
         if (data.id === 'checkpoint_test') {
             Notify.create({
                 color: 'positive',
-                message: 'Inference stopped'
+                message: t('inferenceStopped')
             });
         }
     });
@@ -514,5 +698,26 @@ onMounted(() => {
     socket.on('record_episode_progress', (data) => {
         collectingProgress.value = data.progress;
     });
+
+    socket.on('moving_homepose', (data) => {
+        movingHomepose.value = data.moving;
+    });
+
+    socket.on('vive_node_ready', () => {
+        viveInitializing.value = false;
+    });
+
+    socket.on('vive_node_error', (data) => {
+        viveInitializing.value = false;
+        Notify.create({
+            color: 'negative',
+            message: `${t('viveConnectFail')}: ${data?.message || t('unreadable')}`,
+        });
+    });
+});
+
+onUnmounted(() => {
+    socket.off('vive_node_ready');
+    socket.off('vive_node_error');
 });
 </script>

@@ -16,6 +16,65 @@ from ..lerobot.configs.types import PolicyFeature, FeatureType
 from torchvision import transforms
 from transformers import AutoImageProcessor
 from PIL import Image
+from scipy.spatial.transform import Rotation
+
+
+def delta_to_relative_trajectory(deltas: np.ndarray) -> np.ndarray:
+    """UMI 방식의 relative trajectory 라벨로 변환.
+
+    deltas: [T, D] sequential ee_delta. 앞 6차원은 [dx, dy, dz, dax, day, daz],
+            7차원 이후는 tool joint (absolute 값)으로 변환 없이 그대로 유지.
+    반환값: [T, D] 각 row i = 현재 위치 기준 i+1 step 후의 누적 displacement + tool
+
+    UMI 방식: action[i] = T_now→t+i+1 (현재 pose 기준 절대 상대 위치)
+    모든 waypoint가 동일한 기준점(현재 EE)에서 독립적으로 계산되므로
+    오차가 누적되지 않음.
+    """
+    T = len(deltas)
+    relative = np.zeros_like(deltas)
+
+    # Translation: 단순 누적합
+    relative[:, :3] = np.cumsum(deltas[:, :3], axis=0)
+
+    # Rotation (axis-angle): proper 회전 합성
+    cumulative = Rotation.identity()
+    for i in range(T):
+        cumulative = cumulative * Rotation.from_rotvec(deltas[i, 3:6])
+        relative[i, 3:6] = cumulative.as_rotvec()
+
+    # Tool 차원 (6 이후): absolute 값이므로 변환 없이 그대로 복사
+    if deltas.shape[1] > 6:
+        relative[:, 6:] = deltas[:, 6:]
+
+    return relative
+
+
+def relative_trajectory_to_delta(waypoints: np.ndarray) -> np.ndarray:
+    """relative trajectory → sequential delta 역변환 (inference 시 사용).
+
+    waypoints: [T, D] relative trajectory. 앞 6차원은 (T_now→t+i),
+               7차원 이후는 tool joint (absolute 값)으로 변환 없이 그대로 유지.
+    반환값: [T, D] sequential deltas + tool
+    """
+    T = len(waypoints)
+    deltas = np.zeros_like(waypoints)
+
+    # Translation: 연속 차분
+    deltas[0, :3] = waypoints[0, :3]
+    deltas[1:, :3] = np.diff(waypoints[:, :3], axis=0)
+
+    # Rotation: 연속 회전 차분
+    deltas[0, 3:6] = waypoints[0, 3:6]
+    for i in range(1, T):
+        r_prev = Rotation.from_rotvec(waypoints[i - 1, 3:6])
+        r_curr = Rotation.from_rotvec(waypoints[i, 3:6])
+        deltas[i, 3:6] = (r_prev.inv() * r_curr).as_rotvec()
+
+    # Tool 차원: 그대로 복사
+    if waypoints.shape[1] > 6:
+        deltas[:, 6:] = waypoints[:, 6:]
+
+    return deltas
 
 
 
@@ -24,7 +83,7 @@ e = IPython.embed
 
 
 class EpisodicDataset(torch.utils.data.Dataset):
-    def __init__(self, episode_ids, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone='resnet18', n_obs_steps=1):
+    def __init__(self, episode_ids, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone='resnet18', n_obs_steps=1, action_key='qaction', use_relative_trajectory=False):
         super(EpisodicDataset).__init__()
         self.episode_ids = episode_ids
         self.dataset_dir = dataset_dir
@@ -34,6 +93,8 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self.n_obs_steps = n_obs_steps
         self.policy_type = policy_type
         self.vision_backbone = vision_backbone
+        self.action_key = action_key
+        self.use_relative_trajectory = use_relative_trajectory
         self.info = None
         self.__getitem__(0) # initialize self.is_sim
 
@@ -49,16 +110,33 @@ class EpisodicDataset(torch.utils.data.Dataset):
             # is_sim = root.attrs['sim']
 
             action_dim = 0
-            for key in root['qaction'].keys():
-                episode_len = root['qaction'][key].shape[0]
-                action_dim += root['qaction'][key].shape[1]
+            is_mixed = (self.action_key == 'ee_delta_action')
+            if is_mixed:
+                ee_robots = set(root['ee_delta_action'].keys()) if 'ee_delta_action' in root else set()
+                for robot_key in root['qaction'].keys():
+                    src = root['ee_delta_action'] if robot_key in ee_robots else root['qaction']
+                    item = src[robot_key]
+                    leaves = list(item.values()) if isinstance(item, h5py.Group) else [item]
+                    for leaf in leaves:
+                        episode_len = leaf.shape[0]
+                        action_dim += leaf.shape[1]
+            else:
+                for key in root[self.action_key].keys():
+                    item = root[self.action_key][key]
+                    leaves = list(item.values()) if isinstance(item, h5py.Group) else [item]
+                    for leaf in leaves:
+                        episode_len = leaf.shape[0]
+                        action_dim += leaf.shape[1]
 
             original_action_shape = (self.chunk_size, action_dim)
 
-            language_instruction = root['language_instruction'][()]
-            if isinstance(language_instruction, bytes):
-                language_instruction = language_instruction.decode('utf-8')
-                
+            if 'language_instruction' in root:
+                language_instruction = root['language_instruction'][()]
+                if isinstance(language_instruction, bytes):
+                    language_instruction = language_instruction.decode('utf-8')
+            else:
+                language_instruction = ''
+
             if sample_full_episode:
                 start_ts = 0
             else:
@@ -67,8 +145,13 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
             obs_step_start = start_ts - self.n_obs_steps + 1
             qpos = []
-            for i in range(self.n_obs_steps):
-                qpos.append(get_concatenated_pos(root['/observations/qpos'], target_id=obs_step_start + i))
+            if is_mixed:
+                for i in range(self.n_obs_steps):
+                    qpos.append(get_concatenated_mixed_pos(root, '/observations/ee_delta', '/observations/qpos', target_id=obs_step_start + i))
+            else:
+                obs_state_path = '/observations/qpos'
+                for i in range(self.n_obs_steps):
+                    qpos.append(get_concatenated_pos(root[obs_state_path], target_id=obs_step_start + i))
 
             image_dict = dict()
             for sensor_id in self.sensor_ids:
@@ -77,13 +160,19 @@ class EpisodicDataset(torch.utils.data.Dataset):
                     image_dict[f"sensor_{sensor_id}"].append(root[f'/observations/images/sensor_{sensor_id}'][obs_step_start + i])
 
 
-            action = get_concatenated_pos(root['qaction'], target_id=None, target_range=[start_ts, min(episode_len, end_ts)])
+            if is_mixed:
+                action = get_concatenated_mixed_pos(root, 'ee_delta_action', 'qaction', target_id=None, target_range=[start_ts, min(episode_len, end_ts)])
+            else:
+                action = get_concatenated_pos(root[self.action_key], target_id=None, target_range=[start_ts, min(episode_len, end_ts)])
             
             action_len = min(self.chunk_size, episode_len - start_ts) # hack, to make timesteps more aligned
 
         padded_action = np.zeros(original_action_shape, dtype=np.float32)
 
-        padded_action[:action_len] = action
+        if self.use_relative_trajectory and self.action_key == 'ee_delta_action':
+            padded_action[:action_len] = delta_to_relative_trajectory(action[:action_len])
+        else:
+            padded_action[:action_len] = action
         is_pad = np.zeros(self.chunk_size)
         is_pad[action_len:] = 1
 
@@ -141,37 +230,45 @@ def process_image(image, vision_backbone='resnet18', to_cuda=False):
     return image.cuda() if to_cuda else image  # Add batch dimension
 
 
-def get_norm_stats(dataset_dir, num_episodes):
+def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative_trajectory=False):
     all_qpos_data = []
     all_action_data = []
     # episode 길이 관련 코드 수정
     observation_image_keys = []
     cnt = 0
+    is_mixed = (action_key == 'ee_delta_action')
     for episode_idx in range(num_episodes):
         dataset_path = os.path.join(dataset_dir, f'episode_{episode_idx}.hdf5')
         with h5py.File(dataset_path, 'r') as root:
-            qpos = get_concatenated_pos(root['/observations/qpos'])
-            action = get_concatenated_pos(root['qaction'])
+            if is_mixed:
+                qpos = get_concatenated_mixed_pos(root, '/observations/ee_delta', '/observations/qpos')
+                action = get_concatenated_mixed_pos(root, 'ee_delta_action', 'qaction')
+            else:
+                qpos = get_concatenated_pos(root['/observations/qpos'])
+                action = get_concatenated_pos(root[action_key])
+            if use_relative_trajectory and action_key == 'ee_delta_action':
+                action = delta_to_relative_trajectory(action)
             observation_image_keys = list(root['/observations/images'].keys())
         
         cnt += qpos.shape[0]
         all_qpos_data.append(torch.from_numpy(qpos))
         all_action_data.append(torch.from_numpy(action))
-    all_qpos_data = torch.stack(all_qpos_data)
-    all_action_data = torch.stack(all_action_data)
+    # 에피소드 길이가 다를 수 있으므로 cat으로 합침
+    all_qpos_data = torch.cat(all_qpos_data, dim=0)     # (total_steps, dim)
+    all_action_data = torch.cat(all_action_data, dim=0)  # (total_steps, dim)
 
     # normalize action data
-    action_min = all_action_data.view(-1, action.shape[-1]).min(dim=0)[0]
-    action_max = all_action_data.view(-1, action.shape[-1]).max(dim=0)[0]
-    action_mean = all_action_data.mean(dim=[0, 1], keepdim=True)
-    action_std = all_action_data.std(dim=[0, 1], keepdim=True)
+    action_min = all_action_data.min(dim=0)[0]
+    action_max = all_action_data.max(dim=0)[0]
+    action_mean = all_action_data.mean(dim=0, keepdim=True)
+    action_std = all_action_data.std(dim=0, keepdim=True)
     action_std = torch.clip(action_std, 1e-2, np.inf) # clipping
 
     # normalize qpos data
-    qpos_min = all_qpos_data.view(-1, qpos.shape[-1]).min(dim=0)[0]
-    qpos_max = all_qpos_data.view(-1, qpos.shape[-1]).max(dim=0)[0]
-    qpos_mean = all_qpos_data.mean(dim=[0, 1], keepdim=True)
-    qpos_std = all_qpos_data.std(dim=[0, 1], keepdim=True)
+    qpos_min = all_qpos_data.min(dim=0)[0]
+    qpos_max = all_qpos_data.max(dim=0)[0]
+    qpos_mean = all_qpos_data.mean(dim=0, keepdim=True)
+    qpos_std = all_qpos_data.std(dim=0, keepdim=True)
     qpos_std = torch.clip(qpos_std, 1e-2, np.inf) # clipping
 
     stats = {
@@ -209,24 +306,51 @@ def get_norm_stats(dataset_dir, num_episodes):
 
 
 def get_concatenated_pos(pos_path, target_id=None, target_range=None):
+    """robot_N 키 아래 dataset이 있거나, robot_N/ee_name 처럼 한 단계 더 nested된 구조 모두 처리."""
     pos_list = []
     for key in pos_path.keys():
-        if target_id is None and target_range is None:
-            pos_list.append(pos_path[key][()])
-            if len(pos_list) > 0:
-                pos = np.concatenate(pos_list, axis=1)
-        elif target_range is None:
-            pos_list.append(pos_path[key][target_id])
-            if len(pos_list) > 0:
-                pos = np.concatenate(pos_list, axis=0)
+        item = pos_path[key]
+        leaves = list(item.values()) if isinstance(item, h5py.Group) else [item]
+        for leaf in leaves:
+            if target_id is None and target_range is None:
+                pos_list.append(leaf[()])
+            elif target_range is None:
+                pos_list.append(leaf[target_id])
+            else:
+                pos_list.append(leaf[target_range[0]:target_range[1]])
+    if not pos_list:
+        return np.array([])
+    axis = 0 if (target_range is None and target_id is not None) else 1
+    return np.concatenate(pos_list, axis=axis)
+
+
+def get_concatenated_mixed_pos(root, primary_path, fallback_path, target_id=None, target_range=None):
+    """ee_delta_action 학습 시, single_arm은 primary_path(ee_delta_action/ee_delta)에서,
+    tool은 fallback_path(qaction/qpos)에서 읽어 concatenate."""
+    primary_robots = set(root[primary_path].keys()) if primary_path in root else set()
+
+    pos_list = []
+    for robot_key in root[fallback_path].keys():
+        if robot_key in primary_robots:
+            item = root[primary_path][robot_key]
         else:
-            pos_list.append(pos_path[key][target_range[0]:target_range[1]])
-            if len(pos_list) > 0:
-                pos = np.concatenate(pos_list, axis=1)
-    return pos
+            item = root[fallback_path][robot_key]
+
+        leaves = list(item.values()) if isinstance(item, h5py.Group) else [item]
+        for leaf in leaves:
+            if target_id is None and target_range is None:
+                pos_list.append(leaf[()])
+            elif target_range is None:
+                pos_list.append(leaf[target_id])
+            else:
+                pos_list.append(leaf[target_range[0]:target_range[1]])
+    if not pos_list:
+        return np.array([])
+    axis = 0 if (target_range is None and target_id is not None) else 1
+    return np.concatenate(pos_list, axis=axis)
 
 
-def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_train, batch_size_val, chunk_size, vision_backbone='resnet18', num_workers=1, n_obs_steps=1):
+def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_train, batch_size_val, chunk_size, vision_backbone='resnet18', num_workers=1, n_obs_steps=1, action_key='qaction', use_relative_trajectory=False):
     print(f'\nData from: {dataset_dir}\n')
     # obtain train test split
     train_ratio = 0.8
@@ -235,13 +359,13 @@ def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_tra
     val_indices = shuffled_indices[int(train_ratio * num_episodes):]
 
     # obtain normalization stats for qpos and action
-    norm_stats = get_norm_stats(dataset_dir, num_episodes)
+    norm_stats = get_norm_stats(dataset_dir, num_episodes, action_key=action_key, use_relative_trajectory=use_relative_trajectory)
 
     # construct dataset and dataloader
-    train_dataset = EpisodicDataset(train_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps)
-    val_dataset = EpisodicDataset(val_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps)
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train, shuffle=True, pin_memory=True, num_workers=num_workers, prefetch_factor=1)
-    val_dataloader = DataLoader(val_dataset, batch_size=batch_size_val, shuffle=True, pin_memory=True, num_workers=num_workers, prefetch_factor=1)
+    train_dataset = EpisodicDataset(train_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory)
+    val_dataset = EpisodicDataset(val_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory)
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train, shuffle=True, pin_memory=True, num_workers=num_workers)
+    val_dataloader = DataLoader(val_dataset, batch_size=batch_size_val, shuffle=True, pin_memory=True, num_workers=num_workers)
 
     input_features = {k: v for k, v in train_dataset.info.items() if k.startswith("observation")}
     output_features = {k: v for k, v in train_dataset.info.items() if k.startswith("action")}
