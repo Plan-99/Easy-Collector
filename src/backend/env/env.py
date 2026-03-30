@@ -82,6 +82,8 @@ class Env:
                 'qpos': qpos,
                 'qaction': qaction,
                 'eepos': agent.get_ee_position(),
+                'qvel': agent.get_joint_vel(),
+                'qeffort': agent.get_joint_effort(),
             }
         return robot_state_dict
     

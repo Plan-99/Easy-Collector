@@ -64,6 +64,10 @@ def train(
     del train_settings['batch_size'] # Remove batch_size from train_settings
     del train_settings['num_workers'] # Remove num_workers from train_settings
     train_settings.pop('action_type', None) # Remove action_type (not a policy config param)
+    train_settings.pop('has_succeed', None) # Remove has_succeed (not a policy config param)
+    train_settings.pop('use_relative_trajectory', None) # Remove use_relative_trajectory (not a policy config param)
+    policy_settings.pop('action_type', None) # Remove action_type (not a policy config param)
+    policy_settings.pop('obs_state_keys', None) # Remove obs_state_keys (not a policy config param)
 
     
     if policy_obj['type'] == 'ACT':
@@ -221,9 +225,15 @@ def main(args):
         checkpoint = checkpoint.to_dict()
 
         batch_size = checkpoint['train_settings']['batch_size']
-        action_key = checkpoint['train_settings'].get('action_type', 'qaction')
+        action_key = policy['settings'].get('action_type', 'qaction')
+        obs_state_keys = policy['settings'].get('obs_state_keys', ['qpos'])
         use_relative_trajectory = checkpoint['train_settings'].get('use_relative_trajectory', False)
-        sensor_ids = task['sensor_ids']
+        # task settings에 설정된 센서만 학습에 사용
+        sensor_settings = task.get('settings', {}).get('sensors', {})
+        if sensor_settings:
+            sensor_ids = [sid for sid in task['sensor_ids'] if str(sid) in sensor_settings]
+        else:
+            sensor_ids = task['sensor_ids']
         if policy['type'] in ['ACT', 'VLAsEn']:
             chunk_size = policy['settings']['chunk_size']
             vision_backbone = policy['settings']['vision_backbone']
@@ -237,8 +247,21 @@ def main(args):
         n_obs_steps = policy['settings']['n_obs_steps']  # Default to 1 if not specified
 
 
+        # succeed 플래그 자동 감지: 첫 번째 에피소드에서 확인
+        first_ep = os.path.join(temp_dir, 'episode_0.hdf5')
+        if os.path.exists(first_ep):
+            import h5py as _h5
+            with _h5.File(first_ep, 'r') as _f:
+                _has_succeed = 'succeed' in _f
+            if _has_succeed:
+                ts = checkpoint['train_settings']
+                ts['has_succeed'] = True
+                Checkpoint.find(args.checkpoint_id).update({'train_settings': ts})
+                checkpoint['train_settings']['has_succeed'] = True
+                print('[INFO] succeed flag detected in dataset, saved to train_settings.')
+
         # Load data from the temporary directory
-        train_dataloader, val_dataloader, stats, input_features, output_features = load_data(temp_dir, policy['type'], episode_counter, sensor_ids, batch_size, batch_size, chunk_size, vision_backbone, num_workers, n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory)
+        train_dataloader, val_dataloader, stats, input_features, output_features = load_data(temp_dir, policy['type'], episode_counter, sensor_ids, batch_size, batch_size, chunk_size, vision_backbone, num_workers, n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys)
         # Start the training process
         best_epoch, min_val_loss, best_state_dict = train(
             train_dataloader,

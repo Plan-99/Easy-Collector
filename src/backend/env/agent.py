@@ -25,6 +25,8 @@ class Agent:
         self.js_mutex = threading.Lock()
         self.joint_states = None
         self.joint_actions = None
+        self.joint_vel = None
+        self.joint_effort = None
         self.ee_pos = None
         self.ee_target = None
         self.last_joint_update = None
@@ -578,7 +580,37 @@ class Agent:
                     else:
                         joint_positions.append(0.0)
         return joint_positions
-    
+
+    def get_joint_vel(self):
+        with self.js_mutex:
+            if self.joint_states is None:
+                return [0.0] * self.joint_len
+            if self.read_topic_msg == 'sensor_msgs/JointState' and len(self.joint_states.velocity) > 0:
+                vel = []
+                for joint_name in self.joint_names:
+                    try:
+                        idx = self.joint_states.name.index(joint_name)
+                        vel.append(self.joint_states.velocity[idx] if idx < len(self.joint_states.velocity) else 0.0)
+                    except (ValueError, IndexError):
+                        vel.append(0.0)
+                return vel
+            return [0.0] * self.joint_len
+
+    def get_joint_effort(self):
+        with self.js_mutex:
+            if self.joint_states is None:
+                return [0.0] * self.joint_len
+            if self.read_topic_msg == 'sensor_msgs/JointState' and len(self.joint_states.effort) > 0:
+                effort = []
+                for joint_name in self.joint_names:
+                    try:
+                        idx = self.joint_states.name.index(joint_name)
+                        effort.append(self.joint_states.effort[idx] if idx < len(self.joint_states.effort) else 0.0)
+                    except (ValueError, IndexError):
+                        effort.append(0.0)
+                return effort
+            return [0.0] * self.joint_len
+
     def get_joint_actions(self):
         if self.joint_actions is None:
             return None

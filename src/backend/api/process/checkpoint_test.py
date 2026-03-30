@@ -65,8 +65,10 @@ def checkpoint_test(
         else:
             ckpt_dir = os.path.join("/root/src/backend/checkpoints", str(checkpoint['id']))
 
-        action_key = action_type or checkpoint.get('train_settings', {}).get('action_type', 'qaction')
+        action_key = action_type or policy_obj.get('settings', {}).get('action_type', 'qaction')
+        obs_state_keys = policy_obj.get('settings', {}).get('obs_state_keys', ['qpos'])
         use_relative_trajectory = checkpoint.get('train_settings', {}).get('use_relative_trajectory', False)
+        has_succeed = checkpoint.get('train_settings', {}).get('has_succeed', False)
 
         if policy_obj['type'] == 'ACT':
             policy = ACTPolicy.from_pretrained(ckpt_dir)
@@ -183,12 +185,14 @@ def checkpoint_test(
         for agent in agents:
             if agent.role != 'tool' and agent.ik_solver is not None:
                 prev_qpos_dict[agent.id] = ts.observation['robot_states'][agent.id]['qpos']
+        rel_action_queue = deque()  # relative_ee_pos용 delta action queue
         start = time.time()
         while not task_control['stop']:
             if step_num % episode_len == 0 and step_num != 0 and move_homepose:
                 print(f"Episode finished. Total Reward: {episode_reward:.4f}")
                 episode_reward = 0.0
                 policy.reset()
+                rel_action_queue.clear()
                 if home_pose is not None:
                     for agent in env.agents:
                         agent.move_to(home_pose[str(agent.id)])
@@ -206,54 +210,94 @@ def checkpoint_test(
                 
             # === a. 현재 상태(state_t) 계산 ===
             obs_t = ts.observation
-            with torch.no_grad():
-                # UMI relative trajectory: 매 step마다 현재 EE pose 기준으로 재예측.
-                # temporal ensemble이 다른 기준 frame의 waypoint를 섞지 않도록 policy를 reset.
-                if use_relative_trajectory and action_key == 'ee_delta_action':
-                    policy.reset()
-                if action_key == 'ee_delta_action':
-                    # single_arm: 실제 EE 포즈 변화량 (closed-loop) + tool qpos, tool-only: 현재 qpos
-                    obs_parts = []
-                    for agent in env.agents:
-                        if agent.role != 'tool' and agent.ik_solver is not None:
-                            current_qpos = obs_t['robot_states'][agent.id]['qpos']
-                            if agent.id in prev_qpos_dict:
-                                fk_delta = agent.compute_fk_delta(current_qpos, prev_qpos_dict[agent.id])
-                                if fk_delta is not None:
-                                    ee_obs = np.concatenate([fk_delta[name] for name in agent.ee_names])
+
+            # relative_ee_pos: queue에 남은 delta가 있으면 추론 없이 꺼내 씀
+            if action_key == 'relative_ee_pos' and len(rel_action_queue) > 0:
+                state_t = rel_action_queue.popleft()
+                print(f"[relative_ee_pos] queue pop ({len(rel_action_queue)} left)")
+            else:
+                with torch.no_grad():
+                    # UMI relative trajectory: 매 step마다 현재 EE pose 기준으로 재예측.
+                    # temporal ensemble이 다른 기준 frame의 waypoint를 섞지 않도록 policy를 reset.
+                    if use_relative_trajectory and action_key == 'ee_delta_action':
+                        policy.reset()
+                    if action_key in ('ee_delta_action', 'relative_ee_pos'):
+                        # single_arm: 실제 EE 포즈 변화량 (closed-loop) + tool qpos, tool-only: 현재 qpos
+                        obs_parts = []
+                        for agent in env.agents:
+                            if agent.role != 'tool' and agent.ik_solver is not None:
+                                current_qpos = obs_t['robot_states'][agent.id]['qpos']
+                                if agent.id in prev_qpos_dict:
+                                    fk_delta = agent.compute_fk_delta(current_qpos, prev_qpos_dict[agent.id])
+                                    if fk_delta is not None:
+                                        ee_obs = np.concatenate([fk_delta[name] for name in agent.ee_names])
+                                    else:
+                                        ee_obs = np.zeros(len(agent.ee_names) * 6)
                                 else:
                                     ee_obs = np.zeros(len(agent.ee_names) * 6)
+                                # tool_inner: tool joint qpos를 proprioception에 append
+                                if agent.tool_inner:
+                                    _, tool_pos = agent.get_joint_and_tool_pos(current_qpos)
+                                    if tool_pos is not None:
+                                        ee_obs = np.concatenate([ee_obs, np.array(tool_pos)])
+                                obs_parts.append(ee_obs)
                             else:
-                                ee_obs = np.zeros(len(agent.ee_names) * 6)
-                            # tool_inner: tool joint qpos를 proprioception에 append
-                            if agent.tool_inner:
-                                _, tool_pos = agent.get_joint_and_tool_pos(current_qpos)
-                                if tool_pos is not None:
-                                    ee_obs = np.concatenate([ee_obs, np.array(tool_pos)])
-                            obs_parts.append(ee_obs)
+                                obs_parts.append(obs_t['robot_states'][agent.id]['qpos'])
+                        qpos_np = np.concatenate(obs_parts)
+                    else:
+                        qpos_np = np.concatenate([item['qpos'] for item in obs_t['robot_states'].values()])
+                    # obs_state_keys에 따라 qvel, qeffort append
+                    extra_obs = []
+                    if 'qvel' in obs_state_keys:
+                        extra_obs.extend([np.array(agent.get_joint_vel()) for agent in env.agents])
+                    if 'qeffort' in obs_state_keys:
+                        extra_obs.extend([np.array(agent.get_joint_effort()) for agent in env.agents])
+                    if extra_obs:
+                        qpos_np = np.concatenate([qpos_np] + extra_obs)
+                    qpos_t = torch.from_numpy(qpos_np).float().cuda().unsqueeze(0)
+                    policy_input_t = {'observation.state': qpos_t}
+                    for sensor in sensors:
+                        image = obs_t['images'][f'sensor_{sensor["id"]}']
+                        sensor_id = str(sensor['id'])
+                        image = fetch_image_with_config(image, {
+                            'resize': task['sensor_img_size'][str(sensor_id)],
+                            'cropped_area': task['sensor_cropped_area'][str(sensor_id)],
+                            'rotate': task['sensor_rotate'][str(sensor_id)]
+                        })
+                        image = process_image(image, vision_backbone, to_cuda=True)
+                        policy_input_t[f'observation.images.sensor_{sensor["id"]}'] = image.unsqueeze(0)
+
+                    if action_key == 'relative_ee_pos':
+                        # full chunk를 한번에 받아서 delta로 변환 후 queue에 넣음
+                        policy.reset()
+                        if hasattr(policy, 'predict_action_chunk'):
+                            # ACT: predict_action_chunk → (1, chunk_size, action_dim)
+                            raw_actions = policy.predict_action_chunk(policy_input_t).squeeze(0)
                         else:
-                            obs_parts.append(obs_t['robot_states'][agent.id]['qpos'])
-                    qpos_np = np.concatenate(obs_parts)
-                else:
-                    qpos_np = np.concatenate([item['qpos'] for item in obs_t['robot_states'].values()])
-                qpos_t = torch.from_numpy(qpos_np).float().cuda().unsqueeze(0)
-                policy_input_t = {'observation.state': qpos_t}
-                for sensor in sensors:
-                    image = obs_t['images'][f'sensor_{sensor["id"]}']
-                    sensor_id = str(sensor['id'])
-                    image = fetch_image_with_config(image, {
-                        'resize': task['sensor_img_size'][str(sensor_id)],
-                        'cropped_area': task['sensor_cropped_area'][str(sensor_id)],
-                        'rotate': task['sensor_rotate'][str(sensor_id)]
-                    })
-                    image = process_image(image, vision_backbone, to_cuda=True)
-                    policy_input_t[f'observation.images.sensor_{sensor["id"]}'] = image.unsqueeze(0)
+                            # Diffusion/PI0 등: select_action이 이미 single action을 반환
+                            # n_action_steps=chunk_size로 설정했으므로 queue를 채운 뒤 전부 꺼냄
+                            raw_list = []
+                            first = policy.select_action(policy_input_t).squeeze(0)
+                            raw_list.append(first)
+                            while len(policy._action_queue if hasattr(policy, '_action_queue') else policy._queues.get('action', [])) > 0:
+                                q = policy._action_queue if hasattr(policy, '_action_queue') else policy._queues['action']
+                                raw_list.append(q.popleft().squeeze(0))
+                            raw_actions = torch.stack(raw_list)
+                        raw_np = raw_actions.cpu().numpy()
+                        print(f"[relative_ee_pos] raw waypoints:\n{raw_np}")
+                        deltas = relative_trajectory_to_delta(raw_np)
+                        print(f"[relative_ee_pos] converted deltas:\n{deltas}")
+                        # 첫 번째 delta는 지금 실행, 나머지는 queue에
+                        state_t = deltas[0]
+                        for i in range(1, len(deltas)):
+                            rel_action_queue.append(deltas[i])
+                        print(f"[relative_ee_pos] new chunk inferred, queue size: {len(rel_action_queue)}")
+                    else:
+                        # relative trajectory 모드: select_action이 반환하는 값은 chunk[0] = T_now→1 = 즉각 delta
+                        state_t = policy.select_action(policy_input_t).squeeze(0).cpu().numpy()
 
-                # relative trajectory 모드: select_action이 반환하는 값은 chunk[0] = T_now→1 = 즉각 delta
-                state_t = policy.select_action(policy_input_t).squeeze(0).cpu().numpy()
-
-                if noise_t_raw is None:
-                    noise_t_raw = np.zeros_like(state_t)
+                    if noise_t_raw is None:
+                        noise_t_raw = np.zeros_like(state_t)
 
             print(state_t)
 
@@ -282,6 +326,13 @@ def checkpoint_test(
                 final_action = state_t
 
             # === c. 로봇 제어 (필터 없이 즉시 반영) ===
+            # succeed 플래그 분리 (action 마지막 1차원)
+            if has_succeed:
+                succeed_val = final_action[-1]
+                final_action = final_action[:-1]
+                print(f"[Succeed] {succeed_val:.4f}")
+                socketio_instance.emit('inference_succeed', {'succeed': bool(succeed_val > 0.5)})
+
             # prev_qpos 갱신: 다음 스텝에서 실제 delta 계산에 사용
             for agent in env.agents:
                 if agent.role != 'tool' and agent.ik_solver is not None:
@@ -289,7 +340,7 @@ def checkpoint_test(
 
             start_action_id = 0
             for agent in env.agents:
-                if action_key == 'ee_delta_action' and agent.role != 'tool' and agent.ik_solver is not None:
+                if action_key in ('ee_delta_action', 'relative_ee_pos') and agent.role != 'tool' and agent.ik_solver is not None:
                     ee_delta_dim = len(agent.ee_names) * 6
                     # tool_inner: ee_delta(6) + tool_abs 차원 추가
                     _, sample_tool = agent.get_joint_and_tool_pos([0.0] * agent.joint_len)

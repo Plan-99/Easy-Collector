@@ -179,6 +179,22 @@
                                             class="full-height bg-secondary"
                                             dark
                                         />
+                                        <q-select
+                                            v-else-if="config.type === 'multiselect'"
+                                            dense
+                                            outlined
+                                            v-model="config.value"
+                                            :options="config.options"
+                                            :label="config.label"
+                                            :readonly="isSettingsReadonly"
+                                            :disable="isSettingsReadonly"
+                                            emit-value
+                                            map-options
+                                            multiple
+                                            use-chips
+                                            class="full-height bg-secondary"
+                                            dark
+                                        />
                                         <q-input
                                             dense
                                             outlined

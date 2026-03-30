@@ -275,6 +275,14 @@ def complete_episode(id):
     task['obj']['episode_complete'] = True
     return {'status': 'success', 'message': 'Episode complete signal sent'}, 200
 
+@dataset_bp.route('/dataset/<id>/:set_succeed', methods=['POST'])
+def set_succeed(id):
+    task = current_app.pm.processes.get('record_episode')
+    if not task or task['type'] != 'function':
+        return {'status': 'error', 'message': 'record_episode is not running'}, 404
+    task['obj']['succeed'] = True
+    return {'status': 'success', 'message': 'Succeed flag set'}, 200
+
 @dataset_bp.route('/dataset/<id>/augment', methods=['POST'])
 def augment_dataset_route(id):
     data = request.json

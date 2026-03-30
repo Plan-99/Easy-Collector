@@ -51,7 +51,7 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                 break
 
             task_control['episode_stop'] = False
-
+            task_control['succeed'] = False
 
             dataset_name = f"episode_{get_auto_index(dataset_dir)}.hdf5"
 
@@ -165,6 +165,7 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                         ts.observation['robot_states'][agent.id]['ee_delta'] = zeros
 
             timesteps = [ts]
+            succeed_flags = [1.0 if task_control.get('succeed') else 0.0]
 
             # 에피소드 시작: vive origin 설정 및 teleop 스레드 시작
             if vive is not None:
@@ -238,8 +239,9 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                             robot_state['ee_delta_action'] = ee_delta
                             robot_state['ee_delta'] = ee_delta
 
+                succeed_flags.append(1.0 if task_control.get('succeed') else 0.0)
                 timesteps.append(ts)
-                
+
                 time.sleep(1.0 / hz)
 
                 if tele_type == 'keyboard':
@@ -276,7 +278,7 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                         image_group.create_dataset(f"sensor_{s_id}", data=np.array(images), dtype='uint8')
 
                     # 2. 로봇 데이터 저장 (None인 값은 자동 스킵 — vive_only 시 전부 None)
-                    obs_keys = ['qpos', 'eepos', 'ee_delta']
+                    obs_keys = ['qpos', 'eepos', 'ee_delta', 'qvel', 'qeffort']
 
                     for agent in agents:
                         a_id = agent.id
@@ -311,13 +313,23 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                                 agent_group = data_group
                                 agent_group.create_dataset(f'robot_{a_id}', data=np.array(series_data))
 
-                    # 3. 기타 메타데이터
+                    # 3. succeed 플래그 저장 (1-step shifted: action과 동일하게 정렬)
+                    succeed_shifted = []
+                    for i in range(len(succeed_flags)):
+                        if i + 1 < len(succeed_flags):
+                            succeed_shifted.append(succeed_flags[i + 1])
+                        else:
+                            succeed_shifted.append(succeed_flags[-1])
+                    root.create_dataset('succeed', data=np.array(succeed_shifted, dtype=np.float32))
+
+                    # 4. 기타 메타데이터
                     root.create_dataset('language_instruction', data=language_instruction if language_instruction else '',
                                     dtype=h5py.string_dtype(encoding='utf-8'))
 
                     time.sleep(1)
 
                 print("Episode recording process ended.")
+                socketio_instance.emit('episode_saved', {'succeed': task_control.get('succeed', False)})
 
             except Exception:
                 import traceback

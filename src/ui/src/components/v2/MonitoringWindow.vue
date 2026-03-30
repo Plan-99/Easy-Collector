@@ -168,6 +168,14 @@
                     class="col q-pa-sm bg-dark border-rounded text-white row flex flex-center"
                     v-else
                 >
+                    <q-icon
+                        v-if="inferenceSucceed"
+                        name="emoji_events"
+                        color="yellow"
+                        size="md"
+                        class="q-mr-sm"
+                    />
+                    <span v-if="inferenceSucceed" class="text-yellow text-bold q-mr-md">SUCCESS</span>
                     <q-space></q-space>
                     <q-btn
                         color="white"
@@ -269,6 +277,15 @@
                         </q-linear-progress>
                     </div>
 
+                    <q-btn
+                        :color="succeedFlag ? 'yellow' : 'blue-grey'"
+                        text-color="white"
+                        label="SUCCESS (C)"
+                        icon="emoji_events"
+                        @click="setSucceed"
+                        :disable="succeedFlag"
+                        class="q-mr-sm"
+                    ></q-btn>
                     <q-btn
                         color="green"
                         text-color="white"
@@ -460,6 +477,8 @@ const showProcessConsole = ref(false);
 
 const moveHomposeInDataCollection = ref(false);
 const movingHomepose = ref(false);
+const succeedFlag = ref(false);
+const inferenceSucceed = ref(false);
 
 function startDataCollection() {
     if (!selectedDatasetId.value) {
@@ -489,6 +508,8 @@ function _doStartDataCollection(effectiveTeleType) {
     if (effectiveTeleType === 'vive_external' || effectiveTeleType === 'vive_only') {
         viveInitializing.value = true;
     }
+    succeedFlag.value = false;
+    addSucceedKeyListener();
     showProcessConsole.value = true;
     collectingProgress.value = 0;
     api.post(`/dataset/${selectedDatasetId.value}/:start_collection`, {
@@ -581,10 +602,35 @@ function completeEpisode() {
     });
 }
 
+function setSucceed() {
+    if (succeedFlag.value) return;
+    succeedFlag.value = true;
+    api.post(`/dataset/${selectedDatasetId.value}/:set_succeed`).catch((error) => {
+        console.error('Error setting succeed flag:', error);
+    });
+}
+
+const succeedKeyHandler = (event) => {
+    if (event.key === 'c' || event.key === 'C') {
+        setSucceed();
+    }
+};
+
+function addSucceedKeyListener() {
+    window.removeEventListener('keydown', succeedKeyHandler);
+    window.addEventListener('keydown', succeedKeyHandler);
+}
+
+function removeSucceedKeyListener() {
+    window.removeEventListener('keydown', succeedKeyHandler);
+}
+
 function stopDataCollection() {
     if (teleType.value === 'keyboard') {
         removeKeyboardListener();
     }
+    removeSucceedKeyListener();
+    succeedFlag.value = false;
     viveInitializing.value = false;
     movingHomepose.value = false;
     api.post(`/dataset/${selectedDatasetId.value}/:stop_collection`).then(() => {
@@ -686,8 +732,11 @@ onMounted(() => {
             collectingProgress.value = 0;
             viveInitializing.value = false;
             movingHomepose.value = false;
+            succeedFlag.value = false;
+            removeSucceedKeyListener();
         }
         if (data.id === 'checkpoint_test') {
+            inferenceSucceed.value = false;
             Notify.create({
                 color: 'positive',
                 message: t('inferenceStopped')
@@ -701,6 +750,14 @@ onMounted(() => {
 
     socket.on('moving_homepose', (data) => {
         movingHomepose.value = data.moving;
+    });
+
+    socket.on('episode_saved', () => {
+        succeedFlag.value = false;
+    });
+
+    socket.on('inference_succeed', (data) => {
+        inferenceSucceed.value = data.succeed;
     });
 
     socket.on('vive_node_ready', () => {
@@ -719,5 +776,7 @@ onMounted(() => {
 onUnmounted(() => {
     socket.off('vive_node_ready');
     socket.off('vive_node_error');
+    socket.off('inference_succeed');
+    removeSucceedKeyListener();
 });
 </script>

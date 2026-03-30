@@ -32,7 +32,9 @@ export const POLICY_CONFIGS = {
         'n_decoder_layers': { 'label': 'Number of Decoder Layers', 'value': 1, 'type': 'number' },
         'use_vae': { 'label': 'Use VAE', 'value': true, 'type': 'boolean' },
         'latent_dim': { 'label': 'Latent Dimension', 'value': 32, 'type': 'number' },
-        'n_vae_encoder_layers': { 'label': 'Number of VAE Encoder Layers', 'value': 4, 'type': 'number' }
+        'n_vae_encoder_layers': { 'label': 'Number of VAE Encoder Layers', 'value': 4, 'type': 'number' },
+        'action_type': { 'label': 'Action Type', 'value': 'qaction', 'type': 'select', 'options': ['qaction', 'ee_delta_action', 'relative_ee_pos'] },
+        'obs_state_keys': { 'label': 'Observation State Keys', 'value': ['qpos'], 'type': 'multiselect', 'options': ['qpos', 'qvel', 'qeffort'] },
     },
     'Diffusion': {
         // --- 데이터 형식 및 시퀀스 관련 ---
@@ -67,6 +69,8 @@ export const POLICY_CONFIGS = {
 
         // --- Loss 계산 ---
         'do_mask_loss_for_padding': { 'label': 'Mask Loss for Padding', 'value': false, 'type': 'boolean' },
+        'action_type': { 'label': 'Action Type', 'value': 'qaction', 'type': 'select', 'options': ['qaction', 'ee_delta_action', 'relative_ee_pos'] },
+        'obs_state_keys': { 'label': 'Observation State Keys', 'value': ['qpos'], 'type': 'multiselect', 'options': ['qpos', 'qvel', 'qeffort'] },
     },
     'PI0': {
         // Input / output structure
@@ -94,6 +98,8 @@ export const POLICY_CONFIGS = {
         'freeze_vision_encoder': { 'label': 'Freeze Vision Encoder', 'value': true, 'type': 'boolean' },
         'train_expert_only': { 'label': 'Train Expert Only', 'value': false, 'type': 'boolean' },
         'train_state_proj': { 'label': 'Train State Projector', 'value': true, 'type': 'boolean' },
+        'action_type': { 'label': 'Action Type', 'value': 'qaction', 'type': 'select', 'options': ['qaction', 'ee_delta_action', 'relative_ee_pos'] },
+        'obs_state_keys': { 'label': 'Observation State Keys', 'value': ['qpos'], 'type': 'multiselect', 'options': ['qpos', 'qvel', 'qeffort'] },
     }
     // 'VLAsEn': {
     //     'n_obs_steps': { 'label': 'Number of Observation Steps', 'value': 1, 'type': 'number' },
@@ -169,6 +175,5 @@ export const TRAIN_CONFIGS = {
         'num_epochs': { 'label': 'Number of Epochs', 'value': 1000, 'type': 'number' },
         'batch_size': { 'label': 'Batch Size', 'value': 32, 'type': 'number' },
         'num_workers': { 'label': 'Number of Workers', 'value': 4, 'type': 'number' },
-        'action_type': { 'label': 'Action Type', 'value': 'qaction', 'type': 'select', 'options': ['qaction', 'ee_delta_action'] },
     }
 };
