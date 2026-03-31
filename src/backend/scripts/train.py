@@ -38,6 +38,7 @@ from ..lerobot.configs.types import FeatureType
 from safetensors.torch import load_file
 
 from .train_fiper import train_fiper
+from ..api.process.generate_ood_features import generate_ood_features
 
 
 def train(
@@ -177,7 +178,7 @@ def train(
         pickle.dump(stats, f)
 
     # torch.save(best_state_dict, ckpt_path)
-    
+
     print(f'Training finished:\nSeed {seed}, val loss {min_val_loss:.6f} at epoch {best_epoch}')
 
     return best_ckpt_info
@@ -225,8 +226,8 @@ def main(args):
         checkpoint = checkpoint.to_dict()
 
         batch_size = checkpoint['train_settings']['batch_size']
-        action_key = policy['settings'].get('action_type', 'qaction')
-        obs_state_keys = policy['settings'].get('obs_state_keys', ['qpos'])
+        action_key = policy['settings'].get('action_type') or checkpoint['train_settings'].get('action_type', 'qaction')
+        obs_state_keys = policy['settings'].get('obs_state_keys') or checkpoint['train_settings'].get('obs_state_keys', ['qpos'])
         use_relative_trajectory = checkpoint['train_settings'].get('use_relative_trajectory', False)
         # task settings에 설정된 센서만 학습에 사용
         sensor_settings = task.get('settings', {}).get('sensors', {})
@@ -282,7 +283,11 @@ def main(args):
             'loss': min_val_loss,
         })
 
-        
+        # OOD feature 생성
+        try:
+            generate_ood_features(checkpoint, policy, task)
+        except Exception as ood_e:
+            print(f'[WARN] OOD feature generation failed: {ood_e}')
 
         print("Training process completed successfully.")
         

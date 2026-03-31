@@ -268,7 +268,11 @@ def handle_move_robot_ee_delta_event(data):
         agent.moved_by_ui = True
         if agent.move_lock:
             return
-        agent.move_ee_delta_step(data['delta_pos'], vel_arg=0.2)
+        delta_pos = {
+            k: [float(v) for v in vals]
+            for k, vals in data['delta_pos'].items()
+        }
+        agent.move_ee_delta_step(delta_pos, vel_arg=0.2)
     except Exception as e:
         print(f"[ERROR] move_robot_ee_delta: {e}")
 

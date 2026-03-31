@@ -65,8 +65,8 @@ def checkpoint_test(
         else:
             ckpt_dir = os.path.join("/root/src/backend/checkpoints", str(checkpoint['id']))
 
-        action_key = action_type or policy_obj.get('settings', {}).get('action_type', 'qaction')
-        obs_state_keys = policy_obj.get('settings', {}).get('obs_state_keys', ['qpos'])
+        action_key = action_type or policy_obj.get('settings', {}).get('action_type') or checkpoint.get('train_settings', {}).get('action_type', 'qaction')
+        obs_state_keys = policy_obj.get('settings', {}).get('obs_state_keys') or checkpoint.get('train_settings', {}).get('obs_state_keys', ['qpos'])
         use_relative_trajectory = checkpoint.get('train_settings', {}).get('use_relative_trajectory', False)
         has_succeed = checkpoint.get('train_settings', {}).get('has_succeed', False)
 
@@ -90,7 +90,32 @@ def checkpoint_test(
         policy.cuda()
         policy.eval()
         print(f'Loaded Policy from {ckpt_dir}, hz: {hz}, re_inference_steps: {re_inference_steps}, action_key: {action_key}')
-        
+
+        # OOD feature store 로드
+        ood_image_feats = None
+        ood_state_feats = None
+        ood_image_dist_sorted = None
+        ood_state_dist_sorted = None
+        ood_features_path = os.path.join(ckpt_dir, 'ood_features.npz')
+        if os.path.exists(ood_features_path) and hasattr(policy, 'enable_feature_caching'):
+            ood_data = np.load(ood_features_path)
+            if 'image_features' in ood_data:
+                ood_image_feats = torch.from_numpy(ood_data['image_features']).float().cuda()
+            if 'state_features' in ood_data:
+                ood_state_feats = torch.from_numpy(ood_data['state_features']).float().cuda()
+            if 'image_dist_sorted' in ood_data:
+                ood_image_dist_sorted = ood_data['image_dist_sorted']
+            if 'state_dist_sorted' in ood_data:
+                ood_state_dist_sorted = ood_data['state_dist_sorted']
+            policy.enable_feature_caching(True)
+            print(f'[OOD] Loaded reference features: image={ood_image_feats.shape if ood_image_feats is not None else None}, state={ood_state_feats.shape if ood_state_feats is not None else None}')
+
+        # Grad-CAM 활성화
+        gradcam_enabled = hasattr(policy, 'enable_gradcam')
+        if gradcam_enabled:
+            policy.enable_gradcam(True)
+            print('[Grad-CAM] Enabled')
+
         # 환경 및 RL 에이전트 초기화
         state_dim = sum(agent.joint_len for agent in agents)
         env = Env(node, agents, sensors)
@@ -214,7 +239,6 @@ def checkpoint_test(
             # relative_ee_pos: queue에 남은 delta가 있으면 추론 없이 꺼내 씀
             if action_key == 'relative_ee_pos' and len(rel_action_queue) > 0:
                 state_t = rel_action_queue.popleft()
-                print(f"[relative_ee_pos] queue pop ({len(rel_action_queue)} left)")
             else:
                 with torch.no_grad():
                     # UMI relative trajectory: 매 step마다 현재 EE pose 기준으로 재예측.
@@ -246,6 +270,9 @@ def checkpoint_test(
                         qpos_np = np.concatenate(obs_parts)
                     else:
                         qpos_np = np.concatenate([item['qpos'] for item in obs_t['robot_states'].values()])
+                    # qpos가 obs_state_keys에 없으면 0으로 채움
+                    if 'qpos' not in obs_state_keys:
+                        qpos_np = np.zeros_like(qpos_np)
                     # obs_state_keys에 따라 qvel, qeffort append
                     extra_obs = []
                     if 'qvel' in obs_state_keys:
@@ -284,14 +311,10 @@ def checkpoint_test(
                                 raw_list.append(q.popleft().squeeze(0))
                             raw_actions = torch.stack(raw_list)
                         raw_np = raw_actions.cpu().numpy()
-                        print(f"[relative_ee_pos] raw waypoints:\n{raw_np}")
                         deltas = relative_trajectory_to_delta(raw_np)
-                        print(f"[relative_ee_pos] converted deltas:\n{deltas}")
-                        # 첫 번째 delta는 지금 실행, 나머지는 queue에
                         state_t = deltas[0]
                         for i in range(1, len(deltas)):
                             rel_action_queue.append(deltas[i])
-                        print(f"[relative_ee_pos] new chunk inferred, queue size: {len(rel_action_queue)}")
                     else:
                         # relative trajectory 모드: select_action이 반환하는 값은 chunk[0] = T_now→1 = 즉각 delta
                         state_t = policy.select_action(policy_input_t).squeeze(0).cpu().numpy()
@@ -299,7 +322,57 @@ def checkpoint_test(
                     if noise_t_raw is None:
                         noise_t_raw = np.zeros_like(state_t)
 
-            print(state_t)
+
+            # === OOD scoring (추론이 실행된 스텝에서만) ===
+            if (ood_image_feats is not None or ood_state_feats is not None) and hasattr(policy, 'get_cached_features'):
+                img_feat, state_feat = policy.get_cached_features()
+                if img_feat is not None or state_feat is not None:
+                    ood_scores = {}
+                    k = 5
+                    if img_feat is not None and ood_image_feats is not None:
+                        dists = torch.cdist(img_feat, ood_image_feats)  # (1, N)
+                        raw_dist = float(dists.topk(k, largest=False).values.mean())
+                        if ood_image_dist_sorted is not None and len(ood_image_dist_sorted) > 0:
+                            idx = int(np.searchsorted(ood_image_dist_sorted, raw_dist))
+                            percentile = idx / len(ood_image_dist_sorted)
+                            ood_scores['image'] = round(min(percentile, 1.0), 3)
+                            print(f"[OOD DEBUG] image raw_dist={raw_dist:.4f}, searchsorted_idx={idx}/{len(ood_image_dist_sorted)}, percentile={percentile:.4f}, ref_range=[{ood_image_dist_sorted[0]:.4f}, {ood_image_dist_sorted[-1]:.4f}]")
+                        else:
+                            ood_scores['image'] = raw_dist
+                    if state_feat is not None and ood_state_feats is not None:
+                        dists = torch.cdist(state_feat, ood_state_feats)  # (1, N)
+                        raw_dist = float(dists.topk(k, largest=False).values.mean())
+                        if ood_state_dist_sorted is not None and len(ood_state_dist_sorted) > 0:
+                            idx = int(np.searchsorted(ood_state_dist_sorted, raw_dist))
+                            percentile = idx / len(ood_state_dist_sorted)
+                            ood_scores['state'] = round(min(percentile, 1.0), 3)
+                            print(f"[OOD DEBUG] state raw_dist={raw_dist:.4f}, searchsorted_idx={idx}/{len(ood_state_dist_sorted)}, percentile={percentile:.4f}, ref_range=[{ood_state_dist_sorted[0]:.4f}, {ood_state_dist_sorted[-1]:.4f}]")
+                        else:
+                            ood_scores['state'] = raw_dist
+                    socketio_instance.emit('ood_score', ood_scores)
+
+            # === Grad-CAM (10스텝마다) ===
+            if gradcam_enabled and step_num % 10 == 0 and 'policy_input_t' in dir():
+                try:
+                    heatmaps = policy.compute_gradcam(policy_input_t)
+                    gradcam_payload = {}
+                    for cam_idx, heatmap in heatmaps.items():
+                        # 히트맵을 원본 이미지에 overlay하여 base64로 변환
+                        sensor = sensors[cam_idx] if cam_idx < len(sensors) else None
+                        if sensor is not None:
+                            import base64
+                            sensor_id = str(sensor['id'])
+                            resize = task['sensor_img_size'].get(sensor_id, [640, 480])
+                            w, h = resize[0], resize[1]
+                            heatmap_resized = cv2.resize(heatmap, (w, h))
+                            heatmap_color = cv2.applyColorMap((heatmap_resized * 255).astype(np.uint8), cv2.COLORMAP_JET)
+                            _, buf = cv2.imencode('.jpg', heatmap_color, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                            b64 = base64.b64encode(buf).decode('utf-8')
+                            gradcam_payload[f'sensor_{sensor["id"]}'] = b64
+                    if gradcam_payload:
+                        socketio_instance.emit('gradcam', gradcam_payload)
+                except Exception as e:
+                    print(f'[Grad-CAM] Error: {e}')
 
             # === b. 최종 행동(final_action) 결정 ===
             if oti_rl:
@@ -330,8 +403,7 @@ def checkpoint_test(
             if has_succeed:
                 succeed_val = final_action[-1]
                 final_action = final_action[:-1]
-                print(f"[Succeed] {succeed_val:.4f}")
-                socketio_instance.emit('inference_succeed', {'succeed': bool(succeed_val > 0.5)})
+                socketio_instance.emit('inference_succeed', {'succeed': bool(succeed_val > 0.5), 'score': round(float(succeed_val), 4)})
 
             # prev_qpos 갱신: 다음 스텝에서 실제 delta 계산에 사용
             for agent in env.agents:

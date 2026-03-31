@@ -6,6 +6,7 @@
                     :process-id="`sensor_${sensor.id}`"
                     :topic="sensor.read_topic"
                     :msg-type="sensor.read_topic_msg"
+                    :sensor-id="sensor.id"
                     class="full-height border-rounded cursor-pointer"
                     :key="sensor.id"
                     :loading="sensor.status !== 'on'"
@@ -168,19 +169,26 @@
                     class="col q-pa-sm bg-dark border-rounded text-white row flex flex-center"
                     v-else
                 >
-                    <q-icon
-                        v-if="inferenceSucceed"
-                        name="emoji_events"
-                        color="yellow"
-                        size="md"
-                        class="q-mr-sm"
-                    />
-                    <span v-if="inferenceSucceed" class="text-yellow text-bold q-mr-md">SUCCESS</span>
                     <q-space></q-space>
+                    <q-badge
+                        v-if="succeedScore !== null"
+                        :color="succeedScore > 0.7 ? 'green' : 'red'"
+                        :label="`Succeed: ${succeedScore.toFixed(2)}`"
+                        class="q-mr-sm q-pa-sm text-bold"
+                        outline
+                    />
+                    <q-badge
+                        v-if="oodScore !== null"
+                        :color="oodTotal > 1.0 ? 'red' : 'orange'"
+                        class="q-mr-sm q-pa-sm text-bold"
+                        outline
+                    >
+                        OOD: {{ oodScoreDisplay }}
+                    </q-badge>
                     <q-btn
                         color="white"
                         text-color="red"
-                        :label="$t('stopInference')"
+                        label="Stop"
                         icon="stop"
                         @click="stopInference"
                     ></q-btn>
@@ -479,6 +487,25 @@ const moveHomposeInDataCollection = ref(false);
 const movingHomepose = ref(false);
 const succeedFlag = ref(false);
 const inferenceSucceed = ref(false);
+const succeedScore = ref(null);
+const oodScore = ref(null);
+const oodTotal = computed(() => {
+    if (!oodScore.value) return 0;
+    const img = oodScore.value.image;
+    const state = oodScore.value.state;
+    if (typeof img === 'number' && typeof state === 'number') return (img + state) / 2;
+    if (typeof img === 'number') return img;
+    if (typeof state === 'number') return state;
+    return 0;
+});
+const oodScoreDisplay = computed(() => {
+    if (!oodScore.value) return '';
+    const img = oodScore.value.image;
+    const state = oodScore.value.state;
+    const imgStr = typeof img === 'number' ? img.toFixed(2) : '-';
+    const stateStr = typeof state === 'number' ? state.toFixed(2) : '-';
+    return `${oodTotal.value.toFixed(2)} (${imgStr} + ${stateStr})`;
+});
 
 function startDataCollection() {
     if (!selectedDatasetId.value) {
@@ -737,6 +764,8 @@ onMounted(() => {
         }
         if (data.id === 'checkpoint_test') {
             inferenceSucceed.value = false;
+            succeedScore.value = null;
+            oodScore.value = null;
             Notify.create({
                 color: 'positive',
                 message: t('inferenceStopped')
@@ -758,6 +787,11 @@ onMounted(() => {
 
     socket.on('inference_succeed', (data) => {
         inferenceSucceed.value = data.succeed;
+        succeedScore.value = data.score;
+    });
+
+    socket.on('ood_score', (data) => {
+        oodScore.value = data;
     });
 
     socket.on('vive_node_ready', () => {
@@ -777,6 +811,7 @@ onUnmounted(() => {
     socket.off('vive_node_ready');
     socket.off('vive_node_error');
     socket.off('inference_succeed');
+    socket.off('ood_score');
     removeSucceedKeyListener();
 });
 </script>

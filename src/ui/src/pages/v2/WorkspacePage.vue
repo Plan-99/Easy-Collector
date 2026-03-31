@@ -329,7 +329,7 @@
                             <q-expansion-item
                                 expand-separator
                                 icon="folder"
-                                :label="dataset.name"
+                                :label="`${dataset.name} (${dataset.id})`"
                                 :caption="`${dataset.episodes.length} episodes`"
                                 v-for="dataset in datasets"
                                 :key="dataset.id"
@@ -341,7 +341,7 @@
                                 <template v-slot:header>
                                     <q-icon name="folder" class="q-mr-lg" size="lg"></q-icon>
                                     <div class="col">
-                                        <div>{{ dataset.name }}</div>
+                                        <div>{{ dataset.name }} ({{ dataset.id }})</div>
                                         <div class="text-caption">{{ dataset.episodes.length }} episodes</div>
                                          <q-menu context-menu>
                                             <q-list bordered separator>
@@ -433,6 +433,12 @@
                                                 <q-icon name="edit" size="xs" />
                                             </q-item-section>
                                         </q-item>
+                                        <q-item clickable v-ripple v-close-popup @click="generateOodFeatures(checkpoint)">
+                                            <q-item-section>Add OOD Features</q-item-section>
+                                            <q-item-section side>
+                                                <q-icon name="analytics" size="xs" />
+                                            </q-item-section>
+                                        </q-item>
                                         <q-item clickable v-ripple class="text-negative" @click="deleteCheckpoint(checkpoint)">
                                             <q-item-section>Delete Checkpoint</q-item-section>
                                             <q-item-section side>
@@ -449,7 +455,7 @@
                                         width="80px"
                                     >
                                     </q-img>
-                                    <div class="text-bold q-mt-md">{{ checkpoint.name }}</div>
+                                    <div class="text-bold q-mt-md">{{ checkpoint.name }} ({{ checkpoint.id }})</div>
                                 </q-card-section>
                             </q-card>
                         </div>
@@ -1098,6 +1104,14 @@ function openCheckpointForm(checkpoint) {
         field.value = checkpoint[field.key] || field.default;
     });
 }
+function generateOodFeatures(checkpoint) {
+    api.post(`/checkpoint/${checkpoint.id}/:generate_ood_features`).then(() => {
+        Notify.create({ color: 'positive', message: 'OOD feature generation started.' });
+    }).catch((err) => {
+        Notify.create({ color: 'negative', message: `Failed to start OOD feature generation: ${err}` });
+    });
+}
+
 function deleteCheckpoint(checkpoint) {
     Notify.create({
         message: `Are you sure you want to delete checkpoint "${checkpoint.name}"?`,

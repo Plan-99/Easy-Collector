@@ -5,6 +5,7 @@ import shutil
 
 from ..process.checkpoint_test import checkpoint_test
 from ..process.failure_detection import failure_detection
+from ..process.generate_ood_features import generate_ood_features
 
 
 checkpoint_bp = Blueprint('checkpoint_bp', __name__)
@@ -122,6 +123,26 @@ def stop_failure_detection(id):
         name=f"failure_detection",
     )
     return {'status': 'success', 'message': 'Failure detection stopped'}, 200
+
+
+@checkpoint_bp.route('/checkpoint/<id>/:generate_ood_features', methods=['POST'])
+def generate_ood(id):
+    checkpoint = CheckpointModel.find(id)
+    if not checkpoint:
+        return {'status': 'error', 'message': 'Checkpoint not found'}, 404
+
+    checkpoint_dict = checkpoint.to_dict()
+    policy = checkpoint.policy.to_dict()
+    task = checkpoint.task.to_dict()
+
+    current_app.pm.start_function(
+        func=generate_ood_features,
+        checkpoint=checkpoint_dict,
+        policy_obj=policy,
+        task=task,
+        name='generate_ood_features',
+    )
+    return {'status': 'success', 'message': 'OOD feature generation started'}, 200
 
 
 @checkpoint_bp.route('/checkpoint/<id>', methods=['PUT'])

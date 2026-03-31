@@ -136,6 +136,67 @@ class ACTPolicy(PreTrainedPolicy):
             self._action_queue.extend(actions.transpose(0, 1))
         return self._action_queue.popleft()
 
+    def enable_feature_caching(self, enable=True):
+        """OOD 감지를 위한 feature caching 활성화/비활성화."""
+        self.model._cache_features = enable
+
+    def get_cached_features(self):
+        """캐시된 image/state feature 반환. (image_feat, state_feat) 튜플."""
+        return self.model._cached_image_features, self.model._cached_state_features
+
+    def enable_gradcam(self, enable=True):
+        """Grad-CAM 활성화/비활성화."""
+        self.model._gradcam_enabled = enable
+        if not enable:
+            self.model._gradcam_features.clear()
+            self.model._gradcam_gradients.clear()
+
+    def compute_gradcam(self, batch):
+        """Grad-CAM 히트맵을 계산하여 {cam_idx: heatmap_numpy (H, W)} 반환.
+        batch는 normalize 전 raw input."""
+        import torch.nn.functional as F
+
+        self.eval()
+        self.model._gradcam_features.clear()
+        self.model._gradcam_gradients.clear()
+
+        batch = self.normalize_inputs(batch)
+        if self.config.image_features:
+            batch = dict(batch)
+            batch[OBS_IMAGES] = [batch[key] for key in self.config.image_features]
+
+        # forward (gradient 추적을 위해 no_grad 없이)
+        actions, _ = self.model(batch)
+
+        # action의 L2 norm을 pseudo-loss로 사용 (action 결정에 기여한 pixel)
+        loss = actions.sum()
+        loss.backward(retain_graph=False)
+
+        heatmaps = {}
+        for cam_idx in self.model._gradcam_features:
+            feat = self.model._gradcam_features[cam_idx]  # (B, C, H, W)
+            grad = self.model._gradcam_gradients.get(cam_idx)
+            if grad is None:
+                continue
+            # GAP of gradients → channel weights
+            weights = grad.mean(dim=[2, 3], keepdim=True)  # (B, C, 1, 1)
+            cam = (weights * feat).sum(dim=1, keepdim=True)  # (B, 1, H, W)
+            cam = F.relu(cam)  # ReLU로 양의 기여만
+            # 0~1 정규화
+            cam = cam.squeeze(0).squeeze(0)  # (H, W)
+            cam_min, cam_max = cam.min(), cam.max()
+            if cam_max - cam_min > 1e-8:
+                cam = (cam - cam_min) / (cam_max - cam_min)
+            else:
+                cam = cam * 0
+            heatmaps[cam_idx] = cam.detach().cpu().numpy()
+
+        self.model._gradcam_features.clear()
+        self.model._gradcam_gradients.clear()
+        self.zero_grad()
+
+        return heatmaps
+
     @torch.no_grad()
     def predict_action_chunk(self, batch: dict[str, Tensor], is_sampling_z=False) -> Tensor:
         """Predict a chunk of actions given environment observations."""
@@ -309,6 +370,16 @@ class ACT(nn.Module):
 
         self._reset_parameters()
 
+        # OOD feature caching
+        self._cache_features = False
+        self._cached_image_features = None
+        self._cached_state_features = None
+
+        # Grad-CAM
+        self._gradcam_enabled = False
+        self._gradcam_features = {}  # {cam_idx: feature_map}
+        self._gradcam_gradients = {}  # {cam_idx: gradient}
+
     def _reset_parameters(self):
         """Xavier-uniform initialization of the transformer parameters as in the original code."""
         for p in chain(self.encoder.parameters(), self.decoder.parameters()):
@@ -428,9 +499,19 @@ class ACT(nn.Module):
             # For a list of images, the H and W may vary but H*W is constant.
             # NOTE: If modifying this section, verify on MPS devices that
             # gradients remain stable (no explosions or NaNs).
-            for img in batch["observation.images"]:
+            all_cam_pooled = []
+            for cam_idx, img in enumerate(batch["observation.images"]):
                 img = img.reshape(img.shape[0], -1, img.shape[-2], img.shape[-1])  # (B, C, H, W)
                 cam_features = self.backbone(img)["feature_map"]
+                # Grad-CAM: feature map 저장 + gradient hook 등록
+                if self._gradcam_enabled and cam_features.requires_grad:
+                    self._gradcam_features[cam_idx] = cam_features
+                    cam_features.retain_grad()
+                    _idx = cam_idx  # closure 캡처용
+                    cam_features.register_hook(lambda grad, i=_idx: self._gradcam_gradients.update({i: grad}))
+                # OOD: global average pooling으로 이미지 feature 캐시
+                if self._cache_features:
+                    all_cam_pooled.append(cam_features.mean(dim=[2, 3]))  # (B, C)
                 cam_pos_embed = self.encoder_cam_feat_pos_embed(cam_features).to(dtype=cam_features.dtype)
                 cam_features = self.encoder_img_feat_input_proj(cam_features)
 
@@ -442,6 +523,12 @@ class ACT(nn.Module):
                 # Convert to list to extend properly
                 encoder_in_tokens.extend(list(cam_features))
                 encoder_in_pos_embed.extend(list(cam_pos_embed))
+
+        # OOD feature caching
+        if self._cache_features:
+            if self.config.image_features and all_cam_pooled:
+                self._cached_image_features = torch.cat(all_cam_pooled, dim=-1)  # (B, C*n_cameras)
+            self._cached_state_features = robot_pos  # (B, state_dim)
 
         # Stack all tokens along the sequence dimension.
         encoder_in_tokens = torch.stack(encoder_in_tokens, axis=0)

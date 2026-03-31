@@ -152,15 +152,20 @@ class EpisodicDataset(torch.utils.data.Dataset):
             end_ts = start_ts + self.chunk_size
 
             obs_step_start = start_ts - self.n_obs_steps + 1
+            use_qpos = 'qpos' in self.obs_state_keys
             qpos = []
             if is_mixed:
                 for i in range(self.n_obs_steps):
                     obs_state = get_concatenated_mixed_pos(root, '/observations/ee_delta', '/observations/qpos', target_id=obs_step_start + i)
+                    if not use_qpos:
+                        obs_state = np.zeros_like(obs_state)
                     extra = _get_extra_obs(root, self.obs_state_keys, target_id=obs_step_start + i)
                     qpos.append(np.concatenate([obs_state, extra]) if extra is not None else obs_state)
             else:
                 for i in range(self.n_obs_steps):
                     obs_state = get_concatenated_pos(root['/observations/qpos'], target_id=obs_step_start + i)
+                    if not use_qpos:
+                        obs_state = np.zeros_like(obs_state)
                     extra = _get_extra_obs(root, self.obs_state_keys, target_id=obs_step_start + i)
                     qpos.append(np.concatenate([obs_state, extra]) if extra is not None else obs_state)
 
@@ -287,6 +292,8 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
             else:
                 qpos = get_concatenated_pos(root['/observations/qpos'])
                 action = get_concatenated_pos(root[action_key])
+            if 'qpos' not in obs_state_keys:
+                qpos = np.zeros_like(qpos)
             # obs_state_keys에 따라 추가 observation append
             extra = _get_extra_obs(root, obs_state_keys)
             if extra is not None:
@@ -374,6 +381,175 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
     #          "example_qpos": qpos, 'example_action': action }
     
     return stats, skipped_episodes
+
+
+class FullScanDataset(EpisodicDataset):
+    """OOD feature 수집용: 모든 에피소드의 모든 스텝을 순차적으로 반환."""
+
+    def __init__(self, *args, **kwargs):
+        # 부모 __init__에서 __getitem__(0)을 호출하므로, 먼저 인덱스 매핑을 준비
+        self._index_map = None
+        super().__init__(*args, **kwargs)
+        self._build_index_map()
+
+    def _build_index_map(self):
+        """(global_index) → (episode_id, start_ts) 매핑 테이블 구축."""
+        index_map = []
+        for ep_idx, ep_id in enumerate(self.episode_ids):
+            dataset_path = os.path.join(self.dataset_dir, f'episode_{ep_id}.hdf5')
+            with h5py.File(dataset_path, 'r') as root:
+                is_mixed = (self.action_key in ('ee_delta_action', 'relative_ee_pos'))
+                if is_mixed:
+                    if 'ee_delta_action' not in root:
+                        continue
+                    ee_robots = set(root['ee_delta_action'].keys())
+                    for robot_key in root['qaction'].keys():
+                        src = root['ee_delta_action'] if robot_key in ee_robots else root['qaction']
+                        item = src[robot_key]
+                        leaves = list(item.values()) if isinstance(item, h5py.Group) else [item]
+                        episode_len = leaves[0].shape[0]
+                        break
+                else:
+                    for key in root[self.action_key].keys():
+                        item = root[self.action_key][key]
+                        leaves = list(item.values()) if isinstance(item, h5py.Group) else [item]
+                        episode_len = leaves[0].shape[0]
+                        break
+            # 소수 stride + 에피소드별 offset으로 다양한 구간 커버
+            stride = 57
+            offset = (ep_idx * 17) % stride  # 에피소드마다 시작점이 17씩 밀림
+            start = self.n_obs_steps - 1 + offset
+            for ts in range(start, max(self.n_obs_steps, episode_len - self.chunk_size), stride):
+                index_map.append((ep_id, ts))
+        self._index_map = index_map
+        print(f'[FullScanDataset] Total samples: {len(self._index_map)}')
+
+    def __len__(self):
+        if self._index_map is None:
+            return len(self.episode_ids)  # 초기화 중 fallback
+        return len(self._index_map)
+
+    def __getitem__(self, index):
+        if self._index_map is None:
+            # 초기화 중 부모의 __getitem__ 사용
+            return super().__getitem__(index)
+
+        ep_id, start_ts = self._index_map[index]
+
+        dataset_path = os.path.join(self.dataset_dir, f'episode_{ep_id}.hdf5')
+        with h5py.File(dataset_path, 'r') as root:
+            action_dim = 0
+            episode_len = 0
+            is_mixed = (self.action_key in ('ee_delta_action', 'relative_ee_pos'))
+            if is_mixed:
+                ee_robots = set(root['ee_delta_action'].keys()) if 'ee_delta_action' in root else set()
+                for robot_key in root['qaction'].keys():
+                    src = root['ee_delta_action'] if robot_key in ee_robots else root['qaction']
+                    item = src[robot_key]
+                    leaves = list(item.values()) if isinstance(item, h5py.Group) else [item]
+                    for leaf in leaves:
+                        episode_len = leaf.shape[0]
+                        action_dim += leaf.shape[1]
+            else:
+                for key in root[self.action_key].keys():
+                    item = root[self.action_key][key]
+                    leaves = list(item.values()) if isinstance(item, h5py.Group) else [item]
+                    for leaf in leaves:
+                        episode_len = leaf.shape[0]
+                        action_dim += leaf.shape[1]
+
+            expected_action_dim = self.norm_stats['action']['mean'].shape[-1]
+            any_has_succeed = (expected_action_dim > action_dim)
+            if any_has_succeed:
+                action_dim = expected_action_dim
+
+            original_action_shape = (self.chunk_size, action_dim)
+
+            if 'language_instruction' in root:
+                language_instruction = root['language_instruction'][()]
+                if isinstance(language_instruction, bytes):
+                    language_instruction = language_instruction.decode('utf-8')
+            else:
+                language_instruction = ''
+
+            end_ts = start_ts + self.chunk_size
+            obs_step_start = start_ts - self.n_obs_steps + 1
+
+            qpos = []
+            if is_mixed:
+                for i in range(self.n_obs_steps):
+                    obs_state = get_concatenated_mixed_pos(root, '/observations/ee_delta', '/observations/qpos', target_id=obs_step_start + i)
+                    extra = _get_extra_obs(root, self.obs_state_keys, target_id=obs_step_start + i)
+                    qpos.append(np.concatenate([obs_state, extra]) if extra is not None else obs_state)
+            else:
+                for i in range(self.n_obs_steps):
+                    obs_state = get_concatenated_pos(root['/observations/qpos'], target_id=obs_step_start + i)
+                    extra = _get_extra_obs(root, self.obs_state_keys, target_id=obs_step_start + i)
+                    qpos.append(np.concatenate([obs_state, extra]) if extra is not None else obs_state)
+
+            image_dict = dict()
+            for sensor_id in self.sensor_ids:
+                image_dict[f"sensor_{sensor_id}"] = []
+                for i in range(self.n_obs_steps):
+                    image_dict[f"sensor_{sensor_id}"].append(root[f'/observations/images/sensor_{sensor_id}'][obs_step_start + i])
+
+            if is_mixed:
+                action = get_concatenated_mixed_pos(root, 'ee_delta_action', 'qaction', target_id=None, target_range=[start_ts, min(episode_len, end_ts)])
+            else:
+                action = get_concatenated_pos(root[self.action_key], target_id=None, target_range=[start_ts, min(episode_len, end_ts)])
+
+            if any_has_succeed:
+                if 'succeed' in root:
+                    succeed = root['succeed'][start_ts:min(episode_len, end_ts)].reshape(-1, 1)
+                else:
+                    succeed = np.zeros((action.shape[0], 1), dtype=np.float32)
+                action = np.concatenate([action, succeed], axis=1)
+
+            action_len = min(self.chunk_size, episode_len - start_ts)
+
+        padded_action = np.zeros(original_action_shape, dtype=np.float32)
+        if self.action_key == 'relative_ee_pos' or (self.use_relative_trajectory and self.action_key == 'ee_delta_action'):
+            padded_action[:action_len] = delta_to_relative_trajectory(action[:action_len])
+        else:
+            padded_action[:action_len] = action
+        is_pad = np.zeros(self.chunk_size)
+        is_pad[action_len:] = 1
+
+        item = dict()
+        item['language_instruction'] = language_instruction
+        for sensor_id in self.sensor_ids:
+            processed_images = []
+            for image in image_dict[f"sensor_{sensor_id}"]:
+                image = Image.fromarray(np.array(image))
+                image = process_image(image)
+                processed_images.append(image)
+            if self.policy_type in ['PI0']:
+                item[f"observation.images.sensor_{sensor_id}"] = torch.stack(processed_images).squeeze()
+            else:
+                item[f"observation.images.sensor_{sensor_id}"] = torch.stack(processed_images)
+
+        if self.policy_type in ['PI0']:
+            item["observation.state"] = torch.from_numpy(np.concatenate(qpos)).float()
+        else:
+            item["observation.state"] = torch.from_numpy(np.array(qpos)).float()
+
+        item["action"] = torch.from_numpy(padded_action).float()
+        item["action_is_pad"] = torch.from_numpy(is_pad).bool()
+        item['next.done'] = torch.from_numpy(np.zeros(1, dtype=np.bool_)).bool()
+
+        if self.info is None:
+            self.info = dict()
+            for key, val in item.items():
+                if key.startswith("observation.images"):
+                    self.info[key] = PolicyFeature(FeatureType.VISUAL, shape=val[0].shape)
+                if key == "observation.state":
+                    self.info[key] = PolicyFeature(FeatureType.STATE, shape=val[0].shape)
+                if key == "action":
+                    self.info[key] = PolicyFeature(FeatureType.ACTION, shape=val[0].shape)
+                if key == "language_instruction":
+                    self.info[key] = PolicyFeature(FeatureType.STATE, shape=(1,))
+
+        return item
 
 
 def _get_extra_obs(root, obs_state_keys, target_id=None, target_range=None):
