@@ -16,7 +16,10 @@ class Env:
 
         for sensor in sensors:
             setattr(self, f'sensor_{sensor["id"]}', None)
-            node.create_subscription(CompressedImage, sensor['read_topic'], lambda msg, sid=sensor['id']: self.image_raw_cb(msg, sid), 10)
+            msg_type = CompressedImage
+            if sensor.get('read_topic_msg') == 'sensor_msgs/Image':
+                msg_type = Image
+            node.create_subscription(msg_type, sensor['read_topic'], lambda msg, sid=sensor['id']: self.image_raw_cb(msg, sid), 10)
 
     def image_raw_cb(self, data, sensor_id):
         image = ros_image_to_numpy(data)
