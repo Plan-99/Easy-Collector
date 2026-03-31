@@ -33,7 +33,6 @@ setup(
     maintainer_email='user@todo.todo',
     description='Package to publish webcam images.',
     license='Apache License 2.0',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'webcam_publisher_node = webcam_publisher.webcam_publisher_node:main',
