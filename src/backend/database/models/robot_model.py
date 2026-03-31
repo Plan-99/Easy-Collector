@@ -59,6 +59,7 @@ class Robot(Model, SoftDeletes):
         'changer_address',
         'serial_port',
         'ik_available',
+        'is_sim',
     ]
 
     def get_robot_type_info(self):
@@ -223,6 +224,10 @@ class Robot(Model, SoftDeletes):
             robot_info = self.get_robot_type_info()
             return 'ik_setting' in robot_info
         return self.settings.get('ik_available', False)
+
+    @accessor
+    def is_sim(self):
+        return self.settings.get('is_sim', False)
     
     # @staticmethod
     # def boot():

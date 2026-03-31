@@ -308,6 +308,7 @@ const robotForm = ref([
         ],
         show: (form) => form.find((e) => e.key === 'type').value === 'custom' 
     },
+    { label: 'Simulation', key: 'is_sim', type: 'checkbox', value: false, default: false, show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
     { label: 'Joint Names', key: 'joint_names', type: 'custom', value: [], default: [] , show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
     { label: '', key: 'tool_index', type: 'custom', value: [], default: [], show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
     { label: 'Joint Lower Bounds', key: 'joint_lower_bounds', type: 'custom', value: [], default: [] , show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
