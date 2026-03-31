@@ -63,7 +63,7 @@
             <div v-if="selectedEpisode.name && selectedDatasetId">
                 <div class="row q-mb-sm">
                     <div
-                        class="col bg-dark border-rounded text-white row"
+                        class="col bg-dark border-rounded text-white row items-center q-col-gutter-x-sm"
                     >
                         <div>
                             <div class="text-h6">{{ selectedEpisode?.name }}</div>
@@ -78,6 +78,36 @@
                             ></q-btn>
                         </div>
                         <q-space class="col"></q-space>
+                        <div class="row items-center q-gutter-x-sm" v-if="status === 'pending'">
+                            <q-checkbox
+                                v-model="replayCapture"
+                                label="Capture Episode"
+                                dark
+                                dense
+                                :disable="!allSensorsOn"
+                            >
+                                <q-tooltip v-if="!allSensorsOn">All cameras must be on to capture</q-tooltip>
+                            </q-checkbox>
+                            <q-select
+                                v-if="replayCapture"
+                                v-model="replayCaptureDatasetId"
+                                dense outlined dark bg-color="dark"
+                                label="Target Dataset"
+                                style="min-width: 180px"
+                                :options="datasets"
+                                option-label="name"
+                                option-value="id"
+                                map-options emit-value
+                            />
+                            <q-input
+                                v-model.number="replayHz"
+                                dense outlined dark bg-color="dark"
+                                label="Hz"
+                                style="width: 80px"
+                                type="number"
+                                :min="1"
+                            />
+                        </div>
                         <div>
                             <q-btn
                                 color="red"
@@ -96,6 +126,21 @@
                                 v-else
                             ></q-btn>
                         </div>
+                    </div>
+                </div>
+                <div class="row q-mb-sm" v-if="replayCapture && status !== 'pending'">
+                    <div class="col">
+                        <q-linear-progress
+                            :value="replayProgress"
+                            color="primary"
+                            track-color="black"
+                            size="30px"
+                            instant-feedback
+                        >
+                            <div class="absolute-full flex flex-center">
+                                <q-badge color="white" text-color="dark" :label="`Capturing ${Number(replayProgress * 100).toFixed(0)}%`" />
+                            </div>
+                        </q-linear-progress>
                     </div>
                 </div>
             </div>
@@ -176,11 +221,24 @@
                         emit-value
                     ></q-select>
                     <q-space></q-space>
-                    <div class="q-mr-md">Teleoparation Type: </div>
-                    <div class="q-gutter-sm q-mr-xl">
-                        <q-radio dark v-model="teleType" val="leader" :label="$t('leaderTele')" />
-                        <q-radio dark v-model="teleType" val="keyboard" :label="$t('keyboardTele')" />
-                        <q-radio dark v-model="teleType" val="externel" :label="$t('externalTele')" />
+                    <div class="row items-center q-mr-xl q-gutter-x-sm">
+                        <q-select
+                            dense outlined dark bg-color="dark"
+                            v-model="teleType"
+                            :options="teleTypeOptions"
+                            map-options emit-value
+                            style="min-width: 220px;"
+                            label="Teleoperation Type"
+                        />
+                        <q-btn
+                            v-if="teleType === 'motion_planning'"
+                            icon="settings"
+                            round flat size="sm"
+                            color="primary"
+                            @click="showRos2ServiceDialog = true"
+                        >
+                            <q-tooltip>Configure ROS2 Service</q-tooltip>
+                        </q-btn>
                     </div>
                     <q-btn
                         color="red"
@@ -256,6 +314,28 @@
                 :path="`${selectedDatasetId}/${selectedEpisode.name}`"
             ></hdf5-viewer>
         </div>
+
+        <!-- ROS2 Service Dialog -->
+        <q-dialog v-model="showRos2ServiceDialog">
+            <q-card style="min-width: 550px;" class="bg-secondary text-white">
+                <q-card-section>
+                    <div class="text-h6">ROS2 Service (std_srvs/Trigger)</div>
+                </q-card-section>
+                <q-card-section>
+                    <q-input
+                        dense outlined dark bg-color="dark"
+                        v-model="ros2Service"
+                        label="Service Name"
+                        placeholder="e.g. /pick_and_place"
+                        hint="Service name only (e.g. /pick_and_place), not the full ros2 command"
+                    />
+                </q-card-section>
+                <q-card-actions align="right">
+                    <q-btn flat label="Cancel" color="grey" v-close-popup />
+                    <q-btn flat label="Save" color="primary" v-close-popup />
+                </q-card-actions>
+            </q-card>
+        </q-dialog>
     </div>
 </template>
 
@@ -319,6 +399,24 @@ const checkpoint = computed(() => {
 });
 
 const teleType = ref('leader')
+
+const teleTypeOptions = [
+    { label: 'Easy Controller', value: 'leader' },
+    { label: 'Keyboard', value: 'keyboard' },
+    { label: 'External', value: 'external' },
+    { label: 'External + Motion Planning', value: 'motion_planning' },
+]
+
+const replayCapture = ref(false)
+const replayCaptureDatasetId = ref(null)
+const replayHz = ref(5)
+const replayProgress = ref(0)
+
+const showRos2ServiceDialog = ref(false)
+const ros2Service = ref('')
+const allSensorsOn = computed(() => {
+    return props.sensors.every(s => s.status === 'on');
+});
 const isRobotSensorAllOn = computed(() => {
     const allRobotsOn = props.robots.every(r => r.status === 'on');
     const allSensorsOn = props.sensors.every(s => s.status === 'on');
@@ -359,14 +457,18 @@ function startDataCollection() {
     }
     showProcessConsole.value = true;
     collectingProgress.value = 0;
-    api.post(`/dataset/${selectedDatasetId.value}/:start_collection`, {
+    const payload = {
         task: props.workspace,
         robots: props.robots,
         sensors: props.sensors,
         tele_type: teleType.value,
         assembly_id: props.workspace.assembly_id,
         move_homepose: moveHomposeInDataCollection.value,
-    }).catch((error) => {
+    };
+    if (teleType.value === 'motion_planning' && ros2Service.value) {
+        payload.ros2_service = ros2Service.value;
+    }
+    api.post(`/dataset/${selectedDatasetId.value}/:start_collection`, payload).catch((error) => {
         console.error('Error starting data collection:', error);
         Notify.create({
             color: 'negative',
@@ -471,12 +573,18 @@ function stopInference() {
 }
 
 function startReplay() {
-    api.post(`/dataset/${selectedDatasetId.value}/${selectedEpisode.value.name}/:start_replay_episode`, {
+    replayProgress.value = 0;
+    const payload = {
         episode: selectedEpisode.value,
         robot_ids: props.robots.map(r => r.id),
         sensors: props.sensors,
         task: props.workspace,
-    }).catch((error) => {
+        hz: replayHz.value,
+    }
+    if (replayCapture.value && replayCaptureDatasetId.value) {
+        payload.capture_dataset_id = replayCaptureDatasetId.value
+    }
+    api.post(`/dataset/${selectedDatasetId.value}/${selectedEpisode.value.name}/:start_replay_episode`, payload).catch((error) => {
         console.error('Error starting replay:', error);
         Notify.create({
             color: 'negative',
@@ -503,6 +611,9 @@ onMounted(() => {
         if (data.id === 'record_episode') {
             collectingProgress.value = 0;
         }
+        if (data.id === 'replay_episode') {
+            replayProgress.value = 0;
+        }
         if (data.id === 'checkpoint_test') {
             Notify.create({
                 color: 'positive',
@@ -513,6 +624,10 @@ onMounted(() => {
 
     socket.on('record_episode_progress', (data) => {
         collectingProgress.value = data.progress;
+    });
+
+    socket.on('replay_capture_progress', (data) => {
+        replayProgress.value = data.progress;
     });
 });
 </script>
