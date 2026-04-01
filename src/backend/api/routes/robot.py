@@ -231,6 +231,7 @@ def create_robot():
             'tool_index': request.json.get('tool_index', []),
             'tool_inner': len(request.json.get('tool_index', [])) > 0,
         }
+        _apply_ik_settings(request.json, settings)
 
     custom_fields = ['can_port', 'ip_address', 'port', 'changer_address', 'serial_port']
     for field in custom_fields:
@@ -285,6 +286,7 @@ def update_robot(id):
             'tool_index': request.json.get('tool_index', []),
             'tool_inner': len(request.json.get('tool_index', [])) > 0,
         }
+        _apply_ik_settings(request.json, settings)
 
     custom_fields = ['can_port', 'ip_address', 'port', 'changer_address', 'serial_port']
     for field in custom_fields:
@@ -368,6 +370,19 @@ def unsubscribe_robot(id):
     # Agent와 ROS2 구독은 유지 — rclpy.spin 중 destroy하면 segfault
     # Agent는 다음 subscribe 시 재사용됨
     return {'status': 'success', 'message': 'Unsubscribed from robot topic'}, 200
+
+
+def _apply_ik_settings(data: dict, settings: dict):
+    """Extract IK JSON from request data into robot settings."""
+    ik_json = data.get('ik_json', '')
+    if ik_json and isinstance(ik_json, dict):
+        settings['urdf_path'] = ik_json.get('urdf_path', '')
+        settings['urdf_package_dir'] = ik_json.get('urdf_package_dir', '')
+        settings['ik_setting'] = ik_json.get('ik_setting', {})
+    else:
+        settings.pop('urdf_path', None)
+        settings.pop('urdf_package_dir', None)
+        settings.pop('ik_setting', None)
 
 
 def _ensure_can_interface(name: str):

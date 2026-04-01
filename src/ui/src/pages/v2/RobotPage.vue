@@ -203,6 +203,20 @@
                     ></q-input>
                 </div>
             </template>
+            <template v-slot:ik_json>
+                <q-input
+                    outlined dark bg-color="dark"
+                    v-model="robotForm.find((e) => e.key === 'ik_json').value"
+                    type="textarea"
+                    rows="10"
+                    class="q-mb-md q-mt-xs"
+                    placeholder='{"urdf_path": "/path/to/robot.urdf", "urdf_package_dir": "/path/to/package/", "ik_setting": {"joints_to_lock": [], "ee_definitions": [["ee", "joint_6", null]]}}'
+                    :error="ikJsonError !== ''"
+                    :error-message="ikJsonError"
+                    hint="Leave empty to disable IK"
+                    style="font-family: monospace;"
+                />
+            </template>
         </form-dialog>
         <tele-setting-dialog
             v-if="showTeleSetting"
@@ -329,12 +343,15 @@ const robotForm = ref([
         show: (form) => form.find((e) => e.key === 'type').value === 'custom' 
     },
     { label: 'Write Topic', key: 'write_topic', type: 'text', value: '', default: '', show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
-    { label: 'Write Topic Message Type', key: 'write_topic_msg', type: 'select', value: '', default: 'sensor_msgs/JointState', 
+    { label: 'Write Topic Message Type', key: 'write_topic_msg', type: 'select', value: '', default: 'sensor_msgs/JointState',
         options: [
             { label: 'sensor_msgs/JointState', value: 'sensor_msgs/JointState' },
             { label: 'control_msgs/action/GripperCommand', value: 'control_msgs/action/GripperCommand' },
         ],
-        show: (form) => form.find((e) => e.key === 'type').value === 'custom' 
+        show: (form) => form.find((e) => e.key === 'type').value === 'custom'
+    },
+    { label: 'IK Settings (JSON)', key: 'ik_json', type: 'custom', value: '', default: '',
+        show: (form) => form.find((e) => e.key === 'type').value === 'custom'
     },
 ]);
 const watchingRobot = ref(null);
@@ -370,10 +387,20 @@ function openAddSensorForm() {
 }
 
 function openEditRobotForm(robot) {
+    ikJsonError.value = ''
     robotForm.value.forEach(field => {
         field.value = robot[field.key] || field.default;
     });
-    robotForm.value.find((e) => e.key === 'id').value = robot.id; // Set ID for edit
+    robotForm.value.find((e) => e.key === 'id').value = robot.id;
+    // Load existing IK settings as JSON string for custom robots
+    if (robot.type === 'custom' && robot.settings && robot.settings.ik_setting) {
+        const ikObj = {
+            urdf_path: robot.settings.urdf_path || '',
+            urdf_package_dir: robot.settings.urdf_package_dir || '',
+            ik_setting: robot.settings.ik_setting,
+        }
+        robotForm.value.find((e) => e.key === 'ik_json').value = JSON.stringify(ikObj, null, 2)
+    }
     showRobotForm.value = true;
 }
 
@@ -396,14 +423,24 @@ function removeJoint(index) {
 }
 
 function saveRobot(formData) {
+    ikJsonError.value = ''
+    if (formData.ik_json && typeof formData.ik_json === 'string') {
+        try {
+            formData.ik_json = JSON.parse(formData.ik_json)
+        } catch {
+            ikJsonError.value = 'Invalid JSON format'
+            showRobotForm.value = true
+            return
+        }
+    }
     if (robotForm.value.find((e) => e.key === 'id').value) {
         return api.put(`/robot/${formData.id}`, formData).then(() => {
-            robotForm.value.forEach(field => field.value = field.default); // Reset form fields
+            robotForm.value.forEach(field => field.value = field.default);
             listRobots()
         })
     }
     return api.post(`/robot`, formData).then(() => {
-        robotForm.value.forEach(field => field.value = field.default); // Reset form fields
+        robotForm.value.forEach(field => field.value = field.default);
         listRobots()
     })
 }
@@ -458,6 +495,7 @@ function watchRobot(robot) {
 
 const canControl = ref(false)
 const showRobotForm = ref(false)
+const ikJsonError = ref('')
 
 const showTeleSetting = ref(false)
 const teleSettingRobot = ref(null)

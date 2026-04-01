@@ -59,6 +59,23 @@ class Agent:
             ik_setting = dict(robot_info['ik_setting'])
             self.ik_solver = Common_ArmIK(urdf_path=urdf_path, urdf_package_dir=urdf_package_dir, **ik_setting)
             self.ee_names = self.ik_solver.ee_names
+        elif self.robot_type == 'custom':
+            settings = robot.get('settings', {}) or {}
+            if 'ik_setting' in settings:
+                urdf_path = settings['urdf_path']
+                urdf_package_dir = settings.get('urdf_package_dir', '')
+                ik_setting = dict(settings['ik_setting'])
+                # JSON에서 list로 들어온 ee_definitions를 tuple로 변환하고, offset을 np.array로 변환
+                if 'ee_definitions' in ik_setting:
+                    converted = []
+                    for item in ik_setting['ee_definitions']:
+                        name, parent, offset = item[0], item[1], item[2] if len(item) > 2 else None
+                        if isinstance(offset, list):
+                            offset = np.array(offset).T
+                        converted.append((name, parent, offset))
+                    ik_setting['ee_definitions'] = converted
+                self.ik_solver = Common_ArmIK(urdf_path=urdf_path, urdf_package_dir=urdf_package_dir, **ik_setting)
+                self.ee_names = self.ik_solver.ee_names
 
         self.read_topic_msg_cls = get_message(robot['read_topic_msg'])
         self.read_topic_sub = node.create_subscription(self.read_topic_msg_cls, robot['read_topic'], self.joint_state_cb, 10)

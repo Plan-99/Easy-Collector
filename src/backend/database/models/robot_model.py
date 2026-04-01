@@ -223,7 +223,7 @@ class Robot(Model, SoftDeletes):
         if self.type != 'custom':
             robot_info = self.get_robot_type_info()
             return 'ik_setting' in robot_info
-        return self.settings.get('ik_available', False)
+        return 'ik_setting' in (self.settings or {})
 
     @accessor
     def is_sim(self):
