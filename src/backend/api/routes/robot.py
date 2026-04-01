@@ -237,6 +237,9 @@ def create_robot():
         if field in request.json:
             settings[field] = request.json.get(field)
 
+    if 'is_sim' in request.json:
+        settings['is_sim'] = request.json.get('is_sim', False)
+
     # Normalize CAN port names (can0/can1) in case underscores are provided
     if 'can_port' in settings and settings['can_port'].startswith('can_'):
         settings['can_port'] = 'can' + settings['can_port'][4:]
@@ -287,6 +290,9 @@ def update_robot(id):
     for field in custom_fields:
         if field in request.json:
             settings[field] = request.json.get(field)
+
+    if 'is_sim' in request.json:
+        settings['is_sim'] = request.json.get('is_sim', False)
 
     robot.settings = settings
     robot.save()

@@ -12,13 +12,17 @@ from PIL import Image
 
 config = {}
 
-def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=False, sensors=None, agents=None, task=None, action_key='qaction'):
+
+def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=False, sensors=None, agents=None, task=None, hz=5, capture_dataset_id=None, action_key='qaction'):
 
     global config
     config = {}
+    capture_env = None
     if move_robot:
         from ...env.env import Env
         env = Env(node, agents, sensors)
+        if capture_dataset_id is not None:
+            capture_env = env
 
     hz = 20
 
@@ -65,11 +69,20 @@ def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=
                 language_instruction = ""
 
 
+            capture_timesteps = []
+            if capture_env is not None:
+                ts = capture_env.reset()
+                capture_timesteps.append(ts)
+
+            total_steps = len(qaction_data[robot_names[0]])
+            if capture_env is not None and task and task.get('episode_len'):
+                total_steps = min(total_steps, task['episode_len'])
+
             # 타임스텝별로 데이터 전송
-            for i in range(len(qaction_data[robot_names[0]])):
+            for i in range(total_steps):
 
                 if task_control['stop']:
-                    print("Stopping read_hdf5 process.")
+                    print("Stopping read_hdf5 process. Captured data discarded.")
                     return
                 
                 # --- 이미지를 Base64 문자열로 인코딩 ---
@@ -150,6 +163,14 @@ def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=
                                 else:
                                     agent.move_joint_step(qaction_array)
 
+                if capture_env is not None:
+                    ts = capture_env.record_step()
+                    capture_timesteps.append(ts)
+                    socketio_instance.emit('replay_capture_progress', {
+                        'progress': (i + 1) / total_steps,
+                    })
+
+                time.sleep(1.0 / hz if hz > 0 else 0.2)
                 socketio_instance.emit('show_episode_step', {
                     'hdf5_path': hdf5_path,
                     'images': encoded_images,
@@ -163,6 +184,69 @@ def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=
 
                 time.sleep(1.0 / hz)
 
+
+            # Save captured episode to target dataset
+            if capture_env is not None and capture_timesteps and capture_dataset_id is not None:
+                _save_captured_episode(capture_dataset_id, capture_timesteps, agents, sensors, task, language_instruction)
+
+
+def _save_captured_episode(dataset_id, timesteps, agents, sensors, task, language_instruction):
+    from ...configs.global_configs import DATASET_DIR
+    from .record_episode import get_auto_index
+    from ...utils.image_parser import fetch_image_with_config
+
+    dataset_dir = os.path.join(DATASET_DIR, str(dataset_id))
+    if not os.path.isdir(dataset_dir):
+        os.makedirs(dataset_dir)
+
+    dataset_name = f"episode_{get_auto_index(dataset_dir)}.hdf5"
+    dataset_path = os.path.join(dataset_dir, dataset_name)
+    print(f"[Capture] Saving captured episode: {dataset_path}")
+
+    try:
+        with h5py.File(dataset_path, 'w', rdcc_nbytes=1024**2*2) as root:
+            root.attrs['sim'] = False
+            obs_group = root.create_group('observations')
+
+            image_group = obs_group.create_group('images')
+            for sensor in sensors:
+                s_id = str(sensor['id'])
+                img_data = []
+                for t_step in timesteps:
+                    img = t_step.observation['images'][f'sensor_{s_id}']
+                    img_data.append(fetch_image_with_config(img, {
+                        'resize': task.get('sensor_img_size', {}).get(s_id),
+                        'cropped_area': task.get('sensor_cropped_area', {}).get(s_id, {}),
+                        'rotate': task.get('sensor_rotate', {}).get(s_id, 0)
+                    }))
+                image_group.create_dataset(f"sensor_{s_id}", data=np.array(img_data), dtype='uint8')
+
+            obs_keys = ['qpos', 'eepos']
+            for agent in agents:
+                a_id = agent.id
+                sample_robot_state = timesteps[0].observation['robot_states'][a_id]
+                for key, value in sample_robot_state.items():
+                    if value is None:
+                        continue
+                    parent_group = obs_group if key in obs_keys else root
+                    data_group = parent_group.require_group(key)
+                    if isinstance(value, dict):
+                        agent_group = data_group.require_group(f'robot_{a_id}')
+                        for ee_name in value.keys():
+                            series_data = [t_step.observation['robot_states'][a_id][key][ee_name] for t_step in timesteps]
+                            agent_group.create_dataset(ee_name, data=np.array(series_data))
+                    else:
+                        series_data = [t_step.observation['robot_states'][a_id][key] for t_step in timesteps]
+                        data_group.create_dataset(f'robot_{a_id}', data=np.array(series_data))
+
+            root.create_dataset('language_instruction',
+                                data=language_instruction if language_instruction else '',
+                                dtype=h5py.string_dtype(encoding='utf-8'))
+
+        print(f"[Capture] Episode saved: {dataset_name} ({len(timesteps)} timesteps)")
+    except Exception as e:
+        import traceback
+        print(f"[Capture ERROR] Failed to save captured episode:\n{traceback.format_exc()}")
 
 
 def add_config(config_data):

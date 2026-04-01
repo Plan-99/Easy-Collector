@@ -17,7 +17,10 @@ class Env:
         self._sensor_subs = []
         for sensor in sensors:
             setattr(self, f'sensor_{sensor["id"]}', None)
-            sub = node.create_subscription(CompressedImage, sensor['read_topic'], lambda msg, sid=sensor['id']: self.image_raw_cb(msg, sid), 10)
+            msg_type = CompressedImage
+            if sensor.get('read_topic_msg') == 'sensor_msgs/Image':
+                msg_type = Image
+            sub = node.create_subscription(msg_type, sensor['read_topic'], lambda msg, sid=sensor['id']: self.image_raw_cb(msg, sid), 10)
             self._sensor_subs.append(sub)
 
     def image_raw_cb(self, data, sensor_id):

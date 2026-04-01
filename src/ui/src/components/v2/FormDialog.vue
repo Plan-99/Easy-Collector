@@ -87,6 +87,13 @@
                             No {{ data.label }} Available.
                         </div>
                     </q-scroll-area>
+                    <q-checkbox
+                        v-else-if="data.type === 'checkbox'"
+                        v-model="data.value"
+                        :label="data.label"
+                        dense
+                        class="q-mb-md"
+                    />
                     <slot :name="data.key" v-else-if="data.type === 'custom'"></slot>
                 </div>
                 <div class="row flex-center q-mt-xl">

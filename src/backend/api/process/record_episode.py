@@ -20,7 +20,9 @@ def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
             return i
     raise Exception(f"Error getting auto index, or more than {max_idx} episodes")
 
-def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors, task, language_instruction, socketio_instance, task_control, tele_type='leader', iter=100000):
+
+
+def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors, task, language_instruction, socketio_instance, task_control, tele_type='leader', ros2_service='', iter=100000):
     agents = sorted(agents, key=lambda a: a.id)
     env = Env(node, agents=agents, sensors=sensors, virtual_agents=(tele_type == 'vive_only'))
     dataset_dir = f"{DATASET_DIR}/{dataset_id}"
@@ -43,6 +45,10 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
             return
 
     task_control['episode_complete'] = False
+
+    # --- ROS2 service (motion_planning용) ---
+    from std_srvs.srv import Trigger
+    service_result = {'done': False, 'success': None, 'message': ''}
 
     try:
         for _ in range(iter):
@@ -102,6 +108,37 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                                     agent.ik_solver.reset_state(arm_js)
                 time.sleep(1)
 
+            # --- motion_planning: ROS2 service 호출 ---
+            if tele_type == 'motion_planning' and ros2_service:
+                service_result = {'done': False, 'success': None, 'message': ''}
+                try:
+                    cli = node.create_client(Trigger, ros2_service)
+                    if not cli.wait_for_service(timeout_sec=5.0):
+                        print(f'[ERROR] ROS2 service "{ros2_service}" not available')
+                        task_control['stop'] = True
+                        return
+
+                    def _on_service_done(future):
+                        try:
+                            result = future.result()
+                            service_result['done'] = True
+                            service_result['success'] = result.success
+                            service_result['message'] = result.message
+                            print(f'[NOTICE] ROS2 service response: success={result.success}, message="{result.message}"')
+                        except Exception as e:
+                            service_result['done'] = True
+                            service_result['success'] = False
+                            service_result['message'] = str(e)
+                            print(f'[ERROR] ROS2 service error: {e}')
+
+                    future = cli.call_async(Trigger.Request())
+                    future.add_done_callback(_on_service_done)
+                    print(f'[NOTICE] ROS2 service "{ros2_service}" called, recording in parallel...')
+                except Exception as e:
+                    print(f'[ERROR] Failed to call ROS2 service: {e}')
+                    task_control['stop'] = True
+                    return
+
             if tele_type == 'leader':
                 teleop = TeleoperatorModel.where('type', 'leader').where('assembly_id', assembly_id).first()
 
@@ -126,6 +163,11 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
             if os.path.isfile(dataset_path):
                 print(f'Dataset already exist at \n{dataset_path}\nHint: set overwrite to True.')
 
+            # motion_planning: joint_actions 초기화 후 대기
+            if tele_type == 'motion_planning':
+                for agent in agents:
+                    agent.joint_actions = None
+
             # vive_only는 실물 로봇 없이 동작하므로 joint state 검증 생략
             if tele_type != 'vive_only':
                 for agent in agents:
@@ -133,10 +175,23 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                         print(f'[ERROR] No joint states from robot {agent.id}')
                         task_control['stop'] = True
                         return
+
+                # joint commands 대기 (motion_planning은 service 응답까지 최대 60초)
+                wait_timeout = 60.0 if tele_type == 'motion_planning' else 5.0
+                for agent in agents:
                     if agent.joint_actions is None:
-                        print(f'[ERROR] No joint commands from robot {agent.id}')
-                        task_control['stop'] = True
-                        return
+                        print(f'[NOTICE] Waiting for joint commands from robot {agent.id}...')
+                        elapsed = 0.0
+                        while agent.joint_actions is None:
+                            if task_control['stop']:
+                                return
+                            time.sleep(0.1)
+                            elapsed += 0.1
+                            if elapsed >= wait_timeout:
+                                print(f'[ERROR] No joint commands from robot {agent.id} after {wait_timeout}s timeout')
+                                task_control['stop'] = True
+                                return
+                        print(f'[NOTICE] Joint commands received from robot {agent.id} ({elapsed:.1f}s)')
                     agent.move_lock = False
 
             for sensor in sensors:
@@ -215,7 +270,7 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                         ee_delta = agent.last_ee_delta if agent.last_ee_delta is not None else None
 
                     else:
-                        # leader: FK(joint_actions) - FK(joint_states)
+                        # leader / motion_planning: FK(joint_actions) - FK(joint_states)
                         ee_delta = agent.compute_fk_delta(
                             robot_state.get('qaction'),
                             robot_state.get('qpos'),
@@ -248,6 +303,11 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                     for agent in agents:
                         agent.moved_by_ui = False
 
+                # motion_planning: service 실패 시 중단
+                if tele_type == 'motion_planning' and service_result['done'] and not service_result['success']:
+                    print(f'[ERROR] ROS2 service failed at step {t+1}/{max_timesteps}: {service_result["message"]}')
+                    break
+
             # 에피소드 종료: teleop 스레드 정지 (다음 에피소드 origin 설정 전에 멈춤)
             if vive is not None:
                 vive.stop_teleop()
@@ -255,6 +315,27 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
             if tele_type == 'leader':
                 task_control['episode_stop'] = True
                 time.sleep(0.5)
+
+            # motion_planning: service 응답 대기 및 결과 확인
+            if tele_type == 'motion_planning' and ros2_service:
+                if not service_result['done']:
+                    print(f'Recording finished, waiting for service response...')
+                    timeout = 120.0
+                    elapsed = 0.0
+                    while not service_result['done'] and elapsed < timeout:
+                        if task_control['stop']:
+                            break
+                        time.sleep(0.5)
+                        elapsed += 0.5
+
+                if service_result['done'] and not service_result['success']:
+                    print(f'[ERROR] ROS2 service failed: {service_result["message"]}, restarting episode...')
+                    continue
+                elif service_result['done'] and service_result['success']:
+                    print(f'[NOTICE] ROS2 service completed successfully: {service_result["message"]}')
+                elif not service_result['done']:
+                    print(f'[WARNING] ROS2 service did not complete within timeout, restarting episode...')
+                    continue
 
             print(f'Saving Data: {dataset_name}')
 

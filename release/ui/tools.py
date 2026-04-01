@@ -472,16 +472,22 @@ class ToolingMixin:
                 if dataset_id is None:
                     self.append_log("[IMPORT][WARN] DB 등록 실패로 파일만 복사합니다.")
                     dest = self._unique_import_path(dest_root / src.name)
+                    dest.mkdir(parents=True, exist_ok=True)
                     if src.is_dir():
-                        shutil.copytree(src, dest, dirs_exist_ok=True)
+                        for f in src.iterdir():
+                            if f.is_file() and f.suffix == '.hdf5':
+                                shutil.copy2(f, dest / f.name)
                     else:
-                        shutil.copy2(src, dest)
+                        shutil.copy2(src, dest / src.name)
                 else:
                     dest = dest_root / str(dataset_id)
+                    dest.mkdir(parents=True, exist_ok=True)
                     if src.is_dir():
-                        shutil.copytree(src, dest, dirs_exist_ok=True)
+                        # Only copy episode HDF5 files, not subdirectories
+                        for f in src.iterdir():
+                            if f.is_file() and f.suffix == '.hdf5':
+                                shutil.copy2(f, dest / f.name)
                     else:
-                        dest.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(src, dest / src.name)
             elif choice == "MODEL":
                 dest_root = self._resolve_backend_subdir("checkpoints") or self._resolve_backend_subdir("models")

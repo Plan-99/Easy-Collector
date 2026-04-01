@@ -36,6 +36,7 @@ class Agent:
         self.joint_names = robot['joint_names']
         self.joint_upper_bounds = robot['joint_upper_bounds']
         self.joint_lower_bounds = robot['joint_lower_bounds']
+        self.is_sim = robot['is_sim']
 
         self.read_topic_msg = robot['read_topic_msg']
         self.write_topic_msg = robot['write_topic_msg']
@@ -734,7 +735,11 @@ class Agent:
         self._move_target = list(target_pos)
         self.is_moving = True
 
-        if self.robot_company == 'Piper':
+        if self.is_sim:
+            print("Moving to target position:", target_pos)
+            self.move_joint_step(target_pos)
+            time.sleep(0.5)
+        elif self.robot_company == 'Piper':
             print("Moving to target position:", target_pos)
             self.move_joint_step(target_pos)
             print("Moving to target position:", target_pos)

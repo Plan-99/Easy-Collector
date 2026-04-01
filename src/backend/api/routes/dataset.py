@@ -217,6 +217,8 @@ def start_replay_episode(id, file_name):
         move_robot=True,
         action_key=data.get('action_type', 'qaction'),
         sid=request.json.get('sid', None),
+        hz=data.get('hz', 5),
+        capture_dataset_id=data.get('capture_dataset_id', None),
     )
     return {'status': 'success', 'message': 'HDF5 replay process started'}, 200
 
@@ -252,6 +254,7 @@ def start_collection(id):
         task=data.get('task'),
         language_instruction=data.get('language_instruction'),
         tele_type=tele_type,
+        ros2_service=data.get('ros2_service', ''),
         socketio_instance=current_app.pm.socketio,
         iter=data.get('iter', 100000),
         name=f"record_episode",
