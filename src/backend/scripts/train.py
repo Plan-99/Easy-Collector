@@ -145,6 +145,7 @@ def train(
         # --- Training Step ---
         policy.train() # Set model to training mode
         for batch_idx, data in enumerate(train_dataloader):
+
             optimizer.zero_grad()
             loss, _ = forward_pass(data, policy)
             # Backpropagation
@@ -227,7 +228,10 @@ def main(args):
 
         batch_size = checkpoint['train_settings']['batch_size']
         action_key = policy['settings'].get('action_type') or checkpoint['train_settings'].get('action_type', 'qaction')
-        obs_state_keys = policy['settings'].get('obs_state_keys') or checkpoint['train_settings'].get('obs_state_keys', ['qpos'])
+        _obs_keys = policy['settings'].get('obs_state_keys')
+        if _obs_keys is None:
+            _obs_keys = checkpoint['train_settings'].get('obs_state_keys')
+        obs_state_keys = _obs_keys if _obs_keys is not None else ['qpos']
         use_relative_trajectory = checkpoint['train_settings'].get('use_relative_trajectory', False)
         # task settings에 설정된 센서만 학습에 사용
         sensor_settings = task.get('settings', {}).get('sensors', {})
@@ -262,6 +266,7 @@ def main(args):
                 print('[INFO] succeed flag detected in dataset, saved to train_settings.')
 
         # Load data from the temporary directory
+        print(f"[CONFIG] obs_state_keys: {obs_state_keys}, action_key: {action_key}")
         train_dataloader, val_dataloader, stats, input_features, output_features = load_data(temp_dir, policy['type'], episode_counter, sensor_ids, batch_size, batch_size, chunk_size, vision_backbone, num_workers, n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys)
         # Start the training process
         best_epoch, min_val_loss, best_state_dict = train(

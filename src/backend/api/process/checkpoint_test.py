@@ -66,7 +66,10 @@ def checkpoint_test(
             ckpt_dir = os.path.join("/root/src/backend/checkpoints", str(checkpoint['id']))
 
         action_key = action_type or policy_obj.get('settings', {}).get('action_type') or checkpoint.get('train_settings', {}).get('action_type', 'qaction')
-        obs_state_keys = policy_obj.get('settings', {}).get('obs_state_keys') or checkpoint.get('train_settings', {}).get('obs_state_keys', ['qpos'])
+        _obs_keys = policy_obj.get('settings', {}).get('obs_state_keys')
+        if _obs_keys is None:
+            _obs_keys = checkpoint.get('train_settings', {}).get('obs_state_keys')
+        obs_state_keys = _obs_keys if _obs_keys is not None else ['qpos']
         use_relative_trajectory = checkpoint.get('train_settings', {}).get('use_relative_trajectory', False)
         has_succeed = checkpoint.get('train_settings', {}).get('has_succeed', False)
 
@@ -283,6 +286,7 @@ def checkpoint_test(
                         qpos_np = np.concatenate([qpos_np] + extra_obs)
                     qpos_t = torch.from_numpy(qpos_np).float().cuda().unsqueeze(0)
                     policy_input_t = {'observation.state': qpos_t}
+                    print(f"[INPUT] state: {qpos_t.shape} = {qpos_t[0].cpu().numpy()}")
                     for sensor in sensors:
                         image = obs_t['images'][f'sensor_{sensor["id"]}']
                         sensor_id = str(sensor['id'])

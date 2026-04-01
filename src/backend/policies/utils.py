@@ -95,7 +95,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self.vision_backbone = vision_backbone
         self.action_key = action_key
         self.use_relative_trajectory = use_relative_trajectory
-        self.obs_state_keys = obs_state_keys or ['qpos']
+        self.obs_state_keys = obs_state_keys if obs_state_keys is not None else ['qpos']
         self.info = None
         self.__getitem__(0) # initialize self.is_sim
 

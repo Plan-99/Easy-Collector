@@ -50,7 +50,10 @@ def generate_ood_features(checkpoint, policy_obj, task, task_control=None):
 
         policy_settings = policy_obj.get('settings', {})
         action_key = policy_settings.get('action_type') or checkpoint.get('train_settings', {}).get('action_type', 'qaction')
-        obs_state_keys = policy_settings.get('obs_state_keys') or checkpoint.get('train_settings', {}).get('obs_state_keys', ['qpos'])
+        _obs_keys = policy_settings.get('obs_state_keys')
+        if _obs_keys is None:
+            _obs_keys = checkpoint.get('train_settings', {}).get('obs_state_keys')
+        obs_state_keys = _obs_keys if _obs_keys is not None else ['qpos']
         use_relative_trajectory = checkpoint.get('train_settings', {}).get('use_relative_trajectory', False)
         sensor_ids = task.get('sensor_ids', [])
         sensor_settings = task.get('settings', {}).get('sensors', {})
