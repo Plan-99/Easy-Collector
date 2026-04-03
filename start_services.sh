@@ -14,6 +14,7 @@ log_status() {
 export PYTHONPATH="/root/src:/opt/openrobots/lib/python3.10/site-packages:${PYTHONPATH:-}"
 export LD_LIBRARY_PATH="/opt/openrobots/lib:${LD_LIBRARY_PATH:-}"
 export PATH="/opt/openrobots/bin:${PATH}"
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
 log_status "[DEBUG] Library path forced to /opt/openrobots and /root/src"
 

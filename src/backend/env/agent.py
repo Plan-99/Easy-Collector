@@ -456,15 +456,7 @@ class Agent:
         if arm_action is None or arm_state is None:
             return None
         with self.ik_lock:
-            ee_action = self.ik_solver.get_ee_position(np.array(arm_action))
-            ee_state = self.ik_solver.get_ee_position(np.array(arm_state))
-        if ee_action is None or ee_state is None:
-            return None
-        return {
-            name: [ee_action[name][i] - ee_state[name][i] for i in range(6)]
-            for name in self.ee_names
-            if name in ee_action and name in ee_state
-        }
+            return self.ik_solver.compute_fk_delta(arm_action, arm_state)
 
     def move_ee_delta_step(self, delta_ee_dict, vel_arg=None, tool_positions=None):
         """EE delta를 적용하여 로봇을 이동.

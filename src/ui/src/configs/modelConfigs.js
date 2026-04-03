@@ -45,13 +45,13 @@ export const POLICY_CONFIGS = {
 
         // --- Vision Backbone 구조 ---
         'vision_backbone': { 'label': 'Vision Backbone', 'value': 'resnet18', 'type': 'select', 'options': ['resnet18', 'resnet34', 'resnet50'] },
-        'crop_shape': { 'label': 'Crop Shape (H, W)', 'value': [84, 84], 'type': 'array' },
+        'crop_shape': { 'label': 'Crop Shape (H, W)', 'value': [150, 200], 'type': 'array' },
         'use_group_norm': { 'label': 'Use Group Norm', 'value': true, 'type': 'boolean' },
         'spatial_softmax_num_keypoints': { 'label': 'Spatial Softmax Keypoints', 'value': 32, 'type': 'number' },
         'use_separate_rgb_encoder_per_camera': { 'label': 'Use Separate RGB Encoder per Camera', 'value': false, 'type': 'boolean' },
 
         // --- U-Net 구조 ---
-        'down_dims': { 'label': 'Down Dims', 'value': [512, 1024, 2048], 'type': 'array' },
+        'down_dims': { 'label': 'Down Dims', 'value': [256, 512, 1024], 'type': 'array' },
         'kernel_size': { 'label': 'Kernel Size', 'value': 5, 'type': 'number' },
         'n_groups': { 'label': 'Number of Groups for Norm', 'value': 8, 'type': 'number' },
         'diffusion_step_embed_dim': { 'label': 'Diffusion Step Embedding Dimension', 'value': 128, 'type': 'number' },

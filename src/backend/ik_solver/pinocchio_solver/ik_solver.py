@@ -202,6 +202,32 @@ class IK_Solver:
         new_se3 = pin.SE3(d_R @ o_R, o_xyz + d_xyz)
         return se3_to_xyzaxayaz(new_se3)
 
+    def compute_fk_delta(self, q_action, q_state):
+        """두 관절 설정 사이의 EE 변위를 계산한다.
+
+        translation은 단순 뺄셈, rotation은 SO(3) log map으로 계산하여
+        compute_delta_target의 exp3 적용과 정합성을 유지한다.
+
+        Returns:
+            dict[str, list[float]]: {ee_name: [dx, dy, dz, dax, day, daz]}
+        """
+        ee_action = self.get_ee_position(np.array(q_action))
+        ee_state = self.get_ee_position(np.array(q_state))
+        if ee_action is None or ee_state is None:
+            return None
+
+        result = {}
+        for name in self.ee_frame_names:
+            if name not in ee_action or name not in ee_state:
+                continue
+            dt = [ee_action[name][i] - ee_state[name][i] for i in range(3)]
+            R_state = pin.exp3(np.array(ee_state[name][3:6]))
+            R_action = pin.exp3(np.array(ee_action[name][3:6]))
+            R_delta = R_action @ R_state.T
+            dr = pin.log3(R_delta).tolist()
+            result[name] = dt + dr
+        return result
+
     def compute_delta_target(self, name, current_q, delta_xyzaxayaz, frame='global'):
         """
         Computes the next target pose based on a delta from the current pose.

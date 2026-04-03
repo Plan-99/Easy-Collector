@@ -25,6 +25,7 @@ from .routes.assembly import assembly_bp
 
 import rclpy
 from rclpy.node import Node
+from rclpy.executors import MultiThreadedExecutor
 
 import usb.core
 import usb.util
@@ -285,8 +286,10 @@ def main():
     try:
         # 3. 메인 스레드에서 웹 서버 실행
         print("Starting Flask-SocketIO server...")
-        # rclpy.spin을 별도의 스레드에서 실행
-        executor_thread = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
+        # rclpy를 MultiThreadedExecutor로 실행 (다른 스레드에서 생성한 service client 응답 처리)
+        ros_executor = MultiThreadedExecutor()
+        ros_executor.add_node(node)
+        executor_thread = threading.Thread(target=ros_executor.spin, daemon=True)
         executor_thread.start()
         # 이 함수는 서버가 종료(예: Ctrl+C)될 때까지 여기서 멈춥니다.
         socketio.run(

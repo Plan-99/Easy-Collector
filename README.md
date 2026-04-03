@@ -95,6 +95,13 @@
 
 ---
 
+
+lerobot 코드에 추가한 내용
+- KNN OOD 판별
+- Grad-cam
+
+
+
 ### 매뉴얼
 
 [https://vertic-ai.com/manual/html/index.html]

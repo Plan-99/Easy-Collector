@@ -40,6 +40,14 @@ def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=
 
             time.sleep(5)
 
+            # ee_delta replay를 위해 IK solver 상태를 현재 조인트에 동기화
+            if action_key == 'ee_delta_action':
+                for agent in agents:
+                    if agent.ik_solver is not None:
+                        js = agent.get_joint_states()
+                        if js is not None:
+                            agent.reset_ik_solver(js)
+
         with h5py.File(hdf5_path, 'r') as f:
             rect_params = []
             # actions = f[f"action"][:]
