@@ -153,13 +153,13 @@ def start_robot():
         command = ['ros2', 'run', 'fairino_hardware', 'ros2_cmd_server',
                    '--ros-args',
                    '-r', f'__ns:=/ec_robot_{id}',
-                   '-p', f'robot_ip:={settings.get("ip_address", "192.168.57.2")}']
+                   '-p', f'robot_ip:={settings.get("ip_address", "192.168.58.2")}']
 
     if company == 'Test':
         command = ['ros2', 'launch', 'test_arm', 'test_arm.launch.py',
                    f'namespace:=ec_robot_{id}']
 
-    print(f"Attempting to start robot")
+    print(f"Attempting to start robot: {' '.join(command)}")
 
     process = current_app.pm.start_process(
         name=process_id,

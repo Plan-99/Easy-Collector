@@ -8,7 +8,7 @@ import traceback
 def subscribe_robot_topic(agent: Agent, node, socketio_instance, task_control):
     import time as _t
     connected = False
-    stale_after = 3.0  # seconds
+    stale_after = 8.0  # seconds
     while not task_control['stop']:
         try:
             now = _t.time()

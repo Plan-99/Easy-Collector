@@ -286,7 +286,10 @@ class Agent:
                 req_start = self.write_service_srv_cls.Request()
                 req_start.cmd_str = 'ServoMoveStart()'
                 future = self.move_robot_client.call_async(req_start)
-                rclpy.spin_until_future_complete(self.node, future, timeout_sec=1.0)
+                # spin_until_future_complete 대신 future 직접 대기 (executor 충돌 방지)
+                timeout = time.time() + 1.0
+                while not future.done() and time.time() < timeout:
+                    time.sleep(0.01)
                 self._fairino_servo_started = True
 
             # Fairino SDK는 도(degree) 단위를 사용하므로 라디안에서 변환
@@ -546,6 +549,9 @@ class Agent:
             with self.js_mutex:
                 self.joint_states = msg
                 self.last_joint_update = time.time()
+                if not getattr(self, '_cb_logged', False):
+                    print(f"[Fairino] joint_state_cb first call, msg type: {type(msg).__name__}")
+                    self._cb_logged = True
         except Exception as e:
             print(f"[ERROR] joint_state_cb: {e}")
 
