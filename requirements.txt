@@ -15,6 +15,9 @@ pyusb
 python-can
 pymodbus==3.9.2
 
+# --- [비디오 인코딩/디코딩] ---
+av
+
 # --- [AI 및 데이터 처리] ---
 matplotlib
 omegaconf

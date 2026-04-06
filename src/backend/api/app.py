@@ -1,6 +1,12 @@
 # -*- coding: utf-8 -*-
 import faulthandler
 import sys
+from pathlib import Path
+
+# vendored lerobot 패키지의 절대 import를 위해 src/backend을 sys.path에 추가
+_backend_dir = str(Path(__file__).resolve().parent.parent)
+if _backend_dir not in sys.path:
+    sys.path.insert(0, _backend_dir)
 
 # Segfault 발생 시 traceback을 stderr에 출력
 faulthandler.enable(file=sys.stderr, all_threads=True)

@@ -1,8 +1,13 @@
 <template>
-    <div class="row q-py-md q-gutter-md flex flex-center">
-        <img :src="image" alt="" v-for="(image, name) in images" :key="name" class="col" style="max-width: 40%; height: auto;"
-            :class="imageClass"
-        >
+    <div>
+        <div v-if="languageInstruction" class="text-white text-caption q-pb-sm">
+            Language: {{ languageInstruction }}
+        </div>
+        <div class="row q-py-md q-gutter-md flex flex-center">
+            <img :src="image" alt="" v-for="(image, name) in images" :key="name" class="col" style="max-width: 40%; height: auto;"
+                :class="imageClass"
+            >
+        </div>
     </div>
 </template>
 <script setup>
@@ -32,9 +37,10 @@ const emit = defineEmits(['update:robotStates']);
 
 const images = ref([]);
 const robot_states = ref({});
+const languageInstruction = ref('');
 
 function startReadingHdf5(path) {
-    api.post(`/dataset/${path}/:start_read_hdf5`, {
+    api.post(`/dataset/${path}/:start_read_dataset`, {
         sid: LocalStorage.getItem('socketId')
     }).then(() => {
         // Successfully started reading HDF5 file
@@ -44,7 +50,7 @@ function startReadingHdf5(path) {
 }
 
 function stopReadingHdf5(path) {
-    api.post(`/dataset/${path}/:stop_read_hdf5`).then(() => {
+    api.post(`/dataset/${path}/:stop_read_dataset`).then(() => {
         // Successfully stopped reading HDF5 file
     }).catch((error) => {
         console.error('Error stopping to read HDF5 file:', error);
@@ -70,7 +76,7 @@ onMounted(() => {
         // const dataset_id = Number(hdf5_path.pop());
         // if (!watchingDataset.value || watchingDataset.value.id !== dataset_id || !watchingFile.value || watchingFile.value.name !== file_name) {
         //     console.log(dataset_id)
-        //     api.post(`/dataset/${dataset_id}/${file_name}/:stop_read_hdf5`).then(() => {
+        //     api.post(`/dataset/${dataset_id}/${file_name}/:stop_read_dataset`).then(() => {
         //         // Successfully started reading HDF5 file
         //     }).catch((error) => {
         //         console.error('Error stoping to read HDF5 file:', error);
@@ -79,6 +85,7 @@ onMounted(() => {
         // }
         images.value = data.images
         robot_states.value = data.robot_states || {};
+        languageInstruction.value = data.language_instruction || '';
         emit('update:robotStates', robot_states.value);
     });
 });

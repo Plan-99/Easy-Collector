@@ -248,6 +248,14 @@
                         map-options
                         emit-value
                     ></q-select>
+                    <q-input
+                        v-model="languageInstruction"
+                        dense outlined dark bg-color="dark"
+                        label="Language Instruction"
+                        style="min-width: 200px; max-width: 400px;"
+                        class="q-ml-sm"
+                        clearable
+                    />
                     <q-space></q-space>
                     <div class="row items-center q-mr-xl q-gutter-x-sm">
                         <q-select
@@ -257,6 +265,14 @@
                             map-options emit-value
                             style="min-width: 220px;"
                             label="Teleoperation Type"
+                        />
+                        <q-input
+                            v-model.number="collectionHz"
+                            dense outlined dark bg-color="dark"
+                            label="Hz"
+                            style="width: 80px"
+                            type="number"
+                            :min="1"
                         />
                         <q-btn
                             v-if="teleType === 'motion_planning'"
@@ -519,6 +535,8 @@ const checkpoint = computed(() => {
 });
 
 const teleType = ref('leader')
+const collectionHz = ref(20)
+const languageInstruction = ref('')
 const viveInitializing = ref(false)
 const viveRobotDialog = ref(false)
 
@@ -630,6 +648,8 @@ function _doStartDataCollection(effectiveTeleType) {
         tele_type: effectiveTeleType,
         assembly_id: props.workspace.assembly_id,
         move_homepose: moveHomposeInDataCollection.value,
+        hz: collectionHz.value,
+        language_instruction: languageInstruction.value || '',
     };
     if (teleType.value === 'motion_planning' && ros2Service.value) {
         payload.ros2_service = ros2Service.value;

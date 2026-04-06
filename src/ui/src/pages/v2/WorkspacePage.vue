@@ -500,9 +500,9 @@
             @submit="saveDataset"
             :ok-button-label="$t(datasetForm.find(f => f.key === 'id') ? 'save' : 'add')"
         >
-            <template v-slot:hdf5_metadata>
+            <template v-slot:dataset_metadata>
                 <div style="color: red;">You have to remap the sensors and robots because this dataset was created with a different sensor/robot configuration.</div>
-                <div v-for="robot in datasetForm.find(f => f.key === 'hdf5_metadata').value.robots" :key="robot">
+                <div v-for="robot in datasetForm.find(f => f.key === 'dataset_metadata').value.robots" :key="robot">
                     <div class="row q-my-md q-col-gutter-sm">
                         <div class="text-white">{{ robot }}</div>
                         <q-select
@@ -521,7 +521,7 @@
                         ></q-select>
                     </div>
                 </div>
-                <div v-for="sensor in datasetForm.find(f => f.key === 'hdf5_metadata').value.sensors" :key="sensor">
+                <div v-for="sensor in datasetForm.find(f => f.key === 'dataset_metadata').value.sensors" :key="sensor">
                     <div class="row q-my-md q-col-gutter-sm">
                         <div class="text-white">{{ sensor }}</div>
                         <q-select
@@ -886,7 +886,7 @@ const showDatasetForm = ref(false);
 const datasetForm = ref([
     { key: 'id', value: null },
     { key: 'name', label: t('datasetName'), type: 'text', value: '', default: '' },
-    { key: 'hdf5_metadata', label: 'HDF5 Metadata', type: 'custom', value: {}, default: {}, show: (form) => !checkDatasetCompatibility(form)},
+    { key: 'dataset_metadata', label: 'Dataset Metadata', type: 'custom', value: {}, default: {}, show: (form) => !checkDatasetCompatibility(form)},
     { key: 'robot_mappings', label: 'Robot Mappings', type: 'custom', value: [], default: {}, show: () => false },
     { key: 'sensor_mappings', label: 'Sensor Mappings', type: 'custom', value: {}, default: {}, show: () => false },
 ])
@@ -911,22 +911,22 @@ async function openEditDatasetForm(dataset) {
 
     // 2. robot_mappings 필드 커스텀 세팅
 
-    console.log('Dataset HDF5 Metadata:', datasetForm.value.find((e) => e.key === 'robot_mappings'));
+    console.log('Dataset Metadata:', datasetForm.value.find((e) => e.key === 'robot_mappings'));
     
     const robotMappingField = datasetForm.value.find((e) => e.key === 'robot_mappings');
-    if (robotMappingField && dataset.hdf5_metadata?.robots) {
+    if (robotMappingField && dataset.dataset_metadata?.robots) {
         // robots 리스트: ['robot_a', 'robot_b']
         // 변환 결과: { "robot_a": null, "robot_b": null }
         robotMappingField.value = Object.fromEntries(
-            dataset.hdf5_metadata.robots.map(robot => [robot, null])
+            dataset.dataset_metadata.robots.map(robot => [robot, null])
         );
     }
     console.log('Robot Mappings set to:', robotMappingField.value);
 
     const sensorMappingField = datasetForm.value.find((e) => e.key === 'sensor_mappings');
-    if (sensorMappingField && dataset.hdf5_metadata?.sensors) {
+    if (sensorMappingField && dataset.dataset_metadata?.sensors) {
         sensorMappingField.value = Object.fromEntries(
-            dataset.hdf5_metadata.sensors.map(sensor => [sensor, null])
+            dataset.dataset_metadata.sensors.map(sensor => [sensor, null])
         );
     }
 
@@ -950,9 +950,16 @@ async function saveDataset(form) {
             // --- 수정(Edit) 로직 ---
             await api.put(`/dataset/${id}`, finalData);
             
-            // 메타데이터 수정 API 호출 (finalData에 robot_mappings 등이 포함됨)
-            if (Object.values(finalData.robot_mappings).some(v => v !== null) || Object.values(finalData.sensor_mappings).some(v => v !== null)) {
-                await api.post(`/dataset/${id}/:edit_datasets_metadata`, finalData);
+            // 메타데이터 수정 API 호출
+            const robotMappings = finalData.robot_mappings || {};
+            const sensorMappings = finalData.sensor_mappings || {};
+            const hasRobotMappings = Object.values(robotMappings).some(v => v !== null);
+            const hasSensorMappings = Object.values(sensorMappings).some(v => v !== null);
+            if (hasRobotMappings || hasSensorMappings) {
+                await api.post(`/dataset/${id}/:edit_datasets_metadata`, {
+                    robot_mappings: robotMappings,
+                    sensor_mappings: sensorMappings,
+                });
             }
 
         } else {
@@ -983,17 +990,17 @@ function checkDatasetCompatibility(form) {
     const datasetSensorTypes = ref([]);
 
     if (Array.isArray(form)) {
-        // 1. 배열 형태인 form에서 hdf5_metadata 값을 추출합니다.
-        const hdf5MetadataEntry = form.find(item => item.key === 'hdf5_metadata');
-        const hdf5_metadata = hdf5MetadataEntry ? hdf5MetadataEntry.value : { robots: [], sensors: [] };
+        // 1. 배열 형태인 form에서 dataset_metadata 값을 추출합니다.
+        const datasetMetadataEntry = form.find(item => item.key === 'dataset_metadata');
+        const dataset_metadata = datasetMetadataEntry ? datasetMetadataEntry.value : { robots: [], sensors: [] };
 
-        // 3. 데이터셋(HDF5)의 구성을 가져옵니다.
-        datasetRobotTypes.value = (hdf5_metadata.robots || []).filter(t => t !== null).sort();
-        datasetSensorTypes.value = (hdf5_metadata.sensors || []).filter(t => t !== null).sort();
+        // 3. 데이터셋의 구성을 가져옵니다.
+        datasetRobotTypes.value = (dataset_metadata.robots || []).filter(t => t !== null).sort();
+        datasetSensorTypes.value = (dataset_metadata.sensors || []).filter(t => t !== null).sort();
 
     } else {
-        datasetRobotTypes.value = (form.hdf5_metadata?.robots || []).filter(t => t !== null).sort();
-        datasetSensorTypes.value = (form.hdf5_metadata?.sensors || []).filter(t => t !== null).sort();
+        datasetRobotTypes.value = (form.dataset_metadata?.robots || []).filter(t => t !== null).sort();
+        datasetSensorTypes.value = (form.dataset_metadata?.sensors || []).filter(t => t !== null).sort();
     }
     const robotsMatch = JSON.stringify(workspaceRobotTypes) === JSON.stringify(datasetRobotTypes.value);
     const sensorsMatch = JSON.stringify(workspaceSensorTypes) === JSON.stringify(datasetSensorTypes.value);

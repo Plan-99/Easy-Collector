@@ -150,6 +150,35 @@ class ToolingMixin:
                 return candidate
         return parent / f"{stem}_{int(time.time())}{suffix}"
 
+    def _copy_lerobot_dataset(self, src: Path, dest: Path):
+        """LeRobot 데이터셋 디렉토리 구조를 복사한다.
+
+        LeRobot 포맷: meta/, data/, images/ 디렉토리.
+        레거시 HDF5 포맷: episode_*.hdf5 파일만 존재.
+        자동으로 감지하여 적절히 복사한다.
+        """
+        # LeRobot 포맷 감지: meta/info.json 존재 여부
+        is_lerobot = (src / "meta" / "info.json").is_file()
+
+        if is_lerobot:
+            # LeRobot 포맷: meta, data, images, videos 디렉토리를 재귀 복사
+            for subdir in ["meta", "data", "images", "videos"]:
+                src_sub = src / subdir
+                if src_sub.is_dir():
+                    dest_sub = dest / subdir
+                    if dest_sub.exists():
+                        shutil.rmtree(dest_sub)
+                    shutil.copytree(src_sub, dest_sub)
+            self.append_log(f"[IMPORT] LeRobot 데이터셋 복사 완료: {src.name}")
+        else:
+            # 레거시 HDF5 포맷: .hdf5 파일만 복사
+            copied = 0
+            for f in src.iterdir():
+                if f.is_file() and f.suffix == '.hdf5':
+                    shutil.copy2(f, dest / f.name)
+                    copied += 1
+            self.append_log(f"[IMPORT] HDF5 에피소드 {copied}개 복사 완료: {src.name}")
+
     def _reload_backend_db(self) -> bool:
         try:
             from urllib import request
@@ -472,23 +501,13 @@ class ToolingMixin:
                 if dataset_id is None:
                     self.append_log("[IMPORT][WARN] DB 등록 실패로 파일만 복사합니다.")
                     dest = self._unique_import_path(dest_root / src.name)
-                    dest.mkdir(parents=True, exist_ok=True)
-                    if src.is_dir():
-                        for f in src.iterdir():
-                            if f.is_file() and f.suffix == '.hdf5':
-                                shutil.copy2(f, dest / f.name)
-                    else:
-                        shutil.copy2(src, dest / src.name)
                 else:
                     dest = dest_root / str(dataset_id)
-                    dest.mkdir(parents=True, exist_ok=True)
-                    if src.is_dir():
-                        # Only copy episode HDF5 files, not subdirectories
-                        for f in src.iterdir():
-                            if f.is_file() and f.suffix == '.hdf5':
-                                shutil.copy2(f, dest / f.name)
-                    else:
-                        shutil.copy2(src, dest / src.name)
+                dest.mkdir(parents=True, exist_ok=True)
+                if src.is_dir():
+                    self._copy_lerobot_dataset(src, dest)
+                else:
+                    shutil.copy2(src, dest / src.name)
             elif choice == "MODEL":
                 dest_root = self._resolve_backend_subdir("checkpoints") or self._resolve_backend_subdir("models")
                 if dest_root is None:

@@ -1,0 +1,12 @@
+lerobot==0.3.2
+h5py
+numpy
+torch
+tyro
+tqdm
+psutil
+av
+Pillow
+opencv-python
+datasets
+typing_extensions

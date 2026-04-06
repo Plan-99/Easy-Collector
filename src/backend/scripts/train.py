@@ -2,6 +2,12 @@ import torch
 
 import sys
 import os
+from pathlib import Path
+
+# vendored lerobot 패키지의 절대 import를 위해 src/backend을 sys.path에 추가
+_backend_dir = str(Path(__file__).resolve().parent.parent)
+if _backend_dir not in sys.path:
+    sys.path.insert(0, _backend_dir)
 import numpy as np
 from tqdm import tqdm
 import time
@@ -209,20 +215,127 @@ def main(args):
         load_model = Checkpoint.find(checkpoint.load_model_id).to_dict() if checkpoint.load_model_id else None
         # load_model = Checkpoint.find(args.load_model_id).to_dict() if args.load_model_id else None
 
-                # Copy dataset files to the temporary directory
+        # Merge LeRobot datasets into temp directory
+        from ..api.process.lerobot_io import (
+            list_episodes, get_dataset_info, _read_json, _write_json,
+            _read_jsonl, _write_jsonl, _append_jsonl,
+            PARQUET_PATH_TEMPLATE, IMAGE_PATH_TEMPLATE, INFO_PATH,
+            EPISODES_PATH, TASKS_PATH, EPISODES_STATS_PATH, DEFAULT_CHUNK_SIZE,
+        )
+        import pyarrow.parquet as pq
+        import pyarrow as pa
+
         dataset_ids = checkpoint.dataset_info.keys()
         episode_counter = 0
+
+        # Initialize temp dataset from first source
+        first_ds_id = list(dataset_ids)[0]
+        first_ds_path = f"/root/src/backend/datasets/{first_ds_id}"
+        first_info = get_dataset_info(first_ds_path)
+        if first_info:
+            tmp_info = dict(first_info)
+            tmp_info["total_episodes"] = 0
+            tmp_info["total_frames"] = 0
+            tmp_info["total_chunks"] = 0
+            tmp_info["total_tasks"] = 0
+            tmp_info["splits"] = {}
+            _write_json(tmp_info, os.path.join(temp_dir, INFO_PATH))
+            for p in [EPISODES_PATH, TASKS_PATH, EPISODES_STATS_PATH]:
+                fp = os.path.join(temp_dir, p)
+                os.makedirs(os.path.dirname(fp), exist_ok=True)
+                open(fp, "w").close()
+            # Copy tasks from first source
+            src_tasks = _read_jsonl(os.path.join(first_ds_path, TASKS_PATH))
+            if src_tasks:
+                _write_jsonl(src_tasks, os.path.join(temp_dir, TASKS_PATH))
+
         for ds_id in dataset_ids:
             dataset_path = f"/root/src/backend/datasets/{ds_id}"
-            
-            episode_files = [f for f in os.listdir(dataset_path) if f.startswith('episode_') and os.path.isfile(os.path.join(dataset_path, f))]
+            ds_info = get_dataset_info(dataset_path)
+            if ds_info is None:
+                continue
+            episodes = list_episodes(dataset_path)
 
-            for ep_file in episode_files:
-                src_ep_path = os.path.join(dataset_path, ep_file)
-                dest_ep_path = os.path.join(temp_dir, f'episode_{episode_counter}.hdf5')
-                shutil.copy(src_ep_path, dest_ep_path)
+            for ep_entry in episodes:
+                ep_idx = ep_entry["episode_index"]
+                chunk = ep_idx // ds_info.get("chunks_size", DEFAULT_CHUNK_SIZE)
+                src_parquet = os.path.join(dataset_path, PARQUET_PATH_TEMPLATE.format(chunk=chunk, ep=ep_idx))
+                if not os.path.exists(src_parquet):
+                    continue
+
+                table = pq.read_table(src_parquet)
+                df = table.to_pandas()
+                num_frames = len(df)
+
+                tmp_info = _read_json(os.path.join(temp_dir, INFO_PATH))
+                global_start = tmp_info["total_frames"]
+                new_chunk = episode_counter // tmp_info.get("chunks_size", DEFAULT_CHUNK_SIZE)
+
+                df["index"] = np.arange(global_start, global_start + num_frames, dtype=np.int64)
+                df["episode_index"] = episode_counter
+
+                # Copy videos (MP4) or images (legacy PNG)
+                features = ds_info.get("features", {})
+                for feat_key, feat in features.items():
+                    if not feat_key.startswith("observation.images."):
+                        continue
+                    if feat.get("dtype") == "video":
+                        # Copy MP4 video file
+                        src_video = os.path.join(
+                            dataset_path, "videos", f"chunk-{chunk:03d}", feat_key,
+                            f"episode_{ep_idx:06d}.mp4"
+                        )
+                        dst_video = os.path.join(
+                            temp_dir, "videos", f"chunk-{new_chunk:03d}", feat_key,
+                            f"episode_{episode_counter:06d}.mp4"
+                        )
+                        os.makedirs(os.path.dirname(dst_video), exist_ok=True)
+                        if os.path.exists(src_video):
+                            shutil.copy2(src_video, dst_video)
+                    elif feat.get("dtype") == "image" and feat_key in df.columns:
+                        # Legacy: copy embedded image paths
+                        sensor_name = feat_key.replace("observation.images.", "")
+                        s_id = sensor_name.replace("sensor_", "")
+                        new_paths = []
+                        for frame_idx, old_rel_path in enumerate(df[feat_key]):
+                            old_abs = os.path.join(dataset_path, old_rel_path)
+                            new_rel = IMAGE_PATH_TEMPLATE.format(sid=s_id, ep=episode_counter, frame=frame_idx)
+                            new_abs = os.path.join(temp_dir, new_rel)
+                            os.makedirs(os.path.dirname(new_abs), exist_ok=True)
+                            if os.path.exists(old_abs):
+                                shutil.copy2(old_abs, new_abs)
+                            new_paths.append(new_rel)
+                        df[feat_key] = new_paths
+
+                dest_parquet = os.path.join(temp_dir, PARQUET_PATH_TEMPLATE.format(chunk=new_chunk, ep=episode_counter))
+                os.makedirs(os.path.dirname(dest_parquet), exist_ok=True)
+                pq.write_table(pa.Table.from_pandas(df), dest_parquet)
+
+                # Copy episode stats
+                src_stats = _read_jsonl(os.path.join(dataset_path, EPISODES_STATS_PATH))
+                ep_stats = {}
+                for s in src_stats:
+                    if s.get("episode_index") == ep_idx:
+                        ep_stats = s.get("stats", {})
+                        break
+
+                tmp_info["total_episodes"] = episode_counter + 1
+                tmp_info["total_frames"] = global_start + num_frames
+                tmp_info["total_chunks"] = new_chunk + 1
+                tmp_info["splits"] = {"train": f"0:{episode_counter + 1}"}
+                _write_json(tmp_info, os.path.join(temp_dir, INFO_PATH))
+
+                _append_jsonl(
+                    {"episode_index": episode_counter, "length": num_frames, "tasks": ep_entry.get("tasks", [""])},
+                    os.path.join(temp_dir, EPISODES_PATH),
+                )
+                _append_jsonl(
+                    {"episode_index": episode_counter, "stats": ep_stats},
+                    os.path.join(temp_dir, EPISODES_STATS_PATH),
+                )
+
                 episode_counter += 1
-                print("Copied episode file:", ep_file, "to", dest_ep_path)
+                print(f"Copied episode {ep_idx} from dataset {ds_id} -> episode_{episode_counter - 1}")
 
         checkpoint = checkpoint.to_dict()
 
@@ -252,12 +365,11 @@ def main(args):
         n_obs_steps = policy['settings']['n_obs_steps']  # Default to 1 if not specified
 
 
-        # succeed 플래그 자동 감지: 첫 번째 에피소드에서 확인
-        first_ep = os.path.join(temp_dir, 'episode_0.hdf5')
-        if os.path.exists(first_ep):
-            import h5py as _h5
-            with _h5.File(first_ep, 'r') as _f:
-                _has_succeed = 'succeed' in _f
+        # succeed 플래그 자동 감지: 첫 번째 에피소드의 parquet에서 확인
+        first_parquet = os.path.join(temp_dir, PARQUET_PATH_TEMPLATE.format(chunk=0, ep=0))
+        if os.path.exists(first_parquet):
+            _first_table = pq.read_table(first_parquet)
+            _has_succeed = 'succeed' in _first_table.column_names
             if _has_succeed:
                 ts = checkpoint['train_settings']
                 ts['has_succeed'] = True
