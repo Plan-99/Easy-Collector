@@ -521,7 +521,6 @@ class Agent:
                     target_ee_dict[name] = target_pose
 
         # 계산된 절대 좌표 타겟으로 이동 명령
-        print(f"Moving EE with delta step. Target EE dict: {target_ee_dict}")
         self.move_ee_step(target_ee_dict, vel_arg=vel_arg)
 
     def move_ee_from_origin(self, origin, offset_ee_dict):
