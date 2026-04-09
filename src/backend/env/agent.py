@@ -276,6 +276,30 @@ class Agent:
                 self.move_robot_client.call_async(req)
 
 
+        elif self.write_topic_msg == 'fairino_msgs/srv/RemoteCmdInterface':
+            if not self.move_robot_client.service_is_ready():
+                print("Fairino command service is not ready, skipping command.")
+                return
+
+            # ServoJ 모드 시작 (최초 1회)
+            if not getattr(self, '_fairino_servo_started', False):
+                req_start = self.write_service_srv_cls.Request()
+                req_start.cmd_str = 'ServoMoveStart()'
+                future = self.move_robot_client.call_async(req_start)
+                # spin_until_future_complete 대신 future 직접 대기 (executor 충돌 방지)
+                timeout = time.time() + 1.0
+                while not future.done() and time.time() < timeout:
+                    time.sleep(0.01)
+                self._fairino_servo_started = True
+
+            # Fairino SDK는 도(degree) 단위를 사용하므로 라디안에서 변환
+            angles_deg = [float(np.degrees(a)) for a in action]
+            jnt_str = ','.join([f"{a:.4f}" for a in angles_deg])
+
+            req = self.write_service_srv_cls.Request()
+            req.cmd_str = f'ServoJ({jnt_str},0,0,0.008,0,0)'
+            self.move_robot_client.call_async(req)
+
         elif self.write_topic_msg == 'jaka_msgs/srv/ServoMove':
             if not self.move_robot_client.service_is_ready():
                 print("JAKA servo_j service is not ready, skipping command.")
@@ -525,6 +549,9 @@ class Agent:
             with self.js_mutex:
                 self.joint_states = msg
                 self.last_joint_update = time.time()
+                if not getattr(self, '_cb_logged', False):
+                    print(f"[Fairino] joint_state_cb first call, msg type: {type(msg).__name__}")
+                    self._cb_logged = True
         except Exception as e:
             print(f"[ERROR] joint_state_cb: {e}")
 
@@ -573,6 +600,16 @@ class Agent:
                 for i, joint_name in enumerate(self.joint_names):
                     topic_index = self.joint_states.joint_names.index(joint_name)
                     joint_positions.append(self.joint_states.actual.positions[topic_index])
+            elif self.read_topic_msg == 'fairino_msgs/msg/RobotNonrtState':
+                # Fairino nonrt_state_data: 도(degree) 단위 → 라디안 변환
+                joint_positions = [
+                    np.radians(self.joint_states.j1_cur_pos),
+                    np.radians(self.joint_states.j2_cur_pos),
+                    np.radians(self.joint_states.j3_cur_pos),
+                    np.radians(self.joint_states.j4_cur_pos),
+                    np.radians(self.joint_states.j5_cur_pos),
+                    np.radians(self.joint_states.j6_cur_pos),
+                ]
             elif self.read_topic_msg == 'tm_msgs/msg/FeedbackState':
                 # TM FeedbackState: joint_pos (6 arm joints) + optional gripper from DI
                 joint_positions = list(self.joint_states.joint_pos)
