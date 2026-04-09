@@ -5,11 +5,11 @@ import numpy as np
 
 from ...lerobot.policies.act.modeling_act import ACTPolicy
 from ...policies.utils import forward_pass, FullScanDataset, get_norm_stats
+from ...configs.global_configs import DATASET_DIR
 from torch.utils.data import DataLoader
 
 
 CHECKPOINT_DIR = '/root/src/backend/checkpoints'
-DATASET_DIR = '/root/src/backend/datasets'
 
 
 def generate_ood_features(checkpoint, policy_obj, task, task_control=None):
@@ -27,7 +27,7 @@ def generate_ood_features(checkpoint, policy_obj, task, task_control=None):
         return
 
     # 데이터셋 준비 (train.py와 동일한 방식)
-    temp_dir = '/root/src/backend/datasets/tmp_ood'
+    temp_dir = os.path.join(DATASET_DIR, 'tmp_ood')
     os.makedirs(temp_dir, exist_ok=True)
 
     try:

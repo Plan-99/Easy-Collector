@@ -24,6 +24,7 @@ from src.backend.api.process.lerobot_io import (
     PARQUET_PATH_TEMPLATE, IMAGE_PATH_TEMPLATE, INFO_PATH,
     EPISODES_PATH, TASKS_PATH, EPISODES_STATS_PATH, DEFAULT_CHUNK_SIZE,
 )
+from src.backend.configs.global_configs import DATASET_DIR
 import pyarrow as pa
 import pyarrow.parquet as pq
 from PIL import Image
@@ -249,7 +250,7 @@ def migrate_single_dataset(dataset_dir, backup=True):
 
 def main():
     parser = argparse.ArgumentParser(description="Migrate HDF5 episodes to LeRobot format")
-    parser.add_argument("--dataset-dir", default="/root/src/backend/datasets",
+    parser.add_argument("--dataset-dir", default=DATASET_DIR,
                         help="Root directory containing dataset folders")
     parser.add_argument("--dataset-ids", nargs="*", type=str, default=None,
                         help="Specific dataset IDs to migrate (default: all)")

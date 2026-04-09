@@ -62,6 +62,7 @@ copy_tree() {
       --exclude='__pycache__/' \
       --exclude='node_modules/' \
       --exclude='database/*.db' \
+      --exclude='datasets/' \
       "$src/" "$dst/"
   else
     # Portable fallback using tar over a pipe.

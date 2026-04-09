@@ -10,6 +10,7 @@ services:
     environment:
       - DISPLAY=${DISPLAY}
       - ROS_DOMAIN_ID=0
+      - RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}
       - XAUTHORITY=${XAUTHORITY}
       - PYTHONPATH=/root/src:${PYTHONPATH}
       # NPM: regional mirror and retry knobs (override in env if needed)

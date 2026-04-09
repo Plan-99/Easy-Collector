@@ -13,6 +13,7 @@ from .lerobot_io import (
 )
 from ...lerobot.datasets.utils import get_hf_features_from_features, embed_images, DEFAULT_IMAGE_PATH
 from ...lerobot.datasets.video_utils import encode_video_frames
+from ...configs.global_configs import DATASET_DIR
 import datasets as hf_datasets
 import pyarrow.parquet as pq
 
@@ -131,8 +132,8 @@ def apply_hsv(image, h_adj, s_adj, v_adj):
 
 
 def augment_dataset(dataset_id, aug_dataset_id, lightness, rectangles, salt_and_pepper, gaussian, prospective, hsv, socketio_instance, task_control):
-    dataset_path = os.path.join('/root/src/backend/datasets', str(dataset_id))
-    aug_dataset_path = os.path.join('/root/src/backend/datasets', str(aug_dataset_id))
+    dataset_path = os.path.join(DATASET_DIR, str(dataset_id))
+    aug_dataset_path = os.path.join(DATASET_DIR, str(aug_dataset_id))
 
     if not os.path.exists(dataset_path):
         print(f"[ERROR] Dataset path {dataset_path} does not exist.")

@@ -15,7 +15,7 @@ from ...utils.image_parser import fetch_image_with_config
 FIPER_ROOT = "/root/src/backend/fiper"
 BASE_CONFIG_PATH = FIPER_ROOT + "/configs"
 BASE_DATA_PATH = FIPER_ROOT + "/data"
-ORI_DATA_ROOT = "/root/src/backend/datasets"
+from ...configs.global_configs import DATASET_DIR as ORI_DATA_ROOT
 
 from ...fiper.rnd import RNDTrainer
 from ...fiper.evaluation import EvaluationManager, ResultsManager

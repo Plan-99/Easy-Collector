@@ -19,6 +19,7 @@ import pickle
 
 # Import policies and utilities
 from ..policies.utils import make_policy, make_optimizer, forward_pass, detach_dict, compute_dict_mean, set_seed, load_data, convert_lists_to_tuples
+from ..configs.global_configs import DATASET_DIR
 
 # Import database and data models
 from orator import DatabaseManager
@@ -199,7 +200,7 @@ def main(args):
     Model.set_connection_resolver(db)
     
     # Create a temporary directory to store dataset files
-    temp_dir = "/root/src/backend/datasets/tmp"
+    temp_dir = os.path.join(DATASET_DIR, "tmp")
     if os.path.exists(temp_dir):
         shutil.rmtree(temp_dir)
     os.makedirs(temp_dir)
@@ -230,7 +231,7 @@ def main(args):
 
         # Initialize temp dataset from first source
         first_ds_id = list(dataset_ids)[0]
-        first_ds_path = f"/root/src/backend/datasets/{first_ds_id}"
+        first_ds_path = os.path.join(DATASET_DIR, str(first_ds_id))
         first_info = get_dataset_info(first_ds_path)
         if first_info:
             tmp_info = dict(first_info)
@@ -250,7 +251,7 @@ def main(args):
                 _write_jsonl(src_tasks, os.path.join(temp_dir, TASKS_PATH))
 
         for ds_id in dataset_ids:
-            dataset_path = f"/root/src/backend/datasets/{ds_id}"
+            dataset_path = os.path.join(DATASET_DIR, str(ds_id))
             ds_info = get_dataset_info(dataset_path)
             if ds_info is None:
                 continue

@@ -1,5 +1,6 @@
 from flask import Blueprint, request, current_app
 from ...database.models.dataset_model import Dataset as DatasetModel
+from ...configs.global_configs import DATASET_DIR
 import os
 import shutil
 from ..process.read_dataset import read_dataset, add_config
@@ -12,8 +13,6 @@ from ..process.lerobot_io import (
 )
 
 dataset_bp = Blueprint('dataset_bp', __name__)
-
-DATASET_DIR = '/root/src/backend/datasets'
 
 @dataset_bp.route('/datasets', methods=['GET'])
 def get_datasets():
