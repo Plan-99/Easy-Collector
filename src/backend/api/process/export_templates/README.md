@@ -180,54 +180,64 @@ If your setup hits any of these limits, run inference inside EasyTrainer.
 
 ---
 
-## Mode 3: Service-based ROS 2 node
+## Mode 3: Service-based ROS 2 node (start / stop)
 
 Use this when an external program (planner, state machine, GUI button) needs
-to step the policy on demand instead of running it autonomously at a fixed
-rate. The node loads the model once at startup and stays warm; each service
-call takes a fresh observation snapshot, runs one inference step, publishes
-the resulting joint command, and returns success/message.
+to trigger a full task execution on demand. The node loads the model once at
+startup and stays warm. When the ``/start`` service is called the node begins
+a continuous inference loop (same as Mode 2) in a background thread. When
+``/stop`` is called the loop exits cleanly and the node returns to idle,
+ready for the next run.
 
 ```bash
 # Bring the node up — model loads once, then it idles waiting for calls
 python ros_inference_service.py
 
-# Custom node name (lets you run several side by side)
-python ros_inference_service.py --node-name my_policy
+# Custom rate / episode length / node name:
+python ros_inference_service.py --hz 15 --episode-len 300 --node-name my_policy
 
 # Dry run: compute & log actions but don't publish to the robot
 python ros_inference_service.py --dry-run
 ```
 
-From another terminal (or any ROS 2 client) call the service:
+From another terminal (or any ROS 2 client):
 
 ```bash
-# Run one inference step
-ros2 service call /easytrainer_inference_service/run_inference \
-    std_srvs/srv/Trigger
+# Start the inference loop (returns immediately)
+ros2 service call /easytrainer_inference_service/start std_srvs/srv/Trigger
 
-# Reset the temporal ensembler / action queue at the start of an episode
-ros2 service call /easytrainer_inference_service/reset \
-    std_srvs/srv/Trigger
+# Stop the inference loop (returns when the loop has exited)
+ros2 service call /easytrainer_inference_service/stop std_srvs/srv/Trigger
+
+# Reset the temporal ensembler / action queue (between episodes)
+ros2 service call /easytrainer_inference_service/reset std_srvs/srv/Trigger
 ```
 
 The response is a `std_srvs/srv/Trigger.Response`:
-- `success`: `true` if inference completed without exception
-- `message`: human-readable summary including the joint command, e.g.
-  `step 0: action=[0.205, 0.840, -0.846, ..., 0.029]`
+- `success`: `true` if the command was accepted
+- `message`: human-readable status, e.g. `inference loop started` or
+  `stopped after 300 steps`
+
+If ``--episode-len N`` is set (N > 0), the loop auto-stops after N steps and
+the node returns to idle — ``/start`` can be called again for the next run.
+If ``--episode-len 0`` (default), the loop runs until ``/stop`` is called.
 
 The same EasyTrainer policy / preprocessor / postprocessor is loaded as in
 Modes 1 and 2 — bit-for-bit identical outputs given identical inputs.
 
 ### Service node design notes
 
+- ``/start`` spawns a background worker thread running the full hz-paced
+  inference loop. The service returns immediately so the caller is not
+  blocked.
+- ``/stop`` signals the worker and joins it (5 s timeout). The response
+  includes the total step count.
 - Joint state and image subscriptions live in a `ReentrantCallbackGroup` and
   the executor is `MultiThreadedExecutor`, so observations keep updating in
-  the background even while a service call is in flight. Each call always
-  sees the freshest frame.
-- Concurrent service calls are serialised behind an internal lock — CUDA and
-  the temporal ensembler are not thread-safe. Two simultaneous callers will
-  not double-publish.
+  the background while the worker thread is running. Each inference step
+  always sees the freshest frame.
+- ``/start`` while already running returns ``success=False``. Call ``/stop``
+  first if you need to restart.
 - All limitations from Mode 2 apply (qaction, resnet18, write_type=topic,
   supported message types).
 

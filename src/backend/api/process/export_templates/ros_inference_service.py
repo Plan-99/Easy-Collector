@@ -1,9 +1,9 @@
 """Service-based ROS 2 inference node for an exported EasyTrainer checkpoint.
 
-Unlike ``ros_inference.py`` which runs an autonomous closed-loop at a fixed
-hz, this script keeps the model warm and only runs inference when an external
-client calls a ROS 2 service. Useful when an upstream planner / state machine
-wants to step the policy on demand.
+Unlike ``ros_inference.py`` which runs an autonomous closed-loop immediately,
+this script keeps the model warm and only starts/stops the inference loop when
+an external client calls a ROS 2 service. Useful when an upstream planner or
+state machine wants to trigger a full task execution on demand.
 
 Lifecycle
 ---------
@@ -13,17 +13,25 @@ At startup the node:
    as ``ros_inference.py``).
 2. Subscribes to every robot's joint-state topic and every sensor's image
    topic — observations are kept hot in the background via the executor.
-3. Advertises two services:
-       <node_name>/run_inference  (std_srvs/srv/Trigger)
-       <node_name>/reset          (std_srvs/srv/Trigger)
+3. Advertises three services:
+       <node_name>/start  (std_srvs/srv/Trigger)  — begin inference loop
+       <node_name>/stop   (std_srvs/srv/Trigger)  — stop inference loop
+       <node_name>/reset  (std_srvs/srv/Trigger)  — clear temporal ensembler
 4. Spins until Ctrl-C.
 
-When ``run_inference`` is called the node grabs a fresh observation snapshot,
-runs one inference step, publishes the resulting joint commands to each agent
-(unless ``--dry-run``), and returns success/message in the service response.
+When ``start`` is called the node spawns a background worker thread that runs
+the full hz-paced inference loop (identical to ``ros_inference.py``). The
+service returns immediately with ``success=True``. If the node is already
+running it returns ``success=False``.
+
+When ``stop`` is called the worker thread is signalled to stop and joined. The
+service returns once the loop has cleanly exited.
+
+The loop also auto-stops when ``--episode-len`` steps are reached (if non-zero).
+After that the node returns to idle and can be started again.
 
 When ``reset`` is called the policy's temporal ensembler / action queue is
-cleared so the next call is treated as a fresh episode.
+cleared so the next run is treated as a fresh episode.
 
 Limitations match ``ros_inference.py`` (qaction, resnet18, write_type=topic,
 JointState/JointTrajectoryPoint/Float64MultiArray robots only). See README.
@@ -36,11 +44,12 @@ Usage
     python3 ros_inference_service.py
 
     # From another terminal:
-    ros2 service call /easytrainer_inference_service/run_inference std_srvs/srv/Trigger
+    ros2 service call /easytrainer_inference_service/start std_srvs/srv/Trigger
+    ros2 service call /easytrainer_inference_service/stop std_srvs/srv/Trigger
     ros2 service call /easytrainer_inference_service/reset std_srvs/srv/Trigger
 
-    # Custom node name (so you can run multiple side-by-side):
-    python3 ros_inference_service.py --node-name my_policy
+    # Custom node name / loop options:
+    python3 ros_inference_service.py --node-name my_policy --hz 15 --episode-len 300
 
     # Dry-run: compute & log actions but don't publish to the robot
     python3 ros_inference_service.py --dry-run
@@ -51,6 +60,7 @@ import argparse
 import json
 import sys
 import threading
+import time
 from pathlib import Path
 
 # ── Bundled lerobot isolation (mirrors inference.py / ros_inference.py) ──────
@@ -127,6 +137,18 @@ def _parse_args() -> argparse.Namespace:
         help="ROS 2 node name (default: easytrainer_inference_service)",
     )
     p.add_argument(
+        "--hz",
+        type=float,
+        default=10.0,
+        help="Inference loop frequency (default: 10 Hz)",
+    )
+    p.add_argument(
+        "--episode-len",
+        type=int,
+        default=0,
+        help="Auto-stop after N steps (0 = run until /stop is called, default: 0)",
+    )
+    p.add_argument(
         "--dry-run",
         action="store_true",
         help="Compute actions but don't publish to the robot.",
@@ -161,16 +183,14 @@ class InferenceServiceNode(Node):
         self.inf = inf
         self.has_succeed = bool(meta.get("has_succeed", False))
 
-        # Inference is not thread-safe (CUDA + temporal ensembler state) so we
-        # serialise concurrent service calls behind this lock. Subscriptions
-        # still update freely on other threads.
-        self._infer_lock = threading.Lock()
+        # Worker thread state
+        self._worker: threading.Thread | None = None
+        self._stop_event = threading.Event()
+        self._lock = threading.Lock()  # guards start/stop transitions
         self._step_count = 0
 
-        # Build agents + env. Putting subscriptions in a ReentrantCallbackGroup
-        # lets the executor process image / joint state callbacks while a
-        # service callback is running, so the next inference call has fresh
-        # data instead of stale frames.
+        # Subscriptions in a ReentrantCallbackGroup so observations keep
+        # updating while the worker thread is running inference.
         self._cb_group = ReentrantCallbackGroup()
 
         robots = meta.get("robots") or []
@@ -186,100 +206,175 @@ class InferenceServiceNode(Node):
         self.env = SimpleEnv(self, self.agents, sensors)
         self.sensors = sensors
 
-        # Services. Same callback group so they don't block subscriptions.
-        self._run_srv = self.create_service(
-            Trigger,
-            f"~/run_inference",
-            self._handle_run_inference,
+        # Services
+        self._start_srv = self.create_service(
+            Trigger, "~/start", self._handle_start,
+            callback_group=self._cb_group,
+        )
+        self._stop_srv = self.create_service(
+            Trigger, "~/stop", self._handle_stop,
             callback_group=self._cb_group,
         )
         self._reset_srv = self.create_service(
-            Trigger,
-            f"~/reset",
-            self._handle_reset,
+            Trigger, "~/reset", self._handle_reset,
             callback_group=self._cb_group,
         )
 
         ns = self.get_name()
         self.get_logger().info(
             f"Inference service ready. Call:\n"
-            f"  ros2 service call /{ns}/run_inference std_srvs/srv/Trigger\n"
+            f"  ros2 service call /{ns}/start std_srvs/srv/Trigger\n"
+            f"  ros2 service call /{ns}/stop  std_srvs/srv/Trigger\n"
             f"  ros2 service call /{ns}/reset std_srvs/srv/Trigger"
         )
 
-    # ──────────────────────────────────────────────────────────────────────
-    def _handle_reset(self, request, response):
-        with self._infer_lock:
-            self.inf.reset()
+    # ── property ──────────────────────────────────────────────────────────
+    @property
+    def is_running(self) -> bool:
+        return self._worker is not None and self._worker.is_alive()
+
+    # ── /start ────────────────────────────────────────────────────────────
+    def _handle_start(self, request, response):
+        with self._lock:
+            if self.is_running:
+                response.success = False
+                response.message = "already running"
+                self.get_logger().warn("[start] rejected — loop already running")
+                return response
+
+            self._stop_event.clear()
             self._step_count = 0
+            self.inf.reset()
+
+            self._worker = threading.Thread(
+                target=self._inference_loop, daemon=True,
+            )
+            self._worker.start()
+
+        response.success = True
+        response.message = "inference loop started"
+        self.get_logger().info("[start] inference loop started")
+        return response
+
+    # ── /stop ─────────────────────────────────────────────────────────────
+    def _handle_stop(self, request, response):
+        with self._lock:
+            if not self.is_running:
+                response.success = False
+                response.message = "not running"
+                self.get_logger().warn("[stop] rejected — loop is not running")
+                return response
+
+            self._stop_event.set()
+
+        # Join outside the lock so the worker can finish cleanly.
+        self._worker.join(timeout=5.0)
+        if self._worker.is_alive():
+            self.get_logger().warn("[stop] worker did not exit within 5s")
+
+        response.success = True
+        response.message = f"stopped after {self._step_count} steps"
+        self.get_logger().info(f"[stop] stopped after {self._step_count} steps")
+        return response
+
+    # ── /reset ────────────────────────────────────────────────────────────
+    def _handle_reset(self, request, response):
+        self.inf.reset()
         response.success = True
         response.message = "policy reset"
         self.get_logger().info("[reset] policy state cleared")
         return response
 
-    # ──────────────────────────────────────────────────────────────────────
-    def _handle_run_inference(self, request, response):
-        try:
-            with self._infer_lock:
-                action = self._run_one_step()
-        except Exception as e:
-            self.get_logger().error(f"[run_inference] failed: {e}")
-            response.success = False
-            response.message = f"{type(e).__name__}: {e}"
-            return response
+    # ── Worker loop (runs in background thread) ──────────────────────────
+    def _inference_loop(self):
+        """Full hz-paced inference loop — mirrors ros_inference.py main loop."""
+        period = 1.0 / max(self.args.hz, 0.1)
+        episode_len = self.args.episode_len
 
-        msg = f"step {self._step_count - 1}: action={np.round(action, 4).tolist()}"
-        if self.args.dry_run:
-            msg = "[DRY] " + msg
-        response.success = True
-        response.message = msg
-        self.get_logger().info(f"[run_inference] {msg}")
-        return response
-
-    # ──────────────────────────────────────────────────────────────────────
-    def _run_one_step(self) -> np.ndarray:
-        """Single inference step. Same logic as ros_inference.py main loop body
-        minus the pacing / episode limit."""
-        obs = self.env.get_observation()
-
-        # State: concat of every agent's qpos in id order
-        qpos_concat = np.concatenate(
-            [
-                np.asarray(obs["robot_states"][a.id]["qpos"], dtype=np.float32)
-                for a in self.agents
-            ]
+        self.get_logger().info(
+            f"[loop] running at {self.args.hz} Hz, "
+            f"episode_len={'infinite' if episode_len == 0 else episode_len}"
         )
 
-        # Per-sensor crop/rotate/resize, then BGR→RGB for the model
-        images = {}
-        for sensor in self.sensors:
-            sid = sensor["id"]
-            raw = obs["images"][f"sensor_{sid}"]
-            cfg = _resolve_sensor_config(self.meta, sid)
-            processed = fetch_image_with_config(raw, cfg)
-            if processed.ndim == 3 and processed.shape[2] == 3:
-                processed = processed[:, :, ::-1]
-            images[f"sensor_{sid}"] = np.ascontiguousarray(processed)
+        try:
+            while not self._stop_event.is_set():
+                if episode_len > 0 and self._step_count >= episode_len:
+                    self.get_logger().info(
+                        f"[loop] episode_len={episode_len} reached, auto-stopping"
+                    )
+                    break
 
-        action = self.inf.infer(qpos_concat, images)
+                loop_start = time.time()
 
-        # Strip succeed bit before publishing (the policy was trained to predict
-        # it as the trailing dim, but it isn't a joint command).
-        if self.has_succeed and len(action) > 0:
-            action_to_send = action[:-1]
-        else:
-            action_to_send = action
+                # 1) Observation snapshot
+                obs = self.env.get_observation()
 
-        # Split across agents. Same offset arithmetic as ros_inference.py.
-        start = 0
-        for a in self.agents:
-            target = action_to_send[start : start + a.joint_len]
-            start += a.joint_len
-            if not self.args.dry_run:
-                a.move_joint_step(target)
+                # 2) State: concat of every agent's qpos in id order
+                qpos_concat = np.concatenate(
+                    [
+                        np.asarray(obs["robot_states"][a.id]["qpos"], dtype=np.float32)
+                        for a in self.agents
+                    ]
+                )
 
-        self._step_count += 1
-        return action  # full vector incl. succeed (caller decides what to do)
+                # 3) Per-sensor crop/rotate/resize, BGR→RGB
+                images = {}
+                for sensor in self.sensors:
+                    sid = sensor["id"]
+                    raw = obs["images"][f"sensor_{sid}"]
+                    cfg = _resolve_sensor_config(self.meta, sid)
+                    processed = fetch_image_with_config(raw, cfg)
+                    if processed.ndim == 3 and processed.shape[2] == 3:
+                        processed = processed[:, :, ::-1]
+                    images[f"sensor_{sid}"] = np.ascontiguousarray(processed)
+
+                # 4) Inference
+                if self._step_count % 10 == 0:
+                    self.get_logger().info(
+                        f"[step {self._step_count}] qpos={np.round(qpos_concat, 4).tolist()}"
+                    )
+                action = self.inf.infer(qpos_concat, images)
+
+                # 5) Strip succeed bit
+                if self.has_succeed and len(action) > 0:
+                    succeed_val = float(action[-1])
+                    action_to_send = action[:-1]
+                else:
+                    succeed_val = None
+                    action_to_send = action
+
+                # 6) Split across agents and publish
+                start = 0
+                for a in self.agents:
+                    target = action_to_send[start : start + a.joint_len]
+                    start += a.joint_len
+                    self.get_logger().info(
+                        f"[step {self._step_count}] {a.name}: "
+                        f"{np.round(target, 4).tolist()}"
+                    )
+                    if not self.args.dry_run:
+                        a.move_joint_step(target)
+
+                if succeed_val is not None:
+                    self.get_logger().info(
+                        f"[step {self._step_count}] succeed_score={succeed_val:.3f}"
+                    )
+
+                self._step_count += 1
+
+                # Pace the loop
+                elapsed = time.time() - loop_start
+                remaining = period - elapsed
+                if remaining > 0:
+                    # Use stop_event.wait() so /stop can interrupt the sleep
+                    self._stop_event.wait(timeout=remaining)
+
+        except Exception as e:
+            self.get_logger().error(f"[loop] exception: {e}")
+        finally:
+            self.get_logger().info(
+                f"[loop] exited after {self._step_count} steps"
+            )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -314,7 +409,8 @@ def main() -> int:
           f"{[(r['id'], r.get('name')) for r in meta.get('robots', [])]}")
     print(f"[ros_inference_service] task sensors:    "
           f"{[(s['id'], s.get('name')) for s in meta.get('sensors', [])]}")
-    print(f"[ros_inference_service] node_name={args.node_name} dry_run={args.dry_run}")
+    print(f"[ros_inference_service] node_name={args.node_name} "
+          f"hz={args.hz} episode_len={args.episode_len} dry_run={args.dry_run}")
 
     print(f"[ros_inference_service] loading checkpoint from {args.model_dir} ...")
     inf = CheckpointInference(args.model_dir, args.meta, device=args.device)
