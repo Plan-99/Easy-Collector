@@ -159,8 +159,8 @@ function submitForm() {
 
         const value = field.value;
         const isInvalid = (value === '' || value === null || value === undefined);
-        
-        if (isInvalid && field.key !== 'id') {
+
+        if (isInvalid && field.key !== 'id' && !field.optional) {
             field.validated = false;
             isFormValid = false;
         } else {

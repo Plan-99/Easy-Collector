@@ -10,8 +10,7 @@ from ...utils.image_parser import fetch_image_with_config
 from ...policies.utils import make_policy
 from ...env.env import Env
 
-from ...lerobot.policies.pi0.modeling_pi0 import PI0Policy
-from ...lerobot.configs.types import PolicyFeature, FeatureType
+from lerobot.configs.types import PolicyFeature, FeatureType
 
 def test_vla(
     node,

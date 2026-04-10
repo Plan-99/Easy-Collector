@@ -3,7 +3,7 @@ import shutil
 import torch
 import numpy as np
 
-from ...lerobot.policies.act.modeling_act import ACTPolicy
+from lerobot.policies.act.modeling_act import ACTPolicy
 from ...policies.utils import forward_pass, FullScanDataset, get_norm_stats
 from ...configs.global_configs import DATASET_DIR
 from torch.utils.data import DataLoader

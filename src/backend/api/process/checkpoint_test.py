@@ -5,16 +5,15 @@ import numpy as np
 import time
 import cv2
 from einops import rearrange
-from ...lerobot.configs.types import PolicyFeature, FeatureType
+from lerobot.configs.types import PolicyFeature, FeatureType
 from ...utils.image_parser import fetch_image_with_config
 
-from ...policies.utils import make_policy, VISION_BACKBONE_MAP, process_image, relative_trajectory_to_delta
+from ...policies.utils import make_policy, VISION_BACKBONE_MAP, process_image, relative_trajectory_to_delta, make_easytrainer_processors
 from collections import deque
 from ...env.env import Env
 
-from ...lerobot.policies.act.modeling_act import ACTPolicy
-from ...lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
-from ...lerobot.policies.pi0.modeling_pi0 import PI0Policy
+from lerobot.policies.act.modeling_act import ACTPolicy
+from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
 
 from .oti_rl import SACAgent, ReplayBuffer, UncertaintySubscriber
 from rclpy.executors import SingleThreadedExecutor
@@ -78,7 +77,7 @@ def checkpoint_test(
             # re_inference_steps=1: temporal ensemble 활성화 (매 스텝 추론 + 가중 평균)
             # re_inference_steps>1: temporal ensemble 비활성화, N스텝마다 재추론
             if re_inference_steps == 1:
-                from ...lerobot.policies.act.modeling_act import ACTTemporalEnsembler
+                from lerobot.policies.act.modeling_act import ACTTemporalEnsembler
                 policy.temporal_ensembler = ACTTemporalEnsembler(temporal_ensemble_coeff, policy.config.chunk_size)
             else:
                 policy.config.n_action_steps = re_inference_steps
@@ -87,12 +86,31 @@ def checkpoint_test(
             policy = DiffusionPolicy.from_pretrained(ckpt_dir)
             policy.config.n_action_steps = re_inference_steps
             policy._queues['action'] = deque(maxlen=re_inference_steps)
-        elif policy_obj['type'] == 'PI0':
-            policy = PI0Policy.from_pretrained(ckpt_dir)
+        elif policy_obj['type'] == 'PI05':
+            from lerobot.policies.pi05.modeling_pi05 import PI05Policy
+            policy = PI05Policy.from_pretrained(ckpt_dir)
 
         policy.cuda()
         policy.eval()
         print(f'Loaded Policy from {ckpt_dir}, hz: {hz}, re_inference_steps: {re_inference_steps}, action_key: {action_key}')
+
+        # Load preprocessor/postprocessor saved alongside the model. These wrap input
+        # observations with Normalize and the model output action with Unnormalize, using
+        # the dataset stats captured at training time. Required for correct predictions
+        # on tiny-scale joints (e.g. gripper) — without normalization the L1 loss is
+        # dominated by larger joints and the gripper is essentially untrained.
+        # Older checkpoints (no processor files) return (None, None) so the call site
+        # can stay uniform and fall back to raw I/O.
+        preprocessor, postprocessor = make_easytrainer_processors(
+            policy_type=policy_obj['type'],
+            cfg=policy.config,
+            pretrained_path=ckpt_dir,
+        )
+        if preprocessor is None:
+            print(f'[INFER][WARN] No processor pipeline found at {ckpt_dir}. '
+                  f'Falling back to raw model I/O — retrain to enable normalization.')
+        else:
+            print(f'[INFER] Loaded preprocessor/postprocessor from {ckpt_dir}')
 
         # OOD feature store 로드
         ood_image_feats = None
@@ -286,6 +304,11 @@ def checkpoint_test(
                         qpos_np = np.concatenate([qpos_np] + extra_obs)
                     qpos_t = torch.from_numpy(qpos_np).float().cuda().unsqueeze(0)
                     policy_input_t = {'observation.state': qpos_t}
+                    # PI05 needs tokenized language inputs
+                    if policy_obj['type'] == 'PI05':
+                        policy_input_t['language_instruction'] = task.get('name', '')
+                        from ...policies.utils import prepare_pi05_language_tokens
+                        prepare_pi05_language_tokens(policy_input_t, policy.config)
                     print(f"[INPUT] state: {qpos_t.shape} = {qpos_t[0].cpu().numpy()}")
                     for sensor in sensors:
                         image = obs_t['images'][f'sensor_{sensor["id"]}']
@@ -297,6 +320,12 @@ def checkpoint_test(
                         })
                         image = process_image(image, vision_backbone, to_cuda=True)
                         policy_input_t[f'observation.images.sensor_{sensor["id"]}'] = image.unsqueeze(0)
+
+                    # Normalize observation inputs (state, images) using train-time stats.
+                    # Shapes are already batched + on CUDA, so AddBatchDim/DeviceProcessor
+                    # are no-ops; only NormalizerProcessorStep does meaningful work.
+                    if preprocessor is not None:
+                        policy_input_t = preprocessor(policy_input_t)
 
                     if action_key == 'relative_ee_pos':
                         # full chunk를 한번에 받아서 delta로 변환 후 queue에 넣음
@@ -314,6 +343,9 @@ def checkpoint_test(
                                 q = policy._action_queue if hasattr(policy, '_action_queue') else policy._queues['action']
                                 raw_list.append(q.popleft().squeeze(0))
                             raw_actions = torch.stack(raw_list)
+                        # Unnormalize the predicted action chunk back to robot units
+                        if postprocessor is not None:
+                            raw_actions = postprocessor(raw_actions)
                         raw_np = raw_actions.cpu().numpy()
                         deltas = relative_trajectory_to_delta(raw_np)
                         state_t = deltas[0]
@@ -321,7 +353,11 @@ def checkpoint_test(
                             rel_action_queue.append(deltas[i])
                     else:
                         # relative trajectory 모드: select_action이 반환하는 값은 chunk[0] = T_now→1 = 즉각 delta
-                        state_t = policy.select_action(policy_input_t).squeeze(0).cpu().numpy()
+                        raw_action = policy.select_action(policy_input_t)
+                        # Unnormalize back to robot units before downstream slicing/publishing
+                        if postprocessor is not None:
+                            raw_action = postprocessor(raw_action)
+                        state_t = raw_action.squeeze(0).cpu().numpy()
 
                     if noise_t_raw is None:
                         noise_t_raw = np.zeros_like(state_t)

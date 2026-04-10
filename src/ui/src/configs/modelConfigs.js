@@ -58,7 +58,7 @@ export const POLICY_CONFIGS = {
         'use_film_scale_modulation': { 'label': 'Use FiLM Scale Modulation', 'value': true, 'type': 'boolean' },
 
         // --- Noise Scheduler ---
-        'noise_scheduler_type': { 'label': 'Noise Scheduler Type', 'value': 'DDPM', 'type': 'select', 'options': ['DDPM', 'DPM-Solver'] },
+        'noise_scheduler_type': { 'label': 'Noise Scheduler Type', 'value': 'DDPM', 'type': 'select', 'options': ['DDPM', 'DDIM'] },
         'num_train_timesteps': { 'label': 'Number of Train Timesteps', 'value': 100, 'type': 'number' },
         'beta_schedule': { 'label': 'Beta Schedule', 'value': 'squaredcos_cap_v2', 'type': 'select', 'options': ['linear', 'squaredcos_cap_v2'] },
         'beta_start': { 'label': 'Beta Start', 'value': 0.0001, 'type': 'number' },
@@ -72,7 +72,7 @@ export const POLICY_CONFIGS = {
         'action_type': { 'label': 'Action Type', 'value': 'qaction', 'type': 'select', 'options': ['qaction', 'ee_delta_action', 'relative_ee_pos'] },
         'obs_state_keys': { 'label': 'Observation State Keys', 'value': ['qpos'], 'type': 'multiselect', 'options': ['qpos', 'qvel', 'qeffort'] },
     },
-    'PI0': {
+    'PI05': {
         // Input / output structure
         'n_obs_steps': { 'label': 'Number of Observation Steps', 'value': 1, 'type': 'number' },
         'chunk_size': { 'label': 'Chunk Size', 'value': 50, 'type': 'number' },
@@ -80,24 +80,20 @@ export const POLICY_CONFIGS = {
         'max_state_dim': { 'label': 'Max State Dimension', 'value': 32, 'type': 'number' },
         'max_action_dim': { 'label': 'Max Action Dimension', 'value': 32, 'type': 'number' },
         // Image preprocessing
-        'resize_imgs_with_padding': { 'label': 'Resize Images with Padding', 'value': [224, 224], 'type': 'array' },
-        'empty_cameras': { 'label': 'Empty Cameras', 'value': 0, 'type': 'number' },
-        // Aloha specific
-        'adapt_to_pi_aloha': { 'label': 'Adapt to Pi Aloha', 'value': false, 'type': 'boolean' },
-        'use_delta_joint_actions_aloha': { 'label': 'Use Delta Joint Actions Aloha', 'value': false, 'type': 'boolean' },
+        'image_resolution': { 'label': 'Image Resolution (H, W)', 'value': [224, 224], 'type': 'array' },
+        // Flow matching
+        'num_inference_steps': { 'label': 'Number of Inference Steps', 'value': 10, 'type': 'number' },
         // Tokenizer
-        'tokenizer_max_length': { 'label': 'Tokenizer Max Length', 'value': 48, 'type': 'number' },
-        // Projector
-        'proj_width': { 'label': 'Projector Width', 'value': 1024, 'type': 'number' },
-        // Decoding
-        'num_steps': { 'label': 'Number of Decoding Steps', 'value': 10, 'type': 'number' },
-        // Attention utils
-        'use_cache': { 'label': 'Use Cache', 'value': true, 'type': 'boolean' },
-        'attention_implementation': { 'label': 'Attention Implementation', 'value': 'eager', 'type': 'select', 'options': ['eager', 'fa2', 'flex'] },
+        'tokenizer_max_length': { 'label': 'Tokenizer Max Length', 'value': 200, 'type': 'number' },
+        // Model variants
+        'paligemma_variant': { 'label': 'PaliGemma Variant', 'value': 'gemma_2b', 'type': 'select', 'options': ['gemma_2b'] },
+        'action_expert_variant': { 'label': 'Action Expert Variant', 'value': 'gemma_300m', 'type': 'select', 'options': ['gemma_300m'] },
         // Finetuning settings
-        'freeze_vision_encoder': { 'label': 'Freeze Vision Encoder', 'value': true, 'type': 'boolean' },
+        'freeze_vision_encoder': { 'label': 'Freeze Vision Encoder', 'value': false, 'type': 'boolean' },
         'train_expert_only': { 'label': 'Train Expert Only', 'value': false, 'type': 'boolean' },
-        'train_state_proj': { 'label': 'Train State Projector', 'value': true, 'type': 'boolean' },
+        'gradient_checkpointing': { 'label': 'Gradient Checkpointing', 'value': false, 'type': 'boolean' },
+        // Relative actions
+        'use_relative_actions': { 'label': 'Use Relative Actions', 'value': false, 'type': 'boolean' },
         'action_type': { 'label': 'Action Type', 'value': 'qaction', 'type': 'select', 'options': ['qaction', 'ee_delta_action', 'relative_ee_pos'] },
         'obs_state_keys': { 'label': 'Observation State Keys', 'value': ['qpos'], 'type': 'multiselect', 'options': ['qpos', 'qvel', 'qeffort'] },
     }
@@ -159,14 +155,12 @@ export const TRAIN_CONFIGS = {
         'scheduler_name': { 'label': 'LR Scheduler Name', 'value': 'cosine', 'type': 'select', 'options': ['cosine', 'linear', 'constant'] },
         'scheduler_warmup_steps': { 'label': 'LR Scheduler Warmup Steps', 'value': 500, 'type': 'number' }
     },
-    'VLAsEn': {
-        'optimizer_lr': { 'label': 'Optimizer Learning Rate', 'value': 1e-5, 'type': 'number' },
-    },
-    'PI0': {
+    'PI05': {
         'optimizer_lr': { 'label': 'Optimizer Learning Rate', 'value': 2.5e-5, 'type': 'number' },
         'optimizer_betas': { 'label': 'Optimizer Betas', 'value': [0.9, 0.95], 'type': 'array' },
         'optimizer_eps': { 'label': 'Optimizer Epsilon', 'value': 1e-8, 'type': 'number' },
-        'optimizer_weight_decay': { 'label': 'Optimizer Weight Decay', 'value': 1e-10, 'type': 'number' },
+        'optimizer_weight_decay': { 'label': 'Optimizer Weight Decay', 'value': 0.01, 'type': 'number' },
+        'optimizer_grad_clip_norm': { 'label': 'Gradient Clip Norm', 'value': 1.0, 'type': 'number' },
         'scheduler_warmup_steps': { 'label': 'Scheduler Warmup Steps', 'value': 1000, 'type': 'number' },
         'scheduler_decay_steps': { 'label': 'Scheduler Decay Steps', 'value': 30000, 'type': 'number' },
         'scheduler_decay_lr': { 'label': 'Scheduler Decay LR', 'value': 2.5e-6, 'type': 'number' },
@@ -175,5 +169,10 @@ export const TRAIN_CONFIGS = {
         'num_epochs': { 'label': 'Number of Epochs', 'value': 1000, 'type': 'number' },
         'batch_size': { 'label': 'Batch Size', 'value': 32, 'type': 'number' },
         'num_workers': { 'label': 'Number of Workers', 'value': 4, 'type': 'number' },
+        'use_peft': { 'label': 'Use LoRA (PEFT)', 'value': false, 'type': 'boolean' },
+        'peft_r': { 'label': 'LoRA Rank', 'value': 16, 'type': 'number', 'showIf': 'use_peft' },
+        'peft_alpha': { 'label': 'LoRA Alpha', 'value': 16, 'type': 'number', 'showIf': 'use_peft' },
+        'use_amp': { 'label': 'Mixed Precision (bf16)', 'value': false, 'type': 'boolean' },
+        'grad_accum_steps': { 'label': 'Gradient Accumulation Steps', 'value': 1, 'type': 'number' },
     }
 };

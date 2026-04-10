@@ -63,6 +63,7 @@ copy_tree() {
       --exclude='node_modules/' \
       --exclude='database/*.db' \
       --exclude='datasets/' \
+      --exclude='.git/' \
       "$src/" "$dst/"
   else
     # Portable fallback using tar over a pipe.

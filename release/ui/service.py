@@ -948,13 +948,30 @@ class RuntimeServiceMixin:
             self.append_log(f"[WARN] Failed to prepare project: {e}")
 
     def _clear_conflicting_containers(self):
-        """Remove stale legacy containers that can block compose up due to duplicate names."""
+        """Remove stale/orphan containers that can block compose up due to duplicate names.
+
+        This handles the case where a container was created by a different compose project
+        (e.g. running from a different directory) and now blocks 'up -d' from this project.
+        Only removes containers that are NOT currently running.
+        """
         targets = [
             "easy_collector_frontend",
             "easy_collector_backend",
+            "easy_collector_service",
         ]
         try:
+            # Get currently running container names
+            running = set()
+            try:
+                out = subprocess.check_output(
+                    ["docker", "ps", "--format", "{{.Names}}"], text=True
+                )
+                running = {n.strip() for n in out.splitlines() if n.strip()}
+            except Exception:
+                pass
             for name in targets:
+                if name in running:
+                    continue  # Don't kill running containers
                 subprocess.run(
                     ["docker", "rm", "-f", name],
                     stdout=subprocess.DEVNULL,
@@ -977,12 +994,12 @@ class RuntimeServiceMixin:
         if running and restart_if_running:
             self.append_log(f"[{reason}] docker compose restart service ...")
             cmd = ["restart", "service"]
-        elif exists:
-            self.append_log(f"[{reason}] docker compose start service ...")
-            cmd = ["start", "service"]
         else:
-            self.append_log(f"[{reason}] docker compose up -d --no-recreate service ...")
-            cmd = ["up", "-d", "--no-recreate", "service"]
+            # Always use 'up -d' instead of 'start' — 'start' fails when container
+            # was removed (e.g. after 'down --volumes'). 'up -d' handles both cases:
+            # creates if missing, starts if stopped.
+            self.append_log(f"[{reason}] docker compose up -d service ...")
+            cmd = ["up", "-d", "service"]
         self.run_compose(cmd, on_finish=on_finish)
 
     # ------------------------ Actions ------------------------

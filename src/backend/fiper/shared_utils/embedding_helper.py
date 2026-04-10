@@ -1,5 +1,5 @@
 
-from backend.lerobot.policies.act.modeling_act import ACTPolicy
+from lerobot.policies.act.modeling_act import ACTPolicy
 import torch
 import numpy as np
 from backend.utils.image_parser import fetch_image_with_config

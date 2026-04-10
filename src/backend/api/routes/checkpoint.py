@@ -1,4 +1,4 @@
-from flask import Blueprint, request, current_app
+from flask import Blueprint, request, current_app, send_file
 from ...database.models.checkpoint_model import Checkpoint as CheckpointModel
 import os
 import shutil
@@ -6,6 +6,7 @@ import shutil
 from ..process.checkpoint_test import checkpoint_test
 from ..process.failure_detection import failure_detection
 from ..process.generate_ood_features import generate_ood_features
+from ..process.export_checkpoint import bundle_checkpoint_zip
 
 
 checkpoint_bp = Blueprint('checkpoint_bp', __name__)
@@ -123,6 +124,38 @@ def stop_failure_detection(id):
         name=f"failure_detection",
     )
     return {'status': 'success', 'message': 'Failure detection stopped'}, 200
+
+
+@checkpoint_bp.route('/checkpoint/<id>/:export', methods=['POST', 'GET'])
+def export_checkpoint(id):
+    """Bundle checkpoint files + standalone inference code into a zip download."""
+    checkpoint = CheckpointModel.with_('policy', 'task').find(id)
+    if not checkpoint:
+        return {'status': 'error', 'message': 'Checkpoint not found'}, 404
+    if not checkpoint.policy:
+        return {'status': 'error', 'message': 'Checkpoint has no associated policy'}, 400
+    if not checkpoint.task:
+        return {'status': 'error', 'message': 'Checkpoint has no associated task'}, 400
+
+    try:
+        buf, filename = bundle_checkpoint_zip(
+            checkpoint=checkpoint.to_dict(),
+            task=checkpoint.task.to_dict(),
+            policy=checkpoint.policy.to_dict(),
+        )
+    except FileNotFoundError as e:
+        return {'status': 'error', 'message': str(e)}, 404
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {'status': 'error', 'message': f'Export failed: {e}'}, 500
+
+    return send_file(
+        buf,
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name=filename,
+    )
 
 
 @checkpoint_bp.route('/checkpoint/<id>/:generate_ood_features', methods=['POST'])

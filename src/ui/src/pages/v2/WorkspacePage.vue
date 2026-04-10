@@ -439,6 +439,12 @@
                                                 <q-icon name="analytics" size="xs" />
                                             </q-item-section>
                                         </q-item>
+                                        <q-item clickable v-ripple v-close-popup @click="exportCheckpoint(checkpoint)">
+                                            <q-item-section>Export Checkpoint</q-item-section>
+                                            <q-item-section side>
+                                                <q-icon name="download" size="xs" />
+                                            </q-item-section>
+                                        </q-item>
                                         <q-item clickable v-ripple class="text-negative" @click="deleteCheckpoint(checkpoint)">
                                             <q-item-section>Delete Checkpoint</q-item-section>
                                             <q-item-section side>
@@ -1117,6 +1123,59 @@ function generateOodFeatures(checkpoint) {
     }).catch((err) => {
         Notify.create({ color: 'negative', message: `Failed to start OOD feature generation: ${err}` });
     });
+}
+
+async function exportCheckpoint(checkpoint) {
+    Loading.show({ message: `Exporting checkpoint "${checkpoint.name}"...` });
+    try {
+        const res = await api.post(
+            `/checkpoint/${checkpoint.id}/:export`,
+            null,
+            { responseType: 'blob' }
+        );
+
+        // Backend may return JSON error inside a blob; sniff content-type.
+        const contentType = res.headers['content-type'] || '';
+        if (!contentType.includes('application/zip')) {
+            const text = await res.data.text();
+            let message = text;
+            try {
+                message = JSON.parse(text).message || text;
+            } catch (_) { /* not JSON */ }
+            throw new Error(message);
+        }
+
+        // Pull filename from Content-Disposition; fall back if header is missing.
+        const cd = res.headers['content-disposition'] || '';
+        const match = cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/);
+        const filename = match
+            ? decodeURIComponent(match[1])
+            : `checkpoint_${checkpoint.id}.zip`;
+
+        const url = URL.createObjectURL(res.data);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+
+        Notify.create({
+            color: 'positive',
+            message: `Exported ${filename}`,
+            timeout: 4000,
+        });
+    } catch (err) {
+        console.error('exportCheckpoint failed:', err);
+        Notify.create({
+            color: 'negative',
+            message: `Export failed: ${err.message || err}`,
+            timeout: 6000,
+        });
+    } finally {
+        Loading.hide();
+    }
 }
 
 function deleteCheckpoint(checkpoint) {

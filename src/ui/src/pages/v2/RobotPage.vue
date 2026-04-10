@@ -350,7 +350,7 @@ const robotForm = ref([
         ],
         show: (form) => form.find((e) => e.key === 'type').value === 'custom'
     },
-    { label: 'IK Settings (JSON)', key: 'ik_json', type: 'custom', value: '', default: '',
+    { label: 'IK Settings (JSON)', key: 'ik_json', type: 'custom', value: '', default: '', optional: true,
         show: (form) => form.find((e) => e.key === 'type').value === 'custom'
     },
 ]);

@@ -1,0 +1,29 @@
+# Core ML stack
+torch>=2.0
+torchvision>=0.15
+safetensors>=0.4
+numpy>=1.24
+einops>=0.7
+
+# Image / video I/O
+pillow>=10.0
+opencv-python-headless>=4.8
+imageio>=2.30
+av>=10.0                          # PyAV — lerobot.datasets.video_utils
+
+# HuggingFace stack — required by lerobot.policies → lerobot.optim →
+# lerobot.datasets import chain. We bypass the factory but the package
+# __init__ still pulls these in.
+huggingface-hub>=0.24
+datasets>=2.18
+transformers>=4.40
+tokenizers>=0.15
+
+# Tabular / parquet
+pandas>=2.0
+pyarrow>=14.0
+
+# Config / utility
+draccus>=0.10
+packaging>=23.0
+typing_extensions>=4.10

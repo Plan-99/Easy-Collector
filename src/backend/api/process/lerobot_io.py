@@ -36,14 +36,9 @@ import pyarrow.parquet as pq
 import datasets as hf_datasets
 from PIL import Image
 
-from ...lerobot.datasets.utils import (
-    get_hf_features_from_features,
-    embed_images,
-    create_empty_dataset_info,
-    DEFAULT_PARQUET_PATH,
-    DEFAULT_IMAGE_PATH,
-    DEFAULT_FEATURES,
-)
+from lerobot.datasets.feature_utils import get_hf_features_from_features, create_empty_dataset_info
+from lerobot.datasets.io_utils import embed_images
+from lerobot.datasets.utils import DEFAULT_IMAGE_PATH, DEFAULT_FEATURES
 LEROBOT_CODEBASE_VERSION = "v2.1"
 
 try:
@@ -448,7 +443,12 @@ def append_episode(dataset_dir, timesteps, agents, sensors, task,
             else:
                 img_pil = img
 
-            frame_path = os.path.join(imgs_dir, f"frame_{t:06d}.png")
+            # NOTE: lerobot's encode_video_frames glob is "frame-NNNNNN.png" (hyphen).
+            # If we use "frame_NNNNNN.png" (underscore) the encoder finds zero matches,
+            # raises FileNotFoundError, the except branch warns silently and keeps the
+            # PNGs without writing an mp4. The training dataset loader then falls back
+            # to all-zero images and the model trains on a black screen.
+            frame_path = os.path.join(imgs_dir, f"frame-{t:06d}.png")
             img_pil.save(frame_path)
 
         # Encode PNGs to MP4
@@ -456,22 +456,26 @@ def append_episode(dataset_dir, timesteps, agents, sensors, task,
             dataset_dir, "videos", f"chunk-{chunk:03d}", feature_key,
             f"episode_{episode_index:06d}.mp4"
         )
-        try:
-            from ...lerobot.datasets.video_utils import encode_video_frames
-            encode_video_frames(
-                imgs_dir=imgs_dir,
-                video_path=video_path,
-                fps=fps,
-                vcodec="h264",
-                pix_fmt="yuv420p",
-                g=2,
-                crf=30,
-                overwrite=True,
+        # Hard fail on encoding errors. Previously this swallowed the exception and
+        # kept the PNGs, which made the dataset loader silently fall back to
+        # all-zero frames during training (the model never saw any image).
+        from lerobot.datasets.video_utils import encode_video_frames
+        encode_video_frames(
+            imgs_dir=imgs_dir,
+            video_path=video_path,
+            fps=fps,
+            vcodec="h264",
+            pix_fmt="yuv420p",
+            g=2,
+            crf=30,
+            overwrite=True,
+        )
+        if not os.path.exists(video_path) or os.path.getsize(video_path) == 0:
+            raise RuntimeError(
+                f"encode_video_frames produced no output for {feature_key} "
+                f"(imgs_dir={imgs_dir}, video_path={video_path})"
             )
-            num_videos += 1
-        except Exception as e:
-            print(f"[WARN] Video encoding failed for {feature_key}: {e}, keeping PNGs")
-            continue
+        num_videos += 1
 
         # Clean up temporary PNGs
         shutil.rmtree(imgs_dir)
@@ -524,17 +528,28 @@ def append_episode(dataset_dir, timesteps, agents, sensors, task,
     if "action.ee_delta" in features and ee_delta_action_list:
         episode_dict["action.ee_delta"] = np.stack(ee_delta_action_list)
 
-    # Build HF Features schema — exclude image/video features (not stored in parquet)
+    # Build parquet directly with pyarrow (avoids HF datasets encode_nested_example
+    # compatibility issues with numpy scalars across different HF datasets versions)
     parquet_features = {k: v for k, v in features.items() if v.get("dtype") not in ("video", "image")}
-    hf_features = get_hf_features_from_features(parquet_features)
-    ep_dataset = hf_datasets.Dataset.from_dict(episode_dict, features=hf_features, split="train")
+    pa_arrays = {}
+    for col_key in parquet_features:
+        if col_key not in episode_dict:
+            continue
+        val = episode_dict[col_key]
+        if isinstance(val, np.ndarray):
+            pa_arrays[col_key] = pa.array(val.tolist())
+        elif isinstance(val, list):
+            pa_arrays[col_key] = pa.array(val)
+        else:
+            pa_arrays[col_key] = pa.array(val)
+    table = pa.table(pa_arrays)
 
     parquet_path = os.path.join(
         dataset_dir,
         PARQUET_PATH_TEMPLATE.format(chunk=chunk, ep=episode_index),
     )
     os.makedirs(os.path.dirname(parquet_path), exist_ok=True)
-    ep_dataset.to_parquet(parquet_path)
+    pq.write_table(table, parquet_path)
 
     # ── Compute episode stats ────────────────────────────────────────────
     ep_stats = {}

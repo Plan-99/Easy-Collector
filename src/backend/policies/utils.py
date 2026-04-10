@@ -9,7 +9,7 @@ import IPython
 import numpy as np
 import json
 from types import SimpleNamespace
-from ..lerobot.configs.types import PolicyFeature, FeatureType
+from lerobot.configs.types import PolicyFeature, FeatureType
 from torchvision import transforms
 from transformers import AutoImageProcessor
 from PIL import Image
@@ -105,6 +105,11 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self._ep_cache = {}
         self._dataset_info = get_dataset_info(dataset_dir)
 
+        # Pre-load tasks once (avoid re-reading jsonl every __getitem__)
+        from ..api.process.lerobot_io import _read_jsonl, TASKS_PATH
+        tasks = _read_jsonl(os.path.join(dataset_dir, TASKS_PATH))
+        self._task_map = {t.get("task_index"): t.get("task", "") for t in tasks}
+
         self.__getitem__(0) # initialize self.info
 
     def __len__(self):
@@ -126,17 +131,14 @@ class EpisodicDataset(torch.utils.data.Dataset):
         state_data = np.array(df["observation.state"].tolist(), dtype=np.float32)
         action_data = np.array(df["action"].tolist(), dtype=np.float32)
 
-        # Get language instruction from tasks
+        # Get language instruction from pre-loaded task map
         task_index = int(df["task_index"].iloc[0])
-        from ..api.process.lerobot_io import _read_jsonl, TASKS_PATH
-        tasks = _read_jsonl(os.path.join(self.dataset_dir, TASKS_PATH))
-        language_instruction = ""
-        for t in tasks:
-            if t.get("task_index") == task_index:
-                language_instruction = t.get("task", "")
-                break
+        language_instruction = self._task_map.get(task_index, "")
 
-        # Get image data per sensor — from parquet (legacy) or video files
+        # Get image data per sensor — from parquet (legacy), video files, or PNG dir.
+        # CRITICAL: silent fallback to np.zeros((224,224,3)) was masking missing images
+        # and causing the model to train on all-black frames. Each sensor MUST resolve
+        # to actual images here; an assertion below catches the failure mode loudly.
         image_data = {}
         image_cols = [col for col in df.columns if col.startswith("observation.images.")]
         if image_cols:
@@ -145,7 +147,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
                 sensor_name = col.replace("observation.images.", "")
                 image_data[sensor_name] = list(df[col])
         else:
-            # Video mode: decode frames from MP4 files
+            # Video / PNG mode: prefer pre-decoded .npy (mmap'd), then mp4, then PNG dir.
             features = self._dataset_info.get("features", {})
             for feat_key, feat in features.items():
                 if not feat_key.startswith("observation.images."):
@@ -155,11 +157,38 @@ class EpisodicDataset(torch.utils.data.Dataset):
                     self.dataset_dir, "videos", f"chunk-{chunk:03d}", feat_key,
                     f"episode_{episode_id:06d}.mp4"
                 )
-                if os.path.exists(video_path):
+                npy_path = video_path[:-4] + ".npy"
+                # PNG fallback: images/{feat_key}/episode_{id:06d}/frame_{idx:06d}.png
+                # lerobot_io.py writes frames here when video encoding isn't used.
+                png_dir = os.path.join(
+                    self.dataset_dir, "images", feat_key, f"episode_{episode_id:06d}"
+                )
+                if os.path.exists(npy_path):
+                    image_data[sensor_name] = np.load(npy_path, mmap_mode="r")
+                elif os.path.exists(video_path):
                     from ..api.process.lerobot_io import _decode_video_frames
                     image_data[sensor_name] = _decode_video_frames(video_path)
+                elif os.path.isdir(png_dir):
+                    # Build a list of frame_XXXXXX.png paths in order. _parse_image_value
+                    # accepts string paths and decodes via PIL.
+                    n_frames = len(state_data)
+                    image_data[sensor_name] = [
+                        os.path.join(png_dir, f"frame_{i:06d}.png") for i in range(n_frames)
+                    ]
                 else:
                     image_data[sensor_name] = []
+
+        # Loud assertion: if any sensor came back empty for an episode that has frames,
+        # the dataset is silently feeding all-black images. Fail early instead of
+        # training on garbage.
+        for sensor_name, vals in image_data.items():
+            if len(vals) == 0 and len(state_data) > 0:
+                raise RuntimeError(
+                    f"[EpisodicDataset] No image source found for sensor '{sensor_name}' "
+                    f"in episode {episode_id} (dataset_dir={self.dataset_dir}). "
+                    f"Checked: parquet column, .npy, .mp4, PNG dir. "
+                    f"Training would silently use all-zero frames."
+                )
 
         succeed = np.array(df["succeed"].tolist(), dtype=np.float32) if "succeed" in df.columns else None
 
@@ -171,9 +200,6 @@ class EpisodicDataset(torch.utils.data.Dataset):
             "succeed": succeed,
             "episode_len": len(df),
         }
-        # Cache only a limited number
-        if len(self._ep_cache) > 50:
-            self._ep_cache.pop(next(iter(self._ep_cache)))
         self._ep_cache[episode_id] = result
         return result
 
@@ -254,12 +280,16 @@ class EpisodicDataset(torch.utils.data.Dataset):
                 image = process_image(image)
                 processed_images.append(image)
 
-            if self.policy_type in ['PI0']:
-                item[f"observation.images.sensor_{sensor_id}"] = torch.stack(processed_images).squeeze()
+            # New lerobot expects [C, H, W] per sample (collate → [batch, C, H, W])
+            stacked = torch.stack(processed_images)  # [n_obs_steps, C, H, W]
+            if self.n_obs_steps == 1:
+                item[f"observation.images.sensor_{sensor_id}"] = stacked.squeeze(0)  # [C, H, W]
             else:
-                item[f"observation.images.sensor_{sensor_id}"] = torch.stack(processed_images)
+                item[f"observation.images.sensor_{sensor_id}"] = stacked
 
-        if self.policy_type in ['PI0']:
+        if self.n_obs_steps == 1:
+            item["observation.state"] = torch.from_numpy(qpos[0]).float()
+        elif self.policy_type in ['PI0', 'PI05']:
             item["observation.state"] = torch.from_numpy(np.concatenate(qpos)).float()
         else:
             item["observation.state"] = torch.from_numpy(np.array(qpos)).float()
@@ -272,9 +302,9 @@ class EpisodicDataset(torch.utils.data.Dataset):
             self.info = dict()
             for key, val in item.items():
                 if key.startswith("observation.images"):
-                    self.info[key] = PolicyFeature(FeatureType.VISUAL, shape=val[0].shape)
+                    self.info[key] = PolicyFeature(FeatureType.VISUAL, shape=val.shape)
                 if key == "observation.state":
-                    self.info[key] = PolicyFeature(FeatureType.STATE, shape=val[0].shape)
+                    self.info[key] = PolicyFeature(FeatureType.STATE, shape=val.shape)
                 if key == "action":
                     self.info[key] = PolicyFeature(FeatureType.ACTION, shape=val[0].shape)
                 if key == "language_instruction":
@@ -285,9 +315,14 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
 
 def process_image(image, vision_backbone='resnet18', to_cuda=False):
+    if not isinstance(image, Image.Image):
+        image = Image.fromarray(np.array(image))
     if vision_backbone not in VISION_BACKBONE_MAP:
-        tensor_transform = transforms.ToTensor()
-        image = tensor_transform(image)
+        image_transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+        ])
+        image = image_transform(image)
     else:
         image_processor = AutoImageProcessor.from_pretrained(VISION_BACKBONE_MAP[vision_backbone])
         image = image_processor(image)['pixel_values'][0]  # Assuming the image is a PIL Image or numpy array
@@ -525,12 +560,17 @@ class FullScanDataset(EpisodicDataset):
                 image = Image.fromarray(np.array(image))
                 image = process_image(image)
                 processed_images.append(image)
-            if self.policy_type in ['PI0']:
-                item[f"observation.images.sensor_{sensor_id}"] = torch.stack(processed_images).squeeze()
-            else:
-                item[f"observation.images.sensor_{sensor_id}"] = torch.stack(processed_images)
 
-        if self.policy_type in ['PI0']:
+            # New lerobot expects [C, H, W] per sample (collate → [batch, C, H, W])
+            stacked = torch.stack(processed_images)  # [n_obs_steps, C, H, W]
+            if self.n_obs_steps == 1:
+                item[f"observation.images.sensor_{sensor_id}"] = stacked.squeeze(0)  # [C, H, W]
+            else:
+                item[f"observation.images.sensor_{sensor_id}"] = stacked
+
+        if self.n_obs_steps == 1:
+            item["observation.state"] = torch.from_numpy(qpos[0]).float()
+        elif self.policy_type in ['PI0', 'PI05']:
             item["observation.state"] = torch.from_numpy(np.concatenate(qpos)).float()
         else:
             item["observation.state"] = torch.from_numpy(np.array(qpos)).float()
@@ -543,9 +583,9 @@ class FullScanDataset(EpisodicDataset):
             self.info = dict()
             for key, val in item.items():
                 if key.startswith("observation.images"):
-                    self.info[key] = PolicyFeature(FeatureType.VISUAL, shape=val[0].shape)
+                    self.info[key] = PolicyFeature(FeatureType.VISUAL, shape=val.shape)
                 if key == "observation.state":
-                    self.info[key] = PolicyFeature(FeatureType.STATE, shape=val[0].shape)
+                    self.info[key] = PolicyFeature(FeatureType.STATE, shape=val.shape)
                 if key == "action":
                     self.info[key] = PolicyFeature(FeatureType.ACTION, shape=val[0].shape)
                 if key == "language_instruction":
@@ -580,8 +620,18 @@ def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_tra
     # construct dataset and dataloader
     train_dataset = EpisodicDataset(train_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys)
     val_dataset = EpisodicDataset(val_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys)
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train, shuffle=True, pin_memory=True, num_workers=num_workers)
-    val_dataloader = DataLoader(val_dataset, batch_size=batch_size_val, shuffle=True, pin_memory=True, num_workers=num_workers)
+    # Keep workers alive across epochs so EpisodicDataset._ep_cache (and OS page
+    # cache backing the mmap'd frame .npy files) survives between epochs.
+    loader_kwargs = dict(
+        shuffle=True,
+        pin_memory=True,
+        num_workers=num_workers,
+    )
+    if num_workers > 0:
+        loader_kwargs["persistent_workers"] = True
+        loader_kwargs["prefetch_factor"] = 4
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train, **loader_kwargs)
+    val_dataloader = DataLoader(val_dataset, batch_size=batch_size_val, **loader_kwargs)
 
     input_features = {k: v for k, v in train_dataset.info.items() if k.startswith("observation")}
     output_features = {k: v for k, v in train_dataset.info.items() if k.startswith("action")}
@@ -728,12 +778,147 @@ def make_optimizer(policy_class, policy):
         raise NotImplementedError
     return optimizer
 
-def forward_pass(batch, policy):
+_pi05_tokenizer = None
+
+def _get_pi05_tokenizer():
+    """Lazy-load PaliGemma tokenizer for PI05."""
+    global _pi05_tokenizer
+    if _pi05_tokenizer is None:
+        from transformers import AutoTokenizer
+        _pi05_tokenizer = AutoTokenizer.from_pretrained("google/paligemma-3b-pt-224")
+    return _pi05_tokenizer
+
+
+def prepare_pi05_language_tokens(batch, config, norm_stats=None):
+    """Convert language_instruction + state → tokenized language tokens for PI05.
+
+    Replicates the logic of Pi05PrepareStateTokenizerProcessorStep + TokenizerProcessorStep.
+    """
+    tokenizer = _get_pi05_tokenizer()
+    max_length = getattr(config, 'tokenizer_max_length', 200)
+    max_state_dim = getattr(config, 'max_state_dim', 32)
+
+    # Get language instruction (string or list of strings)
+    lang = batch.get('language_instruction', '')
+    if isinstance(lang, str):
+        lang = [lang]
+
+    # Get state for discretization
+    state = batch.get('observation.state')
+    prompts = []
+    for i, task_text in enumerate(lang):
+        cleaned = task_text.strip().replace("_", " ").replace("\n", " ") if task_text else ""
+        state_str = ""
+        if state is not None:
+            s = state[i] if state.dim() > 1 else state
+            s_np = s.cpu().numpy().flatten()
+            # Normalize to [-1, 1] using min-max if norm_stats available
+            if norm_stats and 'observation.state' in norm_stats:
+                s_min = norm_stats['observation.state']['min']
+                s_max = norm_stats['observation.state']['max']
+                s_range = s_max - s_min
+                s_range[s_range < 1e-6] = 1.0
+                s_np = 2.0 * (s_np - s_min) / s_range - 1.0
+                s_np = np.clip(s_np, -1.0, 1.0)
+            # Pad to max_state_dim
+            if len(s_np) < max_state_dim:
+                s_np = np.concatenate([s_np, np.zeros(max_state_dim - len(s_np))])
+            # Discretize into 256 bins
+            bins = np.linspace(-1, 1, 257)[:-1]
+            discretized = np.digitize(s_np, bins) - 1
+            state_str = " ".join(map(str, discretized.astype(int)))
+        prompt = f"Task: {cleaned}, State: {state_str};\nAction: "
+        prompts.append(prompt)
+
+    tokenized = tokenizer(
+        prompts,
+        max_length=max_length,
+        truncation=True,
+        padding="max_length",
+        return_tensors="pt",
+    )
+
+    device = state.device if state is not None else torch.device('cuda')
+    batch['observation.language.tokens'] = tokenized['input_ids'].to(device)
+    batch['observation.language.attention_mask'] = tokenized['attention_mask'].to(dtype=torch.bool, device=device)
+
+    return batch
+
+
+def forward_pass(batch, policy, norm_stats=None, preprocessor=None):
     data = {k: (v.cuda() if isinstance(v, torch.Tensor) else v) for k, v in batch.items()}
+    # PI05 needs tokenized language inputs
+    if hasattr(policy, 'config') and hasattr(policy.config, 'tokenizer_max_length'):
+        data = prepare_pi05_language_tokens(data, policy.config, norm_stats=norm_stats)
+    # Apply input preprocessor (Normalize state/action/images per cfg.normalization_mapping)
+    # so the model trains on normalized targets and the gradient is balanced across joints.
+    if preprocessor is not None:
+        data = preprocessor(data)
     return policy.forward(data)
-    # image_data, qpos_data, action_data, is_pad = data
-    # image_data, qpos_data, action_data, is_pad = image_data.cuda(), qpos_data.cuda(), action_data.cuda(), is_pad.cuda()
-    # return policy(qpos_data, image_data, action_data, is_pad) # TODO remove None
+
+
+def make_easytrainer_processors(policy_type, cfg, dataset_stats=None, pretrained_path=None):
+    """Per-policy dispatch for building / loading the LeRobot Normalize+Unnormalize pipeline.
+
+    Bypasses ``lerobot.policies.factory.make_pre_post_processors`` because that module
+    eagerly imports ``lerobot.envs.configs`` → robots → motors, none of which we install
+    in the EasyTrainer container. We just call the per-policy ``make_*_pre_post_processors``
+    builders directly so the dependency surface stays minimal.
+
+    Args:
+        policy_type: 'ACT' | 'Diffusion' | 'PI05'
+        cfg: the policy config (ACTConfig / DiffusionConfig / PI05Config)
+        dataset_stats: numpy stats dict from get_norm_stats() — used when building from scratch.
+        pretrained_path: when set, load saved processor json/safetensors from this dir
+            instead of building. ``dataset_stats`` is ignored in this branch.
+
+    Returns:
+        (preprocessor, postprocessor) PolicyProcessorPipeline tuple, or (None, None)
+        on a load failure when pretrained_path is set (caller falls back to raw I/O).
+    """
+    from lerobot.processor.pipeline import PolicyProcessorPipeline
+    from lerobot.processor.converters import (
+        batch_to_transition,
+        transition_to_batch,
+        policy_action_to_transition,
+        transition_to_policy_action,
+    )
+    from lerobot.utils.constants import (
+        POLICY_PREPROCESSOR_DEFAULT_NAME,
+        POLICY_POSTPROCESSOR_DEFAULT_NAME,
+    )
+
+    if pretrained_path is not None:
+        try:
+            preprocessor = PolicyProcessorPipeline.from_pretrained(
+                pretrained_model_name_or_path=pretrained_path,
+                config_filename=f"{POLICY_PREPROCESSOR_DEFAULT_NAME}.json",
+                to_transition=batch_to_transition,
+                to_output=transition_to_batch,
+            )
+            postprocessor = PolicyProcessorPipeline.from_pretrained(
+                pretrained_model_name_or_path=pretrained_path,
+                config_filename=f"{POLICY_POSTPROCESSOR_DEFAULT_NAME}.json",
+                to_transition=policy_action_to_transition,
+                to_output=transition_to_policy_action,
+            )
+            return preprocessor, postprocessor
+        except Exception as e:
+            print(f'[WARN] make_easytrainer_processors: failed to load processors from '
+                  f'{pretrained_path} ({type(e).__name__}: {e}). Returning (None, None).')
+            return None, None
+
+    # Build from scratch using per-policy factories
+    if policy_type == 'ACT':
+        from lerobot.policies.act.processor_act import make_act_pre_post_processors
+        return make_act_pre_post_processors(config=cfg, dataset_stats=dataset_stats)
+    if policy_type == 'Diffusion':
+        from lerobot.policies.diffusion.processor_diffusion import make_diffusion_pre_post_processors
+        return make_diffusion_pre_post_processors(config=cfg, dataset_stats=dataset_stats)
+    if policy_type == 'PI05':
+        from lerobot.policies.pi05.processor_pi05 import make_pi05_pre_post_processors
+        return make_pi05_pre_post_processors(config=cfg, dataset_stats=dataset_stats)
+    raise ValueError(f'make_easytrainer_processors: unsupported policy_type {policy_type!r}')
 
 
 def convert_lists_to_tuples(obj):

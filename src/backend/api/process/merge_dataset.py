@@ -7,7 +7,7 @@ from .lerobot_io import (
     PARQUET_PATH_TEMPLATE, IMAGE_PATH_TEMPLATE, INFO_PATH,
     EPISODES_PATH, TASKS_PATH, EPISODES_STATS_PATH, DEFAULT_CHUNK_SIZE,
 )
-from ...lerobot.datasets.utils import DEFAULT_IMAGE_PATH
+from lerobot.datasets.utils import DEFAULT_IMAGE_PATH
 import numpy as np
 import pyarrow.parquet as pq
 

@@ -11,8 +11,10 @@ from .lerobot_io import (
     PARQUET_PATH_TEMPLATE, IMAGE_PATH_TEMPLATE, INFO_PATH,
     EPISODES_PATH, TASKS_PATH, EPISODES_STATS_PATH, DEFAULT_CHUNK_SIZE,
 )
-from ...lerobot.datasets.utils import get_hf_features_from_features, embed_images, DEFAULT_IMAGE_PATH
-from ...lerobot.datasets.video_utils import encode_video_frames
+from lerobot.datasets.feature_utils import get_hf_features_from_features
+from lerobot.datasets.io_utils import embed_images
+from lerobot.datasets.utils import DEFAULT_IMAGE_PATH
+from lerobot.datasets.video_utils import encode_video_frames
 from ...configs.global_configs import DATASET_DIR
 import datasets as hf_datasets
 import pyarrow.parquet as pq
