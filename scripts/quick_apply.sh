@@ -62,7 +62,7 @@ copy_tree() {
       --exclude='__pycache__/' \
       --exclude='node_modules/' \
       --exclude='database/*.db' \
-      --exclude='datasets/' \
+      --exclude='/datasets/' \
       --exclude='.git/' \
       "$src/" "$dst/"
   else
