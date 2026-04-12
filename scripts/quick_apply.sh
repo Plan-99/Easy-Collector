@@ -58,12 +58,14 @@ copy_tree() {
   fi
   mkdir -p "$dst"
   if [ -n "$RSYNC_BIN" ]; then
-    "$RSYNC_BIN" -a \
+    "$RSYNC_BIN" -rlptD --no-owner --no-group \
       --exclude='__pycache__/' \
       --exclude='node_modules/' \
       --exclude='database/*.db' \
       --exclude='/datasets/' \
       --exclude='.git/' \
+      --exclude='*.so' \
+      --exclude='*.so.*' \
       "$src/" "$dst/"
   else
     # Portable fallback using tar over a pipe.
