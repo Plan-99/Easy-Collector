@@ -158,8 +158,8 @@ RUN bash -c "source /opt/ros/humble/setup.bash && \
     colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release"
 
 RUN python3 -m pip install --no-cache-dir --ignore-installed \
-    --index-url https://download.pytorch.org/whl/nightly/cu124 \
-    torch torchvision torchaudio
+    --index-url https://download.pytorch.org/whl/cu124 \
+    torch==2.5.1+cu124 torchvision==0.20.1+cu124 torchaudio==2.5.1+cu124
 
 # 6. GStreamer 설치 (ROS 2 이미지 토픽 처리를 위해 필요)
 RUN apt-get update && apt-get install -y gstreamer1.0-tools \

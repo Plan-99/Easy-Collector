@@ -39,6 +39,7 @@ zarr
 scipy
 scikit-learn
 pandas
+xformers
 
 # --- [시각화 및 유틸리티] ---
 rerun-sdk==0.20.1

@@ -495,14 +495,14 @@ watch(selectedCheckpoint, (newVal) => {
 });
 
 const pretrained_backbone_weight_options = computed(() => {
-    if (!policyForm.value.type || !POLICY_CONFIGS[policyForm.value.type]['pretrained_backbone_weight']) return [];
+    if (!policyForm.value.type || !POLICY_CONFIGS[policyForm.value.type]['pretrained_backbone_weights']) return [];
     if (!policyForm.value.settings || !policyForm.value.settings.vision_backbone) return [];
     const backbone = policyForm.value.settings.vision_backbone.value;
     return POLICY_CONFIGS[policyForm.value.type].pretrained_backbone_weights.options[backbone] || [];
 });
 
 watch(() => policyForm.value.settings?.vision_backbone?.value, (newVal) => {
-    if (!policyForm.value.type || !POLICY_CONFIGS[policyForm.value.type]['pretrained_backbone_weight']) return;
+    if (!policyForm.value.type || !POLICY_CONFIGS[policyForm.value.type]['pretrained_backbone_weights']) return;
     if (newVal && policyForm.value.type) {
         policyForm.value.settings.pretrained_backbone_weights.options = pretrained_backbone_weight_options.value;
         if (!policyForm.value.settings.pretrained_backbone_weights.value) {

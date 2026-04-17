@@ -222,6 +222,13 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
             timesteps = [ts]
             succeed_flags = [1.0 if task_control.get('succeed') else 0.0]
 
+            # 이전 타임스텝 qpos 저장 (연속 프레임 간 ee_delta 계산용)
+            prev_qpos_map = {}
+            for agent in agents:
+                if agent.ik_solver is not None:
+                    a_id = agent.id
+                    prev_qpos_map[a_id] = ts.observation['robot_states'][a_id].get('qpos')
+
             # 에피소드 시작: vive origin 설정 및 teleop 스레드 시작
             if vive is not None:
                 vive.set_origin()
@@ -270,11 +277,14 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                         ee_delta = agent.last_ee_delta if agent.last_ee_delta is not None else None
 
                     else:
-                        # leader / motion_planning: FK(joint_actions) - FK(joint_states)
-                        ee_delta = agent.compute_fk_delta(
-                            robot_state.get('qaction'),
-                            robot_state.get('qpos'),
-                        )
+                        # 연속 타임스텝 간 실제 EE 이동량: FK(qpos[t]) - FK(qpos[t-1])
+                        prev_qpos = prev_qpos_map.get(a_id)
+                        cur_qpos = robot_state.get('qpos')
+                        if prev_qpos is not None and cur_qpos is not None:
+                            ee_delta = agent.compute_fk_delta(cur_qpos, prev_qpos)
+                        else:
+                            ee_delta = None
+                        prev_qpos_map[a_id] = cur_qpos
 
                     if ee_delta is not None:
                         if agent.tool_inner:
@@ -377,10 +387,12 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                                 for ee_name in value.keys():
                                     series_data = []
                                     if key == 'ee_delta_action':
-                                        # action을 1스텝 shift: obs_t와 delta(t→t+1)을 짝짓기
-                                        for i in range(len(timesteps)):
-                                            if i + 1 < len(timesteps):
-                                                series_data.append(timesteps[i + 1].observation['robot_states'][a_id][key][ee_name])
+                                        # delta[t] = FK(qpos[t]) - FK(qpos[t-1])
+                                        # 이미 "t-1→t 이동량"이므로 shift 불필요
+                                        for t_step in timesteps:
+                                            ee_val = t_step.observation['robot_states'][a_id].get(key, {}).get(ee_name)
+                                            if ee_val is not None:
+                                                series_data.append(ee_val)
                                             else:
                                                 series_data.append([0.0] * len(value[ee_name]))
                                     else:

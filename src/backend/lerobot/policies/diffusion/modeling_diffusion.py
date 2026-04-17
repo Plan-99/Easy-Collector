@@ -185,12 +185,13 @@ class DiffusionModel(nn.Module):
         global_cond_dim = self.config.robot_state_feature.shape[0]
         if self.config.image_features:
             num_images = len(self.config.image_features)
+            encoder_cls = DiffusionDINOv2Encoder if config.vision_backbone == "dinov2" else DiffusionRgbEncoder
             if self.config.use_separate_rgb_encoder_per_camera:
-                encoders = [DiffusionRgbEncoder(config) for _ in range(num_images)]
+                encoders = [encoder_cls(config) for _ in range(num_images)]
                 self.rgb_encoder = nn.ModuleList(encoders)
                 global_cond_dim += encoders[0].feature_dim * num_images
             else:
-                self.rgb_encoder = DiffusionRgbEncoder(config)
+                self.rgb_encoder = encoder_cls(config)
                 global_cond_dim += self.rgb_encoder.feature_dim * num_images
         if self.config.env_state_feature:
             global_cond_dim += self.config.env_state_feature.shape[0]
@@ -518,6 +519,66 @@ class DiffusionRgbEncoder(nn.Module):
         # Final linear layer with non-linearity.
         x = self.relu(self.out(x))
         return x
+
+
+class DiffusionDINOv2Encoder(nn.Module):
+    """Encodes an RGB image into a 1D feature vector using DINOv2 ViT backbone.
+
+    Uses the [CLS] token output from a frozen or fine-tunable DINOv2 model,
+    projected to a configurable feature dimension.
+    """
+
+    DINOV2_MODELS = {
+        "dinov2_vits14": {"embed_dim": 384},
+        "dinov2_vitb14": {"embed_dim": 768},
+        "dinov2_vitl14": {"embed_dim": 1024},
+    }
+
+    def __init__(self, config: DiffusionConfig):
+        super().__init__()
+
+        model_name = config.pretrained_backbone_weights if config.pretrained_backbone_weights else "dinov2_vits14"
+        if model_name not in self.DINOV2_MODELS:
+            raise ValueError(
+                f"Unknown DINOv2 model: {model_name}. "
+                f"Supported: {list(self.DINOV2_MODELS.keys())}"
+            )
+
+        self.backbone = torch.hub.load("facebookresearch/dinov2", model_name)
+        embed_dim = self.DINOV2_MODELS[model_name]["embed_dim"]
+
+        if config.freeze_vision_backbone:
+            for param in self.backbone.parameters():
+                param.requires_grad = False
+
+        self.resize = torchvision.transforms.Resize(
+            (224, 224), interpolation=torchvision.transforms.InterpolationMode.BILINEAR, antialias=True
+        )
+        self.normalize = torchvision.transforms.Normalize(
+            mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+        )
+
+        self.feature_dim = config.spatial_softmax_num_keypoints * 2
+        self.proj = nn.Sequential(
+            nn.Linear(embed_dim, self.feature_dim),
+            nn.ReLU(),
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+        """
+        Args:
+            x: (B, C, H, W) image tensor with pixel values in [0, 1].
+        Returns:
+            (B, D) image feature.
+        """
+        x = self.resize(x)
+        x = self.normalize(x)
+        if self.backbone.training and not any(p.requires_grad for p in self.backbone.parameters()):
+            with torch.no_grad():
+                features = self.backbone(x)
+        else:
+            features = self.backbone(x)
+        return self.proj(features)
 
 
 def _replace_submodules(

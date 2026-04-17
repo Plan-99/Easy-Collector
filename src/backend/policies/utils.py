@@ -97,19 +97,47 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self.use_relative_trajectory = use_relative_trajectory
         self.obs_state_keys = obs_state_keys if obs_state_keys is not None else ['qpos']
         self.info = None
-        self.__getitem__(0) # initialize self.is_sim
+
+        # Sliding window index 생성: (episode_id, start_ts) 쌍을 미리 계산
+        self.sample_indices = []
+        for ep_id in self.episode_ids:
+            dataset_path = os.path.join(self.dataset_dir, f'episode_{ep_id}.hdf5')
+            with h5py.File(dataset_path, 'r') as root:
+                episode_len = self._get_episode_len(root)
+            min_start = self.n_obs_steps - 1
+            max_start = max(min_start, episode_len - self.chunk_size)
+            for start_ts in range(min_start, max_start + 1):
+                self.sample_indices.append((ep_id, start_ts))
+
+        print(f'[Dataset] {len(self.episode_ids)} episodes → {len(self.sample_indices)} sliding window samples')
+        self.__getitem__(0)  # initialize self.info
+
+    def _get_episode_len(self, root):
+        """HDF5 root에서 episode 길이를 추출한다."""
+        is_mixed = (self.action_key in ('ee_delta_action', 'relative_ee_pos'))
+        if is_mixed:
+            ee_robots = set(root['ee_delta_action'].keys()) if 'ee_delta_action' in root else set()
+            for robot_key in root['qaction'].keys():
+                src = root['ee_delta_action'] if robot_key in ee_robots else root['qaction']
+                item = src[robot_key]
+                leaves = list(item.values()) if isinstance(item, h5py.Group) else [item]
+                for leaf in leaves:
+                    return leaf.shape[0]
+        else:
+            for key in root[self.action_key].keys():
+                item = root[self.action_key][key]
+                leaves = list(item.values()) if isinstance(item, h5py.Group) else [item]
+                for leaf in leaves:
+                    return leaf.shape[0]
+        return 0
 
     def __len__(self):
-        return len(self.episode_ids)
+        return len(self.sample_indices)
 
     def __getitem__(self, index):
-        sample_full_episode = False # hardcode
-
-        episode_id = self.episode_ids[index]
+        episode_id, start_ts = self.sample_indices[index]
         dataset_path = os.path.join(self.dataset_dir, f'episode_{episode_id}.hdf5')
         with h5py.File(dataset_path, 'r') as root:
-            # is_sim = root.attrs['sim']
-
             action_dim = 0
             episode_len = 0
             is_mixed = (self.action_key in ('ee_delta_action', 'relative_ee_pos'))
@@ -145,13 +173,6 @@ class EpisodicDataset(torch.utils.data.Dataset):
             else:
                 language_instruction = ''
 
-            if sample_full_episode:
-                start_ts = 0
-            elif episode_len <= self.chunk_size + self.n_obs_steps - 1:
-                # Episode is shorter than or equal to chunk_size: use all available data, pad the rest
-                start_ts = self.n_obs_steps - 1
-            else:
-                start_ts = np.random.choice(np.arange(self.n_obs_steps - 1, episode_len - self.chunk_size))
             end_ts = start_ts + self.chunk_size
 
             obs_step_start = start_ts - self.n_obs_steps + 1

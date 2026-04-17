@@ -40,13 +40,17 @@ def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=
 
             time.sleep(5)
 
-            # ee_delta replay를 위해 IK solver 상태를 현재 조인트에 동기화
+            # ee_delta replay: 초기 EE 위치를 qpos[0]에서 계산하여 누적 추적용 초기화
+            accumulated_ee = {}
             if action_key == 'ee_delta_action':
                 for agent in agents:
                     if agent.ik_solver is not None:
                         js = agent.get_joint_states()
                         if js is not None:
                             agent.reset_ik_solver(js)
+                            arm_js, _ = agent.get_joint_and_tool_pos(js)
+                            if arm_js is not None:
+                                accumulated_ee[agent.id] = agent.ik_solver.get_ee_position(np.array(arm_js))
 
         with h5py.File(hdf5_path, 'r') as f:
             rect_params = []
@@ -165,9 +169,29 @@ def read_hdf5(node, hdf5_path, socketio_instance, sid, task_control, move_robot=
                                 if action_key == 'ee_delta_action' and agent.role != 'tool' and agent.ik_solver is not None:
                                     ee_name = agent.ee_names[0]
                                     action_list = qaction_array.tolist()
-                                    ee_delta = {ee_name: action_list[:6]}
-                                    tool_positions = action_list[6:] if agent.tool_inner and len(action_list) > 6 else None
-                                    agent.move_ee_delta_step(ee_delta, tool_positions=tool_positions)
+                                    delta = action_list[:6]
+                                    # 누적 target에 delta를 더해서 절대 EE target 계산
+                                    if agent.id in accumulated_ee and ee_name in accumulated_ee[agent.id]:
+                                        import pinocchio as pin
+                                        cur = accumulated_ee[agent.id][ee_name]
+                                        # translation: 단순 덧셈
+                                        new_xyz = [cur[j] + delta[j] for j in range(3)]
+                                        # rotation: exp3(delta_rot) @ exp3(cur_rot) (SO(3) 합성)
+                                        R_cur = pin.exp3(np.array(cur[3:6]))
+                                        R_delta = pin.exp3(np.array(delta[3:6]))
+                                        new_R = R_delta @ R_cur
+                                        new_rot = pin.log3(new_R).tolist()
+                                        new_ee = new_xyz + new_rot
+                                        accumulated_ee[agent.id][ee_name] = new_ee
+                                        # tool 값 추가
+                                        target = list(new_ee)
+                                        if agent.tool_inner and len(action_list) > 6:
+                                            target.extend(action_list[6:])
+                                        agent.move_ee_step({ee_name: target})
+                                    else:
+                                        ee_delta = {ee_name: delta}
+                                        tool_positions = action_list[6:] if agent.tool_inner and len(action_list) > 6 else None
+                                        agent.move_ee_delta_step(ee_delta, tool_positions=tool_positions)
                                 else:
                                     agent.move_joint_step(qaction_array)
 

@@ -44,7 +44,23 @@ export const POLICY_CONFIGS = {
         'drop_n_last_frames': { 'label': 'Drop N Last Frames', 'value': 7, 'type': 'number' },
 
         // --- Vision Backbone 구조 ---
-        'vision_backbone': { 'label': 'Vision Backbone', 'value': 'resnet18', 'type': 'select', 'options': ['resnet18', 'resnet34', 'resnet50'] },
+        'vision_backbone': { 'label': 'Vision Backbone', 'value': 'resnet18', 'type': 'select', 'options': ['resnet18', 'resnet34', 'resnet50', 'dinov2'] },
+        'pretrained_backbone_weights': {
+            'label': 'Pretrained Backbone Weights',
+            'value': null,
+            'type': 'select',
+            'nullable': true,
+            'options': {
+                'resnet18': ['ResNet18_Weights.IMAGENET1K_V1'],
+                'resnet34': ['ResNet34_Weights.IMAGENET1K_V1'],
+                'resnet50': ['ResNet50_Weights.IMAGENET1K_V1'],
+                'dinov2': ['dinov2_vits14', 'dinov2_vitb14', 'dinov2_vitl14']
+            },
+            'default_by_backbone': {
+                'dinov2': 'dinov2_vits14'
+            }
+        },
+        'freeze_vision_backbone': { 'label': 'Freeze Vision Backbone', 'value': false, 'type': 'boolean' },
         'crop_shape': { 'label': 'Crop Shape (H, W)', 'value': [150, 200], 'type': 'array' },
         'use_group_norm': { 'label': 'Use Group Norm', 'value': true, 'type': 'boolean' },
         'spatial_softmax_num_keypoints': { 'label': 'Spatial Softmax Keypoints', 'value': 32, 'type': 'number' },
@@ -58,7 +74,8 @@ export const POLICY_CONFIGS = {
         'use_film_scale_modulation': { 'label': 'Use FiLM Scale Modulation', 'value': true, 'type': 'boolean' },
 
         // --- Noise Scheduler ---
-        'noise_scheduler_type': { 'label': 'Noise Scheduler Type', 'value': 'DDPM', 'type': 'select', 'options': ['DDPM', 'DPM-Solver'] },
+        'noise_scheduler_type': { 'label': 'Noise Scheduler Type', 'value': 'DDPM', 'type': 'select', 'options': ['DDPM', 'DDIM'] },
+        'num_inference_steps': { 'label': 'Inference Steps (null = same as train)', 'value': null, 'type': 'number', 'nullable': true },
         'num_train_timesteps': { 'label': 'Number of Train Timesteps', 'value': 100, 'type': 'number' },
         'beta_schedule': { 'label': 'Beta Schedule', 'value': 'squaredcos_cap_v2', 'type': 'select', 'options': ['linear', 'squaredcos_cap_v2'] },
         'beta_start': { 'label': 'Beta Start', 'value': 0.0001, 'type': 'number' },

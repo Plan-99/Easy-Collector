@@ -130,6 +130,7 @@ class DiffusionConfig(PreTrainedConfig):
     use_group_norm: bool = True
     spatial_softmax_num_keypoints: int = 32
     use_separate_rgb_encoder_per_camera: bool = False
+    freeze_vision_backbone: bool = False
     # Unet.
     down_dims: tuple[int, ...] = (512, 1024, 2048)
     kernel_size: int = 5
@@ -164,9 +165,10 @@ class DiffusionConfig(PreTrainedConfig):
         super().__post_init__()
 
         """Input validation (not exhaustive)."""
-        if not self.vision_backbone.startswith("resnet"):
+        supported_backbones = ["resnet18", "resnet34", "resnet50", "dinov2"]
+        if self.vision_backbone not in supported_backbones:
             raise ValueError(
-                f"`vision_backbone` must be one of the ResNet variants. Got {self.vision_backbone}."
+                f"`vision_backbone` must be one of {supported_backbones}. Got {self.vision_backbone}."
             )
 
         supported_prediction_types = ["epsilon", "sample"]
@@ -175,6 +177,9 @@ class DiffusionConfig(PreTrainedConfig):
                 f"`prediction_type` must be one of {supported_prediction_types}. Got {self.prediction_type}."
             )
         supported_noise_schedulers = ["DDPM", "DDIM"]
+        # DDIM uses fewer inference steps by default
+        if self.noise_scheduler_type == "DDIM" and self.num_inference_steps is None:
+            self.num_inference_steps = 16
         if self.noise_scheduler_type not in supported_noise_schedulers:
             raise ValueError(
                 f"`noise_scheduler_type` must be one of {supported_noise_schedulers}. "
