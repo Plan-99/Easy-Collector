@@ -970,10 +970,13 @@ async function saveDataset(form) {
 
         } else {
             // --- 추가(Add) 로직 ---
-            await api.post(`/dataset`, { 
-                ...finalData, 
-                task_id: selectedWorkspaceId.value 
+            const { data: createResult } = await api.post(`/dataset`, {
+                ...finalData,
+                task_id: selectedWorkspaceId.value
             });
+            if (createResult.dataset_id) {
+                selectedDatasetId.value = createResult.dataset_id;
+            }
         }
 
         // 공통 마무리 로직

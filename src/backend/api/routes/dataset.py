@@ -59,7 +59,7 @@ def create_dataset():
     dataset_path = os.path.join(DATASET_DIR, str(new_dataset.id))
     os.makedirs(dataset_path, exist_ok=True)
 
-    return {'status': 'success', 'message': 'Dataset Created'}, 200
+    return {'status': 'success', 'message': 'Dataset Created', 'dataset_id': new_dataset.id}, 200
 
 
 @dataset_bp.route('/dataset/<id>', methods=['PUT'])
