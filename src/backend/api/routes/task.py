@@ -3,6 +3,7 @@ from ...database.models.task_model import Task as TaskModel
 import json
 from ...database.models.checkpoint_model import Checkpoint as CheckpointModel
 from ...database.models.assembly_model import Assembly as AssemblyModel
+from ...configs.global_configs import DATASET_DIR
 from ..utils.runtime import attach_robot_runtime
 
 from ..process.failure_detection import failure_detection
@@ -108,7 +109,7 @@ def stop_training():
 
     current_app.pm.stop_process('train_task')
     
-    temp_dir = "/root/src/backend/datasets/tmp"
+    temp_dir = os.path.join(DATASET_DIR, "tmp")
     if os.path.exists(temp_dir):
         shutil.rmtree(temp_dir)
     return {'status': 'success', 'message': 'Training stopped'}, 200

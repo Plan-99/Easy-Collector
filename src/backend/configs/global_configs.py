@@ -1,6 +1,11 @@
-DATASET_DIR = '/root/src/backend/datasets'
-
+import os
 import numpy as np
+
+# Datasets are persistent runtime data and must NOT live under the bind-mounted
+# source tree (/root/src is bind-mounted from the dev checkout). Resolve under
+# EASYTRAINER_DATA_DIR when available so writes land on the persistent volume.
+_data_root = os.environ.get('EASYTRAINER_DATA_DIR')
+DATASET_DIR = os.path.join(_data_root, 'datasets') if _data_root else '/root/src/backend/datasets'
 
 SUPPORT_ROBOTS = [
     {

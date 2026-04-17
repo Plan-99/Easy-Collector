@@ -16,7 +16,7 @@ ENV PIP_DEFAULT_TIMEOUT=300
 ENV EC_SKIP_TORCHVISION_COMPAT=1
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
-ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+# ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
 # Regional PyPI mirror (Kakao)
 ARG PIP_INDEX_URL=https://mirror.kakao.com/pypi/simple

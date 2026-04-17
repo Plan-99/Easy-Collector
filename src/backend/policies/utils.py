@@ -4,19 +4,22 @@ import cv2
 import numpy as np
 import torch
 import os
-import h5py
 from torch.utils.data import TensorDataset, DataLoader
 import IPython
 import numpy as np
 import json
-import readline
-from sensor_msgs.msg import CompressedImage
 from types import SimpleNamespace
-from ..lerobot.configs.types import PolicyFeature, FeatureType
+from lerobot.configs.types import PolicyFeature, FeatureType
 from torchvision import transforms
 from transformers import AutoImageProcessor
 from PIL import Image
 from scipy.spatial.transform import Rotation
+import pyarrow.parquet as pq
+from ..api.process.lerobot_io import (
+    read_episode, list_episodes, get_dataset_info, get_norm_stats_from_dataset,
+    _parse_image_value,
+    PARQUET_PATH_TEMPLATE, IMAGE_PATH_TEMPLATE, DEFAULT_CHUNK_SIZE,
+)
 
 
 def delta_to_relative_trajectory(deltas: np.ndarray) -> np.ndarray:
@@ -97,105 +100,170 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self.use_relative_trajectory = use_relative_trajectory
         self.obs_state_keys = obs_state_keys if obs_state_keys is not None else ['qpos']
         self.info = None
-        self.__getitem__(0) # initialize self.is_sim
+
+        # Pre-load episode metadata (lengths) for efficient sampling
+        self._ep_cache = {}
+        self._dataset_info = get_dataset_info(dataset_dir)
+
+        # Pre-load tasks once (avoid re-reading jsonl every __getitem__)
+        from ..api.process.lerobot_io import _read_jsonl, TASKS_PATH
+        tasks = _read_jsonl(os.path.join(dataset_dir, TASKS_PATH))
+        self._task_map = {t.get("task_index"): t.get("task", "") for t in tasks}
+
+        self.__getitem__(0) # initialize self.info
 
     def __len__(self):
         return len(self.episode_ids)
 
-    def __getitem__(self, index):
-        sample_full_episode = False # hardcode
+    def _load_episode_parquet(self, episode_id):
+        """Load parquet data for an episode, with caching."""
+        if episode_id in self._ep_cache:
+            return self._ep_cache[episode_id]
 
-        episode_id = self.episode_ids[index]
-        dataset_path = os.path.join(self.dataset_dir, f'episode_{episode_id}.hdf5')
-        with h5py.File(dataset_path, 'r') as root:
-            # is_sim = root.attrs['sim']
+        chunk = episode_id // self._dataset_info.get("chunks_size", DEFAULT_CHUNK_SIZE)
+        parquet_path = os.path.join(
+            self.dataset_dir,
+            PARQUET_PATH_TEMPLATE.format(chunk=chunk, ep=episode_id),
+        )
+        table = pq.read_table(parquet_path)
+        df = table.to_pandas()
 
-            action_dim = 0
-            episode_len = 0
-            is_mixed = (self.action_key in ('ee_delta_action', 'relative_ee_pos'))
-            if is_mixed:
-                ee_robots = set(root['ee_delta_action'].keys()) if 'ee_delta_action' in root else set()
-                for robot_key in root['qaction'].keys():
-                    src = root['ee_delta_action'] if robot_key in ee_robots else root['qaction']
-                    item = src[robot_key]
-                    leaves = list(item.values()) if isinstance(item, h5py.Group) else [item]
-                    for leaf in leaves:
-                        episode_len = leaf.shape[0]
-                        action_dim += leaf.shape[1]
-            else:
-                for key in root[self.action_key].keys():
-                    item = root[self.action_key][key]
-                    leaves = list(item.values()) if isinstance(item, h5py.Group) else [item]
-                    for leaf in leaves:
-                        episode_len = leaf.shape[0]
-                        action_dim += leaf.shape[1]
+        state_data = np.array(df["observation.state"].tolist(), dtype=np.float32)
+        action_data = np.array(df["action"].tolist(), dtype=np.float32)
 
-            # norm_stats의 action dim으로 succeed 존재 여부 판단 (데이터셋 전체 통일)
-            expected_action_dim = self.norm_stats['action']['mean'].shape[-1]
-            any_has_succeed = (expected_action_dim > action_dim)
-            if any_has_succeed:
-                action_dim = expected_action_dim
+        # Get language instruction from pre-loaded task map
+        task_index = int(df["task_index"].iloc[0])
+        language_instruction = self._task_map.get(task_index, "")
 
-            original_action_shape = (self.chunk_size, action_dim)
-
-            if 'language_instruction' in root:
-                language_instruction = root['language_instruction'][()]
-                if isinstance(language_instruction, bytes):
-                    language_instruction = language_instruction.decode('utf-8')
-            else:
-                language_instruction = ''
-
-            if sample_full_episode:
-                start_ts = 0
-            elif episode_len <= self.chunk_size + self.n_obs_steps - 1:
-                # Episode is shorter than or equal to chunk_size: use all available data, pad the rest
-                start_ts = self.n_obs_steps - 1
-            else:
-                start_ts = np.random.choice(np.arange(self.n_obs_steps - 1, episode_len - self.chunk_size))
-            end_ts = start_ts + self.chunk_size
-
-            obs_step_start = start_ts - self.n_obs_steps + 1
-            use_qpos = 'qpos' in self.obs_state_keys
-            qpos = []
-            if is_mixed:
-                for i in range(self.n_obs_steps):
-                    obs_state = get_concatenated_mixed_pos(root, '/observations/ee_delta', '/observations/qpos', target_id=obs_step_start + i)
-                    if not use_qpos:
-                        obs_state = np.zeros_like(obs_state)
-                    extra = _get_extra_obs(root, self.obs_state_keys, target_id=obs_step_start + i)
-                    qpos.append(np.concatenate([obs_state, extra]) if extra is not None else obs_state)
-            else:
-                for i in range(self.n_obs_steps):
-                    obs_state = get_concatenated_pos(root['/observations/qpos'], target_id=obs_step_start + i)
-                    if not use_qpos:
-                        obs_state = np.zeros_like(obs_state)
-                    extra = _get_extra_obs(root, self.obs_state_keys, target_id=obs_step_start + i)
-                    qpos.append(np.concatenate([obs_state, extra]) if extra is not None else obs_state)
-
-            image_dict = dict()
-            for sensor_id in self.sensor_ids:
-                image_dict[f"sensor_{sensor_id}"] = []
-                for i in range(self.n_obs_steps):
-                    image_dict[f"sensor_{sensor_id}"].append(root[f'/observations/images/sensor_{sensor_id}'][obs_step_start + i])
-
-
-            if is_mixed:
-                action = get_concatenated_mixed_pos(root, 'ee_delta_action', 'qaction', target_id=None, target_range=[start_ts, min(episode_len, end_ts)])
-            else:
-                action = get_concatenated_pos(root[self.action_key], target_id=None, target_range=[start_ts, min(episode_len, end_ts)])
-
-            # succeed 플래그를 action 끝에 append (없는 에피소드는 0으로 채움)
-            if any_has_succeed:
-                if 'succeed' in root:
-                    succeed = root['succeed'][start_ts:min(episode_len, end_ts)].reshape(-1, 1)
+        # Get image data per sensor — from parquet (legacy), video files, or PNG dir.
+        # CRITICAL: silent fallback to np.zeros((224,224,3)) was masking missing images
+        # and causing the model to train on all-black frames. Each sensor MUST resolve
+        # to actual images here; an assertion below catches the failure mode loudly.
+        image_data = {}
+        image_cols = [col for col in df.columns if col.startswith("observation.images.")]
+        if image_cols:
+            # Legacy image mode: images embedded in parquet
+            for col in image_cols:
+                sensor_name = col.replace("observation.images.", "")
+                image_data[sensor_name] = list(df[col])
+        else:
+            # Video / PNG mode: prefer pre-decoded .npy (mmap'd), then mp4, then PNG dir.
+            features = self._dataset_info.get("features", {})
+            for feat_key, feat in features.items():
+                if not feat_key.startswith("observation.images."):
+                    continue
+                sensor_name = feat_key.replace("observation.images.", "")
+                video_path = os.path.join(
+                    self.dataset_dir, "videos", f"chunk-{chunk:03d}", feat_key,
+                    f"episode_{episode_id:06d}.mp4"
+                )
+                npy_path = video_path[:-4] + ".npy"
+                # PNG fallback: images/{feat_key}/episode_{id:06d}/frame_{idx:06d}.png
+                # lerobot_io.py writes frames here when video encoding isn't used.
+                png_dir = os.path.join(
+                    self.dataset_dir, "images", feat_key, f"episode_{episode_id:06d}"
+                )
+                if os.path.exists(npy_path):
+                    image_data[sensor_name] = np.load(npy_path, mmap_mode="r")
+                elif os.path.exists(video_path):
+                    from ..api.process.lerobot_io import _decode_video_frames
+                    image_data[sensor_name] = _decode_video_frames(video_path)
+                elif os.path.isdir(png_dir):
+                    # Build a list of frame_XXXXXX.png paths in order. _parse_image_value
+                    # accepts string paths and decodes via PIL.
+                    n_frames = len(state_data)
+                    image_data[sensor_name] = [
+                        os.path.join(png_dir, f"frame_{i:06d}.png") for i in range(n_frames)
+                    ]
                 else:
-                    succeed = np.zeros((action.shape[0], 1), dtype=np.float32)
-                action = np.concatenate([action, succeed], axis=1)
+                    image_data[sensor_name] = []
 
-            action_len = min(self.chunk_size, episode_len - start_ts) # hack, to make timesteps more aligned
+        # Loud assertion: if any sensor came back empty for an episode that has frames,
+        # the dataset is silently feeding all-black images. Fail early instead of
+        # training on garbage.
+        for sensor_name, vals in image_data.items():
+            if len(vals) == 0 and len(state_data) > 0:
+                raise RuntimeError(
+                    f"[EpisodicDataset] No image source found for sensor '{sensor_name}' "
+                    f"in episode {episode_id} (dataset_dir={self.dataset_dir}). "
+                    f"Checked: parquet column, .npy, .mp4, PNG dir. "
+                    f"Training would silently use all-zero frames."
+                )
+
+        succeed = np.array(df["succeed"].tolist(), dtype=np.float32) if "succeed" in df.columns else None
+
+        result = {
+            "state_data": state_data,
+            "action_data": action_data,
+            "language_instruction": language_instruction,
+            "image_data": image_data,
+            "succeed": succeed,
+            "episode_len": len(df),
+        }
+        self._ep_cache[episode_id] = result
+        return result
+
+    def __getitem__(self, index):
+        episode_id = self.episode_ids[index]
+        ep = self._load_episode_parquet(episode_id)
+
+        episode_len = ep["episode_len"]
+        state_data = ep["state_data"]   # (T, state_dim)
+        action_data = ep["action_data"]  # (T, action_dim)
+        language_instruction = ep["language_instruction"]
+
+        action_dim = action_data.shape[1]
+
+        # succeed 처리
+        expected_action_dim = self.norm_stats['action']['mean'].shape[-1]
+        any_has_succeed = (expected_action_dim > action_dim)
+        if any_has_succeed:
+            action_dim = expected_action_dim
+
+        original_action_shape = (self.chunk_size, action_dim)
+
+        if episode_len <= self.chunk_size + self.n_obs_steps - 1:
+            start_ts = self.n_obs_steps - 1
+        else:
+            start_ts = np.random.choice(np.arange(self.n_obs_steps - 1, episode_len - self.chunk_size))
+        end_ts = start_ts + self.chunk_size
+
+        obs_step_start = start_ts - self.n_obs_steps + 1
+
+        # Observation states
+        qpos = []
+        for i in range(self.n_obs_steps):
+            idx = max(0, min(obs_step_start + i, episode_len - 1))
+            qpos.append(state_data[idx])
+
+        # Images
+        image_dict = {}
+        for sensor_id in self.sensor_ids:
+            key = f"sensor_{sensor_id}"
+            image_dict[key] = []
+            img_vals = ep["image_data"].get(key, [])
+            for i in range(self.n_obs_steps):
+                idx = max(0, min(obs_step_start + i, episode_len - 1))
+                if idx < len(img_vals):
+                    img_array = _parse_image_value(img_vals[idx], self.dataset_dir)
+                else:
+                    img_array = np.zeros((224, 224, 3), dtype=np.uint8)
+                image_dict[key].append(img_array)
+
+        # Actions
+        actual_end = min(episode_len, end_ts)
+        action = action_data[start_ts:actual_end]
+
+        if any_has_succeed:
+            if ep["succeed"] is not None:
+                succeed = ep["succeed"][start_ts:actual_end].reshape(-1, 1)
+            else:
+                succeed = np.zeros((action.shape[0], 1), dtype=np.float32)
+            action = np.concatenate([action, succeed], axis=1)
+
+        action_len = min(self.chunk_size, episode_len - start_ts)
 
         padded_action = np.zeros(original_action_shape, dtype=np.float32)
-
         if self.action_key == 'relative_ee_pos' or (self.use_relative_trajectory and self.action_key == 'ee_delta_action'):
             padded_action[:action_len] = delta_to_relative_trajectory(action[:action_len])
         else:
@@ -211,45 +279,50 @@ class EpisodicDataset(torch.utils.data.Dataset):
                 image = Image.fromarray(np.array(image))
                 image = process_image(image)
                 processed_images.append(image)
-            # image = torch.from_numpy(np.array(image_dict[f"sensor_{sensor_id}"]))
-            # image = torch.einsum('n h w c -> n c h w', image)  # channel last to channel first
-            # image = image / 255.0  # normalize image
 
-            if self.policy_type in ['PI0']:
-                item[f"observation.images.sensor_{sensor_id}"] = torch.stack(processed_images).squeeze()  # add time dim
-                print(item[f"observation.images.sensor_{sensor_id}"].shape)
+            # New lerobot expects [C, H, W] per sample (collate → [batch, C, H, W])
+            stacked = torch.stack(processed_images)  # [n_obs_steps, C, H, W]
+            if self.n_obs_steps == 1:
+                item[f"observation.images.sensor_{sensor_id}"] = stacked.squeeze(0)  # [C, H, W]
             else:
-                item[f"observation.images.sensor_{sensor_id}"] = torch.stack(processed_images)
-                
-        if self.policy_type in ['PI0']:
+                item[f"observation.images.sensor_{sensor_id}"] = stacked
+
+        if self.n_obs_steps == 1:
+            item["observation.state"] = torch.from_numpy(qpos[0]).float()
+        elif self.policy_type in ['PI0', 'PI05']:
             item["observation.state"] = torch.from_numpy(np.concatenate(qpos)).float()
         else:
             item["observation.state"] = torch.from_numpy(np.array(qpos)).float()
 
         item["action"] = torch.from_numpy(padded_action).float()
         item["action_is_pad"] = torch.from_numpy(is_pad).bool()
-        item['next.done'] = torch.from_numpy(np.zeros(1, dtype=np.bool_)).bool()  # dummy done tensor
+        item['next.done'] = torch.from_numpy(np.zeros(1, dtype=np.bool_)).bool()
 
         if self.info is None:
             self.info = dict()
             for key, val in item.items():
                 if key.startswith("observation.images"):
-                    self.info[key] = PolicyFeature(FeatureType.VISUAL, shape=val[0].shape)
+                    self.info[key] = PolicyFeature(FeatureType.VISUAL, shape=val.shape)
                 if key == "observation.state":
-                    self.info[key] = PolicyFeature(FeatureType.STATE, shape=val[0].shape)
+                    self.info[key] = PolicyFeature(FeatureType.STATE, shape=val.shape)
                 if key == "action":
                     self.info[key] = PolicyFeature(FeatureType.ACTION, shape=val[0].shape)
                 if key == "language_instruction":
-                    self.info[key] = PolicyFeature(FeatureType.STATE, shape=(1,)) # dummy shape
+                    self.info[key] = PolicyFeature(FeatureType.STATE, shape=(1,))
 
         return item
 
 
 
 def process_image(image, vision_backbone='resnet18', to_cuda=False):
+    if not isinstance(image, Image.Image):
+        image = Image.fromarray(np.array(image))
     if vision_backbone not in VISION_BACKBONE_MAP:
-        tensor_transform = transforms.ToTensor()
-        image = tensor_transform(image)
+        image_transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+        ])
+        image = image_transform(image)
     else:
         image_processor = AutoImageProcessor.from_pretrained(VISION_BACKBONE_MAP[vision_backbone])
         image = image_processor(image)['pixel_values'][0]  # Assuming the image is a PIL Image or numpy array
@@ -258,99 +331,109 @@ def process_image(image, vision_backbone='resnet18', to_cuda=False):
 
 
 def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None):
+    """Compute normalization stats from LeRobot dataset parquet files."""
     if obs_state_keys is None:
         obs_state_keys = ['qpos']
+
+    dataset_info = get_dataset_info(dataset_dir)
     all_qpos_data = []
     all_action_data = []
-    # episode 길이 관련 코드 수정
     observation_image_keys = []
     cnt = 0
-    is_mixed = (action_key in ('ee_delta_action', 'relative_ee_pos'))
-
-    # 데이터셋에 succeed가 하나라도 있는지 사전 확인
-    any_has_succeed = False
-    missing_succeed_episodes = []
-    for episode_idx in range(num_episodes):
-        dataset_path = os.path.join(dataset_dir, f'episode_{episode_idx}.hdf5')
-        with h5py.File(dataset_path, 'r') as root:
-            if 'succeed' in root:
-                any_has_succeed = True
-            else:
-                missing_succeed_episodes.append(episode_idx)
-    if any_has_succeed and missing_succeed_episodes:
-        print(f'[WARN] Episodes missing succeed flag (will be filled with 0): {missing_succeed_episodes}')
-
-    expected_action_dim = None
     skipped_episodes = []
+
+    # Check if any episode has succeed
+    any_has_succeed = False
+    expected_action_dim = None
+
     for episode_idx in range(num_episodes):
-        dataset_path = os.path.join(dataset_dir, f'episode_{episode_idx}.hdf5')
-        with h5py.File(dataset_path, 'r') as root:
-            if is_mixed:
-                # ee_delta_action이 없는 에피소드는 스킵
-                if 'ee_delta_action' not in root:
-                    skipped_episodes.append(episode_idx)
-                    continue
-                qpos = get_concatenated_mixed_pos(root, '/observations/ee_delta', '/observations/qpos')
-                action = get_concatenated_mixed_pos(root, 'ee_delta_action', 'qaction')
+        chunk = episode_idx // dataset_info.get("chunks_size", DEFAULT_CHUNK_SIZE)
+        parquet_path = os.path.join(dataset_dir, PARQUET_PATH_TEMPLATE.format(chunk=chunk, ep=episode_idx))
+        if not os.path.exists(parquet_path):
+            skipped_episodes.append(episode_idx)
+            continue
+
+        table = pq.read_table(parquet_path)
+        df = table.to_pandas()
+
+        state_data = np.array(df["observation.state"].tolist(), dtype=np.float32)
+        action_data = np.array(df["action"].tolist(), dtype=np.float32)
+
+        # Check succeed
+        if "succeed" in df.columns:
+            any_has_succeed = True
+
+    # Second pass: collect data
+    for episode_idx in range(num_episodes):
+        if episode_idx in skipped_episodes:
+            continue
+        chunk = episode_idx // dataset_info.get("chunks_size", DEFAULT_CHUNK_SIZE)
+        parquet_path = os.path.join(dataset_dir, PARQUET_PATH_TEMPLATE.format(chunk=chunk, ep=episode_idx))
+        table = pq.read_table(parquet_path)
+        df = table.to_pandas()
+
+        qpos = np.array(df["observation.state"].tolist(), dtype=np.float32)
+        action = np.array(df["action"].tolist(), dtype=np.float32)
+
+        if qpos.ndim == 1:
+            qpos = qpos.reshape(1, -1)
+        if action.ndim == 1:
+            action = action.reshape(1, -1)
+
+        # succeed 플래그
+        if any_has_succeed:
+            if "succeed" in df.columns:
+                succeed = np.array(df["succeed"].tolist(), dtype=np.float32).reshape(-1, 1)
             else:
-                qpos = get_concatenated_pos(root['/observations/qpos'])
-                action = get_concatenated_pos(root[action_key])
-            if 'qpos' not in obs_state_keys:
-                qpos = np.zeros_like(qpos)
-            # obs_state_keys에 따라 추가 observation append
-            extra = _get_extra_obs(root, obs_state_keys)
-            if extra is not None:
-                if qpos.ndim == 1:
-                    extra_flat = extra.flatten() if extra.ndim > 1 else extra
-                    qpos = np.concatenate([qpos, extra_flat])
-                else:
-                    qpos = np.concatenate([qpos, extra], axis=-1)
-            if qpos.ndim == 1:
-                qpos = qpos.reshape(1, -1)
-            if action.ndim == 1:
-                action = action.reshape(1, -1)
-            # succeed 플래그: 있으면 append, 없으면 0으로 채움
-            if any_has_succeed:
-                if 'succeed' in root:
-                    succeed = root['succeed'][()].reshape(-1, 1)
-                else:
-                    succeed = np.zeros((action.shape[0], 1), dtype=np.float32)
-                action = np.concatenate([action, succeed], axis=1)
+                succeed = np.zeros((action.shape[0], 1), dtype=np.float32)
+            action = np.concatenate([action, succeed], axis=1)
 
-            # action dim 일관성 검증
-            if expected_action_dim is None:
-                expected_action_dim = action.shape[1]
-            elif action.shape[1] != expected_action_dim:
-                print(f'[WARN] episode_{episode_idx} action dim {action.shape[1]} != expected {expected_action_dim}, skipping.')
-                skipped_episodes.append(episode_idx)
-                continue
+        if expected_action_dim is None:
+            expected_action_dim = action.shape[1]
+        elif action.shape[1] != expected_action_dim:
+            print(f'[WARN] episode_{episode_idx} action dim {action.shape[1]} != expected {expected_action_dim}, skipping.')
+            skipped_episodes.append(episode_idx)
+            continue
 
-            if action_key == 'relative_ee_pos' or (use_relative_trajectory and action_key == 'ee_delta_action'):
-                action = delta_to_relative_trajectory(action)
-            observation_image_keys = list(root['/observations/images'].keys())
+        if action_key == 'relative_ee_pos' or (use_relative_trajectory and action_key == 'ee_delta_action'):
+            action = delta_to_relative_trajectory(action)
+
+        # Collect image keys from parquet columns
+        for col in df.columns:
+            if col.startswith("observation.images."):
+                sensor_name = col.replace("observation.images.", "")
+                if sensor_name not in observation_image_keys:
+                    observation_image_keys.append(sensor_name)
 
         cnt += qpos.shape[0]
         all_qpos_data.append(torch.from_numpy(qpos))
         all_action_data.append(torch.from_numpy(action))
+
+    # Also collect image keys from features (video mode: not in parquet columns)
+    if dataset_info:
+        for feat_key, feat in dataset_info.get("features", {}).items():
+            if feat_key.startswith("observation.images.") and feat.get("dtype") in ("video", "image"):
+                sensor_name = feat_key.replace("observation.images.", "")
+                if sensor_name not in observation_image_keys:
+                    observation_image_keys.append(sensor_name)
+
     if skipped_episodes:
         print(f'[WARN] Skipped incompatible episodes: {skipped_episodes}')
-    # cat instead of stack to support variable-length episodes
-    all_qpos_data = torch.cat(all_qpos_data, dim=0)     # (total_steps, dim)
-    all_action_data = torch.cat(all_action_data, dim=0)  # (total_steps, dim)
 
-    # normalize action data
+    all_qpos_data = torch.cat(all_qpos_data, dim=0)
+    all_action_data = torch.cat(all_action_data, dim=0)
+
     action_min = all_action_data.min(dim=0)[0]
     action_max = all_action_data.max(dim=0)[0]
     action_mean = all_action_data.mean(dim=0)
     action_std = all_action_data.std(dim=0)
-    action_std = torch.clip(action_std, 1e-2, np.inf) # clipping
+    action_std = torch.clip(action_std, 1e-2, np.inf)
 
-    # normalize qpos data
     qpos_min = all_qpos_data.min(dim=0)[0]
     qpos_max = all_qpos_data.max(dim=0)[0]
     qpos_mean = all_qpos_data.mean(dim=0)
     qpos_std = all_qpos_data.std(dim=0)
-    qpos_std = torch.clip(qpos_std, 1e-2, np.inf) # clipping
+    qpos_std = torch.clip(qpos_std, 1e-2, np.inf)
 
     stats = {
         "action": {
@@ -371,18 +454,13 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
 
     for key in observation_image_keys:
         stats[f"observation.images.{key}"] = {
-            "min": np.array([[[0.0]], [[0.0]], [[0.0]]]),  # Assuming images are normalized between 0 and 1
-            "max": np.array([[[1.0]], [[1.0]], [[1.0]]]),  # Assuming images are normalized between 0 and 1
-            "mean": np.array([[[0.5]], [[0.5]], [[0.5]]]),  # Assuming images are normalized between 0 and 1
-            "std": np.array([[[0.25]], [[0.25]], [[0.25]]]),  # Assuming images are normalized between 0 and 1
+            "min": np.array([[[0.0]], [[0.0]], [[0.0]]]),
+            "max": np.array([[[1.0]], [[1.0]], [[1.0]]]),
+            "mean": np.array([[[0.5]], [[0.5]], [[0.5]]]),
+            "std": np.array([[[0.25]], [[0.25]], [[0.25]]]),
             "count": np.array([cnt]),
         }
-    
 
-    # stats = {"qaction_mean": action_mean.numpy().squeeze(), "qaction_std": action_std.numpy().squeeze(),
-    #          "qpos_mean": qpos_mean.numpy().squeeze(), "qpos_std": qpos_std.numpy().squeeze(),
-    #          "example_qpos": qpos, 'example_action': action }
-    
     return stats, skipped_episodes
 
 
@@ -390,37 +468,19 @@ class FullScanDataset(EpisodicDataset):
     """OOD feature 수집용: 모든 에피소드의 모든 스텝을 순차적으로 반환."""
 
     def __init__(self, *args, **kwargs):
-        # 부모 __init__에서 __getitem__(0)을 호출하므로, 먼저 인덱스 매핑을 준비
         self._index_map = None
         super().__init__(*args, **kwargs)
         self._build_index_map()
 
     def _build_index_map(self):
-        """(global_index) → (episode_id, start_ts) 매핑 테이블 구축."""
+        """(global_index) -> (episode_id, start_ts) 매핑 테이블 구축."""
         index_map = []
         for ep_idx, ep_id in enumerate(self.episode_ids):
-            dataset_path = os.path.join(self.dataset_dir, f'episode_{ep_id}.hdf5')
-            with h5py.File(dataset_path, 'r') as root:
-                is_mixed = (self.action_key in ('ee_delta_action', 'relative_ee_pos'))
-                if is_mixed:
-                    if 'ee_delta_action' not in root:
-                        continue
-                    ee_robots = set(root['ee_delta_action'].keys())
-                    for robot_key in root['qaction'].keys():
-                        src = root['ee_delta_action'] if robot_key in ee_robots else root['qaction']
-                        item = src[robot_key]
-                        leaves = list(item.values()) if isinstance(item, h5py.Group) else [item]
-                        episode_len = leaves[0].shape[0]
-                        break
-                else:
-                    for key in root[self.action_key].keys():
-                        item = root[self.action_key][key]
-                        leaves = list(item.values()) if isinstance(item, h5py.Group) else [item]
-                        episode_len = leaves[0].shape[0]
-                        break
-            # 소수 stride + 에피소드별 offset으로 다양한 구간 커버
+            ep = self._load_episode_parquet(ep_id)
+            episode_len = ep["episode_len"]
+
             stride = 57
-            offset = (ep_idx * 17) % stride  # 에피소드마다 시작점이 17씩 밀림
+            offset = (ep_idx * 17) % stride
             start = self.n_obs_steps - 1 + offset
             for ts in range(start, max(self.n_obs_steps, episode_len - self.chunk_size), stride):
                 index_map.append((ep_id, ts))
@@ -429,86 +489,60 @@ class FullScanDataset(EpisodicDataset):
 
     def __len__(self):
         if self._index_map is None:
-            return len(self.episode_ids)  # 초기화 중 fallback
+            return len(self.episode_ids)
         return len(self._index_map)
 
     def __getitem__(self, index):
         if self._index_map is None:
-            # 초기화 중 부모의 __getitem__ 사용
             return super().__getitem__(index)
 
         ep_id, start_ts = self._index_map[index]
+        ep = self._load_episode_parquet(ep_id)
 
-        dataset_path = os.path.join(self.dataset_dir, f'episode_{ep_id}.hdf5')
-        with h5py.File(dataset_path, 'r') as root:
-            action_dim = 0
-            episode_len = 0
-            is_mixed = (self.action_key in ('ee_delta_action', 'relative_ee_pos'))
-            if is_mixed:
-                ee_robots = set(root['ee_delta_action'].keys()) if 'ee_delta_action' in root else set()
-                for robot_key in root['qaction'].keys():
-                    src = root['ee_delta_action'] if robot_key in ee_robots else root['qaction']
-                    item = src[robot_key]
-                    leaves = list(item.values()) if isinstance(item, h5py.Group) else [item]
-                    for leaf in leaves:
-                        episode_len = leaf.shape[0]
-                        action_dim += leaf.shape[1]
-            else:
-                for key in root[self.action_key].keys():
-                    item = root[self.action_key][key]
-                    leaves = list(item.values()) if isinstance(item, h5py.Group) else [item]
-                    for leaf in leaves:
-                        episode_len = leaf.shape[0]
-                        action_dim += leaf.shape[1]
+        episode_len = ep["episode_len"]
+        state_data = ep["state_data"]
+        action_data = ep["action_data"]
+        language_instruction = ep["language_instruction"]
 
-            expected_action_dim = self.norm_stats['action']['mean'].shape[-1]
-            any_has_succeed = (expected_action_dim > action_dim)
-            if any_has_succeed:
-                action_dim = expected_action_dim
+        action_dim = action_data.shape[1]
+        expected_action_dim = self.norm_stats['action']['mean'].shape[-1]
+        any_has_succeed = (expected_action_dim > action_dim)
+        if any_has_succeed:
+            action_dim = expected_action_dim
 
-            original_action_shape = (self.chunk_size, action_dim)
+        original_action_shape = (self.chunk_size, action_dim)
+        end_ts = start_ts + self.chunk_size
+        obs_step_start = start_ts - self.n_obs_steps + 1
 
-            if 'language_instruction' in root:
-                language_instruction = root['language_instruction'][()]
-                if isinstance(language_instruction, bytes):
-                    language_instruction = language_instruction.decode('utf-8')
-            else:
-                language_instruction = ''
+        qpos = []
+        for i in range(self.n_obs_steps):
+            idx = max(0, min(obs_step_start + i, episode_len - 1))
+            qpos.append(state_data[idx])
 
-            end_ts = start_ts + self.chunk_size
-            obs_step_start = start_ts - self.n_obs_steps + 1
-
-            qpos = []
-            if is_mixed:
-                for i in range(self.n_obs_steps):
-                    obs_state = get_concatenated_mixed_pos(root, '/observations/ee_delta', '/observations/qpos', target_id=obs_step_start + i)
-                    extra = _get_extra_obs(root, self.obs_state_keys, target_id=obs_step_start + i)
-                    qpos.append(np.concatenate([obs_state, extra]) if extra is not None else obs_state)
-            else:
-                for i in range(self.n_obs_steps):
-                    obs_state = get_concatenated_pos(root['/observations/qpos'], target_id=obs_step_start + i)
-                    extra = _get_extra_obs(root, self.obs_state_keys, target_id=obs_step_start + i)
-                    qpos.append(np.concatenate([obs_state, extra]) if extra is not None else obs_state)
-
-            image_dict = dict()
-            for sensor_id in self.sensor_ids:
-                image_dict[f"sensor_{sensor_id}"] = []
-                for i in range(self.n_obs_steps):
-                    image_dict[f"sensor_{sensor_id}"].append(root[f'/observations/images/sensor_{sensor_id}'][obs_step_start + i])
-
-            if is_mixed:
-                action = get_concatenated_mixed_pos(root, 'ee_delta_action', 'qaction', target_id=None, target_range=[start_ts, min(episode_len, end_ts)])
-            else:
-                action = get_concatenated_pos(root[self.action_key], target_id=None, target_range=[start_ts, min(episode_len, end_ts)])
-
-            if any_has_succeed:
-                if 'succeed' in root:
-                    succeed = root['succeed'][start_ts:min(episode_len, end_ts)].reshape(-1, 1)
+        image_dict = {}
+        for sensor_id in self.sensor_ids:
+            key = f"sensor_{sensor_id}"
+            image_dict[key] = []
+            img_vals = ep["image_data"].get(key, [])
+            for i in range(self.n_obs_steps):
+                idx = max(0, min(obs_step_start + i, episode_len - 1))
+                if idx < len(img_vals):
+                    img_array = _parse_image_value(img_vals[idx], self.dataset_dir)
                 else:
-                    succeed = np.zeros((action.shape[0], 1), dtype=np.float32)
-                action = np.concatenate([action, succeed], axis=1)
+                    img_array = np.zeros((224, 224, 3), dtype=np.uint8)
+                image_dict[key].append(img_array)
 
-            action_len = min(self.chunk_size, episode_len - start_ts)
+        actual_end = min(episode_len, end_ts)
+        action = action_data[start_ts:actual_end]
+
+        if any_has_succeed:
+            if ep["succeed"] is not None:
+                succeed = ep["succeed"][start_ts:actual_end].reshape(-1, 1)
+            else:
+                succeed = np.zeros((action.shape[0], 1), dtype=np.float32)
+            action = np.concatenate([action, succeed], axis=1)
+
+        action_len = min(self.chunk_size, episode_len - start_ts)
 
         padded_action = np.zeros(original_action_shape, dtype=np.float32)
         if self.action_key == 'relative_ee_pos' or (self.use_relative_trajectory and self.action_key == 'ee_delta_action'):
@@ -526,12 +560,17 @@ class FullScanDataset(EpisodicDataset):
                 image = Image.fromarray(np.array(image))
                 image = process_image(image)
                 processed_images.append(image)
-            if self.policy_type in ['PI0']:
-                item[f"observation.images.sensor_{sensor_id}"] = torch.stack(processed_images).squeeze()
-            else:
-                item[f"observation.images.sensor_{sensor_id}"] = torch.stack(processed_images)
 
-        if self.policy_type in ['PI0']:
+            # New lerobot expects [C, H, W] per sample (collate → [batch, C, H, W])
+            stacked = torch.stack(processed_images)  # [n_obs_steps, C, H, W]
+            if self.n_obs_steps == 1:
+                item[f"observation.images.sensor_{sensor_id}"] = stacked.squeeze(0)  # [C, H, W]
+            else:
+                item[f"observation.images.sensor_{sensor_id}"] = stacked
+
+        if self.n_obs_steps == 1:
+            item["observation.state"] = torch.from_numpy(qpos[0]).float()
+        elif self.policy_type in ['PI0', 'PI05']:
             item["observation.state"] = torch.from_numpy(np.concatenate(qpos)).float()
         else:
             item["observation.state"] = torch.from_numpy(np.array(qpos)).float()
@@ -544,78 +583,15 @@ class FullScanDataset(EpisodicDataset):
             self.info = dict()
             for key, val in item.items():
                 if key.startswith("observation.images"):
-                    self.info[key] = PolicyFeature(FeatureType.VISUAL, shape=val[0].shape)
+                    self.info[key] = PolicyFeature(FeatureType.VISUAL, shape=val.shape)
                 if key == "observation.state":
-                    self.info[key] = PolicyFeature(FeatureType.STATE, shape=val[0].shape)
+                    self.info[key] = PolicyFeature(FeatureType.STATE, shape=val.shape)
                 if key == "action":
                     self.info[key] = PolicyFeature(FeatureType.ACTION, shape=val[0].shape)
                 if key == "language_instruction":
                     self.info[key] = PolicyFeature(FeatureType.STATE, shape=(1,))
 
         return item
-
-
-def _get_extra_obs(root, obs_state_keys, target_id=None, target_range=None):
-    """obs_state_keys에 따라 qpos 외 추가 observation을 concatenate하여 반환.
-    qpos는 기본이므로 여기서는 qvel, qeffort만 처리."""
-    qpos_ref = get_concatenated_pos(root['/observations/qpos'], target_id=target_id, target_range=target_range)
-    parts = []
-    for key in ['qvel', 'qeffort']:
-        if key not in obs_state_keys:
-            continue
-        obs_path = f'/observations/{key}'
-        if obs_path in root:
-            parts.append(get_concatenated_pos(root[obs_path], target_id=target_id, target_range=target_range))
-        else:
-            parts.append(np.zeros_like(qpos_ref))
-    if not parts:
-        return None
-    return np.concatenate(parts, axis=-1)
-
-
-def get_concatenated_pos(pos_path, target_id=None, target_range=None):
-    """robot_N 키 아래 dataset이 있거나, robot_N/ee_name 처럼 한 단계 더 nested된 구조 모두 처리."""
-    pos_list = []
-    for key in pos_path.keys():
-        item = pos_path[key]
-        leaves = list(item.values()) if isinstance(item, h5py.Group) else [item]
-        for leaf in leaves:
-            if target_id is None and target_range is None:
-                pos_list.append(leaf[()])
-            elif target_range is None:
-                pos_list.append(leaf[target_id])
-            else:
-                pos_list.append(leaf[target_range[0]:target_range[1]])
-    if not pos_list:
-        return np.array([])
-    axis = 0 if (target_range is None and target_id is not None) else 1
-    return np.concatenate(pos_list, axis=axis)
-
-
-def get_concatenated_mixed_pos(root, primary_path, fallback_path, target_id=None, target_range=None):
-    """ee_delta_action 학습 시, single_arm은 primary_path(ee_delta_action/ee_delta)에서,
-    tool은 fallback_path(qaction/qpos)에서 읽어 concatenate."""
-    primary_robots = set(root[primary_path].keys()) if primary_path in root else set()
-
-    pos_list = []
-    for robot_key in root[fallback_path].keys():
-        if robot_key in primary_robots:
-            item = root[primary_path][robot_key]
-        else:
-            item = root[fallback_path][robot_key]
-
-        leaves = list(item.values()) if isinstance(item, h5py.Group) else [item]
-        for leaf in leaves:
-            if target_id is None and target_range is None:
-                pos_list.append(leaf[()])
-            elif target_range is None:
-                pos_list.append(leaf[target_id])
-            else:
-                pos_list.append(leaf[target_range[0]:target_range[1]])
-    if not pos_list:
-        return np.array([])
-    axis = 0 if (target_range is None and target_id is not None) else 1
-    return np.concatenate(pos_list, axis=axis)
 
 
 def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_train, batch_size_val, chunk_size, vision_backbone='resnet18', num_workers=1, n_obs_steps=1, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None):
@@ -644,8 +620,18 @@ def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_tra
     # construct dataset and dataloader
     train_dataset = EpisodicDataset(train_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys)
     val_dataset = EpisodicDataset(val_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys)
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train, shuffle=True, pin_memory=True, num_workers=num_workers)
-    val_dataloader = DataLoader(val_dataset, batch_size=batch_size_val, shuffle=True, pin_memory=True, num_workers=num_workers)
+    # Keep workers alive across epochs so EpisodicDataset._ep_cache (and OS page
+    # cache backing the mmap'd frame .npy files) survives between epochs.
+    loader_kwargs = dict(
+        shuffle=True,
+        pin_memory=True,
+        num_workers=num_workers,
+    )
+    if num_workers > 0:
+        loader_kwargs["persistent_workers"] = True
+        loader_kwargs["prefetch_factor"] = 4
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train, **loader_kwargs)
+    val_dataloader = DataLoader(val_dataset, batch_size=batch_size_val, **loader_kwargs)
 
     input_features = {k: v for k, v in train_dataset.info.items() if k.startswith("observation")}
     output_features = {k: v for k, v in train_dataset.info.items() if k.startswith("action")}
@@ -792,12 +778,147 @@ def make_optimizer(policy_class, policy):
         raise NotImplementedError
     return optimizer
 
-def forward_pass(batch, policy):
+_pi05_tokenizer = None
+
+def _get_pi05_tokenizer():
+    """Lazy-load PaliGemma tokenizer for PI05."""
+    global _pi05_tokenizer
+    if _pi05_tokenizer is None:
+        from transformers import AutoTokenizer
+        _pi05_tokenizer = AutoTokenizer.from_pretrained("google/paligemma-3b-pt-224")
+    return _pi05_tokenizer
+
+
+def prepare_pi05_language_tokens(batch, config, norm_stats=None):
+    """Convert language_instruction + state → tokenized language tokens for PI05.
+
+    Replicates the logic of Pi05PrepareStateTokenizerProcessorStep + TokenizerProcessorStep.
+    """
+    tokenizer = _get_pi05_tokenizer()
+    max_length = getattr(config, 'tokenizer_max_length', 200)
+    max_state_dim = getattr(config, 'max_state_dim', 32)
+
+    # Get language instruction (string or list of strings)
+    lang = batch.get('language_instruction', '')
+    if isinstance(lang, str):
+        lang = [lang]
+
+    # Get state for discretization
+    state = batch.get('observation.state')
+    prompts = []
+    for i, task_text in enumerate(lang):
+        cleaned = task_text.strip().replace("_", " ").replace("\n", " ") if task_text else ""
+        state_str = ""
+        if state is not None:
+            s = state[i] if state.dim() > 1 else state
+            s_np = s.cpu().numpy().flatten()
+            # Normalize to [-1, 1] using min-max if norm_stats available
+            if norm_stats and 'observation.state' in norm_stats:
+                s_min = norm_stats['observation.state']['min']
+                s_max = norm_stats['observation.state']['max']
+                s_range = s_max - s_min
+                s_range[s_range < 1e-6] = 1.0
+                s_np = 2.0 * (s_np - s_min) / s_range - 1.0
+                s_np = np.clip(s_np, -1.0, 1.0)
+            # Pad to max_state_dim
+            if len(s_np) < max_state_dim:
+                s_np = np.concatenate([s_np, np.zeros(max_state_dim - len(s_np))])
+            # Discretize into 256 bins
+            bins = np.linspace(-1, 1, 257)[:-1]
+            discretized = np.digitize(s_np, bins) - 1
+            state_str = " ".join(map(str, discretized.astype(int)))
+        prompt = f"Task: {cleaned}, State: {state_str};\nAction: "
+        prompts.append(prompt)
+
+    tokenized = tokenizer(
+        prompts,
+        max_length=max_length,
+        truncation=True,
+        padding="max_length",
+        return_tensors="pt",
+    )
+
+    device = state.device if state is not None else torch.device('cuda')
+    batch['observation.language.tokens'] = tokenized['input_ids'].to(device)
+    batch['observation.language.attention_mask'] = tokenized['attention_mask'].to(dtype=torch.bool, device=device)
+
+    return batch
+
+
+def forward_pass(batch, policy, norm_stats=None, preprocessor=None):
     data = {k: (v.cuda() if isinstance(v, torch.Tensor) else v) for k, v in batch.items()}
+    # PI05 needs tokenized language inputs
+    if hasattr(policy, 'config') and hasattr(policy.config, 'tokenizer_max_length'):
+        data = prepare_pi05_language_tokens(data, policy.config, norm_stats=norm_stats)
+    # Apply input preprocessor (Normalize state/action/images per cfg.normalization_mapping)
+    # so the model trains on normalized targets and the gradient is balanced across joints.
+    if preprocessor is not None:
+        data = preprocessor(data)
     return policy.forward(data)
-    # image_data, qpos_data, action_data, is_pad = data
-    # image_data, qpos_data, action_data, is_pad = image_data.cuda(), qpos_data.cuda(), action_data.cuda(), is_pad.cuda()
-    # return policy(qpos_data, image_data, action_data, is_pad) # TODO remove None
+
+
+def make_easytrainer_processors(policy_type, cfg, dataset_stats=None, pretrained_path=None):
+    """Per-policy dispatch for building / loading the LeRobot Normalize+Unnormalize pipeline.
+
+    Bypasses ``lerobot.policies.factory.make_pre_post_processors`` because that module
+    eagerly imports ``lerobot.envs.configs`` → robots → motors, none of which we install
+    in the EasyTrainer container. We just call the per-policy ``make_*_pre_post_processors``
+    builders directly so the dependency surface stays minimal.
+
+    Args:
+        policy_type: 'ACT' | 'Diffusion' | 'PI05'
+        cfg: the policy config (ACTConfig / DiffusionConfig / PI05Config)
+        dataset_stats: numpy stats dict from get_norm_stats() — used when building from scratch.
+        pretrained_path: when set, load saved processor json/safetensors from this dir
+            instead of building. ``dataset_stats`` is ignored in this branch.
+
+    Returns:
+        (preprocessor, postprocessor) PolicyProcessorPipeline tuple, or (None, None)
+        on a load failure when pretrained_path is set (caller falls back to raw I/O).
+    """
+    from lerobot.processor.pipeline import PolicyProcessorPipeline
+    from lerobot.processor.converters import (
+        batch_to_transition,
+        transition_to_batch,
+        policy_action_to_transition,
+        transition_to_policy_action,
+    )
+    from lerobot.utils.constants import (
+        POLICY_PREPROCESSOR_DEFAULT_NAME,
+        POLICY_POSTPROCESSOR_DEFAULT_NAME,
+    )
+
+    if pretrained_path is not None:
+        try:
+            preprocessor = PolicyProcessorPipeline.from_pretrained(
+                pretrained_model_name_or_path=pretrained_path,
+                config_filename=f"{POLICY_PREPROCESSOR_DEFAULT_NAME}.json",
+                to_transition=batch_to_transition,
+                to_output=transition_to_batch,
+            )
+            postprocessor = PolicyProcessorPipeline.from_pretrained(
+                pretrained_model_name_or_path=pretrained_path,
+                config_filename=f"{POLICY_POSTPROCESSOR_DEFAULT_NAME}.json",
+                to_transition=policy_action_to_transition,
+                to_output=transition_to_policy_action,
+            )
+            return preprocessor, postprocessor
+        except Exception as e:
+            print(f'[WARN] make_easytrainer_processors: failed to load processors from '
+                  f'{pretrained_path} ({type(e).__name__}: {e}). Returning (None, None).')
+            return None, None
+
+    # Build from scratch using per-policy factories
+    if policy_type == 'ACT':
+        from lerobot.policies.act.processor_act import make_act_pre_post_processors
+        return make_act_pre_post_processors(config=cfg, dataset_stats=dataset_stats)
+    if policy_type == 'Diffusion':
+        from lerobot.policies.diffusion.processor_diffusion import make_diffusion_pre_post_processors
+        return make_diffusion_pre_post_processors(config=cfg, dataset_stats=dataset_stats)
+    if policy_type == 'PI05':
+        from lerobot.policies.pi05.processor_pi05 import make_pi05_pre_post_processors
+        return make_pi05_pre_post_processors(config=cfg, dataset_stats=dataset_stats)
+    raise ValueError(f'make_easytrainer_processors: unsupported policy_type {policy_type!r}')
 
 
 def convert_lists_to_tuples(obj):

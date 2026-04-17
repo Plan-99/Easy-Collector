@@ -1,6 +1,7 @@
 release/*.deb
 logs/
 src/backend/database/*.db
+src/backend/datasets/
 /.venv
 
 .cache/

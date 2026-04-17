@@ -264,7 +264,7 @@
                                 />
                             </div>
 
-                            <div v-for="(config, key) in trainingForm" :key="key" class="col-4">
+                            <div v-for="(config, key) in trainingForm" :key="key" class="col-4" v-show="!config.showIf || (trainingForm[config.showIf] && trainingForm[config.showIf].value)">
                                 <q-select
                                     v-if="config.type === 'select'"
                                     dense

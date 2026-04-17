@@ -10,8 +10,9 @@ services:
     environment:
       - DISPLAY=${DISPLAY}
       - ROS_DOMAIN_ID=0
+      - RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}
       - XAUTHORITY=${XAUTHORITY}
-      - PYTHONPATH=/root/src:${PYTHONPATH}
+      - PYTHONPATH=/root/src:/root/src/backend/lerobot/src:${PYTHONPATH}
       # NPM: regional mirror and retry knobs (override in env if needed)
       - NPM_CONFIG_REGISTRY=${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
       - NPM_CONFIG_FETCH_RETRIES=${NPM_CONFIG_FETCH_RETRIES:-5}

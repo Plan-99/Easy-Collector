@@ -355,7 +355,7 @@ function startDialog() {
 }
 
 function addConfig() {
-    api.post(`/dataset/${props.dataset.id}/${augmentationPreviewFile.value.name}/:read_hdf5_add_config`, form.value)
+    api.post(`/dataset/${props.dataset.id}/${augmentationPreviewFile.value.name}/:read_dataset_add_config`, form.value)
 }
 
 const progress = ref(0)

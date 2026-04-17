@@ -13,9 +13,8 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float64
 
-from ...lerobot.policies.act.modeling_act import ACTPolicy
-from ...lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
-from ...lerobot.policies.pi0.modeling_pi0 import PI0Policy
+from lerobot.policies.act.modeling_act import ACTPolicy
+from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
 from ...utils.image_parser import fetch_image_with_config
 from ...policies.utils import process_image
 from ...env.env import Env

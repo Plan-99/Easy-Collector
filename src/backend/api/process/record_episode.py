@@ -1,14 +1,13 @@
 from tqdm import tqdm
 import os
-import numpy as np
 from ...env.env import Env
 from ...env.vive_controller import ViveController
 from ...configs.global_configs import DATASET_DIR
 from .leader_teleoperation import Leader
 from ...utils.image_parser import fetch_image_with_config
 import time
-import h5py
 from concurrent.futures import ThreadPoolExecutor
+from .lerobot_io import append_episode as lerobot_append_episode, get_episode_count
 from ...database.models.teleoperator_model import Teleoperator as TeleoperatorModel
 
 def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
@@ -22,7 +21,7 @@ def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
 
 
 
-def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors, task, language_instruction, socketio_instance, task_control, tele_type='leader', ros2_service='', iter=100000):
+def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors, task, language_instruction, socketio_instance, task_control, tele_type='leader', ros2_service='', iter=100000, hz=20):
     agents = sorted(agents, key=lambda a: a.id)
     env = Env(node, agents=agents, sensors=sensors, virtual_agents=(tele_type == 'vive_only'))
     dataset_dir = f"{DATASET_DIR}/{dataset_id}"
@@ -31,7 +30,6 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
     # --- Vive: collection 전체에서 1회 초기화 (에피소드마다 재시작하지 않음) ---
     # vive_external: 실물 로봇 + vive, vive_only: vive tracker만 (이미지+ee_delta_action)
     vive = None
-    hz = 20
     if tele_type in ('vive_external', 'vive_only'):
         move_robot = (tele_type == 'vive_external')
         vive = ViveController(
@@ -59,7 +57,8 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
             task_control['episode_stop'] = False
             task_control['succeed'] = False
 
-            dataset_name = f"episode_{get_auto_index(dataset_dir)}.hdf5"
+            ep_count = get_episode_count(dataset_dir)
+            dataset_name = f"episode_{ep_count:06d}"
 
             print(f"Recording Data: {dataset_name}")
 
@@ -159,9 +158,6 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
 
             if not os.path.isdir(dataset_dir):
                 os.makedirs(dataset_dir)
-            dataset_path = os.path.join(dataset_dir, dataset_name)
-            if os.path.isfile(dataset_path):
-                print(f'Dataset already exist at \n{dataset_path}\nHint: set overwrite to True.')
 
             # motion_planning: joint_actions 초기화 후 대기
             if tele_type == 'motion_planning':
@@ -340,74 +336,19 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
             print(f'Saving Data: {dataset_name}')
 
             try:
-                # --- 데이터 재구성 및 HDF5 쓰기 ---
-                with h5py.File(dataset_path, 'w', rdcc_nbytes=1024**2*2) as root:
-                    root.attrs['sim'] = False
-                    obs_group = root.create_group('observations')
-
-                    # 1. 이미지 저장 (observations/images/...)
-                    image_group = obs_group.create_group('images')
-                    for sensor in sensors:
-                        s_id = str(sensor['id'])
-                        images = [
-                            fetch_image_with_config(ts.observation['images'][f'sensor_{s_id}'], {
-                                'resize': task['sensor_img_size'][s_id],
-                                'cropped_area': task['sensor_cropped_area'][s_id],
-                                'rotate': task['sensor_rotate'][s_id]
-                            }) for ts in timesteps
-                        ]
-                        image_group.create_dataset(f"sensor_{s_id}", data=np.array(images), dtype='uint8')
-
-                    # 2. 로봇 데이터 저장 (None인 값은 자동 스킵 — vive_only 시 전부 None)
-                    obs_keys = ['qpos', 'eepos', 'ee_delta', 'qvel', 'qeffort']
-
-                    for agent in agents:
-                        a_id = agent.id
-                        sample_robot_state = timesteps[0].observation['robot_states'][a_id]
-
-                        for key, value in sample_robot_state.items():
-                            if value is None:
-                                continue
-
-                            parent_group = obs_group if key in obs_keys else root
-                            data_group = parent_group.require_group(key)
-
-                            if isinstance(value, dict):
-                                agent_group = data_group.require_group(f'robot_{a_id}')
-                                for ee_name in value.keys():
-                                    series_data = []
-                                    if key == 'ee_delta_action':
-                                        # action을 1스텝 shift: obs_t와 delta(t→t+1)을 짝짓기
-                                        for i in range(len(timesteps)):
-                                            if i + 1 < len(timesteps):
-                                                series_data.append(timesteps[i + 1].observation['robot_states'][a_id][key][ee_name])
-                                            else:
-                                                series_data.append([0.0] * len(value[ee_name]))
-                                    else:
-                                        for t_step in timesteps:
-                                            series_data.append(t_step.observation['robot_states'][a_id][key][ee_name])
-                                    agent_group.create_dataset(ee_name, data=np.array(series_data))
-                            else:
-                                series_data = []
-                                for t_step in timesteps:
-                                    series_data.append(t_step.observation['robot_states'][a_id][key])
-                                agent_group = data_group
-                                agent_group.create_dataset(f'robot_{a_id}', data=np.array(series_data))
-
-                    # 3. succeed 플래그 저장 (1-step shifted: action과 동일하게 정렬)
-                    succeed_shifted = []
-                    for i in range(len(succeed_flags)):
-                        if i + 1 < len(succeed_flags):
-                            succeed_shifted.append(succeed_flags[i + 1])
-                        else:
-                            succeed_shifted.append(succeed_flags[-1])
-                    root.create_dataset('succeed', data=np.array(succeed_shifted, dtype=np.float32))
-
-                    # 4. 기타 메타데이터
-                    root.create_dataset('language_instruction', data=language_instruction if language_instruction else '',
-                                    dtype=h5py.string_dtype(encoding='utf-8'))
-
-                    time.sleep(1)
+                # --- LeRobot 포맷으로 저장 ---
+                lerobot_append_episode(
+                    dataset_dir=dataset_dir,
+                    timesteps=timesteps,
+                    agents=agents,
+                    sensors=sensors,
+                    task=task,
+                    language_instruction=language_instruction if language_instruction else "",
+                    action_key='qaction',
+                    succeed_flags=succeed_flags,
+                    fetch_image_fn=fetch_image_with_config,
+                    fps=hz,
+                )
 
                 print("Episode recording process ended.")
                 socketio_instance.emit('episode_saved', {'succeed': task_control.get('succeed', False)})

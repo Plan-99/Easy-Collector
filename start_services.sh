@@ -11,7 +11,7 @@ log_status() {
   fi
 }
 
-export PYTHONPATH="/root/src:/opt/openrobots/lib/python3.10/site-packages:${PYTHONPATH:-}"
+export PYTHONPATH="/root/src:/root/src/backend/lerobot/src:/opt/openrobots/lib/python3.10/site-packages:${PYTHONPATH:-}"
 export LD_LIBRARY_PATH="/opt/openrobots/lib:${LD_LIBRARY_PATH:-}"
 export PATH="/opt/openrobots/bin:${PATH}"
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
@@ -238,58 +238,6 @@ sync_project_root() {
 }
 
 sync_project_root
-
-# Ensure missing package init files are present to avoid import failures
-ensure_lerobot_dataset_init() {
-  local target="/root/src/backend/lerobot/datasets/__init__.py"
-  if [ -f "$target" ]; then
-    return
-  fi
-  mkdir -p "$(dirname "$target")"
-  cat >"$target" <<'PYCODE'
-"""Dataset utilities for LeRobot."""
-
-from .utils import (
-    append_jsonlines,
-    embed_images,
-    flatten_dict,
-    get_nested_item,
-    load_info,
-    load_json,
-    load_jsonlines,
-    load_stats,
-    serialize_dict,
-    unflatten_dict,
-    write_info,
-    write_json,
-    write_jsonlines,
-    write_stats,
-    write_task,
-)
-
-__all__ = [
-    "append_jsonlines",
-    "embed_images",
-    "flatten_dict",
-    "get_nested_item",
-    "load_info",
-    "load_json",
-    "load_jsonlines",
-    "load_stats",
-    "serialize_dict",
-    "unflatten_dict",
-    "write_info",
-    "write_json",
-    "write_jsonlines",
-    "write_stats",
-    "write_task",
-]
-PYCODE
-  chmod 644 "$target" 2>/dev/null || true
-  log_status "[PATCH] Created missing backend/lerobot/datasets/__init__.py"
-}
-
-ensure_lerobot_dataset_init
 
 build_ros2_workspace() {
   local ws="/root/ros2_ws"
