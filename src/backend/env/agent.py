@@ -196,14 +196,8 @@ class Agent:
         elif self.write_topic_msg == 'trajectory_msgs/JointTrajectory':
             self.write_topic_msg_data.joint_names = self.joint_names
             self.joint_trajectory_point.positions = action
-             # velocities를 목적지 - 현재 위치 차이의 절반으로 설정
-            current_pos = self.get_joint_states()
-            if current_pos is None:
-                print("Current joint states are None, cannot move.")
-                return
-            second = 0.2 if vel_arg is None else vel_arg
-            self.joint_trajectory_point.velocities = [(abs(t - c) / 2) for t, c in zip(action, current_pos)]
-            # self.joint_trajectory_point.velocities = [0.0] * self.joint_len
+            second = 0 if vel_arg is None else vel_arg
+            self.joint_trajectory_point.velocities = []
             self.joint_trajectory_point.time_from_start = rclpy.duration.Duration(seconds=second).to_msg()
             self.write_topic_msg_data.points = [self.joint_trajectory_point]
             self.move_robot_pub.publish(self.write_topic_msg_data)
@@ -353,13 +347,28 @@ class Agent:
         # 3. 중요: 멤버 변수 대신 '로컬 변수'로 Goal 객체 생성
         # 여러 스레드나 루프에서 공유 변수를 수정하는 위험을 방지합니다.
         goal_msg = get_action(self.write_topic_msg).Goal()
-        
+
         if self.write_topic_msg == 'control_msgs/action/GripperCommand':
             goal_msg.command.position = float(action[0])
-            goal_msg.command.max_effort = 1.0 
+            goal_msg.command.max_effort = 1.0
+
+        elif self.write_topic_msg == 'control_msgs/action/FollowJointTrajectory':
+            from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+            seconds = 0 if vel_arg is None else vel_arg
+
+            point = JointTrajectoryPoint()
+            point.positions = [float(a) for a in action]
+            point.velocities = []
+            point.time_from_start = rclpy.duration.Duration(seconds=seconds).to_msg()
+
+            traj = JointTrajectory()
+            traj.joint_names = self.joint_names
+            traj.points = [point]
+
+            goal_msg.trajectory = traj
 
         self.is_waiting_for_goal = True
-        
+
         # send_goal_async 자체가 Non-blocking이므로 그대로 사용
         send_goal_future = self.move_robot_client.send_goal_async(goal_msg)
         send_goal_future.add_done_callback(self.goal_response_callback)
@@ -596,10 +605,16 @@ class Agent:
                         joint_positions.append(self.joint_states.position[topic_index])
                     except (ValueError, AttributeError):
                         joint_positions.append(0.0)
-            elif self.read_topic_msg == 'control_msgs/JointTrajectoryControllerState':
+            elif self.read_topic_msg in (
+                'control_msgs/JointTrajectoryControllerState',
+                'control_msgs/msg/JointTrajectoryControllerState',
+            ):
                 for i, joint_name in enumerate(self.joint_names):
-                    topic_index = self.joint_states.joint_names.index(joint_name)
-                    joint_positions.append(self.joint_states.actual.positions[topic_index])
+                    try:
+                        topic_index = self.joint_states.joint_names.index(joint_name)
+                        joint_positions.append(self.joint_states.actual.positions[topic_index])
+                    except (ValueError, IndexError, AttributeError):
+                        joint_positions.append(0.0)
             elif self.read_topic_msg == 'fairino_msgs/msg/RobotNonrtState':
                 # Fairino nonrt_state_data: 도(degree) 단위 → 라디안 변환
                 joint_positions = [
@@ -641,6 +656,18 @@ class Agent:
                     except (ValueError, IndexError):
                         vel.append(0.0)
                 return vel
+            if self.read_topic_msg in (
+                'control_msgs/JointTrajectoryControllerState',
+                'control_msgs/msg/JointTrajectoryControllerState',
+            ) and len(self.joint_states.actual.velocities) > 0:
+                vel = []
+                for joint_name in self.joint_names:
+                    try:
+                        idx = self.joint_states.joint_names.index(joint_name)
+                        vel.append(self.joint_states.actual.velocities[idx] if idx < len(self.joint_states.actual.velocities) else 0.0)
+                    except (ValueError, IndexError):
+                        vel.append(0.0)
+                return vel
             return [0.0] * self.joint_len
 
     def get_joint_effort(self):
@@ -653,6 +680,18 @@ class Agent:
                     try:
                         idx = self.joint_states.name.index(joint_name)
                         effort.append(self.joint_states.effort[idx] if idx < len(self.joint_states.effort) else 0.0)
+                    except (ValueError, IndexError):
+                        effort.append(0.0)
+                return effort
+            if self.read_topic_msg in (
+                'control_msgs/JointTrajectoryControllerState',
+                'control_msgs/msg/JointTrajectoryControllerState',
+            ) and len(self.joint_states.actual.effort) > 0:
+                effort = []
+                for joint_name in self.joint_names:
+                    try:
+                        idx = self.joint_states.joint_names.index(joint_name)
+                        effort.append(self.joint_states.actual.effort[idx] if idx < len(self.joint_states.actual.effort) else 0.0)
                     except (ValueError, IndexError):
                         effort.append(0.0)
                 return effort
@@ -669,7 +708,10 @@ class Agent:
                     joint_actions.append(self.joint_actions.position[topic_index])
             elif self.write_topic_msg == 'std_msgs/Float64MultiArray':
                 joint_actions = list(self.joint_actions.data)
-            elif self.write_topic_msg == 'control_msgs/JointTrajectoryControllerState':
+            elif self.write_topic_msg in (
+                'control_msgs/JointTrajectoryControllerState',
+                'control_msgs/msg/JointTrajectoryControllerState',
+            ):
                 for i, joint_name in enumerate(self.joint_names):
                     topic_index = self.joint_actions.joint_names.index(joint_name)
                     joint_actions.append(self.joint_actions.actual.positions[topic_index])
@@ -777,7 +819,7 @@ class Agent:
 
         return full_joint_positions, None
 
-    def move_to(self, target_pos, step_size=0.1, duration=5.0):
+    def move_to(self, target_pos, step_size=0.0005, duration=5.0):
         self._move_target = list(target_pos)
         self.is_moving = True
 
@@ -790,7 +832,7 @@ class Agent:
             self.move_joint_step(target_pos)
             print("Moving to target position:", target_pos)
             time.sleep(0.5)
-        elif self.robot_company == 'Kinova':
+        elif self.robot_company == 'Kinova' or self.write_topic_msg == 'trajectory_msgs/JointTrajectory':
             self.write_topic_msg_data.joint_names = self.joint_names
             print("Moving to target position:", target_pos)
             self.joint_trajectory_point.positions = [float(x) for x in target_pos]
@@ -810,7 +852,7 @@ class Agent:
                 pos_diff = [target - current for target, current in zip(target_pos, current_pos)]
                 
                 # 목표 위치에 도달했는지 확인
-                if all(abs(diff) < 0.01 for diff in pos_diff):
+                if all(abs(diff) < 0.001 for diff in pos_diff):
                     print("Reached target position.")
                     break
 

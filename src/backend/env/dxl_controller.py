@@ -39,23 +39,28 @@ class DxlController:
     def enable_torque(self):
         torque_enable_address = 64  # MX, X 시리즈 기준
         self.controlled = True
+        print(f"[enable_torque] dxl_ids={self.dxl_ids} gripper_dxl_ids={self.gripper_dxl_ids}", flush=True)
+        enabled = []
         for index, dxl_id in enumerate(self.dxl_ids):
             if dxl_id in self.gripper_dxl_ids:
                 continue
             with self.port_lock:
                 dxl_comm_result, dxl_error = self.packetHandler.write1ByteTxRx(self.portHandler, dxl_id, torque_enable_address, 1)
             if dxl_comm_result != dxl.COMM_SUCCESS:
-                print(f"Torque Enable Comm Error: {self.packetHandler.getTxRxResult(dxl_comm_result)}")
-                print(f"dxl_id: {dxl_id}")
+                print(f"Torque Enable Comm Error: {self.packetHandler.getTxRxResult(dxl_comm_result)} dxl_id={dxl_id}", flush=True)
                 return
             elif dxl_error != 0:
-                print(f"Torque Enable Error: {self.packetHandler.getRxPacketError(dxl_error)}")
-                print(f"dxl_id: {dxl_id}")
+                print(f"Torque Enable Error: {self.packetHandler.getRxPacketError(dxl_error)} dxl_id={dxl_id}", flush=True)
                 return
+            enabled.append(dxl_id)
             time.sleep(0.01)
+        print(f"[enable_torque] enabled={enabled}", flush=True)
             
     def remove_torque(self):
+        import traceback
         torque_enable_address = 64  # MX, X 시리즈 기준
+        print(f"[remove_torque] called on dxl_ids={self.dxl_ids}", flush=True)
+        traceback.print_stack()
         for index, dxl_id in enumerate(self.dxl_ids):
             with self.port_lock:
                 dxl_comm_result, dxl_error = self.packetHandler.write1ByteTxRx(self.portHandler, dxl_id, torque_enable_address, 0)
@@ -206,7 +211,7 @@ class DxlController:
                 goal_position = goal_joint_dict['dxl_goal_position']
 
                 print(f"[ID:{dxl_id}] GoalPos:{goal_position}  PresPos:{position}")
-                if abs(goal_position - position) < 40 or abs(goal_position - position + 4096) < 40 or abs(goal_position - position - 4096) < 40:
+                if abs(goal_position - position) < 20 or abs(goal_position - position + 4096) < 20 or abs(goal_position - position - 4096) < 20:
                     print(f"[ID:{dxl_id}] Reached goal position.")
                     reached[i] = True
 

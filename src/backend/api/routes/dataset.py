@@ -7,6 +7,7 @@ from ..process.read_dataset import read_dataset, add_config
 from ..process.record_episode import record_episode
 from ..process.augment_dataset import augment_dataset
 from ..process.merge_dataset import merge_dataset
+from ..process.downsample_dataset import downsample_dataset
 from ..process.lerobot_io import (
     get_episodes_as_file_list, get_dataset_metadata, get_dataset_info,
     delete_episode as lerobot_delete_episode, list_episodes,
@@ -418,3 +419,31 @@ def merge_datasets():
     merge_dataset(source_dataset, target_datasets)
 
     return {'status': 'success', 'message': 'Dataset merged successfully'}, 200
+
+@dataset_bp.route('/dataset/<id>/downsample', methods=['POST'])
+def downsample_dataset_route(id):
+    data = request.json
+    name = data.get('name')
+    task_id = data.get('task_id')
+    keep = int(data.get('keep', 1))
+    every = int(data.get('every', 2))
+
+    if keep <= 0 or every <= 0 or keep >= every:
+        return {'status': 'error', 'message': 'Invalid downsample ratio: keep must be < every, both > 0'}, 400
+
+    new_dataset = DatasetModel.create(
+        name=name,
+        task_id=task_id,
+    )
+
+    current_app.pm.start_function(
+        func=downsample_dataset,
+        dataset_id=id,
+        new_dataset_id=new_dataset.id,
+        keep=keep,
+        every=every,
+        socketio_instance=current_app.pm.socketio,
+        name="downsample_dataset",
+    )
+
+    return {'status': 'success', 'message': 'Dataset downsample started'}, 200

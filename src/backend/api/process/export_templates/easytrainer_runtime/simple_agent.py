@@ -95,15 +95,17 @@ class SimpleAgent:
             return
 
         with self._js_lock:
-            # If joint_names are present in both msg and config, reorder to
-            # match the training-time canonical order. Otherwise trust the
-            # message order and slice to joint_len.
+            # If joint name list is present in the message (as `name` for
+            # sensor_msgs/JointState or `joint_names` for control_msgs/
+            # JointTrajectoryControllerState), reorder positions to match the
+            # training-time canonical order. Otherwise trust msg order.
+            msg_names = getattr(msg, 'name', None) or getattr(msg, 'joint_names', None)
             if (
                 self.joint_names
-                and getattr(msg, 'name', None)
-                and len(getattr(msg, 'name', [])) == len(positions)
+                and msg_names
+                and len(msg_names) == len(positions)
             ):
-                name_to_idx = {n: i for i, n in enumerate(msg.name)}
+                name_to_idx = {n: i for i, n in enumerate(msg_names)}
                 ordered = []
                 for jn in self.joint_names:
                     if jn not in name_to_idx:
@@ -119,6 +121,13 @@ class SimpleAgent:
     @staticmethod
     def _extract_positions(msg):
         """Pull a list of joint positions from common ROS message types."""
+        # control_msgs/JointTrajectoryControllerState — check before sensor_msgs/JointState
+        # because this msg also has no top-level `position`, but nested `actual.positions`.
+        if hasattr(msg, 'actual') and hasattr(msg.actual, 'positions') and msg.actual.positions is not None:
+            try:
+                return list(msg.actual.positions)
+            except TypeError:
+                pass
         # sensor_msgs/JointState
         if hasattr(msg, 'position') and msg.position is not None:
             try:

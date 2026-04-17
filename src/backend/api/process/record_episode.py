@@ -107,6 +107,7 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                                     agent.ik_solver.reset_state(arm_js)
                 time.sleep(1)
 
+            time.sleep(2)
             # --- motion_planning: ROS2 service 호출 ---
             if tele_type == 'motion_planning' and ros2_service:
                 service_result = {'done': False, 'success': None, 'message': ''}
@@ -138,24 +139,6 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                     task_control['stop'] = True
                     return
 
-            if tele_type == 'leader':
-                teleop = TeleoperatorModel.where('type', 'leader').where('assembly_id', assembly_id).first()
-
-                if teleop is None:
-                    print(f'[ERROR]: No leader robot preset for assembly {assembly_id}')
-                    task_control['stop'] = True
-                    return
-
-                leader = Leader(node, agents, socketio_instance, teleop.settings)
-
-                socketio_instance.start_background_task(
-                    target=leader.leader_teleop_workflow,
-                    task_control=task_control
-                )
-
-                while not leader.is_synced:
-                    time.sleep(0.1)
-
             if not os.path.isdir(dataset_dir):
                 os.makedirs(dataset_dir)
 
@@ -172,29 +155,58 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                         task_control['stop'] = True
                         return
 
-                # joint commands 대기 (motion_planning은 service 응답까지 최대 60초)
-                wait_timeout = 60.0 if tele_type == 'motion_planning' else 5.0
-                for agent in agents:
-                    if agent.joint_actions is None:
-                        print(f'[NOTICE] Waiting for joint commands from robot {agent.id}...')
-                        elapsed = 0.0
-                        while agent.joint_actions is None:
-                            if task_control['stop']:
-                                return
-                            time.sleep(0.1)
-                            elapsed += 0.1
-                            if elapsed >= wait_timeout:
-                                print(f'[ERROR] No joint commands from robot {agent.id} after {wait_timeout}s timeout')
-                                task_control['stop'] = True
-                                return
-                        print(f'[NOTICE] Joint commands received from robot {agent.id} ({elapsed:.1f}s)')
-                    agent.move_lock = False
-
             for sensor in sensors:
-                if getattr(env, f'sensor_{sensor["id"]}') is None:
-                    print(f'[ERROR] No data from sensor {sensor["id"]}')
+                attr = f'sensor_{sensor["id"]}'
+                if getattr(env, attr) is None:
+                    print(f'[NOTICE] Waiting for first frame from sensor {sensor["id"]}...')
+                    elapsed = 0.0
+                    while getattr(env, attr) is None:
+                        if task_control['stop']:
+                            return
+                        time.sleep(0.1)
+                        elapsed += 0.1
+                        if elapsed >= 10.0:
+                            print(f'[ERROR] No data from sensor {sensor["id"]} after 5.0s timeout')
+                            task_control['stop'] = True
+                            return
+                    print(f'[NOTICE] Sensor {sensor["id"]} first frame received ({elapsed:.1f}s)')
+
+            if tele_type == 'leader':
+                teleop = TeleoperatorModel.where('type', 'leader').where('assembly_id', assembly_id).first()
+
+                if teleop is None:
+                    print(f'[ERROR]: No leader robot preset for assembly {assembly_id}')
                     task_control['stop'] = True
                     return
+
+                leader = Leader(node, agents, socketio_instance, teleop.settings)
+
+                socketio_instance.start_background_task(
+                    target=leader.leader_teleop_workflow,
+                    task_control=task_control
+                )
+
+                while not leader.is_synced:
+                    # print('[NOTICE] Waiting for leader teleoperation to sync...')
+                    time.sleep(0.1)
+
+            # joint commands 대기 (motion_planning은 service 응답까지 최대 60초)
+            wait_timeout = 60.0 if tele_type == 'motion_planning' else 5.0
+            for agent in agents:
+                if agent.joint_actions is None:
+                    print(f'[NOTICE] Waiting for joint commands from robot {agent.id}...')
+                    elapsed = 0.0
+                    while agent.joint_actions is None:
+                        if task_control['stop']:
+                            return
+                        time.sleep(0.1)
+                        elapsed += 0.1
+                        if elapsed >= wait_timeout:
+                            print(f'[ERROR] No joint commands from robot {agent.id} after {wait_timeout}s timeout')
+                            task_control['stop'] = True
+                            return
+                    print(f'[NOTICE] Joint commands received from robot {agent.id} ({elapsed:.1f}s)')
+                agent.move_lock = False
 
             # reset 타임스텝: ee_delta_action, ee_delta = zeros (tool_inner인 경우 tool joint 포함)
             ts = env.reset()
