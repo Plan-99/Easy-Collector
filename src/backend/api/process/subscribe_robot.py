@@ -1,11 +1,11 @@
 import time
 from flask import current_app, request
-from ...env.agent import Agent
+from ...bridge.remote_agent import RemoteAgent as Agent
 import json
 import traceback
 
 
-def subscribe_robot_topic(agent: Agent, node, socketio_instance, task_control):
+def subscribe_robot_topic(agent: Agent, socketio_instance, task_control):
     import time as _t
     connected = False
     stale_after = 8.0  # seconds
@@ -17,6 +17,9 @@ def subscribe_robot_topic(agent: Agent, node, socketio_instance, task_control):
             ja = agent.get_joint_actions()
             ep = agent.get_ee_position()
             et = agent.get_ee_target()
+            # 로컬 캐시 업데이트 (record_episode 등에서 agent.joint_states 직접 참조)
+            agent.joint_states = js
+            agent.joint_actions = ja
             connected = (now - last_js) <= stale_after and js is not None
             socketio_instance.emit('robot_status_' + str(agent.id), {
                 # .tolist()를 호출하여 파이썬 list로 변환

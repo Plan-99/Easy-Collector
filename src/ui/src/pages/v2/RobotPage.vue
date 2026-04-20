@@ -1,12 +1,14 @@
 <template>
     <q-page class="q-pt-lg q-pr-lg full-height">
-        <div class="border-rounded bg-secondary q-pa-lg q-mb-lg row">
+        <div class="border-rounded bg-secondary q-pa-lg q-mb-lg row items-center">
             <q-img src="images/robot1.png" style="width: 100px" class="q-mr-xl"></q-img>
             <div>
                 <div class="text-h5 text-primary text-bold q-mb-lg">{{ $t('robotIntroTitle') }}</div>
                 <div class="text-body text-white">{{ $t('robotIntroBody') }}</div>
                 <div class="text-body text-white">{{ $t('robotIntroBody2') }}</div>
             </div>
+            <q-space />
+            <r-o-s2-log-dialog />
         </div>
         <div class="row q-col-gutter-md">
             <div class="col-6 col-sm-4 col-md-3 col-lg-2" v-for="robot in robots" :key="robot.id">
@@ -273,6 +275,7 @@ import BottomTerminal from 'src/components/v2/BottomTerminal.vue';
 import { useRobot } from 'src/composables/useRobot';
 import FormDialog from 'src/components/v2/FormDialog.vue';
 import RobotPendant from 'src/components/v2/RobotPendant.vue';
+import ROS2LogDialog from 'src/components/v2/ROS2LogDialog.vue';
 
 const { socket } = useSocket();
 const { leaderTeleStarted, startLeaderTele, stopLeaderTele } = useLeaderTeleoperation();

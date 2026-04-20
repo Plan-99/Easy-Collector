@@ -1,5 +1,4 @@
 import collections
-import dm_env
 import time
 import rclpy
 from rclpy.node import Node
@@ -40,20 +39,11 @@ class Env:
     
     
     def reset(self):
-        return dm_env.TimeStep(
-            step_type=dm_env.StepType.FIRST,
-            reward=self.get_reward(),
-            discount=None,
-            observation=self.get_observation())
+        return self.get_observation()
 
 
     def record_step(self):
-        # time.sleep(0.1)
-        return dm_env.TimeStep(
-            step_type=dm_env.StepType.MID,
-            reward=self.get_reward(),
-            discount=None,
-            observation=self.get_observation())
+        return self.get_observation()
         
 
     def get_images(self):

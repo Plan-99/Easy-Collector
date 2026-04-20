@@ -11,10 +11,7 @@ log_status() {
   fi
 }
 
-export PYTHONPATH="/root/src:/root/src/backend/lerobot/src:/opt/openrobots/lib/python3.10/site-packages:${PYTHONPATH:-}"
-export LD_LIBRARY_PATH="/opt/openrobots/lib:${LD_LIBRARY_PATH:-}"
-export PATH="/opt/openrobots/bin:${PATH}"
-export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+export PYTHONPATH="/root/src:/root/src/backend/lerobot/src:${PYTHONPATH:-}"
 
 log_status "[DEBUG] Library path forced to /opt/openrobots and /root/src"
 
@@ -35,7 +32,7 @@ try:
             return m.version(p)
         except Exception:
             return 'n/a'
-    names = ['flask','flask-socketio','orator','torch','torchvision','rclpy']
+    names = ['flask','flask-socketio','orator','torch','torchvision','grpcio']
     print('[ENV] Packages:', ' '.join([f"%s=%s" % (n, ver(n)) for n in names]))
 except Exception as e:
     print('[ENV] Packages: unavailable', e)
@@ -239,50 +236,8 @@ sync_project_root() {
 
 sync_project_root
 
-build_ros2_workspace() {
-  local ws="/root/ros2_ws"
-  log_status "[ROS] Building ROS 2 workspace at $ws (this may take a while)"
-  ( cd "$ws" && source /opt/ros/humble/setup.bash && colcon build --symlink-install )
-}
-
-ensure_ros2_workspace() {
-  local ws="/root/ros2_ws"
-  local install="$ws/install/setup.bash"
-  if [[ "${EC_NO_ROS:-0}" == "1" ]]; then
-    log_status "[ROS] Skipped workspace build (EC_NO_ROS=1)"
-    return
-  fi
-  if [[ ! -d "$ws" ]]; then
-    log_status "[ROS][WARN] ROS 2 workspace not found at $ws; skipping build"
-    return
-  fi
-  if [[ ! -f "$install" ]]; then
-    build_ros2_workspace
-    return
-  fi
-  if ! (source /opt/ros/humble/setup.bash && source "$install" && ros2 pkg list 2>/dev/null | grep -q '^piper$'); then
-    log_status "[ROS] Workspace found but required packages missing; rebuilding"
-    build_ros2_workspace
-  else
-    log_status "[ROS] Workspace already built (piper package found)"
-  fi
-}
-
-# Ensure ROS 2 environment is available for rclpy and ros2 CLI.
-# Temporarily disable nounset because ROS setup scripts reference unset vars.
-set +u
-if [[ -f "/opt/ros/humble/setup.bash" ]]; then
-  log_status "[ROS] Sourcing /opt/ros/humble/setup.bash"
-  # shellcheck disable=SC1091
-  source /opt/ros/humble/setup.bash
-fi
-ensure_ros2_workspace
-if [[ -f "/root/ros2_ws/install/setup.bash" ]]; then
-  log_status "[ROS] Sourcing /root/ros2_ws/install/setup.bash"
-  # shellcheck disable=SC1091
-  source /root/ros2_ws/install/setup.bash
-fi
-set -u
+# ROS2는 별도 컨테이너(easy_collector_ros2)에서 관리
+log_status "[ROS] ROS2 is managed by the ros2 container (gRPC bridge on port ${GRPC_BRIDGE_PORT:-50051})"
 
 # Optional debug flags for backend
 BACKEND_FLAGS=""

@@ -1,7 +1,6 @@
 from tqdm import tqdm
 import os
-from ...env.env import Env
-from ...env.vive_controller import ViveController
+from ...bridge.remote_env import RemoteEnv
 from ...configs.global_configs import DATASET_DIR
 from .leader_teleoperation import Leader
 from ...utils.image_parser import fetch_image_with_config
@@ -23,7 +22,7 @@ def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
 
 def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors, task, language_instruction, socketio_instance, task_control, tele_type='leader', ros2_service='', iter=100000, hz=20):
     agents = sorted(agents, key=lambda a: a.id)
-    env = Env(node, agents=agents, sensors=sensors, virtual_agents=(tele_type == 'vive_only'))
+    env = RemoteEnv(agents=agents, sensors=sensors, virtual_agents=(tele_type == 'vive_only'))
     dataset_dir = f"{DATASET_DIR}/{dataset_id}"
     thread_pool = ThreadPoolExecutor(max_workers=len(agents))
 
@@ -31,9 +30,10 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
     # vive_external: 실물 로봇 + vive, vive_only: vive tracker만 (이미지+ee_delta_action)
     vive = None
     if tele_type in ('vive_external', 'vive_only'):
+        from ...bridge.remote_vive import RemoteViveController
         move_robot = (tele_type == 'vive_external')
-        vive = ViveController(
-            node, socketio_instance,
+        vive = RemoteViveController(
+            socketio_instance,
             agents=agents, move_robot=move_robot,
             scale_factor=2, step_rate=40,
         )
@@ -45,7 +45,8 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
     task_control['episode_complete'] = False
 
     # --- ROS2 service (motion_planning용) ---
-    from std_srvs.srv import Trigger
+    from ...bridge.client import get_bridge_client
+    from ...bridge.generated import robot_bridge_pb2 as pb
     service_result = {'done': False, 'success': None, 'message': ''}
 
     try:
@@ -101,38 +102,37 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                     if agent.ik_solver is not None:
                         js = agent.get_joint_states()
                         if js is not None:
-                            arm_js, _ = agent.get_joint_and_tool_pos(js)
-                            if arm_js is not None:
-                                with agent.ik_lock:
-                                    agent.ik_solver.reset_state(arm_js)
+                            agent.reset_ik_solver(js)
                 time.sleep(1)
 
             time.sleep(2)
-            # --- motion_planning: ROS2 service 호출 ---
+            # --- motion_planning: ROS2 service 호출 (gRPC ROSProxy 경유) ---
             if tele_type == 'motion_planning' and ros2_service:
                 service_result = {'done': False, 'success': None, 'message': ''}
                 try:
-                    cli = node.create_client(Trigger, ros2_service)
-                    if not cli.wait_for_service(timeout_sec=5.0):
-                        print(f'[ERROR] ROS2 service "{ros2_service}" not available')
-                        task_control['stop'] = True
-                        return
-
-                    def _on_service_done(future):
+                    import threading as _th
+                    def _call_ros2_service():
                         try:
-                            result = future.result()
+                            client = get_bridge_client()
+                            resp = client.ros_proxy.CallService(pb.ROSServiceRequest(
+                                service_type='std_srvs/srv/Trigger',
+                                service_name=ros2_service,
+                                request_json='',
+                            ))
                             service_result['done'] = True
-                            service_result['success'] = result.success
-                            service_result['message'] = result.message
-                            print(f'[NOTICE] ROS2 service response: success={result.success}, message="{result.message}"')
+                            service_result['success'] = resp.success
+                            service_result['message'] = resp.response_json
+                            if resp.success:
+                                print(f'[NOTICE] ROS2 service "{ros2_service}" completed: {resp.response_json}')
+                            else:
+                                print(f'[ERROR] ROS2 service "{ros2_service}" failed: {resp.response_json}')
                         except Exception as e:
                             service_result['done'] = True
                             service_result['success'] = False
                             service_result['message'] = str(e)
                             print(f'[ERROR] ROS2 service error: {e}')
 
-                    future = cli.call_async(Trigger.Request())
-                    future.add_done_callback(_on_service_done)
+                    _th.Thread(target=_call_ros2_service, daemon=True).start()
                     print(f'[NOTICE] ROS2 service "{ros2_service}" called, recording in parallel...')
                 except Exception as e:
                     print(f'[ERROR] Failed to call ROS2 service: {e}')
@@ -150,26 +150,36 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
             # vive_only는 실물 로봇 없이 동작하므로 joint state 검증 생략
             if tele_type != 'vive_only':
                 for agent in agents:
+                    js = agent.get_joint_states()
+                    if js is not None:
+                        agent.joint_states = js
                     if agent.joint_states is None:
                         print(f'[ERROR] No joint states from robot {agent.id}')
                         task_control['stop'] = True
                         return
 
+            # 센서 첫 프레임 대기: get_observation()으로 이미지 확인
             for sensor in sensors:
-                attr = f'sensor_{sensor["id"]}'
-                if getattr(env, attr) is None:
-                    print(f'[NOTICE] Waiting for first frame from sensor {sensor["id"]}...')
-                    elapsed = 0.0
-                    while getattr(env, attr) is None:
-                        if task_control['stop']:
-                            return
-                        time.sleep(0.1)
-                        elapsed += 0.1
-                        if elapsed >= 10.0:
-                            print(f'[ERROR] No data from sensor {sensor["id"]} after 5.0s timeout')
-                            task_control['stop'] = True
-                            return
-                    print(f'[NOTICE] Sensor {sensor["id"]} first frame received ({elapsed:.1f}s)')
+                sensor_key = f'sensor_{sensor["id"]}'
+                print(f'[NOTICE] Waiting for first frame from sensor {sensor["id"]}...')
+                elapsed = 0.0
+                while True:
+                    if task_control['stop']:
+                        return
+                    try:
+                        obs = env.get_observation()
+                        img = obs.get('images', {}).get(sensor_key)
+                        if img is not None:
+                            break
+                    except Exception:
+                        pass
+                    time.sleep(0.1)
+                    elapsed += 0.1
+                    if elapsed >= 10.0:
+                        print(f'[ERROR] No data from sensor {sensor["id"]} after 10.0s timeout')
+                        task_control['stop'] = True
+                        return
+                print(f'[NOTICE] Sensor {sensor["id"]} first frame received ({elapsed:.1f}s)')
 
             if tele_type == 'leader':
                 teleop = TeleoperatorModel.where('type', 'leader').where('assembly_id', assembly_id).first()
@@ -190,22 +200,24 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                     # print('[NOTICE] Waiting for leader teleoperation to sync...')
                     time.sleep(0.1)
 
-            # joint commands 대기 (motion_planning은 service 응답까지 최대 60초)
-            wait_timeout = 60.0 if tele_type == 'motion_planning' else 5.0
+            # joint commands 대기 (keyboard는 사용자 입력 전까지 actions 없으므로 스킵)
+            if tele_type != 'keyboard':
+                wait_timeout = 60.0 if tele_type == 'motion_planning' else 5.0
+                for agent in agents:
+                    if agent.joint_actions is None:
+                        print(f'[NOTICE] Waiting for joint commands from robot {agent.id}...')
+                        elapsed = 0.0
+                        while agent.joint_actions is None:
+                            if task_control['stop']:
+                                return
+                            time.sleep(0.1)
+                            elapsed += 0.1
+                            if elapsed >= wait_timeout:
+                                print(f'[ERROR] No joint commands from robot {agent.id} after {wait_timeout}s timeout')
+                                task_control['stop'] = True
+                                return
+                        print(f'[NOTICE] Joint commands received from robot {agent.id} ({elapsed:.1f}s)')
             for agent in agents:
-                if agent.joint_actions is None:
-                    print(f'[NOTICE] Waiting for joint commands from robot {agent.id}...')
-                    elapsed = 0.0
-                    while agent.joint_actions is None:
-                        if task_control['stop']:
-                            return
-                        time.sleep(0.1)
-                        elapsed += 0.1
-                        if elapsed >= wait_timeout:
-                            print(f'[ERROR] No joint commands from robot {agent.id} after {wait_timeout}s timeout')
-                            task_control['stop'] = True
-                            return
-                    print(f'[NOTICE] Joint commands received from robot {agent.id} ({elapsed:.1f}s)')
                 agent.move_lock = False
 
             # reset 타임스텝: ee_delta_action, ee_delta = zeros (tool_inner인 경우 tool joint 포함)

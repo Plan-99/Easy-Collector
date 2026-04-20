@@ -1,12 +1,8 @@
 # #!/usr/bin/env python
 
 from concurrent.futures import thread
-import rclpy
-from rclpy.node import Node
 import math
-# import numpy as np
 import time
-import math
 import threading
 from ...env.dxl_controller import DxlController
 from .subscribe_dynamixel import get_available_ports
@@ -15,8 +11,23 @@ import sys
 
 from concurrent.futures import ThreadPoolExecutor
 
+
+class _SimpleRate:
+    """rclpy.Rate 대체. 지정 Hz로 sleep."""
+    def __init__(self, hz):
+        self._interval = 1.0 / hz
+        self._last = time.monotonic()
+
+    def sleep(self):
+        now = time.monotonic()
+        elapsed = now - self._last
+        remaining = self._interval - elapsed
+        if remaining > 0:
+            time.sleep(remaining)
+        self._last = time.monotonic()
+
 class Leader():
-    def __init__(self, node: Node, agents, socketio_instance, teleop_setting) -> None:
+    def __init__(self, node, agents, socketio_instance, teleop_setting) -> None:
         # ROS 노드 초기화ur5e/ur5e_scaled_pos_joint_traj_controller/command
         self.node = node
         self.socketio_instance = socketio_instance
@@ -228,7 +239,7 @@ class Leader():
         Dynamixel 값을 최대한 빠르게 지속적으로 읽어 joint_map에 반영하는 루프.
         별도 스레드에서 실행되며, publish 루프와 분리되어 있다.
         """
-        while rclpy.ok() and not task_control.get('stop', False) and not task_control.get('episode_stop', False):
+        while not task_control.get('stop', False) and not task_control.get('episode_stop', False):
             try:
                 self.read_dxl_and_write_to_joint_map()
                 if not self._first_read_done.is_set():
@@ -262,10 +273,10 @@ class Leader():
                     is_joint_trajectory = True
                     break
             if is_joint_trajectory:
-                rate = self.node.create_rate(100)  # 100Hz
+                rate = _SimpleRate(100)  # 100Hz
             else:
-                rate = self.node.create_rate(50)  # 50Hz
-            while rclpy.ok() and not task_control.get('stop', False) and not task_control.get('episode_stop', False):
+                rate = _SimpleRate(50)  # 50Hz
+            while not task_control.get('stop', False) and not task_control.get('episode_stop', False):
 
                 group_by_agent = self.group_joints_by_agent()
 

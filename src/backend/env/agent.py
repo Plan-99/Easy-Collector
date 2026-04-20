@@ -82,7 +82,16 @@ class Agent:
         self.read_topic_msg_data = self.read_topic_msg_cls()
 
 
-        self.write_type = robot.get('write_type', 'topic')  
+        self.write_type = robot.get('write_type', 'topic')
+        # 보간 노드용 publisher: interpolation=True이면 ec_joint_cmd로 보냄
+        self._interp_pub = None
+        if robot.get('interpolation'):
+            from sensor_msgs.msg import JointState as JointStateMsg
+            # write_topic에서 네임스페이스 추출 (e.g., /ec_robot_1/joint_states → /ec_robot_1)
+            ns = '/'.join(robot['write_topic'].rsplit('/', 1)[:-1])
+            interp_topic = f'{ns}/ec_joint_cmd' if ns else 'ec_joint_cmd'
+            self._interp_pub = node.create_publisher(JointStateMsg, interp_topic, 10)
+
         if self.write_type == 'topic':
             self.write_topic_msg_cls = get_message(robot['write_topic_msg'])
             self.write_topic_msg_data = self.write_topic_msg_cls()
@@ -192,7 +201,9 @@ class Agent:
             self.write_topic_msg_data.position = action
             self.write_topic_msg_data.velocity = [0.0] * self.joint_len
             self.write_topic_msg_data.velocity[-1] = 100
-            self.move_robot_pub.publish(self.write_topic_msg_data)
+            # 보간 노드가 있으면 ec_joint_cmd로, 없으면 write_topic으로 직접
+            pub = self._interp_pub if self._interp_pub is not None else self.move_robot_pub
+            pub.publish(self.write_topic_msg_data)
         elif self.write_topic_msg == 'trajectory_msgs/JointTrajectory':
             self.write_topic_msg_data.joint_names = self.joint_names
             self.joint_trajectory_point.positions = action
@@ -829,8 +840,12 @@ class Agent:
             time.sleep(0.5)
         elif self.robot_company == 'Piper':
             print("Moving to target position:", target_pos)
-            self.move_joint_step(target_pos)
-            print("Moving to target position:", target_pos)
+            # write_topic(joint_states)으로 직접 보냄 — 보간 노드 우회
+            self.write_topic_msg_data.name = self.joint_names
+            self.write_topic_msg_data.position = [float(x) for x in target_pos]
+            self.write_topic_msg_data.velocity = [0.0] * self.joint_len
+            self.write_topic_msg_data.velocity[-1] = 100.0
+            self.move_robot_pub.publish(self.write_topic_msg_data)
             time.sleep(0.5)
         elif self.robot_company == 'Kinova' or self.write_topic_msg == 'trajectory_msgs/JointTrajectory':
             self.write_topic_msg_data.joint_names = self.joint_names

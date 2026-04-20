@@ -190,6 +190,7 @@ copy_file() {
 
 copy_tree "src/backend"
 copy_tree "src/ui"
+copy_tree "src/ros2_bridge"
 copy_tree "ros2_ws/src"
 
 copy_file "docker-compose.yml"
@@ -197,11 +198,15 @@ copy_file "docker-compose.dev.yml"
 copy_file "docker-compose.cpu.yml"
 copy_file "docker-compose.gpu.yml"
 copy_file "start_services.sh" 755
+copy_file "start_ros2_services.sh" 755
 copy_file "src/kill.sh" 755
 copy_file "Dockerfile"
+copy_file "Dockerfile.main"
+copy_file "Dockerfile.ros2"
 copy_file ".dockerignore"
 copy_file "requirements.txt"
 copy_file "requirements.min.txt"
+copy_file "requirements.ros2.txt"
 copy_file "scripts/quick_apply.sh" 755
 copy_file "scripts/install_nvidia_runtime.sh" 755
 

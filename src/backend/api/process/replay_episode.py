@@ -4,10 +4,11 @@ import argparse
 import json
 import os
 
-from ...env.env import Env
 import time
 
-import rospy
+# Legacy code - lazy imports for ROS dependencies
+# from ...env.env import Env
+# import rospy
 
 import cv2
 

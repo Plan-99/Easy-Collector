@@ -1,10 +1,13 @@
 from flask import Blueprint, request, current_app
 from flask_socketio import Namespace, emit
 from ...database.models.robot_model import Robot as RobotModel
+import json
 import time
 import os
 import subprocess
-from ...env.agent import Agent
+from ...bridge.remote_agent import RemoteAgent
+from ...bridge.client import get_bridge_client
+from ...bridge.generated import robot_bridge_pb2 as pb
 from ..process.subscribe_robot import subscribe_robot_topic
 from ...configs.global_configs import SUPPORT_ROBOTS
 from ..utils.runtime import attach_robot_runtime
@@ -33,6 +36,13 @@ def get_robots():
     robots = [robot.to_dict() for robot in robots]
 
     processes = set(current_app.pm.list_processes())
+    # ROS2 컨테이너의 드라이버 프로세스 목록도 포함
+    try:
+        client = get_bridge_client()
+        ros2_procs = client.driver.ListProcesses(pb.Empty())
+        processes.update(ros2_procs.names)
+    except Exception:
+        pass
     for robot in robots:
         attach_robot_runtime(robot, processes)
 
@@ -78,138 +88,63 @@ def start_robot():
     company = data.get('company', '')
     settings = data.get('settings', {})
 
-    # Stop lingering processes from previous attempts to allow clean restart
-    try:
-        current_app.pm.stop_process(process_id)
-    except Exception:
-        pass
+    # global_configs에서 파생되는 값을 settings에 주입 (드라이버 서비스에서 필요)
+    robot_model = RobotModel.find(id)
+    if robot_model:
+        robot_dict = robot_model.to_dict()
+        settings['interpolation'] = robot_dict.get('interpolation', False)
+        settings['write_topic'] = robot_dict.get('write_topic', '')
+
+    # 기존 구독 정리
     try:
         current_app.pm.stop_function('subscribe_robot_' + str(id))
     except Exception:
         pass
 
-    command = ''
-    if company == 'Piper':
-        script_path = os.path.expanduser('~/ros2_ws/src/piper_ros/can_activate_main.sh')
-        current_app.pm.start_process(
-            name='can_config',
-            command=['bash', script_path],
-            log_emit_id = process_id
-        )
-        time.sleep(1)
+    print(f"[DEBUG start_robot] id={id} type={type} company='{company}' process_id={process_id}")
 
-        gripper_exist = 'true' if type == 'piper' else 'false'
-        can_port = settings.get("can_port", "can0")
-        if can_port.startswith("can_"):
-            can_port = "can" + can_port[4:]
-        can_port = _ensure_can_interface(can_port)
-        # If still missing, fail fast
-        if not os.path.exists(f"/sys/class/net/{can_port}"):
-            return {'status': 'error', 'message': f'CAN interface {can_port} not found'}, 400
-        command = ['ros2', 'launch', 'piper', 'start_single_piper.launch.py', 
-                   f'namespace:=ec_robot_{id}', 
-                   f'can_port:={can_port}', 
-                   'auto_enable:=true', 'rviz_ctrl_flag:=false', 
-                   f'gripper_exist:={gripper_exist}']
+    # custom 로봇은 드라이버 시작 불필요 (외부 토픽 직접 구독)
+    if type == 'custom':
+        return {'status': 'success', 'message': 'Custom robot uses external topic'}, 200
 
-    if company == 'Rainbow Robotics':
-        # moveit_command = ['ros2', 'launch', 'rbpodo_bringup', 'moveit.launch.py', f'namespace:=ec_robot_{id}', f'robot_ip:={settings.get("ip", "10.0.2.27")}', 'use_fake_hardware:=false']
-        
-        command = ['ros2', 'launch', 'rbpodo_bringup', 'rbpodo.launch.py', f'namespace:=ec_robot_{id}', f'robot_ip:={settings.get("ip", "10.0.2.27")}', 'use_fake_hardware:=false']
-        
-    if company == 'OnRobot':
-        command = ['ros2', 'launch', 'onrobot_rg_control', 'bringup.launch.py',
-                   f'namespace:=ec_robot_{id}',
-                   f'gripper:={type}',
-                   f'ip:={settings.get("ip_address", "10.0.2.27")}',
-                   f'port:={settings.get("port", 41414)}',
-                   f'changer_addr:={settings.get("changer_address", 5)}'
-        ]
+    # ROS2 컨테이너에 드라이버 시작 요청 (gRPC)
+    client = get_bridge_client()
+    result = client.driver.StartRobotDriver(pb.DriverConfig(
+        process_id=process_id,
+        robot_id=int(id),
+        type=type,
+        company=company,
+        settings_json=json.dumps(settings),
+    ))
 
-    if company == 'Robotiq':
-        command = ['ros2', 'launch', 'robotiq_description', 'robotiq_control.launch.py',
-                   f'namespace:=ec_robot_{id}',
-                   f'com_port:={settings.get("serial_port", "/dev/ttyUSB0")}'
-        ]
-
-    if company == "Kinova":
-        command = ['ros2', 'launch', f'{type}_moveit_config', 'robot.launch.py',
-                f'namespace:=ec_robot_{id}',
-                f'robot_ip:={settings.get("ip_address", "192.168.1.10")}',
-                'launch_rviz:=false'
-        ]
-
-    if company == 'OMRON':
-        command = ['ros2', 'launch', 'tm_driver', 'tm_bringup.launch.py', 
-                   f'namespace:=ec_robot_{id}', 
-                   f'robot_ip:={settings.get("ip_address", "192.168.1.10")}']
-        
-    if company == 'JAKA':
-        command = ['ros2', 'launch', 'jaka_driver', 'robot_start.launch.py',
-                   f'namespace:=ec_robot_{id}',
-                   f'ip:={settings.get("ip_address", "192.168.1.10")}']
-
-    if company == 'Fairino':
-        command = ['ros2', 'run', 'fairino_hardware', 'ros2_cmd_server',
-                   '--ros-args',
-                   '-r', f'__ns:=/ec_robot_{id}',
-                   '-p', f'robot_ip:={settings.get("ip_address", "192.168.58.2")}']
-
-    if company == 'Test':
-        command = ['ros2', 'launch', 'test_arm', 'test_arm.launch.py',
-                   f'namespace:=ec_robot_{id}']
-
-    print(f"Attempting to start robot: {' '.join(command)}")
-
-    process = current_app.pm.start_process(
-        name=process_id,
-        command=command,
-    )
-
-    if company == 'JAKA':
-        # Give the driver a moment to start up before enabling servo mode
-        time.sleep(5)
-        
-        from jaka_msgs.srv import ServoMoveEnable
-        
-        # The service name in the driver has a leading '/', so it's absolute
-        service_name = '/jaka_driver/servo_move_enable'
-        servo_client = current_app.node.create_client(ServoMoveEnable, service_name)
-        
-        if not servo_client.wait_for_service(timeout_sec=5.0):
-            current_app.logger.error(f"JAKA servo_move_enable service not available.")
-            current_app.pm.stop_process(process_id)
-            return {'status': 'error', 'message': f'Failed to find JAKA servo_move_enable service'}, 500
-
-        req = ServoMoveEnable.Request()
-        req.enable = True
-        
-        # Fire and forget the service call
-        future = servo_client.call_async(req)
-        current_app.logger.info("Attempted to enable JAKA servo mode.")
-
-    # agent = Agent(current_app.node, data)
-
-    # current_app.agents[id] = agent
-
-    if process:
+    if result.success:
         return {
             'status': 'success',
-            'message': f'Robot process started',
-            'pid': process.pid
+            'message': 'Robot process started',
+            'pid': result.pid
         }, 200
     else:
-        return {'status': 'error', 'message': f'Failed to start robot'}, 500
+        return {'status': 'error', 'message': result.message}, 500
     
 
 @robot_bp.route('/robot:stop', methods=['POST'])
 def stop_robot():
     robot_id = request.json.get('id')
     process_id = request.json.get('process_id')
-    current_app.pm.stop_process(process_id)
+
+    # ROS2 컨테이너에 드라이버 정지 요청
+    client = get_bridge_client()
+    client.driver.StopRobotDriver(pb.ProcessId(name=process_id))
+
+    # 로컬 리소스 정리
     current_app.pm.stop_process('leader_teleoperation')
     current_app.pm.stop_function('subscribe_robot_' + str(robot_id))
-    current_app.agents.pop(int(robot_id), None)
+
+    # RemoteAgent 정리
+    agent = current_app.agents.pop(int(robot_id), None)
+    if agent:
+        agent.destroy()
+
     return {'status': 'success', 'message': 'Robot process stopped'}, 200
 
 
@@ -341,15 +276,13 @@ def subscribe_robot(id):
     int_id = int(id)
     func_name = 'subscribe_robot_' + str(id)
 
-    # 기존 Agent가 있으면 재사용 (rclpy.spin 중 destroy_subscription → segfault 방지)
+    # 기존 RemoteAgent가 있으면 재사용
     existing_agent = current_app.agents.get(int_id)
     if existing_agent is not None:
-        # background task만 재시작
         if func_name in current_app.pm.processes:
             return {'status': 'success', 'message': 'Already subscribed'}, 200
         current_app.pm.start_function(
             name=func_name,
-            node=current_app.node,
             func=subscribe_robot_topic,
             socketio_instance=current_app.pm.socketio,
             agent=existing_agent,
@@ -357,12 +290,11 @@ def subscribe_robot(id):
         return {'status': 'success', 'message': 'Subscribed to robot topic'}, 200
 
     robot = RobotModel.find(id).to_dict()
-    agent = Agent(current_app.node, robot)
+    agent = RemoteAgent(robot)
     current_app.agents[int_id] = agent
 
     current_app.pm.start_function(
         name=func_name,
-        node=current_app.node,
         func=subscribe_robot_topic,
         socketio_instance=current_app.pm.socketio,
         agent=agent,

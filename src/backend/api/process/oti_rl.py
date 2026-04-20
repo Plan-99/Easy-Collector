@@ -9,31 +9,9 @@ from collections import deque
 import time
 import os
 
-import rclpy
-from rclpy.node import Node
-from std_msgs.msg import Float64
-
-from lerobot.policies.act.modeling_act import ACTPolicy
-from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
-from ...utils.image_parser import fetch_image_with_config
-from ...policies.utils import process_image
-from ...env.env import Env
-
-# --- ROS2 Subscriber for Uncertainty Score ---
-
-class UncertaintySubscriber(Node):
-    """ROS2 노드를 상속하여 uncertainty score를 구독하는 클래스."""
-    def __init__(self):
-        super().__init__('uncertainty_subscriber')
-        self.subscription = self.create_subscription(
-            Float64,
-            '/failure_detection/uncertainty_score',
-            self.listener_callback,
-            10)
-        self.latest_score = 0.0
-
-    def listener_callback(self, msg):
-        self.latest_score = msg.data
+# UncertaintySubscriber는 ROS2 컨테이너로 이동됨
+# (ros2_bridge/services/uncertainty_service.py)
+# 메인 컨테이너에서는 bridge_client.uncertainty.GetLatestScore()로 접근
 
 # --- Replay Buffer ---
 

@@ -272,7 +272,6 @@
 import { ref, onMounted, onUnmounted, defineProps, computed } from 'vue';
 import { useSocket } from 'src/composables/useSocket';
 import ProcessConsole from './ProcessConsole.vue';
-import { useROS } from 'src/composables/useROS';
 import { useLeaderTeleoperation } from 'src/composables/useLeaderTeleoperation';
 import { api } from 'src/boot/axios';
 import { useProcessStore } from 'src/stores/processStore';
@@ -289,7 +288,6 @@ const props = defineProps({
 })
 
 const { socket } = useSocket();
-const { connectROS } = useROS(); 
 const { leaderTeleStarted, startLeaderTele, stopLeaderTele } = useLeaderTeleoperation();
 
 
@@ -465,8 +463,6 @@ function removeDxlFromJointMap(jointIndex) {
 }
 
 onMounted(() => {
-    connectROS();
-
     socket.on('dynamixel_data', (data) => {
         const port = data.port;
         data.values.forEach((value) => {

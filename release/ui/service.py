@@ -497,7 +497,13 @@ class HealthServiceMixin:
         self._stop_inline_logs()
         self._hide_preload_dialog()
         self.append_log("[ERROR] 서비스가 제시간에 준비되지 않아 중지합니다.")
-        logs = self._collect_docker_logs("easy_collector_service", tail=200)
+        ros2_logs = self._collect_docker_logs("easy_collector_ros2", tail=100)
+        svc_logs = self._collect_docker_logs("easy_collector_service", tail=100)
+        logs = ""
+        if ros2_logs:
+            logs += "=== easy_collector_ros2 ===\n" + ros2_logs + "\n\n"
+        if svc_logs:
+            logs += "=== easy_collector_service ===\n" + svc_logs
         self._show_docker_logs_follow(
             "서비스 시작 실패",
             container="easy_collector_service",
@@ -531,12 +537,16 @@ class RuntimeServiceMixin:
                 return False
             required = [
                 path / "docker-compose.yml",
-                path / "Dockerfile",
                 path / "start_services.sh",
                 path / "src" / "backend",
                 path / "src" / "ui",
             ]
-            return all(p.exists() for p in required)
+            if not all(p.exists() for p in required):
+                return False
+            # Support both legacy single Dockerfile and new split layout
+            has_dockerfile = (path / "Dockerfile").exists()
+            has_split = (path / "Dockerfile.main").exists() and (path / "Dockerfile.ros2").exists()
+            return has_dockerfile or has_split
         except Exception:
             return False
 
@@ -560,6 +570,8 @@ class RuntimeServiceMixin:
             svc = []
             if "easy_collector_service" in names:
                 svc.append("service")
+            if "easy_collector_ros2" in names:
+                svc.append("ros2")
             return svc
         except Exception:
             return []

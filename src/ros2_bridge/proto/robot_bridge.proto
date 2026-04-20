@@ -1,0 +1,312 @@
+syntax = "proto3";
+
+package easytrainer;
+
+// ============================================================
+// Common Types
+// ============================================================
+
+message Empty {}
+
+message StatusResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// ============================================================
+// Driver Management Service
+// ============================================================
+
+message DriverConfig {
+  string process_id = 1;
+  int32 robot_id = 2;
+  string type = 3;
+  string company = 4;
+  // JSON-encoded settings (ip_address, can_port, serial_port, etc.)
+  string settings_json = 5;
+}
+
+message SensorDriverConfig {
+  string process_id = 1;
+  int32 sensor_id = 2;
+  string type = 3;
+  string company = 4;
+  string settings_json = 5;
+}
+
+message DriverStatus {
+  bool success = 1;
+  string message = 2;
+  int32 pid = 3;
+}
+
+message ProcessId {
+  string name = 1;
+}
+
+message ProcessList {
+  repeated string names = 1;
+}
+
+message TopicInfo {
+  string name = 1;
+  string type = 2;
+}
+
+message TopicList {
+  repeated TopicInfo topics = 1;
+}
+
+service DriverService {
+  rpc StartRobotDriver(DriverConfig) returns (DriverStatus);
+  rpc StopRobotDriver(ProcessId) returns (StatusResponse);
+  rpc StartSensorDriver(SensorDriverConfig) returns (DriverStatus);
+  rpc StopSensorDriver(ProcessId) returns (StatusResponse);
+  rpc ListProcesses(Empty) returns (ProcessList);
+  rpc ListTopics(Empty) returns (TopicList);
+}
+
+// ============================================================
+// Agent Service
+// ============================================================
+
+message RobotConfig {
+  // JSON-encoded full robot dict (from database model)
+  string robot_json = 1;
+}
+
+message AgentId {
+  int32 id = 1;
+}
+
+message JointValues {
+  repeated double values = 1;
+}
+
+message MoveJointRequest {
+  int32 agent_id = 1;
+  repeated double action = 2;
+  bool from_ee = 3;
+  optional double velocity_arg = 4;
+}
+
+message MoveEERequest {
+  int32 agent_id = 1;
+  // JSON-encoded target_ee_dict: {"L_ee": [x,y,z,r,p,y,tool], ...}
+  string target_ee_json = 2;
+  optional double velocity_arg = 3;
+}
+
+message MoveEEDeltaRequest {
+  int32 agent_id = 1;
+  // JSON-encoded delta_ee_dict
+  string delta_ee_json = 2;
+  optional double velocity_arg = 3;
+  // JSON-encoded tool_positions list (optional)
+  string tool_positions_json = 4;
+}
+
+message MoveToRequest {
+  int32 agent_id = 1;
+  repeated double target_pos = 2;
+  double step_size = 3;
+  double duration = 4;
+}
+
+message ResetIKRequest {
+  int32 agent_id = 1;
+  repeated double q = 2;
+}
+
+// Robot state streamed at ~10Hz
+message RobotState {
+  int32 agent_id = 1;
+  repeated double joint_states = 2;
+  repeated double joint_actions = 3;
+  // JSON-encoded ee_pos dict (nullable)
+  string ee_pos_json = 4;
+  // JSON-encoded ee_target dict (nullable)
+  string ee_target_json = 5;
+  bool connected = 6;
+  repeated double joint_vel = 7;
+  repeated double joint_effort = 8;
+}
+
+message SubscribeRequest {
+  int32 agent_id = 1;
+}
+
+message FetchJointMapRequest {
+  int32 agent_id = 1;
+  // JSON-encoded joint_map list
+  string joint_map_json = 2;
+}
+
+service AgentService {
+  // Lifecycle
+  rpc CreateAgent(RobotConfig) returns (AgentId);
+  rpc DestroyAgent(AgentId) returns (StatusResponse);
+
+  // Movement commands
+  rpc MoveJointStep(MoveJointRequest) returns (StatusResponse);
+  rpc MoveJointDeltaStep(MoveJointRequest) returns (StatusResponse);
+  rpc MoveEEStep(MoveEERequest) returns (StatusResponse);
+  rpc MoveEEDeltaStep(MoveEEDeltaRequest) returns (StatusResponse);
+  rpc MoveTo(MoveToRequest) returns (StatusResponse);
+
+  // State queries
+  rpc GetJointStates(AgentId) returns (JointValues);
+  rpc GetJointActions(AgentId) returns (JointValues);
+  rpc GetJointVel(AgentId) returns (JointValues);
+  rpc GetJointEffort(AgentId) returns (JointValues);
+  rpc GetEEPosition(AgentId) returns (StatusResponse);  // ee_pos as JSON in message
+  rpc GetEETarget(AgentId) returns (StatusResponse);     // ee_target as JSON in message
+
+  // IK
+  rpc ResetIKSolver(ResetIKRequest) returns (StatusResponse);
+  rpc FetchJointMapToAction(FetchJointMapRequest) returns (JointValues);
+
+  // Streaming (server-streaming for continuous state updates)
+  rpc SubscribeRobotState(SubscribeRequest) returns (stream RobotState);
+}
+
+// ============================================================
+// Environment Service
+// ============================================================
+
+message EnvConfig {
+  // List of agent IDs already created via AgentService
+  repeated int32 agent_ids = 1;
+  // JSON-encoded sensor config list
+  string sensors_json = 2;
+  string language_instruction = 3;
+  bool virtual_agents = 4;
+}
+
+message EnvId {
+  int32 id = 1;
+}
+
+message ImageData {
+  string sensor_key = 1;  // e.g. "sensor_5"
+  int32 width = 2;
+  int32 height = 3;
+  int32 channels = 4;
+  // For shared memory mode: key name in /dev/shm/easytrainer/
+  string shm_name = 5;
+  // For inline mode (fallback): raw bytes
+  bytes data = 6;
+}
+
+message Observation {
+  // JSON-encoded robot_states dict
+  string robot_states_json = 1;
+  // Image data per sensor
+  repeated ImageData images = 2;
+  string language_instruction = 3;
+}
+
+service EnvService {
+  rpc CreateEnv(EnvConfig) returns (EnvId);
+  rpc DestroyEnv(EnvId) returns (StatusResponse);
+  rpc GetObservation(EnvId) returns (Observation);
+  rpc Reset(EnvId) returns (Observation);
+  rpc RecordStep(EnvId) returns (Observation);
+}
+
+// ============================================================
+// Generic ROS2 Service Proxy
+// ============================================================
+
+message ROSServiceRequest {
+  string service_type = 1;   // e.g. "std_srvs/srv/Trigger"
+  string service_name = 2;   // e.g. "/pick_and_place"
+  string request_json = 3;   // JSON-encoded request fields
+}
+
+message ROSServiceResponse {
+  bool success = 1;
+  string response_json = 2;
+}
+
+service ROSProxy {
+  rpc CallService(ROSServiceRequest) returns (ROSServiceResponse);
+}
+
+// ============================================================
+// Vive Controller Service
+// ============================================================
+
+message ViveConfig {
+  repeated int32 agent_ids = 1;
+  bool move_robot = 2;
+  string role = 3;              // e.g. "right_wrist"
+  double scale_factor = 4;
+  double rotation_scale_factor = 5;
+  double step_rate = 6;
+  double smoothing_alpha = 7;
+  double deadzone_pos = 8;
+  double deadzone_rot = 9;
+}
+
+message ViveReadyRequest {
+  double timeout = 1;
+}
+
+message DeltaValues {
+  repeated double values = 1;
+}
+
+service ViveService {
+  rpc CreateVive(ViveConfig) returns (StatusResponse);
+  rpc WaitForReady(ViveReadyRequest) returns (StatusResponse);
+  rpc SetOrigin(Empty) returns (Empty);
+  rpc StartTeleop(Empty) returns (Empty);
+  rpc StopTeleop(Empty) returns (Empty);
+  rpc ConsumeDelta(Empty) returns (DeltaValues);
+  rpc GetOffset(Empty) returns (DeltaValues);
+  rpc DestroyVive(Empty) returns (Empty);
+}
+
+// ============================================================
+// Uncertainty Subscriber Service (OTI-RL)
+// ============================================================
+
+message UncertaintyScore {
+  double score = 1;
+}
+
+service UncertaintyService {
+  rpc StartSubscriber(Empty) returns (StatusResponse);
+  rpc GetLatestScore(Empty) returns (UncertaintyScore);
+  rpc SetScore(UncertaintyScore) returns (Empty);
+  rpc StopSubscriber(Empty) returns (StatusResponse);
+}
+
+// ============================================================
+// Streaming (WebRTC) Management
+// ============================================================
+
+message StreamConfig {
+  string topic = 1;
+  string msg_type = 2;
+  // JSON-encoded config (crop, resize, rotate)
+  string config_json = 3;
+}
+
+message StreamResponse {
+  string sdp = 1;
+  string type = 2;
+  string stream_id = 3;
+}
+
+message UpdateStreamConfig {
+  string stream_id = 1;
+  string config_json = 2;
+}
+
+service StreamingService {
+  // WebRTC offer/answer is HTTP-based, keep it as REST on the ROS2 container
+  // These RPCs are for management only
+  rpc UpdateConfig(UpdateStreamConfig) returns (StatusResponse);
+}

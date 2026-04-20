@@ -1,0 +1,88 @@
+# ===================================================================
+# EasyTrainer Main Container
+# Flask API + Vue Frontend + Training Pipeline
+# NO ROS2 - 로봇 제어는 gRPC로 ROS2 컨테이너에 위임
+# ===================================================================
+
+FROM nvidia/cuda:12.4.1-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Asia/Seoul
+ENV PIP_NO_CACHE_DIR=1
+ENV PIP_DEFAULT_TIMEOUT=300
+ENV EC_SKIP_TORCHVISION_COMPAT=1
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+
+# Regional PyPI mirror
+ARG PIP_INDEX_URL=https://mirror.kakao.com/pypi/simple
+ARG PIP_EXTRA_INDEX_URL=https://pypi.org/simple
+ENV PIP_INDEX_URL=${PIP_INDEX_URL}
+ENV PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL}
+RUN printf "[global]\nindex-url = %s\nextra-index-url = %s\n" "$PIP_INDEX_URL" "$PIP_EXTRA_INDEX_URL" > /etc/pip.conf
+
+RUN mkdir -p /opt/easytrainer/logs /tmp/easytrainer/logs /dev/shm/easytrainer && \
+    chmod -R 777 /opt/easytrainer /tmp/easytrainer /dev/shm/easytrainer
+
+# --- 시스템 패키지 (ROS2 제외) ---
+RUN sed -i 's/archive.ubuntu.com/mirror.kakao.com/g' /etc/apt/sources.list && \
+    sed -i 's/security.ubuntu.com/mirror.kakao.com/g' /etc/apt/sources.list && \
+    echo 'Acquire::http::Pipeline-Depth "32";' > /etc/apt/apt.conf.d/99parallel && \
+    echo 'Acquire::http::No-Cache "true";' >> /etc/apt/apt.conf.d/99parallel && \
+    echo 'Acquire::Retries "10";' >> /etc/apt/apt.conf.d/99parallel
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    apt-utils curl gnupg lsb-release ca-certificates software-properties-common \
+    python3-pip python3-dev build-essential cmake \
+    v4l-utils iproute2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.js (프론트엔드)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*
+
+# --- Python 패키지 ---
+WORKDIR /root
+RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools==58.2.0
+
+COPY requirements.txt .
+RUN python3 -m pip install --no-cache-dir --ignore-installed -r requirements.txt
+
+# gRPC (ROS2 bridge 통신용)
+RUN python3 -m pip install --no-cache-dir grpcio grpcio-tools protobuf
+
+# PyTorch (학습용) - Blackwell/cu124
+RUN python3 -m pip install --no-cache-dir --ignore-installed \
+    --index-url https://download.pytorch.org/whl/nightly/cu124 \
+    torch torchvision torchaudio
+
+RUN python3 -m pip install --no-cache-dir --ignore-installed \
+    matplotlib==3.8.2 \
+    pyyaml==6.0.2 \
+    setuptools==58.2.0
+
+# GStreamer + OpenCV
+RUN apt-get update && apt-get install -y gstreamer1.0-tools \
+    gstreamer1.0-libav libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+    libgstreamer-plugins-good1.0-dev gstreamer1.0-plugins-good gstreamer1.0-plugins-base && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m pip uninstall -y opencv-python opencv-contrib-python opencv-python-headless
+RUN apt-get update && apt-get install -y python3-opencv && rm -rf /var/lib/apt/lists/*
+RUN rm -rf /usr/local/lib/python3.10/dist-packages/numpy* && \
+    rm -rf /usr/lib/python3/dist-packages/numpy* && \
+    python3 -m pip install --no-cache-dir numpy==1.26.4
+
+ENV LIBGL_ALWAYS_SOFTWARE=1
+
+# --- 소스 코드 ---
+WORKDIR /root
+COPY src /root/src
+
+# --- 최종 설정 ---
+COPY --chmod=755 start_services.sh /usr/local/bin/start_services.sh
+RUN chmod -R 777 /opt/easytrainer /tmp/easytrainer
+
+EXPOSE 5000 5173
+
+ENTRYPOINT ["/bin/bash", "/usr/local/bin/start_services.sh"]

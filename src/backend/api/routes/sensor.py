@@ -2,6 +2,8 @@ from flask import Blueprint, request, current_app, jsonify
 from flask_socketio import Namespace, emit
 from ...database.models.sensor_model import Sensor as SensorModel
 from ...configs.global_configs import SUPPORT_SENSORS
+from ...bridge.client import get_bridge_client
+from ...bridge.generated import robot_bridge_pb2 as pb
 import json
 
 # 1. Blueprint 생성
@@ -56,59 +58,38 @@ def start_sensor():
     id = data.get('id')
     type = data.get('type')
     company = data.get('company')
+    settings = data.get('settings', {})
 
     # Custom sensors use external ROS topics — no process to start
     if type == 'custom':
         return {'status': 'success', 'message': 'Custom sensor uses external topic'}, 200
 
-    command = []
+    # ROS2 컨테이너에 센서 드라이버 시작 요청 (gRPC)
+    client = get_bridge_client()
+    result = client.driver.StartSensorDriver(pb.SensorDriverConfig(
+        process_id=process_id,
+        sensor_id=int(id),
+        type=type,
+        company=company,
+        settings_json=json.dumps(settings),
+    ))
 
-    if company == 'Intel':
-        serial_no = data.get('serial_no', None)
-        if serial_no is None:
-            return {'status': 'error', 'message': 'serial_no is required'}, 400
-        command = ['ros2', 'launch', 'realsense2_camera', 'rs_launch.py', f'camera_namespace:=ec_sensor_{id}', f'serial_no:="{serial_no}"']
-    elif company == 'Logitec':
-        device_index = data.get('device_index', None)
-        if device_index is None:
-            return {'status': 'error', 'message': 'device_index is required'}, 400
-        command = ['ros2', 'launch', 'webcam_publisher', 'webcam_publisher.launch.py', f'namespace:=ec_sensor_{id}', f'device_index:={device_index}']
-    elif company == 'Kinova':
-        ip_address = data.get('ip_address', None)
-        if ip_address is None:
-            return {'status': 'error', 'message': 'ip_address is required'}, 400
-        command = ['ros2', 'launch', 'kinova_vision', 'kinova_vision.launch.py', f'device:={ip_address}', f'camera:=ec_sensor_{id}']
-
-    print(f"Attempting to start sensor commmand: {' '.join(command)}")
-
-    process = current_app.pm.start_process(
-        name=process_id,
-        command=command,
-    )
-
-    if process:
+    if result.success:
         return {
             'status': 'success',
             'message': f'Sensor process started for id {id}',
-            'pid': process.pid
+            'pid': result.pid
         }, 200
     else:
-        return {'status': 'error', 'message': f'Failed to start sensor for id {id}'}, 500
-
-    # if process:
-    #     return {
-    #         'status': 'success',
-    #         'message': f'Sensor process started for serial {serial_no}',
-    #         'pid': process.pid
-    #     }, 200
-    # else:
-    #     return {'status': 'error', 'message': f'Failed to start sensor for serial {serial_no}'}, 500
+        return {'status': 'error', 'message': result.message}, 500
     
 
 @sensor_bp.route('/sensor:stop', methods=['POST'])
 def stop_sensor():
     process_id = request.json.get('process_id')
-    current_app.pm.stop_process(process_id)
+    # ROS2 컨테이너에 센서 드라이버 정지 요청
+    client = get_bridge_client()
+    client.driver.StopSensorDriver(pb.ProcessId(name=process_id))
     return {'status': 'success', 'message': 'Sensor process stopped'}, 200
 
 

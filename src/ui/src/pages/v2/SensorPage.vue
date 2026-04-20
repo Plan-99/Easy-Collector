@@ -1,12 +1,14 @@
 <template>
     <q-page class="q-pt-lg q-pr-lg full-height">
-        <div class="border-rounded bg-secondary q-pa-lg q-mb-lg row">
+        <div class="border-rounded bg-secondary q-pa-lg q-mb-lg row items-center">
             <q-img src="images/robot1.png" style="width: 100px" class="q-mr-xl"></q-img>
             <div>
                 <div class="text-h5 text-primary text-bold q-mb-lg">{{ $t('sensorIntroTitle') }}</div>
                 <div class="text-body text-white">{{ $t('sensorIntroBody') }}</div>
                 <div class="text-body text-white">{{ $t('sensorIntroBody2') }}</div>
             </div>
+            <q-space />
+            <r-o-s2-log-dialog />
         </div>
         <div class="row q-col-gutter-md">
             <div class="col-6 col-sm-4 col-md-3 col-lg-2"  v-for="sensor in sensors" :key="sensor.id">
@@ -120,6 +122,7 @@ import BottomTerminal from 'src/components/v2/BottomTerminal.vue';
 import WebRtcVideo from 'src/components/v2/WebRtcVideo.vue';
 import { useSensor } from '../../composables/useSensor';
 import FormDialog from 'src/components/v2/FormDialog.vue';
+import ROS2LogDialog from 'src/components/v2/ROS2LogDialog.vue';
 
 import { useI18n } from 'vue-i18n'
 const { t } = useI18n()

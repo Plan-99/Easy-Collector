@@ -1,0 +1,32 @@
+# ===================================================================
+# EasyTrainer ROS2 Bridge Container - Python Dependencies
+# Dockerfile.ros2에서 사용. 로봇 제어 + gRPC 브릿지에 필요한 패키지만 포함.
+# PyTorch, Flask, 프론트엔드 관련 패키지는 메인 컨테이너(requirements.txt) 참조.
+# ===================================================================
+
+# --- [gRPC 브릿지] ---
+grpcio
+grpcio-tools
+protobuf
+
+# --- [데이터 처리] ---
+numpy==1.26.4
+opencv-python-headless
+
+# --- [로봇 SDK] ---
+piper-sdk
+dynamixel_sdk
+pyserial
+python-can
+pymodbus==3.9.2
+pyusb
+
+# --- [IK solver] ---
+pin-pink
+proxsuite
+
+# --- [WebRTC 스트리밍] ---
+aiortc
+aiohttp
+aiohttp-cors
+av

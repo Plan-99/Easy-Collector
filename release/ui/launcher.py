@@ -3810,6 +3810,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         frontend_log = shlex.quote(str(SERVICE_LOG_DIR / "frontend.log"))
         tail_backend = ["exec", "-T", svc, "bash", "-lc", f"tail -n 200 -F {backend_log}"]
         tail_frontend = ["exec", "-T", svc, "bash", "-lc", f"tail -n 200 -F {frontend_log}"]
+        tail_ros2 = ["logs", "-f", "--tail=200", "ros2"]
         self._close_log_windows()
         dialogs: list[QDialog] = []
 
@@ -3830,6 +3831,12 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             self._register_log_window_append(dlg_back)
             dlg_back.show()
             dialogs.append(dlg_back)
+
+        dlg_ros2 = self._create_log_dialog("ROS2 Bridge Logs", tail_ros2)
+        if dlg_ros2:
+            self._register_log_window_append(dlg_ros2)
+            dlg_ros2.show()
+            dialogs.append(dlg_ros2)
 
         self._arrange_log_windows_side_by_side(dialogs)
 

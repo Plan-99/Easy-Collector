@@ -10,18 +10,18 @@ from ...utils.image_parser import fetch_image_with_config
 
 from ...policies.utils import make_policy, VISION_BACKBONE_MAP, process_image, relative_trajectory_to_delta, make_easytrainer_processors
 from collections import deque
-from ...env.env import Env
+from ...bridge.remote_env import RemoteEnv
 
 from lerobot.policies.act.modeling_act import ACTPolicy
 from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
 
-from .oti_rl import SACAgent, ReplayBuffer, UncertaintySubscriber
-from rclpy.executors import SingleThreadedExecutor
+from .oti_rl import SACAgent, ReplayBuffer
+from ...bridge.client import get_bridge_client
+from ...bridge.generated import robot_bridge_pb2 as pb
 
 import torchvision.transforms as transforms
 from transformers import AutoImageProcessor
 
-import rclpy
 import re
 
 import gc
@@ -139,7 +139,7 @@ def checkpoint_test(
 
         # 환경 및 RL 에이전트 초기화
         state_dim = sum(agent.joint_len for agent in agents)
-        env = Env(node, agents, sensors)
+        env = RemoteEnv(agents, sensors)
         vision_backbone = policy_obj.get('vision_backbone')
         episode_len = task.get('episode_len', 300) * 1.5
 
@@ -178,9 +178,9 @@ def checkpoint_test(
                 else:
                     print(f"[ERROR] RL model checkpoint not found at: {actor_path}")
 
-            uncertainty_subscriber = UncertaintySubscriber()
-            executor = SingleThreadedExecutor()
-            executor.add_node(uncertainty_subscriber)
+            # UncertaintySubscriber는 ROS2 컨테이너에서 gRPC로 관리
+            bridge_client = get_bridge_client()
+            bridge_client.uncertainty.StartSubscriber(pb.Empty())
 
     except Exception as e:
         import traceback
@@ -416,8 +416,7 @@ def checkpoint_test(
 
             # === b. 최종 행동(final_action) 결정 ===
             if oti_rl:
-                executor.spin_once(timeout_sec=0.01)
-                uncertainty = uncertainty_subscriber.latest_score
+                uncertainty = bridge_client.uncertainty.GetLatestScore(pb.Empty()).score
 
                 if uncertainty > 1.2:
                     if uncertainty_mode_timer == 0:
@@ -476,8 +475,7 @@ def checkpoint_test(
 
             # === d. OTI-RL 학습 ===
             if oti_rl:
-                executor.spin_once(timeout_sec=0.01)
-                uncertainty = uncertainty_subscriber.latest_score
+                uncertainty = bridge_client.uncertainty.GetLatestScore(pb.Empty()).score
                 noise_reward = noise_reward_coeff * np.linalg.norm(noise_t)
                 uncertainty_penalty = -uncertainty_penalty_coeff * uncertainty
                 move_reward = move_reward_coeff * np.linalg.norm(np.concatenate([item['qpos'] for item in ts_next.observation['robot_states'].values()]) - 
@@ -535,10 +533,11 @@ def checkpoint_test(
     finally:
         thread_pool.shutdown(wait=False)
         # --- 4. 종료 처리 ---
-        if oti_rl and 'uncertainty_subscriber' in locals():
-            uncertainty_subscriber.destroy_node()
-            if executor is not None:
-                executor.shutdown()
+        if oti_rl and 'bridge_client' in locals():
+            try:
+                bridge_client.uncertainty.StopSubscriber(pb.Empty())
+            except Exception:
+                pass
         
         gc.collect()
         torch.cuda.empty_cache()

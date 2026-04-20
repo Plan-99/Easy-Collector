@@ -8,12 +8,9 @@ flask-cors
 eventlet
 
 # --- [로봇 및 통신] ---
-rospkg
+# piper_sdk, rospkg, python-can, pymodbus → requirements.ros2.txt로 이동 (ROS2 컨테이너 전용)
 dynamixel_sdk
-piper_sdk
 pyusb
-python-can
-pymodbus==3.9.2
 
 # --- [비디오 인코딩/디코딩] ---
 av

@@ -60,6 +60,7 @@ class Robot(Model, SoftDeletes):
         'serial_port',
         'ik_available',
         'is_sim',
+        'interpolation',
     ]
 
     def get_robot_type_info(self):
@@ -131,9 +132,15 @@ class Robot(Model, SoftDeletes):
     def write_topic_msg(self):
         if self.type != 'custom':
             return self.get_robot_type_info().get('write_topic_msg', '')
-        
+
         return self.settings['write_topic_msg']
-    
+
+    @accessor
+    def interpolation(self):
+        if self.type != 'custom':
+            return self.get_robot_type_info().get('interpolation', False)
+        return self.settings.get('interpolation', False)
+
     @accessor
     def move_action(self):
         return ''

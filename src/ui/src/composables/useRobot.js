@@ -1,12 +1,10 @@
 import { api } from 'boot/axios';
-// import { useROS } from './useROS';
 import { Notify } from 'quasar';
 import { useSocket } from 'src/composables/useSocket.js';
 
 const { socket } = useSocket();
 
 export function useRobot(robot, robotOnCallback=() => {}) {
-  // const { createSubscriber, connectROS } = useROS();
   let robotTopicChecker = null;
 
   const formatError = (error) => {
@@ -116,16 +114,8 @@ export function useRobot(robot, robotOnCallback=() => {}) {
       clearInterval(robotTopicChecker);
       robotTopicChecker = null;
     }
-    // if (robot.jointSub) {
-    //   robot.jointSub.unsubscribe();
-    //   robot.jointSub = null;
-    // }
     api.post(`/robot/${robot.id}/:unsubscribe_robot`);
-    robot.status = 'off';
-    robot.jointState = [];
-    robot.jointAction = [];
-    robot.eePos = {};
-    robot.eeTarget = {};
+    // status는 유지 — 드라이버는 계속 돌고 있음. socketio listener만 해제.
     socket.off(`robot_status_${robot.id}`);
   }
 

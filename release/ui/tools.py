@@ -855,8 +855,19 @@ class ToolingMixin:
                 self.process.finished.connect(_after_current)
                 return
             if running:
+                # ROS2 컨테이너 재시작 (gRPC 서버는 autoreload 없으므로 재시작 필요)
+                if "ros2" in self._get_running_services():
+                    self.append_log("[SYNC] ROS2 컨테이너 재시작 중...")
+                    try:
+                        subprocess.run(
+                            ["docker", "restart", "easy_collector_ros2"],
+                            capture_output=True, text=True, timeout=30,
+                        )
+                        self.append_log("[SYNC] ROS2 컨테이너 재시작 완료.")
+                    except Exception as e:
+                        self.append_log(f"[SYNC][WARN] ROS2 재시작 실패: {e}")
                 if fast_backend_reload:
-                    self.append_log("[SYNC] 빠른 적용 완료. 컨테이너는 유지하고 autoreload/HMR로 바로 반영합니다.")
+                    self.append_log("[SYNC] 빠른 적용 완료. 메인 컨테이너는 autoreload/HMR로 반영, ROS2는 재시작됨.")
                     self.load_ui(open_mode="CURRENT")
                     return
                 self.append_log("[SYNC][INFO] 컨테이너 유지 (autreload=off). 필요하면 수동 재시작해 주세요.")
