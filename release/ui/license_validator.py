@@ -1,49 +1,81 @@
-from licensing.models import *
-from licensing.methods import Key, Helpers
-import sys
+"""License validation via EasyTrainer home-next API."""
+from __future__ import annotations
 
-# === [설정 구간] Cryptolens 대시보드에서 가져와야 함 ===
-# 1. Product ID (제품 번호)
-PRODUCT_ID = 32008  
-# 2. RSA Public Key (보안 키)
-RSA_PUB_KEY = "<RSAKeyValue><Modulus>sr0fRk+t/ddNZdGOnMzNoA+IVlGwX0GwQHHKgVEueazhFtZZGdEcnUO8Gtwi1xv0XgM6B762RULQ/1xE1fPi1/RJBzlyIlpH/8ybrbH6S0cvu0TpHHY+pv3SYZduAcHlazKv3N7Fi3A6lyGwJQEj1UsrbINFhFiXZHGXiaggY+Fwr0CJUhZ2wjGyjCWOk1UdhXjd6eMzd98JJ4DJC0n1QnFbaawdWureXdLLDRn47bu322r9iokbpNReQVpBDc9fHx0kIouQbSGuYYkkyjAxIIuaca0meH8XPa7laodplYzRsPL+xZhEAouTII2M8gg/lwpMXepDMv/WiKoQNuK4/Q==</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>"
-# 3. Access Token (권한 토큰) - 'Activate' 권한이 있어야 함
-ACCESS_TOKEN = "WyIxMTY1MjUwNzkiLCJyQ1VLeTN2WERVNHpyNmRmQ2FwUlFDVlR6RGFFRHFVcGhpU3ozUE91Il0="
+import json
+import platform
+import hashlib
+import uuid
+import urllib.request
+import urllib.error
 
-def verify_license(key_string):
-    """
-    라이선스 키를 입력받아 유효성을 검사하는 함수
-    """
+from app_context import load_config, save_config
+
+# API base URL — change to production domain when deployed
+_CONFIG_KEY = "license_server_url"
+_DEFAULT_URL = "http://localhost:3000"
+
+
+def _get_api_url() -> str:
     try:
-        # 1. 현재 기기의 고유 지문(Machine Code) 생성
-        machine_code = Helpers.GetMachineCode()
+        cfg = load_config()
+        return cfg.get(_CONFIG_KEY, _DEFAULT_URL).rstrip("/")
+    except Exception:
+        return _DEFAULT_URL
 
-        # 2. 서버에 검증 요청 (함수명 소문자 주의: activate)
-        # 반환값은 (LicenseKeyObject, MessageString) 형태의 튜플입니다.
-        result = Key.activate(
-            token=ACCESS_TOKEN,
-            rsa_pub_key=RSA_PUB_KEY,
-            product_id=PRODUCT_ID,
-            key=key_string,
-            machine_code=machine_code
-        )
 
-        # 3. 결과 확인
-        # result[0]이 None이면 인증 실패
-        # Helpers.IsOnRightMachine으로 기기 검증까지 해야 확실함
-        if result[0] is None or not Helpers.IsOnRightMachine(result[0]):
-            # 실패 이유를 출력 (디버깅용)
-            print(f"[Fail] 인증 실패 사유: {result[1]}")
-            return False
+def get_machine_fingerprint() -> str:
+    """Generate a stable machine-unique ID."""
+    try:
+        mac = uuid.getnode()
+        node_name = platform.node()
+        raw = f"{mac}-{node_name}-{platform.machine()}"
+        return hashlib.sha256(raw.encode()).hexdigest()[:32]
+    except Exception:
+        return "unknown"
 
-        # 성공 시
-        print(f"[Success] 인증 성공! (만료일: {result[0].expires})")
-        return True
 
-    except Exception as e:
-        print(f"[Error] 라이선스 인증 중 오류 발생: {e}")
+def verify_license(key_string: str) -> bool:
+    """Validate a serial key against the home-next API.
+
+    Sends the key + machineId to the server.
+    On first activation, the key is bound to this machine.
+    """
+    api_url = _get_api_url()
+    url = f"{api_url}/api/serial-key/validate"
+    machine_id = get_machine_fingerprint()
+
+    payload = json.dumps({"key": key_string, "machineId": machine_id}).encode()
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+            if data.get("valid"):
+                plan = data.get("plan", "free")
+                print(f"[Success] 인증 성공! (plan: {plan})")
+                # Save plan info to config
+                try:
+                    cfg = load_config()
+                    cfg["license_plan"] = plan
+                    save_config(cfg)
+                except Exception:
+                    pass
+                return True
+            else:
+                print(f"[Fail] 인증 실패: {data.get('error', 'unknown')}")
+                return False
+    except urllib.error.HTTPError as e:
+        try:
+            body = json.loads(e.read().decode())
+            print(f"[Fail] 인증 실패 (HTTP {e.code}): {body.get('error', 'unknown')}")
+        except Exception:
+            print(f"[Fail] 인증 실패 (HTTP {e.code})")
         return False
-
-def get_machine_fingerprint():
-    """사용자가 내 기기 ID를 물어볼 때 알려주는 용도"""
-    return Helpers.GetMachineCode()
+    except Exception as e:
+        print(f"[Error] 라이선스 서버 연결 실패: {e}")
+        return False

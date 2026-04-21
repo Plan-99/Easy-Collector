@@ -139,28 +139,7 @@ if [ "$USE_PYINSTALLER" != "1" ]; then
   done
   # --- [FIXED SECTION END] ---
 
-  echo "[deb] Copying licensing package into venv..."
-
-  # --- [FIXED SECTION START] Licensing Detection ---
-  LICENSING_SRC=$(python3 -c "import os, licensing; print(os.path.dirname(licensing.__file__))" 2>/dev/null || true)
-
-  if [ -z "$LICENSING_SRC" ] || [ ! -d "$LICENSING_SRC" ]; then
-    echo "[deb][ERROR] Host Python is missing licensing. Install it first (e.g. python3 -m pip install licensing) and retry." >&2
-    exit 1
-  fi
-
-  rsync -a "$LICENSING_SRC" "$DST_SITE/"
-
-  LICENSING_PARENT=$(dirname "$LICENSING_SRC")
-  LICENSE_DIST=$(find "$LICENSING_PARENT" -maxdepth 1 -type d -iname "licensing-*.dist-info" | head -n1 || true)
-
-  if [ -n "$LICENSE_DIST" ] && [ -d "$LICENSE_DIST" ]; then
-    rsync -a "$LICENSE_DIST" "$DST_SITE/"
-  else
-    echo "[deb][WARN] dist-info for licensing not found in $LICENSING_PARENT; continuing."
-  fi
-  # --- [FIXED SECTION END] ---
-
+  # licensing package no longer needed — validation uses home-next API
   echo "[deb] Embedded venv ready at $VENV_DIR (copied from host PySide6)"
 fi
 
@@ -175,17 +154,19 @@ RSYNC_EXCLUDES=(
   '/datasets'
   '/datasets/**'
   'node_modules'
-  'src/ui/node_modules'
-  'src/ui/.quasar'
+  'frontend/node_modules'
+  'frontend/.quasar'
   'logs'
   'log'
   'build'
   'dist'
   'install'
-  'ros2_ws/build'
-  'ros2_ws/install'
-  'ros2_ws/log'
-  'ros2_ws/logs'
+  'ros2/ros2_ws/src'
+  'ros2/ros2_ws/build'
+  'backend/modules'
+  'ros2/ros2_ws/install'
+  'ros2/ros2_ws/log'
+  'ros2/ros2_ws/logs'
   '**/__pycache__'
   '*.pyc'
   'python_pkgs/**/build'
@@ -213,10 +194,11 @@ fi
 # Ensure critical code paths exist in the payload (avoid shipping partial copies)
 REQUIRED_PATHS=(
   "$STAGE${PAYLOAD_DIR}/docker-compose.yml"
-  "$STAGE${PAYLOAD_DIR}/start_services.sh"
-  "$STAGE${PAYLOAD_DIR}/scripts/quick_apply.sh"
-  "$STAGE${PAYLOAD_DIR}/src/backend/api/app.py"
-  "$STAGE${PAYLOAD_DIR}/src/backend/lerobot/datasets/utils.py"
+  "$STAGE${PAYLOAD_DIR}/backend/Dockerfile"
+  "$STAGE${PAYLOAD_DIR}/backend/entrypoint.sh"
+  "$STAGE${PAYLOAD_DIR}/backend/api/app.py"
+  "$STAGE${PAYLOAD_DIR}/frontend/Dockerfile"
+  "$STAGE${PAYLOAD_DIR}/ros2/Dockerfile"
 )
 for req in "${REQUIRED_PATHS[@]}"; do
   if [ ! -f "$req" ]; then
@@ -324,7 +306,7 @@ chmod 0644 "$STAGE/usr/share/applications/EasyTrainer.desktop"
 
 # Control file
 # Runtime GUI libs needed by Qt (ensure auto-install by apt)
-RUNTIME_LIBS="libxcb-cursor0, libxkbcommon-x11-0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-render-util0, libxcb-xinerama0, libegl1, libgl1-mesa-dri, libopengl0, libnss3, libasound2"
+RUNTIME_LIBS="libxcb-cursor0, libxkbcommon-x11-0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-render-util0, libxcb-xinerama0, libegl1, libgl1-mesa-dri, libopengl0, libnss3, libasound2, libnvidia-egl-wayland1"
 if [ "$USE_PYINSTALLER" = "1" ]; then
   DEPENDS_LINE="Depends: xdg-utils, ${RUNTIME_LIBS}"
 else
@@ -409,6 +391,13 @@ chmod 777 /opt/easytrainer /opt/easytrainer/logs || true
 chmod 666 /opt/easytrainer/config.json /opt/easytrainer/logs/launcher.log 2>/dev/null || true
 
 if [ -d "$SRC" ]; then
+  # Clean old project files (preserve user data: modules, databases)
+  if [ -d "$DEST" ]; then
+    find "$DEST" -maxdepth 1 -type f -delete 2>/dev/null || true
+    for d in backend frontend ros2 release scripts cmake_pkgs python_pkgs training_server; do
+      rm -rf "$DEST/$d" 2>/dev/null || true
+    done
+  fi
   cp -a "$SRC"/. "$DEST"/ || true
   chown -R "$TARGET_USER":"$TARGET_GROUP" "$DEST" || true
   chmod -R u+rwX "$DEST" || true

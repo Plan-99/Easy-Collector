@@ -1,5 +1,0 @@
-# eval(...)
-
-string  script
----
-bool    success

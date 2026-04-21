@@ -63,7 +63,7 @@ try:
         QApplication, QMainWindow, QWidget, QPushButton, QTextEdit, QLabel,
         QVBoxLayout, QHBoxLayout, QMessageBox, QTabWidget, QFileDialog, QLineEdit,
         QDialog, QFrame, QListWidget, QListWidgetItem, QProgressBar, QToolButton,
-        QMenu, QPlainTextEdit, QSizePolicy, QRadioButton, QCheckBox, QStackedLayout, QButtonGroup, QInputDialog
+        QMenu, QPlainTextEdit, QSizePolicy, QRadioButton, QCheckBox, QStackedLayout, QButtonGroup, QInputDialog, QScrollArea
     )
     if not _force_external:
         try:
@@ -90,7 +90,7 @@ except Exception:
         QApplication, QMainWindow, QWidget, QPushButton, QTextEdit, QLabel,
         QVBoxLayout, QHBoxLayout, QMessageBox, QTabWidget, QFileDialog, QLineEdit,
         QDialog, QFrame, QListWidget, QListWidgetItem, QProgressBar, QToolButton,
-        QMenu, QPlainTextEdit, QSizePolicy, QRadioButton, QCheckBox, QStackedLayout, QButtonGroup, QInputDialog
+        QMenu, QPlainTextEdit, QSizePolicy, QRadioButton, QCheckBox, QStackedLayout, QButtonGroup, QInputDialog, QScrollArea
     )
     if not _force_external:
         try:

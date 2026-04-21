@@ -13,7 +13,7 @@ docker stop easy_collector_container 2>/dev/null || true
 docker run -it --rm \
     --privileged \
     -v /dev:/dev \
-    -v "./src":"/root/src" \
+    -v "./backend":"/root/backend" \
     -v "./ros2_ws":"/root/ros2_ws" \
     -v "./python_pkgs":"/root/python_pkgs" \
     -v "./requirements.txt":"/root/requirements.txt" \

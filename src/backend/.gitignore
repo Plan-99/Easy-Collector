@@ -1,5 +1,0 @@
-/datasets/
-database/*.db
-checkpoints/
-
-__pycache__/

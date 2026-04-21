@@ -1,53 +1,69 @@
 version: "3.9"
+name: easytrainer
 
 services:
-  service:
-    build: .
-    image: easy-collector:latest
-    container_name: easy_collector_service
-    privileged: true
+  # ── Frontend: same as GPU version ──
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: easytrainer_frontend
     network_mode: host
     environment:
-      - DISPLAY=${DISPLAY}
-      - ROS_DOMAIN_ID=0
-      - RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}
-      - XAUTHORITY=${XAUTHORITY}
-      - PYTHONPATH=/root/src:/root/src/backend/lerobot/src:${PYTHONPATH}
-      # NPM: regional mirror and retry knobs (override in env if needed)
+      - NODE_OPTIONS=--max-old-space-size=${EC_NODE_MAX_OLD_SPACE_SIZE:-384}
       - NPM_CONFIG_REGISTRY=${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
       - NPM_CONFIG_FETCH_RETRIES=${NPM_CONFIG_FETCH_RETRIES:-5}
       - NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=${NPM_CONFIG_FETCH_RETRY_MINTIMEOUT:-20000}
       - NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=${NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT:-120000}
-      # Pip cache: keep downloads in host-mounted python_pkgs/.cache/pip
-      - PIP_NO_CACHE_DIR=${PIP_NO_CACHE_DIR:-0}
-      - PIP_CACHE_DIR=${PIP_CACHE_DIR:-/root/python_pkgs/.cache/pip}
-      - EC_NO_SIDE_PROCESSES=${EC_NO_SIDE_PROCESSES:-0}
-      - EC_DEBUG=${EC_DEBUG:-0}
-      - EC_NO_FRONTEND=${EC_NO_FRONTEND:-0}
-      - EC_SKIP_TORCHVISION_COMPAT=${EC_SKIP_TORCHVISION_COMPAT:-0}
-      - EC_NODE_MAX_OLD_SPACE_SIZE=${EC_NODE_MAX_OLD_SPACE_SIZE:-384}
-      - EC_MINIMAL_API=${EC_MINIMAL_API:-0}
-      - EC_NO_ROS=${EC_NO_ROS:-0}
+    volumes:
+      - ./frontend:/app
+      - ui_node_modules:/app/node_modules
+    restart: unless-stopped
+
+  # ── Backend: Flask API + PyTorch (CPU only, no GPU) ──
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: easytrainer_backend
+    network_mode: host
+    # No GPU deploy block
+    environment:
+      - PYTHONPATH=/root:/root/backend/lerobot/src
+      - EC_DEBUG=${EC_DEBUG:-1}
       - EC_BACKEND_AUTORELOAD=${EC_BACKEND_AUTORELOAD:-1}
+      - EC_MINIMAL_API=${EC_MINIMAL_API:-0}
       - EASYTRAINER_DATA_DIR=${EASYTRAINER_DATA_DIR:-/opt/easytrainer}
       - EASYTRAINER_LOG_DIR=${EASYTRAINER_LOG_DIR:-/tmp/easytrainer/logs}
       - EASYTRAINER_CONFIG_PATH=${EASYTRAINER_CONFIG_PATH:-/opt/easytrainer/config.json}
+      - PIP_NO_CACHE_DIR=${PIP_NO_CACHE_DIR:-0}
+      - PIP_CACHE_DIR=${PIP_CACHE_DIR:-/root/python_pkgs/.cache/pip}
     volumes:
-      - /dev:/dev
-      - /tmp/.X11-unix:/tmp/.X11-unix
-      - ./src:/root/src
-      - ./ros2_ws:/root/ros2_ws
+      - ./backend:/root/backend
       - ./python_pkgs:/root/python_pkgs
       - ./requirements.txt:/root/requirements.txt
-      # Persist service logs/config on host under /opt/easytrainer
       - /opt/easytrainer:/opt/easytrainer
-      # Keep launcher script editable without rebuilds
-      - ./start_services.sh:/usr/local/bin/start_services.sh:ro
-      # Cache node_modules to avoid reinstall on restarts
-      - ui_node_modules:/root/src/ui/node_modules
     working_dir: /root
-    # Run via bash to avoid needing executable bit on bind-mounted script
-    command: bash -lc "bash /usr/local/bin/start_services.sh"
+    restart: unless-stopped
+
+  # ── ROS 2: same as GPU version (no GPU needed) ──
+  ros2:
+    build:
+      context: .
+      dockerfile: ros2/Dockerfile
+    container_name: easytrainer_ros2
+    network_mode: host
+    privileged: true
+    environment:
+      - DISPLAY=${DISPLAY}
+      - XAUTHORITY=${XAUTHORITY}
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}
+    volumes:
+      - ./ros2/ros2_ws:/root/ros2_ws
+      - /dev:/dev
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    restart: unless-stopped
 
 volumes:
   ui_node_modules:

@@ -65,6 +65,24 @@ from app_context import (
     _app_icon_path,
     _window_icon,
 )
+from modules import (
+    MODULE_REGISTRY,
+    CATEGORY_LABELS,
+    VISIBLE_CATEGORIES,
+    modules_by_category,
+    get_installed_modules,
+    get_installed_version,
+    get_remote_versions,
+    set_module_installed,
+    download_module,
+    remove_module,
+    fetch_latest_release,
+    detect_gpus,
+    is_training_server_installed,
+    set_training_server_installed,
+    get_training_mode,
+    set_training_mode,
+)
 from service import ComposeServiceMixin, HealthServiceMixin, RuntimeServiceMixin, docker_compose_available
 from tools import ToolingMixin
 from update import UpdateManager, CONFIG_UPGRADE_KEY
@@ -403,10 +421,26 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self.btn_settings.clicked.connect(self.open_logs_window)
         pill_layout.addWidget(self.btn_settings, 0, Qt.AlignHCenter)
 
+        self.btn_modules = self._create_circle_button(
+            "🧩",
+            "모듈 관리",
+            circle_icons[5] if len(circle_icons) > 5 else None,
+        )
+        self.btn_modules.clicked.connect(self._on_modules_clicked)
+        pill_layout.addWidget(self.btn_modules, 0, Qt.AlignHCenter)
+
+        self.btn_training = self._create_circle_button(
+            "🔥",
+            "학습 서버",
+            circle_icons[6] if len(circle_icons) > 6 else None,
+        )
+        self.btn_training.clicked.connect(self._on_training_clicked)
+        pill_layout.addWidget(self.btn_training, 0, Qt.AlignHCenter)
+
         self.btn_exit = self._create_circle_button(
             "✕",
             "서비스 종료",
-            circle_icons[5] if len(circle_icons) > 5 else None,
+            circle_icons[7] if len(circle_icons) > 7 else None,
         )
         self.btn_exit.clicked.connect(self._on_exit_action)
         pill_layout.addWidget(self.btn_exit, 0, Qt.AlignHCenter)
@@ -429,7 +463,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         except Exception:
             pass
         self._bridge_segments: list[QFrame] = []
-        for _ in range(6):
+        for _ in range(8):
             seg = QFrame(self._pad_bridge)
             seg.setObjectName("FloatingBarBridgeSegment")
             seg.setVisible(False)
@@ -489,18 +523,22 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self.pad_export_buttons,
         ) = self._create_pad_choice_box("4. 내보내기", self._pad_export_choice, self._set_export_choice)
         self.pad_box_settings, self.pad_label_settings, self.pad_stack_settings = self._create_pad_simple_box("5. 로그")
+        self.pad_box_modules, self.pad_label_modules, self.pad_stack_modules = self._create_pad_simple_box("6. 모듈 관리")
+        self.pad_box_training, self.pad_label_training, self.pad_stack_training = self._create_pad_simple_box("7. 학습 서버")
         (
             self.pad_box_exit,
             self.pad_label_exit,
             self.pad_stack_exit,
             self._exit_action_buttons,
-        ) = self._create_pad_exit_action_box("6. 종료", self._exit_action, self._set_exit_action)
+        ) = self._create_pad_exit_action_box("8. 종료", self._exit_action, self._set_exit_action)
         self._pad_boxes = [
             self.pad_box_open_ui,
             self.pad_box_sync,
             self.pad_box_folder,
             self.pad_box_logs,
             self.pad_box_settings,
+            self.pad_box_modules,
+            self.pad_box_training,
             self.pad_box_exit,
         ]
         self._pad_loading_panel = self._create_pad_loading_panel()
@@ -512,6 +550,8 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             self.pad_label_folder,
             self.pad_label_logs,
             self.pad_label_settings,
+            self.pad_label_modules,
+            self.pad_label_training,
             self.pad_label_exit,
         ]
         self._pad_desc_stacks = [
@@ -520,6 +560,8 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             self.pad_stack_folder,
             self.pad_stack_logs,
             self.pad_stack_settings,
+            self.pad_stack_modules,
+            self.pad_stack_training,
             self.pad_stack_exit,
         ]
         self._update_pad_choice_labels()
@@ -531,6 +573,8 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         pad_layout.addWidget(self.pad_box_folder)
         pad_layout.addWidget(self.pad_box_logs)
         pad_layout.addWidget(self.pad_box_settings)
+        pad_layout.addWidget(self.pad_box_modules)
+        pad_layout.addWidget(self.pad_box_training)
         pad_layout.addWidget(self.pad_box_exit)
         try:
             self._right_pad.lower()  # keep the pad behind the pill so pill corners stay round
@@ -1225,7 +1269,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             img_dirs.append(Path(meipass) / "img")
             img_dirs.append(Path(meipass) / "release" / "ui" / "img")
         for img_dir in img_dirs:
-            icons = [img_dir / f"Plugin icon - {idx}.png" for idx in range(1, 7)]
+            icons = [img_dir / f"Plugin icon - {idx}.png" for idx in range(1, 9)]
             if all(p.is_file() for p in icons):
                 return icons
         return []
@@ -2878,7 +2922,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
     def _upgrade_migration_cmd(self) -> str:
         return (
-            "set -euxo pipefail; cd ~/src/backend/database; "
+            "set -euxo pipefail; cd ~/backend/database; "
             "python3 -m pip show orator >/dev/null 2>&1 || ("
             "python3 -m pip install --no-deps --no-input -q "
             "backpack==0.1 simplejson faker lazy-object-proxy cleo==0.6.8 inflection "
@@ -3206,6 +3250,342 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             QMessageBox.warning(self, "프로젝트 필요", "프로젝트가 아직 준비되지 않았습니다. 설치를 먼저 진행하세요.")
             return
         self.load_ui(open_mode=self._open_ui_mode)
+
+    def _on_training_clicked(self):
+        """Open the training server management dialog."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("학습 서버 관리")
+        dlg.resize(500, 420)
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+
+        title = QLabel("학습 서버")
+        f = title.font()
+        f.setPointSize(f.pointSize() + 4)
+        f.setBold(True)
+        title.setFont(f)
+        layout.addWidget(title)
+
+        # GPU info
+        gpu_box = QFrame()
+        gpu_box.setStyleSheet("background-color: #2d2d2d; border-radius: 8px; padding: 10px;")
+        gpu_layout = QVBoxLayout(gpu_box)
+        gpu_layout.setContentsMargins(12, 8, 12, 8)
+        gpu_title = QLabel("GPU 정보")
+        gpu_title.setStyleSheet("font-weight: bold; font-size: 12px;")
+        gpu_layout.addWidget(gpu_title)
+
+        gpus = detect_gpus()
+        if not gpus:
+            gpu_info = QLabel("⚠ NVIDIA GPU가 감지되지 않았습니다.")
+            gpu_info.setStyleSheet("color: #ff9800; font-size: 11px;")
+        else:
+            lines = []
+            for g in gpus:
+                lines.append(f"GPU {g.index}: {g.name}  —  VRAM {g.vram_total_mb}MB "
+                             f"(사용: {g.vram_used_mb}MB / 여유: {g.vram_free_mb}MB)")
+            gpu_info = QLabel("\n".join(lines))
+            gpu_info.setStyleSheet("color: #86efac; font-size: 11px;")
+        gpu_info.setWordWrap(True)
+        gpu_layout.addWidget(gpu_info)
+        layout.addWidget(gpu_box)
+
+        # Status
+        installed = is_training_server_installed()
+        status_label = QLabel(f"상태: {'설치됨' if installed else '미설치'}")
+        status_label.setStyleSheet(
+            f"font-size: 13px; font-weight: 600; color: {'#86efac' if installed else '#999'};"
+        )
+        layout.addWidget(status_label)
+
+        # Running status check
+        running = False
+        try:
+            import subprocess as _sp
+            out = _sp.check_output(["docker", "ps", "--format", "{{.Names}}"], text=True)
+            running = "easytrainer_trainer" in out or "training_server_trainer" in out
+        except Exception:
+            pass
+
+        running_label = QLabel(f"실행 상태: {'🟢 실행 중' if running else '⚫ 중지'}")
+        running_label.setStyleSheet("font-size: 12px;")
+        layout.addWidget(running_label)
+
+        layout.addSpacing(6)
+
+        # Buttons
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        if installed:
+            if running:
+                btn_stop = QPushButton("학습 서버 중지")
+                btn_stop.setStyleSheet("font-size: 12px;")
+
+                def _stop():
+                    try:
+                        import subprocess as _sp
+                        _sp.run(
+                            ["docker", "compose", "-f", "training_server/docker-compose.yml", "stop"],
+                            cwd=str(self.project_root), timeout=30,
+                        )
+                        running_label.setText("실행 상태: ⚫ 중지")
+                        btn_stop.setEnabled(False)
+                        btn_stop.setText("중지됨")
+                    except Exception as e:
+                        QMessageBox.warning(dlg, "오류", f"중지 실패: {e}")
+
+                btn_stop.clicked.connect(_stop)
+                btn_row.addWidget(btn_stop)
+            else:
+                btn_start = QPushButton("학습 서버 시작")
+                btn_start.setStyleSheet("font-size: 12px;")
+
+                def _start():
+                    try:
+                        import subprocess as _sp
+                        _sp.Popen(
+                            ["docker", "compose", "-f", "training_server/docker-compose.yml", "up", "-d"],
+                            cwd=str(self.project_root),
+                        )
+                        running_label.setText("실행 상태: 🟢 시작 중...")
+                        btn_start.setEnabled(False)
+                        btn_start.setText("시작 중...")
+                    except Exception as e:
+                        QMessageBox.warning(dlg, "오류", f"시작 실패: {e}")
+
+                btn_start.clicked.connect(_start)
+                btn_row.addWidget(btn_start)
+
+            btn_uninstall = QPushButton("학습 서버 제거")
+            btn_uninstall.setStyleSheet("font-size: 12px; color: #ef4444;")
+
+            def _uninstall():
+                res = QMessageBox.question(
+                    dlg, "확인", "학습 서버 Docker 이미지를 제거하시겠습니까?",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+                )
+                if res != QMessageBox.Yes:
+                    return
+                try:
+                    import subprocess as _sp
+                    _sp.run(
+                        ["docker", "compose", "-f", "training_server/docker-compose.yml", "down", "--rmi", "all", "--volumes"],
+                        cwd=str(self.project_root), timeout=60,
+                    )
+                    set_training_server_installed(False)
+                    status_label.setText("상태: 미설치")
+                    status_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #999;")
+                    running_label.setText("실행 상태: ⚫ 중지")
+                    btn_uninstall.setEnabled(False)
+                except Exception as e:
+                    QMessageBox.warning(dlg, "오류", f"제거 실패: {e}")
+
+            btn_uninstall.clicked.connect(_uninstall)
+            btn_row.addWidget(btn_uninstall)
+        else:
+            btn_install = QPushButton("학습 서버 설치")
+            btn_install.setStyleSheet("font-size: 12px;")
+
+            def _install():
+                btn_install.setEnabled(False)
+                btn_install.setText("설치 중...")
+                try:
+                    import subprocess as _sp
+                    _sp.Popen(
+                        ["docker", "compose", "-f", "training_server/docker-compose.yml", "build"],
+                        cwd=str(self.project_root),
+                    )
+                    set_training_server_installed(True)
+                    status_label.setText("상태: 설치됨 (빌드 진행 중)")
+                    status_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #7dd3fc;")
+                except Exception as e:
+                    btn_install.setEnabled(True)
+                    btn_install.setText("학습 서버 설치")
+                    QMessageBox.warning(dlg, "오류", f"설치 실패: {e}")
+
+            btn_install.clicked.connect(_install)
+            btn_row.addWidget(btn_install)
+
+        btn_row.addStretch(1)
+        btn_close = QPushButton("닫기")
+        btn_close.clicked.connect(dlg.accept)
+        btn_row.addWidget(btn_close)
+        layout.addLayout(btn_row)
+
+        layout.addStretch(1)
+        dlg.exec()
+
+    def _on_modules_clicked(self):
+        """Open the module management dialog."""
+        from app_context import QScrollArea
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("모듈 관리")
+        dlg.resize(750, 600)
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(8)
+
+        title = QLabel("모듈 관리")
+        f = title.font()
+        f.setPointSize(f.pointSize() + 4)
+        f.setBold(True)
+        title.setFont(f)
+        layout.addWidget(title)
+
+        desc = QLabel("설치된 모듈을 확인하고 추가/제거할 수 있습니다.")
+        desc.setStyleSheet("color: #999; font-size: 12px;")
+        layout.addWidget(desc)
+        layout.addSpacing(4)
+
+        installed = get_installed_modules()
+        by_cat = modules_by_category()
+
+        # Fetch remote versions (best-effort)
+        remote_vers: dict[str, str] = {}
+        try:
+            release = fetch_latest_release()
+            remote_vers = get_remote_versions(release)
+        except Exception:
+            release = None
+
+        def _make_action(module_id, action, btn, status_lbl, ver_lbl, release_ref):
+            def _do():
+                if action == "install" or action == "update":
+                    btn.setEnabled(False)
+                    btn.setText("...")
+                    ok = download_module(module_id, release=release_ref)
+                    if ok:
+                        rv = remote_vers.get(module_id, "")
+                        status_lbl.setText(f"v{rv}" if rv else "설치됨")
+                        status_lbl.setStyleSheet("color: #86efac; font-size: 11px; font-weight: 600;")
+                        ver_lbl.setText("")
+                        btn.setText("제거")
+                        btn.setEnabled(True)
+                        btn.clicked.disconnect()
+                        btn.clicked.connect(_make_action(module_id, "remove", btn, status_lbl, ver_lbl, release_ref))
+                    else:
+                        btn.setText("실패")
+                        btn.setEnabled(True)
+                elif action == "remove":
+                    remove_module(module_id)
+                    status_lbl.setText("미설치")
+                    status_lbl.setStyleSheet("color: #999; font-size: 11px; font-weight: 600;")
+                    ver_lbl.setText("")
+                    btn.setText("설치")
+                    btn.clicked.disconnect()
+                    btn.clicked.connect(_make_action(module_id, "install", btn, status_lbl, ver_lbl, release_ref))
+            return _do
+
+        def _make_filter(si, wl):
+            def _f():
+                q = si.text().strip().lower()
+                for w, k in wl:
+                    w.setVisible(not q or q in k)
+            si.textChanged.connect(_f)
+
+        columns_row = QHBoxLayout()
+        columns_row.setSpacing(16)
+
+        for cat in VISIBLE_CATEGORIES:
+            mods = by_cat.get(cat, [])
+            if not mods:
+                continue
+
+            col = QVBoxLayout()
+            col.setSpacing(4)
+
+            cat_label = QLabel(f"■ {CATEGORY_LABELS.get(cat, cat)}")
+            cat_label.setStyleSheet("font-weight: bold; font-size: 13px;")
+            col.addWidget(cat_label)
+
+            search_input = QLineEdit()
+            search_input.setPlaceholderText("검색...")
+            search_input.setFixedHeight(28)
+            search_input.setStyleSheet("font-size: 11px; padding: 2px 8px;")
+            col.addWidget(search_input)
+
+            sorted_mods = sorted(mods, key=lambda m: (0 if m.id in installed else 1, m.name))
+            row_widgets: list[tuple[QWidget, str]] = []
+
+            for mod in sorted_mods:
+                row_widget = QWidget()
+                row = QHBoxLayout(row_widget)
+                row.setContentsMargins(4, 4, 4, 4)
+                row.setSpacing(4)
+
+                name_label = QLabel(mod.name)
+                name_label.setStyleSheet("font-weight: 600; font-size: 12px;")
+                row.addWidget(name_label)
+                row.addStretch(1)
+
+                is_installed = mod.id in installed
+                local_ver = get_installed_version(mod.id)
+                remote_ver = remote_vers.get(mod.id)
+                has_update = is_installed and remote_ver and local_ver and remote_ver != local_ver
+
+                # Status label (version or status)
+                if is_installed and local_ver:
+                    status = QLabel(f"v{local_ver}")
+                    status.setStyleSheet("color: #86efac; font-size: 11px; font-weight: 600;")
+                elif is_installed:
+                    status = QLabel("설치됨")
+                    status.setStyleSheet("color: #86efac; font-size: 11px; font-weight: 600;")
+                else:
+                    status = QLabel("미설치")
+                    status.setStyleSheet("color: #999; font-size: 11px; font-weight: 600;")
+                row.addWidget(status)
+
+                # Update available indicator
+                ver_lbl = QLabel("")
+                if has_update:
+                    ver_lbl.setText(f"→ v{remote_ver}")
+                    ver_lbl.setStyleSheet("color: #7dd3fc; font-size: 10px; font-weight: 600;")
+                row.addWidget(ver_lbl)
+
+                # Action button
+                if has_update:
+                    btn = QPushButton("업데이트")
+                    btn.setFixedSize(60, 26)
+                    btn.setStyleSheet("font-size: 11px; border-radius: 6px; background-color: #1e3a5f; color: #7dd3fc; border: 1px solid #7dd3fc;")
+                    btn.clicked.connect(_make_action(mod.id, "update", btn, status, ver_lbl, release))
+                elif is_installed:
+                    btn = QPushButton("제거")
+                    btn.setFixedSize(52, 26)
+                    btn.setStyleSheet("font-size: 11px; border-radius: 6px;")
+                    btn.clicked.connect(_make_action(mod.id, "remove", btn, status, ver_lbl, release))
+                else:
+                    btn = QPushButton("설치")
+                    btn.setFixedSize(52, 26)
+                    btn.setStyleSheet("font-size: 11px; border-radius: 6px;")
+                    btn.clicked.connect(_make_action(mod.id, "install", btn, status, ver_lbl, release))
+                row.addWidget(btn)
+
+                col.addWidget(row_widget)
+                search_key = f"{mod.name} {mod.description} {mod.id}".lower()
+                row_widgets.append((row_widget, search_key))
+
+            _make_filter(search_input, row_widgets)
+            col.addStretch(1)
+            if columns_row.count() > 0:
+                sep = QFrame()
+                sep.setFrameShape(QFrame.VLine)
+                sep.setStyleSheet("color: #444;")
+                columns_row.addWidget(sep)
+            columns_row.addLayout(col, 1)
+
+        layout.addLayout(columns_row, 1)
+
+        btn_close = QPushButton("닫기")
+        btn_close.clicked.connect(dlg.accept)
+        close_row = QHBoxLayout()
+        close_row.addStretch(1)
+        close_row.addWidget(btn_close)
+        layout.addLayout(close_row)
+
+        dlg.exec()
 
     def _on_exit_action(self):
         action = getattr(self, "_exit_action", "EXIT")
@@ -3805,11 +4185,10 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         if any(getattr(dlg, "isVisible", lambda: False)() for dlg in self._log_windows):
             self._close_log_windows()
             return
-        svc = "service"
-        backend_log = shlex.quote(str(SERVICE_LOG_DIR / "backend.log"))
-        frontend_log = shlex.quote(str(SERVICE_LOG_DIR / "frontend.log"))
-        tail_backend = ["exec", "-T", svc, "bash", "-lc", f"tail -n 200 -F {backend_log}"]
-        tail_frontend = ["exec", "-T", svc, "bash", "-lc", f"tail -n 200 -F {frontend_log}"]
+        # Use docker compose logs for each service container
+        tail_frontend = ["logs", "-f", "--tail", "200", "frontend"]
+        tail_backend = ["logs", "-f", "--tail", "200", "backend"]
+        tail_ros2 = ["logs", "-f", "--tail", "200", "ros2"]
         self._close_log_windows()
         dialogs: list[QDialog] = []
 
@@ -3830,6 +4209,12 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             self._register_log_window_append(dlg_back)
             dlg_back.show()
             dialogs.append(dlg_back)
+
+        dlg_ros2 = self._create_log_dialog("ROS 2 Logs", tail_ros2)
+        if dlg_ros2:
+            self._register_log_window_append(dlg_ros2)
+            dlg_ros2.show()
+            dialogs.append(dlg_ros2)
 
         self._arrange_log_windows_side_by_side(dialogs)
 

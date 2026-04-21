@@ -7,13 +7,9 @@ python-engineio==4.13.1
 flask-cors
 eventlet
 
-# --- [로봇 및 통신] ---
+# --- [로봇 및 통신] --- (모듈 설치 시 자동 설치됨)
+# dynamixel_sdk, piper_sdk, pyusb, python-can, pymodbus → ros2 모듈 의존성으로 이동
 rospkg
-dynamixel_sdk
-piper_sdk
-pyusb
-python-can
-pymodbus==3.9.2
 
 # --- [비디오 인코딩/디코딩] ---
 av
@@ -57,3 +53,7 @@ aiortc
 aiohttp
 aiohttp-cors
 hypercorn
+
+# --- [Remote Training Server Client] ---
+requests
+websocket-client

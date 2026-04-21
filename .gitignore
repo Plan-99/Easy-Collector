@@ -1,4 +1,5 @@
 release/*.deb
+release/easytrainer_*/
 logs/
 src/backend/database/*.db
 src/backend/datasets/

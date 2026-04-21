@@ -497,17 +497,17 @@ class HealthServiceMixin:
         self._stop_inline_logs()
         self._hide_preload_dialog()
         self.append_log("[ERROR] 서비스가 제시간에 준비되지 않아 중지합니다.")
-        logs = self._collect_docker_logs("easy_collector_service", tail=200)
+        logs = self._collect_docker_logs("easytrainer_backend", tail=200)
         self._show_docker_logs_follow(
             "서비스 시작 실패",
-            container="easy_collector_service",
+            container="easytrainer_backend",
             tail=200,
             initial_text=logs,
         )
         self._enable_restart_button()
         if docker_compose_available() and self._is_valid_project_root(self.project_root):
-            self.append_log("[STOP] docker compose stop service ...")
-            self.run_compose(["stop", "service"], on_finish=self._on_stop_finished)
+            self.append_log("[STOP] docker compose stop ...")
+            self.run_compose(["stop"], on_finish=self._on_stop_finished)
 
 
 class RuntimeServiceMixin:
@@ -550,6 +550,15 @@ class RuntimeServiceMixin:
         except Exception:
             return False
 
+    # Container name → compose service name mapping
+    _CONTAINER_SERVICE_MAP = {
+        "easytrainer_frontend": "frontend",
+        "easytrainer_backend": "backend",
+        "easytrainer_ros2": "ros2",
+        # Legacy single-container support
+        "easy_collector_service": "service",
+    }
+
     def _get_running_services(self) -> list[str]:
         """Return a short list of running compose services based on container names."""
         try:
@@ -558,23 +567,22 @@ class RuntimeServiceMixin:
             ], text=True)
             names = [n.strip() for n in out.splitlines() if n.strip()]
             svc = []
-            if "easy_collector_service" in names:
-                svc.append("service")
+            for container, service in self._CONTAINER_SERVICE_MAP.items():
+                if container in names:
+                    svc.append(service)
             return svc
         except Exception:
             return []
 
-        # Dynamic service detection removed; we standardize on 'service'.
-
     def _service_exists(self) -> bool:
-        """Check whether the service container exists (running or stopped)."""
+        """Check whether any service container exists (running or stopped)."""
         try:
             out = subprocess.check_output(
                 ["docker", "ps", "-a", "--format", "{{.Names}}"],
                 text=True,
             )
             names = [n.strip() for n in out.splitlines() if n.strip()]
-            return "easy_collector_service" in names
+            return any(c in names for c in self._CONTAINER_SERVICE_MAP)
         except Exception:
             return False
 
@@ -673,39 +681,41 @@ class RuntimeServiceMixin:
             pass
 
     def _apply_compose_variant(self, variant: str | None = None) -> bool:
+        """Apply CPU/GPU variant.
+
+        In the 3-service architecture, docker-compose.yml is always the GPU version.
+        For CPU, we copy docker-compose.cpu.yml over docker-compose.yml.
+        For GPU, we ensure docker-compose.yml is unchanged (it's already GPU).
+        """
         variant = (variant or self._current_variant())
-        src_name = "docker-compose.gpu.yml" if variant == "gpu" else "docker-compose.cpu.yml"
-        src = self.project_root / src_name
         dst = self.project_root / "docker-compose.yml"
-        if not src.exists():
+
+        if variant == "cpu":
+            src = self.project_root / "docker-compose.cpu.yml"
+            if not src.exists():
+                try:
+                    self.append_log("[VARIANT] docker-compose.cpu.yml 파일이 없어 기본 compose를 유지합니다.")
+                except Exception:
+                    pass
+                return True  # GPU compose is fine as fallback
+            if not self._ensure_project_root_writable():
+                try:
+                    self.append_log("[VARIANT][ERROR] 프로젝트 경로 권한 확보에 실패했습니다.")
+                except Exception:
+                    pass
+                return False
             try:
-                self.append_log(f"[VARIANT] {src_name} 파일이 없어 기본 compose를 유지합니다.")
-            except Exception:
-                pass
-            return False
-        if not self._ensure_project_root_writable():
-            try:
-                self.append_log("[VARIANT][ERROR] 프로젝트 경로 권한 확보에 실패했습니다.")
-            except Exception:
-                pass
-            return False
-        try:
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dst)
-            return True
-        except Exception as e:
-            try:
-                if isinstance(e, PermissionError):
-                    if self._ensure_project_root_writable():
-                        shutil.copy2(src, dst)
-                        return True
-            except Exception:
-                pass
-            try:
-                self.append_log(f"[VARIANT][ERROR] compose 템플릿 적용 실패: {e}")
-            except Exception:
-                pass
-            return False
+                shutil.copy2(src, dst)
+                return True
+            except Exception as e:
+                try:
+                    self.append_log(f"[VARIANT][ERROR] compose 템플릿 적용 실패: {e}")
+                except Exception:
+                    pass
+                return False
+        else:
+            # GPU: docker-compose.yml is already the 3-service GPU version
+            return dst.exists()
 
     def _ensure_project_root_writable(self, force_auth: bool = False, allow_auth: bool = True) -> bool:
         if not force_auth and getattr(self, "_project_root_writable_fixed", False):
@@ -870,36 +880,8 @@ class RuntimeServiceMixin:
         return Path.home()
 
     def _unify_compose_service(self):
-        """Ensure docker-compose service name is 'service' and container is unified.
-        Modifies docker-compose.yml and docker-compose.dev.yml in project_root if needed.
-        """
-        try:
-            import re
-            for fn in ("docker-compose.yml", "docker-compose.dev.yml"):
-                path = self.project_root / fn
-                if not path.exists():
-                    continue
-                try:
-                    txt = path.read_text(encoding="utf-8", errors="ignore")
-                except Exception:
-                    continue
-                orig = txt
-                # Rename top-level service key 'backend:' -> 'service:'
-                txt = re.sub(r"(?m)^(\s{2,})backend\s*:", r"\1service:", txt)
-                # Update container_name if present
-                txt = txt.replace("easy_collector_backend", "easy_collector_service")
-                if txt != orig:
-                    try:
-                        path.write_text(txt, encoding="utf-8")
-                    except Exception:
-                        pass
-            # Best-effort remove legacy container if it exists
-            try:
-                subprocess.run(["docker", "rm", "-f", "easy_collector_backend"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except Exception:
-                pass
-        except Exception:
-            pass
+        """Legacy compat — no longer modifies compose files in 3-service architecture."""
+        pass
 
     def _ensure_project_present(self):
         """Ensure a valid project exists under the shared data root.
@@ -955,6 +937,10 @@ class RuntimeServiceMixin:
         Only removes containers that are NOT currently running.
         """
         targets = [
+            "easytrainer_frontend",
+            "easytrainer_backend",
+            "easytrainer_ros2",
+            # Legacy names
             "easy_collector_frontend",
             "easy_collector_backend",
             "easy_collector_service",
@@ -992,14 +978,14 @@ class RuntimeServiceMixin:
                 on_finish(0)
             return
         if running and restart_if_running:
-            self.append_log(f"[{reason}] docker compose restart service ...")
-            cmd = ["restart", "service"]
+            self.append_log(f"[{reason}] docker compose restart ...")
+            cmd = ["restart"]
         else:
             # Always use 'up -d' instead of 'start' — 'start' fails when container
             # was removed (e.g. after 'down --volumes'). 'up -d' handles both cases:
             # creates if missing, starts if stopped.
-            self.append_log(f"[{reason}] docker compose up -d service ...")
-            cmd = ["up", "-d", "service"]
+            self.append_log(f"[{reason}] docker compose up -d ...")
+            cmd = ["up", "-d"]
         self.run_compose(cmd, on_finish=on_finish)
 
     # ------------------------ Actions ------------------------
@@ -1037,8 +1023,8 @@ class RuntimeServiceMixin:
             QMessageBox.critical(self, "오류", self._compose_help_text())
             return
         self._run_backend_kill()
-        self.append_log("[STOP] docker compose stop service ...")
-        self.run_compose(["stop", "service"], on_finish=self._on_stop_finished)
+        self.append_log("[STOP] docker compose stop ...")
+        self.run_compose(["stop"], on_finish=self._on_stop_finished)
 
     def _on_stop_finished(self, exit_code: int):
         if exit_code == 0:
@@ -1080,7 +1066,7 @@ class RuntimeServiceMixin:
                 return
             self._restart_phase = "starting"
             self.append_log("[RESTART] 컨테이너를 다시 시작합니다...")
-            self.run_compose(["up", "-d", "service"], on_finish=_after_up)
+            self.run_compose(["up", "-d"], on_finish=_after_up)
 
         def _after_up(ec: int, *_):
             if ec == 0:
@@ -1096,8 +1082,9 @@ class RuntimeServiceMixin:
 
     def _run_backend_kill(self, keep_backend: bool = False, label: str = "STOP"):
         """Best-effort: run kill.sh inside the service container to clean ROS/backend processes."""
-        container = "easy_collector_service"
-        if "service" not in self._get_running_services():
+        container = "easytrainer_backend"
+        running = self._get_running_services()
+        if "backend" not in running and "service" not in running:
             return
         label = label or "STOP"
         cmd = "/root/src/kill.sh"

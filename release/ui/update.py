@@ -521,9 +521,9 @@ class UpdateManager:
         self._fallback_sync(payload_root, self._window.project_root)
 
     def _fallback_sync(self, src_root: Path, dst_root: Path):
-        self._sync_tree(src_root / "src" / "backend", dst_root / "src" / "backend", skip_db=True)
-        self._sync_tree(src_root / "src" / "ui", dst_root / "src" / "ui", skip_db=False)
-        self._sync_tree(src_root / "ros2_ws" / "src", dst_root / "ros2_ws" / "src", skip_db=False)
+        self._sync_tree(src_root / "backend", dst_root / "backend", skip_db=True)
+        self._sync_tree(src_root / "frontend", dst_root / "frontend", skip_db=False)
+        # ros2/ros2_ws/src and backend/modules are managed by module installer — do not sync
         self._copy_core_files(src_root, dst_root)
         self._sync_scripts(src_root, APP_HOME / "scripts")
 

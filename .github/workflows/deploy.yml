@@ -62,7 +62,7 @@ jobs:
           # 제외할 파일은 --exclude로 지정
           pyarmor gen -O temp_obf \
             -r release/ui src \
-            --exclude "src/backend/lerobot" \
+            --exclude "backend/lerobot" \
             --exclude "release/ui/launcher.py"
 
           echo "2. 폴더 구조 맞추기 (ui -> release/ui)"

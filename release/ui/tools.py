@@ -40,7 +40,7 @@ class ToolingMixin:
 
     def _is_valid_dev_src(self, path: Path | None) -> bool:
         try:
-            return bool(path) and path.is_dir() and (path / "src" / "backend").exists() and (path / "src" / "ui").exists()
+            return bool(path) and path.is_dir() and (path / "backend").exists() and (path / "frontend").exists()
         except Exception:
             return False
 
@@ -109,13 +109,13 @@ class ToolingMixin:
         except Exception:
             project_under_data = False
         if self._is_valid_dev_src(self.dev_src_root) and not project_under_data:
-            return self.dev_src_root / "src" / "backend" / "database" / "main.db"
+            return self.dev_src_root / "backend" / "database" / "main.db"
         if self._is_valid_project_root(self.project_root) and not project_under_data:
-            return self.project_root / "src" / "backend" / "database" / "main.db"
+            return self.project_root / "backend" / "database" / "main.db"
         if docker_compose_available() and self._is_valid_project_root(self.project_root):
             return data_db
         if self._is_valid_project_root(self.project_root):
-            return self.project_root / "src" / "backend" / "database" / "main.db"
+            return self.project_root / "backend" / "database" / "main.db"
         return data_db
 
     def _cleanup_sqlite_sidecars(self, db_path: Path):
@@ -624,12 +624,12 @@ class ToolingMixin:
             self._quick_apply_from_dev_src()
 
     def on_select_dev_src(self):
-        folder = QFileDialog.getExistingDirectory(self, "원본 프로젝트 루트 선택 (src/backend, src/ui 포함)", str(self.dev_src_root or Path.home()))
+        folder = QFileDialog.getExistingDirectory(self, "원본 프로젝트 루트 선택 (backend, frontend 포함)", str(self.dev_src_root or Path.home()))
         if not folder:
             return
         path = Path(folder)
         if not self._is_valid_dev_src(path):
-            QMessageBox.warning(self, "잘못된 경로", "선택한 폴더에 src/backend 또는 src/ui가 없습니다.")
+            QMessageBox.warning(self, "잘못된 경로", "선택한 폴더에 backend 또는 frontend가 없습니다.")
             return
         self.dev_src_root = path
         cfg = load_config()
@@ -781,9 +781,9 @@ class ToolingMixin:
         # Fallback to in-app copy when script is missing (legacy behaviour)
         try:
             self.append_log("[SYNC][WARN] quick_apply 스크립트를 찾을 수 없어 내부 복사를 사용합니다.")
-            self._sync_dirs(self.dev_src_root / "src" / "backend", self.project_root / "src" / "backend")
-            self._sync_dirs(self.dev_src_root / "src" / "ui", self.project_root / "src" / "ui")
-            self._sync_dirs(self.dev_src_root / "ros2_ws" / "src", self.project_root / "ros2_ws" / "src")
+            self._sync_dirs(self.dev_src_root / "backend", self.project_root / "backend")
+            self._sync_dirs(self.dev_src_root / "frontend", self.project_root / "frontend")
+            # ros2/ros2_ws/src and backend/modules are managed by module installer — do not sync
             self._sync_release_ui()
             self._sync_core_files()
             self._apply_compose_variant(self.install_variant)

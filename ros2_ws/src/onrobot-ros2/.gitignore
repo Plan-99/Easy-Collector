@@ -1,8 +1,0 @@
-*~
-*.egg
-*.egg-info
-dist
-build
-eggs
-__pycache__
-CATKIN_IGNORE

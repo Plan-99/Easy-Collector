@@ -45,9 +45,9 @@ elif [[ "$PROJECT_DIR" != "$INSTALL_ROOT"/project ]]; then
   echo "[clean] Refusing to run docker compose: unexpected PROJECT_DIR '$PROJECT_DIR'."
 fi
 
-echo "[clean] Removing easy-collector docker artifacts ..."
-docker rm -f easy_collector_service 2>/dev/null || true
-docker image rm easy-collector:latest 2>/dev/null || true
+echo "[clean] Removing easytrainer docker containers and images ..."
+docker rm -f easytrainer_frontend easytrainer_backend easytrainer_ros2 easy_collector_service 2>/dev/null || true
+docker image rm easytrainer-frontend:latest easytrainer-backend:latest easytrainer-ros2:latest easytrainer-service:latest easy-collector:latest 2>/dev/null || true
 
 echo "[clean] Removing easytrainer apt package (if installed)..."
 if dpkg -s easytrainer >/dev/null 2>&1; then
@@ -63,8 +63,13 @@ safe_remove_dir "$INSTALL_ROOT" "easytrainer install root" "$INSTALL_ROOT"
 echo "[clean] Removing user config $USER_CONFIG_DIR ..."
 safe_remove_dir "$USER_CONFIG_DIR" "user config" "$USER_CONFIG_DIR"
 
-echo "[clean] Pruning dangling Docker volumes/builder cache ..."
-docker volume prune -f || true
-docker builder prune -f || true
+echo "[clean] Pruning EasyTrainer Docker resources ..."
+# Remove only easytrainer-related dangling/unused images
+for img in $(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^easytrainer-|^easy-collector'); do
+  docker image rm "$img" 2>/dev/null || true
+done
+# Remove easytrainer build cache only (filter by label or prune project cache)
+docker builder prune -f --filter "until=0s" 2>/dev/null || true
+docker volume rm easytrainer_ui_node_modules 2>/dev/null || true
 
 echo "[clean] Done."

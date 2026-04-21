@@ -186,9 +186,9 @@ copy_file() {
   echo "[quick-apply] 파일 복사 완료: $rel"
 }
 
-copy_tree "src/backend"
-copy_tree "src/ui"
-copy_tree "ros2_ws/src"
+copy_tree "backend" --exclude "modules"
+copy_tree "frontend"
+# ros2/ros2_ws/src and backend/modules are managed by module installer — do not sync
 
 copy_file "docker-compose.yml"
 copy_file "docker-compose.dev.yml"
