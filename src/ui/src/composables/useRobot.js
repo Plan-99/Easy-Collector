@@ -37,6 +37,9 @@ export function useRobot(robot, robotOnCallback=() => {}) {
     api.post(`/robot/${robot.id}/:subscribe_robot`);
     subscribeRobot(() => {});
     robotOnCallback();
+  } else {
+    // 센서처럼 초기화 시 토픽 존재 여부 1회 확인 → 이미 켜져있으면 자동 'on'
+    checkRobotTopic(1);
   }
 
   function status() {
@@ -47,7 +50,16 @@ export function useRobot(robot, robotOnCallback=() => {}) {
     robot.status = 'loading'
     robot.lastError = null;
     return api.post('/robot:start', robot).then(() => {
-      checkRobotTopic()
+      if (robot.sdk_control) {
+        // SDK 로봇: ROS2 토픽 체크 불필요, 바로 구독 시작
+        robot.status = 'on';
+        robot.lastError = null;
+        robotOnCallback();
+        api.post(`/robot/${robot.id}/:subscribe_robot`);
+        subscribeRobot(() => {});
+      } else {
+        checkRobotTopic()
+      }
     }).catch((error) => {
       const msg = formatError(error);
       console.error('Error starting robot:', msg);
@@ -191,6 +203,7 @@ export function useRobot(robot, robotOnCallback=() => {}) {
           robot.lastError = null;
           robotOnCallback();
           api.post(`/robot/${robot.id}/:subscribe_robot`);
+          subscribeRobot(() => {});
           clearInterval(robotTopicChecker);
           robotTopicChecker = null;
           return;

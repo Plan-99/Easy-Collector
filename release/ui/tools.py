@@ -783,7 +783,7 @@ class ToolingMixin:
             self.append_log("[SYNC][WARN] quick_apply 스크립트를 찾을 수 없어 내부 복사를 사용합니다.")
             self._sync_dirs(self.dev_src_root / "src" / "backend", self.project_root / "src" / "backend")
             self._sync_dirs(self.dev_src_root / "src" / "ui", self.project_root / "src" / "ui")
-            self._sync_dirs(self.dev_src_root / "ros2_ws" / "src", self.project_root / "ros2_ws" / "src")
+            self._sync_dirs(self.dev_src_root / "ros2" / "ros2_ws" / "src", self.project_root / "ros2" / "ros2_ws" / "src")
             self._sync_release_ui()
             self._sync_core_files()
             self._apply_compose_variant(self.install_variant)

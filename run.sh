@@ -14,7 +14,7 @@ docker run -it --rm \
     --privileged \
     -v /dev:/dev \
     -v "./src":"/root/src" \
-    -v "./ros2_ws":"/root/ros2_ws" \
+    -v "./ros2":"/root/ros2" \
     -v "./python_pkgs":"/root/python_pkgs" \
     -v "./requirements.txt":"/root/requirements.txt" \
     -v "${DATA_ROOT}":"${DATA_ROOT}" \

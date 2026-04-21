@@ -99,7 +99,7 @@ WORKDIR /root
 RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools==58.2.0
 
 # ROS2 bridge에 필요한 Python 패키지 설치
-COPY requirements.ros2.txt /root/requirements.ros2.txt
+COPY ros2/requirements.ros2.txt /root/requirements.ros2.txt
 RUN python3 -m pip install --no-cache-dir -r /root/requirements.ros2.txt
 
 # 커스텀 패키지 (로봇 제어용)
@@ -117,8 +117,8 @@ RUN mkdir -p build && cd build && cmake -DCMAKE_BUILD_TYPE=Release .. && make -j
 RUN python3 -m pip uninstall -y setuptools && \
     python3 -m pip install --no-cache-dir setuptools==58.2.0
 
-COPY ros2_ws /root/ros2_ws
-WORKDIR /root/ros2_ws
+COPY ros2/ros2_ws /root/ros2/ros2_ws
+WORKDIR /root/ros2/ros2_ws
 ENV PYTHONWARNINGS="ignore:setup.py install is deprecated"
 RUN bash -c "source /opt/ros/humble/setup.bash && \
     colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release"
@@ -139,9 +139,9 @@ RUN apt-get update && apt-get install --only-upgrade -y --no-install-recommends 
 # --- 최종 설정 ---
 WORKDIR /root
 RUN echo "source /opt/ros/humble/setup.bash" >> /etc/bash.bashrc && \
-    echo "source /root/ros2_ws/install/setup.bash" >> /etc/bash.bashrc
+    echo "source /root/ros2/ros2_ws/install/setup.bash" >> /etc/bash.bashrc
 
-COPY --chmod=755 start_ros2_services.sh /usr/local/bin/start_ros2_services.sh
+COPY --chmod=755 ros2/start_ros2_services.sh /usr/local/bin/start_ros2_services.sh
 RUN chmod -R 777 /opt/easytrainer /tmp/easytrainer
 
 EXPOSE 50051 5002

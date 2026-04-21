@@ -545,7 +545,7 @@ class RuntimeServiceMixin:
                 return False
             # Support both legacy single Dockerfile and new split layout
             has_dockerfile = (path / "Dockerfile").exists()
-            has_split = (path / "Dockerfile.main").exists() and (path / "Dockerfile.ros2").exists()
+            has_split = (path / "Dockerfile.main").exists() and (path / "ros2" / "Dockerfile.ros2").exists()
             return has_dockerfile or has_split
         except Exception:
             return False

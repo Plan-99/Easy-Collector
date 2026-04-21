@@ -55,7 +55,7 @@ services:
   ros2:
     build:
       context: .
-      dockerfile: Dockerfile.ros2
+      dockerfile: ros2/Dockerfile.ros2
     image: easy-collector-ros2:latest
     container_name: easy_collector_ros2
     privileged: true
@@ -69,17 +69,17 @@ services:
     environment:
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
       - RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}
-      - PYTHONPATH=/root/src:/root/src/backend/lerobot/src:/opt/openrobots/lib/python3.10/site-packages
+      - PYTHONPATH=/root/ros2:/root/src:/root/src/backend/lerobot/src:/opt/openrobots/lib/python3.10/site-packages
       - EASYTRAINER_DATA_DIR=${EASYTRAINER_DATA_DIR:-/opt/easytrainer}
       - EASYTRAINER_LOG_DIR=${EASYTRAINER_LOG_DIR:-/tmp/easytrainer/logs}
     volumes:
       - /dev:/dev
       - /tmp/.X11-unix:/tmp/.X11-unix
-      - ./ros2_ws:/root/ros2_ws
+      - ./ros2:/root/ros2
       - ./src:/root/src
       - ./python_pkgs:/root/python_pkgs
       - /opt/easytrainer:/opt/easytrainer:ro
-      - ./start_ros2_services.sh:/usr/local/bin/start_ros2_services.sh:ro
+      - ./ros2/start_ros2_services.sh:/usr/local/bin/start_ros2_services.sh:ro
       - easytrainer_shm:/dev/shm/easytrainer
     working_dir: /root
     command: bash -lc "bash /usr/local/bin/start_ros2_services.sh"

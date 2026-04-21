@@ -523,7 +523,7 @@ class UpdateManager:
     def _fallback_sync(self, src_root: Path, dst_root: Path):
         self._sync_tree(src_root / "src" / "backend", dst_root / "src" / "backend", skip_db=True)
         self._sync_tree(src_root / "src" / "ui", dst_root / "src" / "ui", skip_db=False)
-        self._sync_tree(src_root / "ros2_ws" / "src", dst_root / "ros2_ws" / "src", skip_db=False)
+        self._sync_tree(src_root / "ros2" / "ros2_ws" / "src", dst_root / "ros2" / "ros2_ws" / "src", skip_db=False)
         self._copy_core_files(src_root, dst_root)
         self._sync_scripts(src_root, APP_HOME / "scripts")
 

@@ -61,6 +61,8 @@ class Robot(Model, SoftDeletes):
         'ik_available',
         'is_sim',
         'interpolation',
+        'sdk_control',
+        'sdk_type',
     ]
 
     def get_robot_type_info(self):
@@ -104,42 +106,69 @@ class Robot(Model, SoftDeletes):
     @accessor
     def read_topic(self):
         if self.type != 'custom':
-            return f'/ec_robot_{self.id}' + self.get_robot_type_info().get('read_topic', '')
+            info = self.get_robot_type_info()
+            # SDK 로봇: 보간 노드가 SDK에서 읽어 퍼블리시하는 토픽
+            if info.get('sdk_control'):
+                return f'/ec_robot_{self.id}/interpolated_joint_cmd'
+            return f'/ec_robot_{self.id}' + info.get('read_topic', '')
 
-        return self.settings['read_topic']
-    
+        return self.settings.get('read_topic', '')
+
     @accessor
     def read_topic_msg(self):
         if self.type != 'custom':
-            return self.get_robot_type_info().get('read_topic_msg', '')
-        return self.settings['read_topic_msg']
+            info = self.get_robot_type_info()
+            if info.get('sdk_control'):
+                return 'sensor_msgs/JointState'
+            return info.get('read_topic_msg', '')
+        return self.settings.get('read_topic_msg', '')
     
     @accessor
     def write_type(self):
         if self.type != 'custom':
-            return self.get_robot_type_info().get('write_type', 'topic')
+            info = self.get_robot_type_info()
+            if info.get('sdk_control'):
+                return 'sdk'
+            return info.get('write_type', 'topic')
         return self.settings.get('write_type', 'topic')
-    
 
     @accessor
     def write_topic(self):
         if self.type != 'custom':
-            return f'/ec_robot_{self.id}' + self.get_robot_type_info().get('write_topic', '')
+            info = self.get_robot_type_info()
+            if info.get('sdk_control'):
+                return ''
+            return f'/ec_robot_{self.id}' + info.get('write_topic', '')
 
-        return self.settings['write_topic']
-    
+        return self.settings.get('write_topic', '')
+
     @accessor
     def write_topic_msg(self):
         if self.type != 'custom':
-            return self.get_robot_type_info().get('write_topic_msg', '')
+            info = self.get_robot_type_info()
+            if info.get('sdk_control'):
+                return ''
+            return info.get('write_topic_msg', '')
 
-        return self.settings['write_topic_msg']
+        return self.settings.get('write_topic_msg', '')
 
     @accessor
     def interpolation(self):
         if self.type != 'custom':
             return self.get_robot_type_info().get('interpolation', False)
         return self.settings.get('interpolation', False)
+
+    @accessor
+    def sdk_control(self):
+        if self.type != 'custom':
+            return self.get_robot_type_info().get('sdk_control', False)
+        return self.settings.get('sdk_control', False)
+
+    @accessor
+    def sdk_type(self):
+        if self.type != 'custom':
+            return self.get_robot_type_info().get('sdk_type', '')
+        return self.settings.get('sdk_type', '')
 
     @accessor
     def move_action(self):

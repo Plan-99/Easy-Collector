@@ -10,7 +10,7 @@ usage() {
   cat <<'USAGE' >&2
 Usage: quick_apply.sh <DEV_SRC_ROOT> <RUNTIME_PROJECT_ROOT>
 
-Copies src/backend, src/ui, ros2_ws/src, docker-compose files, and helper
+Copies src/backend, src/ui, ros2/, docker-compose files, and helper
 scripts from the development checkout into the runtime project directory used
 by services.
 This script avoids rebuilding Docker images; it simply updates files in-place.
@@ -50,6 +50,7 @@ fi
 
 copy_tree() {
   local rel="$1"
+  local no_so_exclude="${2:-}"  # "no_so" 전달 시 *.so 제외 안 함
   local src="$DEV_SRC/$rel"
   local dst="$PROJECT_ROOT/$rel"
   if [ ! -d "$src" ]; then
@@ -58,15 +59,18 @@ copy_tree() {
   fi
   mkdir -p "$dst"
   if [ -n "$RSYNC_BIN" ]; then
-    "$RSYNC_BIN" -rlptD --no-owner --no-group \
-      --exclude='__pycache__/' \
-      --exclude='node_modules/' \
-      --exclude='database/*.db' \
-      --exclude='/datasets/' \
-      --exclude='.git/' \
-      --exclude='*.so' \
-      --exclude='*.so.*' \
-      "$src/" "$dst/"
+    local -a rsync_args=(
+      -rlptD --no-owner --no-group
+      --exclude='__pycache__/'
+      --exclude='node_modules/'
+      --exclude='database/*.db'
+      --exclude='/datasets/'
+      --exclude='.git/'
+    )
+    if [ "$no_so_exclude" != "keep_so" ]; then
+      rsync_args+=(--exclude='*.so' --exclude='*.so.*')
+    fi
+    "$RSYNC_BIN" "${rsync_args[@]}" "$src/" "$dst/"
   else
     # Portable fallback using tar over a pipe.
     (
@@ -190,23 +194,24 @@ copy_file() {
 
 copy_tree "src/backend"
 copy_tree "src/ui"
-copy_tree "src/ros2_bridge"
-copy_tree "ros2_ws/src"
+copy_tree "ros2/ros2_bridge"
+copy_tree "ros2/robot_sdk"
+copy_tree "ros2/ros2_ws/src" "keep_so"
 
 copy_file "docker-compose.yml"
 copy_file "docker-compose.dev.yml"
 copy_file "docker-compose.cpu.yml"
 copy_file "docker-compose.gpu.yml"
 copy_file "start_services.sh" 755
-copy_file "start_ros2_services.sh" 755
+copy_file "ros2/start_ros2_services.sh" 755
 copy_file "src/kill.sh" 755
 copy_file "Dockerfile"
 copy_file "Dockerfile.main"
-copy_file "Dockerfile.ros2"
+copy_file "ros2/Dockerfile.ros2"
 copy_file ".dockerignore"
 copy_file "requirements.txt"
 copy_file "requirements.min.txt"
-copy_file "requirements.ros2.txt"
+copy_file "ros2/requirements.ros2.txt"
 copy_file "scripts/quick_apply.sh" 755
 copy_file "scripts/install_nvidia_runtime.sh" 755
 

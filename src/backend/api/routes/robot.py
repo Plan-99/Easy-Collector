@@ -94,6 +94,8 @@ def start_robot():
         robot_dict = robot_model.to_dict()
         settings['interpolation'] = robot_dict.get('interpolation', False)
         settings['write_topic'] = robot_dict.get('write_topic', '')
+        settings['sdk_control'] = robot_dict.get('sdk_control', False)
+        settings['sdk_type'] = robot_dict.get('sdk_type', '')
 
     # 기존 구독 정리
     try:
@@ -102,10 +104,17 @@ def start_robot():
         pass
 
     print(f"[DEBUG start_robot] id={id} type={type} company='{company}' process_id={process_id}")
+    socketio = current_app.extensions.get('socketio')
+    def _log(msg, log_type='stdout'):
+        print(f"[robot:{id}] {msg}", flush=True)
+        if socketio:
+            socketio.emit('task_log', {'id': process_id, 'message': msg, 'type': log_type})
 
     # custom 로봇은 드라이버 시작 불필요 (외부 토픽 직접 구독)
     if type == 'custom':
         return {'status': 'success', 'message': 'Custom robot uses external topic'}, 200
+
+    _log(f'Starting robot driver: {type} ({company})')
 
     # ROS2 컨테이너에 드라이버 시작 요청 (gRPC)
     client = get_bridge_client()
@@ -118,12 +127,14 @@ def start_robot():
     ))
 
     if result.success:
+        _log(f'Driver started (pid={result.pid})')
         return {
             'status': 'success',
             'message': 'Robot process started',
             'pid': result.pid
         }, 200
     else:
+        _log(f'Driver failed: {result.message}', 'error')
         return {'status': 'error', 'message': result.message}, 500
     
 

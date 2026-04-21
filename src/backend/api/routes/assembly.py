@@ -18,6 +18,15 @@ def get_assemblies():
     ).get()
     assemblies = [assembly.to_dict() for assembly in assemblies]
     processes = set(current_app.pm.list_processes())
+    # ROS2 컨테이너의 드라이버 프로세스 목록도 포함
+    try:
+        from ...bridge.client import get_bridge_client
+        from ...bridge.generated import robot_bridge_pb2 as pb
+        client = get_bridge_client()
+        ros2_procs = client.driver.ListProcesses(pb.Empty())
+        processes.update(ros2_procs.names)
+    except Exception:
+        pass
     for assembly in assemblies:
         if assembly.get('robots'):
             assembly['robots'] = [attach_robot_runtime(robot, processes) for robot in assembly['robots']]

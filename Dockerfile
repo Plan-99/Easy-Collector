@@ -145,8 +145,8 @@ RUN mkdir -p build && cd build && cmake -DCMAKE_BUILD_TYPE=Release .. && make -j
 # # ROS 2 워크스페이스 빌드
 # RUN python3 -m pip install --no-cache-dir --ignore-installed setuptools==58.2.0
 
-COPY ros2_ws /root/ros2_ws
-WORKDIR /root/ros2_ws
+COPY ros2/ros2_ws /root/ros2/ros2_ws
+WORKDIR /root/ros2/ros2_ws
 # setuptools==58.2.0 덕분에 --symlink-install 에러가 해결됩니다.
 RUN python3 -m pip uninstall -y setuptools && \
     python3 -m pip install --no-cache-dir setuptools==58.2.0
@@ -184,7 +184,7 @@ RUN apt-get update && apt-get install --only-upgrade -y --no-install-recommends 
 # 최종 환경 설정
 WORKDIR /root
 RUN echo "source /opt/ros/humble/setup.bash" >> /etc/bash.bashrc && \
-    echo "source /root/ros2_ws/install/setup.bash" >> /etc/bash.bashrc
+    echo "source /root/ros2/ros2_ws/install/setup.bash" >> /etc/bash.bashrc
 
 # COPY start_services.sh /usr/local/bin/start_services.sh
 # RUN chmod +x /usr/local/bin/start_services.sh

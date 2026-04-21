@@ -19,12 +19,19 @@ class Env:
             msg_type = CompressedImage
             if sensor.get('read_topic_msg') == 'sensor_msgs/Image':
                 msg_type = Image
-            sub = node.create_subscription(msg_type, sensor['read_topic'], lambda msg, sid=sensor['id']: self.image_raw_cb(msg, sid), 10)
+            topic = sensor['read_topic']
+            print(f"[Env] Subscribing sensor {sensor['id']}: topic={topic}, msg={msg_type.__name__}", flush=True)
+            sub = node.create_subscription(msg_type, topic, lambda msg, sid=sensor['id']: self.image_raw_cb(msg, sid), 10)
             self._sensor_subs.append(sub)
 
     def image_raw_cb(self, data, sensor_id):
         try:
             image = ros_image_to_numpy(data)
+            if not hasattr(self, '_img_cb_count'):
+                self._img_cb_count = {}
+            self._img_cb_count[sensor_id] = self._img_cb_count.get(sensor_id, 0) + 1
+            if self._img_cb_count[sensor_id] <= 3:
+                print(f"[Env] image_raw_cb sensor {sensor_id}: shape={image.shape}", flush=True)
             setattr(self, f'sensor_{sensor_id}', image)
         except Exception as e:
             print(f"[ERROR] image_raw_cb (sensor {sensor_id}): {e}")

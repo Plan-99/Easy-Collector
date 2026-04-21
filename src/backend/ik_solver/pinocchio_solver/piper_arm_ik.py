@@ -11,8 +11,8 @@ class Piper_ArmIK(IK_Solver):
     def __init__(self):
 
 
-        urdf_path = parent_of_cwd + '/ros2_ws/src/piper_ros/src/piper_description/urdf/piper_description.urdf'
-        package_dir = parent_of_cwd + '/ros2_ws/src/piper_ros/src/piper_description/'
+        urdf_path = parent_of_cwd + '/ros2/ros2_ws/src/piper_ros/src/piper_description/urdf/piper_description.urdf'
+        package_dir = parent_of_cwd + '/ros2/ros2_ws/src/piper_ros/src/piper_description/'
         # urdf_path = '../../assets/g1/g1_body23.urdf'
         # package_dir = '../../assets/g1/'
 

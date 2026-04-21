@@ -25,8 +25,31 @@ SUPPORT_ROBOTS = [
         'tool_inner': True,
         'tool_index': [6],
         'custom_fields': [],
-        'urdf_path': '/root/ros2_ws/src/piper_ros/src/piper_description/urdf/piper_description.urdf',
-        'urdf_package_dir': '/root/ros2_ws/src/piper_ros/src/piper_description/',
+        'urdf_path': '/root/ros2/ros2_ws/src/piper_ros/src/piper_description/urdf/piper_description.urdf',
+        'urdf_package_dir': '/root/ros2/ros2_ws/src/piper_ros/src/piper_description/',
+        'ik_setting': {
+            'joints_to_lock': [
+                'joint6_to_gripper_base', 'joint7', 'joint8'
+            ],
+            'ee_definitions': [('ee', 'joint7', None)],
+        },
+    },
+    {
+        'name': 'piper_by_sdk',
+        'role': 'single_arm',
+        'company': 'Piper',
+        'joint_dim': 7,
+        'joint_names': ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"],
+        'joint_lower_bounds': [-2.618, 0, -2.618, -1.745, -1.22, -2.094, 0],
+        'joint_upper_bounds': [2.618, 2.618, 0, 1.745, 1.22, 2.094, 0.087],
+        'interpolation': True,
+        'sdk_control': True,
+        'sdk_type': 'piper',
+        'tool_inner': True,
+        'tool_index': [6],
+        'custom_fields': ['can_port'],
+        'urdf_path': '/root/ros2/ros2_ws/src/piper_ros/src/piper_description/urdf/piper_description.urdf',
+        'urdf_package_dir': '/root/ros2/ros2_ws/src/piper_ros/src/piper_description/',
         'ik_setting': {
             'joints_to_lock': [
                 'joint6_to_gripper_base', 'joint7', 'joint8'
@@ -51,8 +74,8 @@ SUPPORT_ROBOTS = [
         'tool_inner': True,
         'tool_index': [6],
         'custom_fields': ['can_port'],
-        'urdf_path': '/root/ros2_ws/src/piper_ros/src/piper_description/urdf/piper_description.urdf',
-        'urdf_package_dir': '/root/ros2_ws/src/piper_ros/src/piper_description/',
+        'urdf_path': '/root/ros2/ros2_ws/src/piper_ros/src/piper_description/urdf/piper_description.urdf',
+        'urdf_package_dir': '/root/ros2/ros2_ws/src/piper_ros/src/piper_description/',
         'ik_setting': {
             'joints_to_lock': [
                 'joint6_to_gripper_base', 'joint7', 'joint8'
@@ -77,8 +100,8 @@ SUPPORT_ROBOTS = [
         'tool_inner': False,
         'tool_index': [],
         'custom_fields': ['can_port'],
-        'urdf_path': '/root/ros2_ws/src/piper_ros/src/piper_description/urdf/piper_no_gripper_description.urdf',
-        'urdf_package_dir': '/root/ros2_ws/src/piper_ros/src/piper_description/',
+        'urdf_path': '/root/ros2/ros2_ws/src/piper_ros/src/piper_description/urdf/piper_no_gripper_description.urdf',
+        'urdf_package_dir': '/root/ros2/ros2_ws/src/piper_ros/src/piper_description/',
         'ik_setting': {
             'joints_to_lock': [],
             'ee_definitions': [('ee', 'joint6', np.array([0.20, 0, 0]).T)],
@@ -100,8 +123,8 @@ SUPPORT_ROBOTS = [
         'tool_inner': False,
         'tool_index': [],
         'custom_fields': ['ip_address'],
-        'urdf_path': '/root/ros2_ws/src/tm2_ros2/tm_description/urdf/tm12s.urdf',
-        'urdf_package_dir': '/root/ros2_ws/src/tm2_ros2/tm_description/',
+        'urdf_path': '/root/ros2/ros2_ws/src/tm2_ros2/tm_description/urdf/tm12s.urdf',
+        'urdf_package_dir': '/root/ros2/ros2_ws/src/tm2_ros2/tm_description/',
         'ik_setting': {
             'joints_to_lock': [],
             'ee_definitions': [('ee', 'joint_6', np.array([0, 0, 0.15]).T)],
@@ -123,8 +146,8 @@ SUPPORT_ROBOTS = [
         'tool_inner': False,
         'tool_index': [],
         'custom_fields': ['ip_address'],
-        'urdf_path': '/root/ros2_ws/src/tm2_ros2/tm_description/urdf/tm12s.urdf',
-        'urdf_package_dir': '/root/ros2_ws/src/tm2_ros2/tm_description/',
+        'urdf_path': '/root/ros2/ros2_ws/src/tm2_ros2/tm_description/urdf/tm12s.urdf',
+        'urdf_package_dir': '/root/ros2/ros2_ws/src/tm2_ros2/tm_description/',
         'ik_setting': {
             'joints_to_lock': [],
             'ee_definitions': [('ee', 'joint_6', np.array([0, 0, 0.15]).T)],
@@ -146,8 +169,8 @@ SUPPORT_ROBOTS = [
         'tool_inner': True,
         'tool_index': [6],
         'custom_fields': ['ip_address'],
-        'urdf_path': '/root/ros2_ws/src/tm2_ros2/tm_description/urdf/tm12s.urdf',
-        'urdf_package_dir': '/root/ros2_ws/src/tm2_ros2/tm_description/',
+        'urdf_path': '/root/ros2/ros2_ws/src/tm2_ros2/tm_description/urdf/tm12s.urdf',
+        'urdf_package_dir': '/root/ros2/ros2_ws/src/tm2_ros2/tm_description/',
         'ik_setting': {
             'joints_to_lock': [],
             'ee_definitions': [('ee', 'joint_6', np.array([0, 0, 0.15]).T)],
@@ -169,8 +192,8 @@ SUPPORT_ROBOTS = [
         'tool_inner': False,
         'tool_index': [],
         'custom_fields': ['ip_address'],
-        'urdf_path': '/root/ros2_ws/src/rbpodo_ros2/rbpodo_description/robots/rb3_730es_u.urdf',
-        'urdf_package_dir': '/root/ros2_ws/src/rbpodo_ros2/rbpodo_description/',
+        'urdf_path': '/root/ros2/ros2_ws/src/rbpodo_ros2/rbpodo_description/robots/rb3_730es_u.urdf',
+        'urdf_package_dir': '/root/ros2/ros2_ws/src/rbpodo_ros2/rbpodo_description/',
         'ik_setting': {
             'joints_to_lock': [],
             'ee_definitions': [('ee', 'tcp_joint', None)],
@@ -192,8 +215,8 @@ SUPPORT_ROBOTS = [
         'tool_inner': False,
         'tool_index': [],
         'custom_fields': ['ip_address'],
-        # 'urdf_path': '/ros2_ws/src/rbpodo_ros2/rbpodo_description/robots/rb5_850e.urdf',
-        # 'urdf_package_dir': '/ros2_ws/src/rbpodo_ros2/rbpodo_description/',
+        # 'urdf_path': '/root/ros2/ros2_ws/src/rbpodo_ros2/rbpodo_description/robots/rb5_850e.urdf',
+        # 'urdf_package_dir': '/root/ros2/ros2_ws/src/rbpodo_ros2/rbpodo_description/',
         # 'ik_setting': {
         #     'joints_to_lock': [],
         #     'ee_definitions': [('ee', 'tcp_joint', None)],
@@ -214,8 +237,8 @@ SUPPORT_ROBOTS = [
         'tool_inner': False,
         'tool_index': [],
         'custom_fields': ['ip_address'],
-        'urdf_path': '/root/ros2_ws/src/ros2_kortex/kortex_description/robots/gen3_7dof.urdf',
-        'urdf_package_dir': '/root/ros2_ws/src/ros2_kortex/kortex_description/',
+        'urdf_path': '/root/ros2/ros2_ws/src/ros2_kortex/kortex_description/robots/gen3_7dof.urdf',
+        'urdf_package_dir': '/root/ros2/ros2_ws/src/ros2_kortex/kortex_description/',
         'ik_setting': {
             'joints_to_lock': [],
             'ee_definitions': [
@@ -266,8 +289,8 @@ SUPPORT_ROBOTS = [
         'tool_inner': False,
         'tool_index': [],
         'custom_fields': ['ip_address'],
-        'urdf_path': '/root/ros2_ws/src/frcobot_ros2/fairino_description/urdf/fairino5_v6.urdf',
-        'urdf_package_dir': '/root/ros2_ws/src/frcobot_ros2/fairino_description/',
+        'urdf_path': '/root/ros2/ros2_ws/src/frcobot_ros2/fairino_description/urdf/fairino5_v6.urdf',
+        'urdf_package_dir': '/root/ros2/ros2_ws/src/frcobot_ros2/fairino_description/',
         'ik_setting': {
             'joints_to_lock': [],
             'ee_definitions': [('ee', 'j6', np.array([0, 0, 0.1]).T)],
@@ -289,8 +312,8 @@ SUPPORT_ROBOTS = [
         'tool_inner': False,
         'tool_index': [],
         'custom_fields': ['ip_address'],
-        'urdf_path': '/root/ros2_ws/src/jaka_ros2/src/jaka_description/urdf/jaka_zu12.urdf',
-        'urdf_package_dir': '/root/ros2_ws/src/jaka_ros2/src/jaka_description/',
+        'urdf_path': '/root/ros2/ros2_ws/src/jaka_ros2/src/jaka_description/urdf/jaka_zu12.urdf',
+        'urdf_package_dir': '/root/ros2/ros2_ws/src/jaka_ros2/src/jaka_description/',
         'ik_setting': {
             'joints_to_lock': [],
             'ee_definitions': [('ee', 'joint_6', None)],

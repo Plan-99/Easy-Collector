@@ -41,16 +41,10 @@ scikit-learn
 pandas
 
 # --- [시각화 및 유틸리티] ---
-rerun-sdk==0.20.1
-meshcat==0.3.2
-sshkeyboard==2.3.1
-logging_mp
-pin-pink
-proxsuite
+# pin-pink, proxsuite, meshcat → requirements.ros2.txt로 이동 (IK solver, ROS2 컨테이너 전용)
+# rerun-sdk, sshkeyboard, logging_mp → standalone 스크립트 전용 (메인 API 미사용)
 hydra-core
 
-# --- [네트워크/WebRTC] ---
-aiortc
-aiohttp
-aiohttp-cors
+# --- [네트워크] ---
+# aiortc, aiohttp, aiohttp-cors → requirements.ros2.txt로 이동 (WebRTC 스트리밍, ROS2 컨테���너 전용)
 hypercorn

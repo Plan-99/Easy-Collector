@@ -38,17 +38,12 @@ class Agent:
         self.joint_lower_bounds = robot['joint_lower_bounds']
         self.is_sim = robot['is_sim']
 
-        self.read_topic_msg = robot['read_topic_msg']
-        self.write_topic_msg = robot['write_topic_msg']
+        self.read_topic_msg = robot.get('read_topic_msg', '')
+        self.write_topic_msg = robot.get('write_topic_msg', '')
+        self.sdk_control = robot.get('sdk_control', False)
 
         self.role = robot.get('role', 'single_arm')
         self.tool_inner = robot.get('tool_inner', False)
-
-        # self.qos_profile = QoSProfile(
-        #     reliability=ReliabilityPolicy.BEST_EFFORT, # Hz 향상을 위해 권장
-        #     history=HistoryPolicy.KEEP_LAST,
-        #     depth=30 # 여기서 큐 사이즈를 결정합니다.
-        # )
 
         self.ik_solver = None
         self.ik_lock = threading.RLock()
@@ -77,45 +72,57 @@ class Agent:
                 self.ik_solver = Common_ArmIK(urdf_path=urdf_path, urdf_package_dir=urdf_package_dir, **ik_setting)
                 self.ee_names = self.ik_solver.ee_names
 
-        self.read_topic_msg_cls = get_message(robot['read_topic_msg'])
-        self.read_topic_sub = node.create_subscription(self.read_topic_msg_cls, robot['read_topic'], self.joint_state_cb, 10)
-        self.read_topic_msg_data = self.read_topic_msg_cls()
-
-
-        self.write_type = robot.get('write_type', 'topic')
         # 보간 노드용 publisher: interpolation=True이면 ec_joint_cmd로 보냄
         self._interp_pub = None
+        self._direct_pub = None  # 보간 우회 직접 명령 (move_to 등)
+        ns = f'/ec_robot_{robot["id"]}'
+
         if robot.get('interpolation'):
             from sensor_msgs.msg import JointState as JointStateMsg
-            # write_topic에서 네임스페이스 추출 (e.g., /ec_robot_1/joint_states → /ec_robot_1)
-            ns = '/'.join(robot['write_topic'].rsplit('/', 1)[:-1])
-            interp_topic = f'{ns}/ec_joint_cmd' if ns else 'ec_joint_cmd'
+            interp_topic = f'{ns}/ec_joint_cmd'
+            direct_topic = f'{ns}/ec_joint_cmd_direct'
             self._interp_pub = node.create_publisher(JointStateMsg, interp_topic, 10)
+            self._direct_pub = node.create_publisher(JointStateMsg, direct_topic, 10)
 
-        if self.write_type == 'topic':
-            self.write_topic_msg_cls = get_message(robot['write_topic_msg'])
-            self.write_topic_msg_data = self.write_topic_msg_cls()
-            self.write_topic_sub = node.create_subscription(self.write_topic_msg_cls, robot['write_topic'], self.joint_action_cb, 10)
-            self.move_robot_pub = node.create_publisher(self.write_topic_msg_cls, robot['write_topic'], 10)
-            
-        elif self.write_type == 'service':
-            self.write_service_srv_cls = get_service(robot['write_topic_msg'])
-            self.write_service_srv_data = None
-            self.move_robot_client = node.create_client(self.write_service_srv_cls, robot['write_topic'])
-            if not self.move_robot_client.wait_for_service(timeout_sec=5.0):
-                print(f'Service {robot["write_topic"]} not available. Please check the connection.')
-            # elif self.robot_type == 'tm_12s':
-            #     enable_req = self.write_service_srv_cls.Request()
-            #     enable_req.id = '1'
-            #     enable_req.script = 'Position(true,"J",1000,10,500)'
-            #     self.move_robot_client.call_async(enable_req)
+        if self.sdk_control:
+            # ── SDK 모드 ──
+            # 보간 노드가 SDK로 제어+상태읽기. Agent는 ec_joint_cmd로 명령, state 토픽 구독.
+            from sensor_msgs.msg import JointState as JointStateMsg
+            state_topic = f'{ns}/interpolated_joint_cmd'
+            self.read_topic_msg_cls = JointStateMsg
+            self.read_topic_sub = node.create_subscription(
+                JointStateMsg, state_topic, self.joint_state_cb, 10)
+            self.read_topic_msg_data = JointStateMsg()
+            self.write_type = 'sdk'
+            self._sdk_write_msg = JointStateMsg()
+        else:
+            # ── 기존 ROS2 토픽/서비스/액션 모드 ──
+            self.read_topic_msg_cls = get_message(robot['read_topic_msg'])
+            self.read_topic_sub = node.create_subscription(
+                self.read_topic_msg_cls, robot['read_topic'], self.joint_state_cb, 10)
+            self.read_topic_msg_data = self.read_topic_msg_cls()
 
-        elif self.write_type == 'action':
-            self.write_action_goal_cls = get_action(robot['write_topic_msg']).Goal
-            self.write_action_goal_data = self.write_action_goal_cls()
-            self.move_robot_client = rclpy.action.ActionClient(node, get_action(robot['write_topic_msg']), robot['write_topic'])
-            if not self.move_robot_client.wait_for_server(timeout_sec=5.0):
-                print(f'Action server {robot["write_topic"]} not available. Please check the connection.')
+            self.write_type = robot.get('write_type', 'topic')
+
+            if self.write_type == 'topic':
+                self.write_topic_msg_cls = get_message(robot['write_topic_msg'])
+                self.write_topic_msg_data = self.write_topic_msg_cls()
+                self.write_topic_sub = node.create_subscription(self.write_topic_msg_cls, robot['write_topic'], self.joint_action_cb, 10)
+                self.move_robot_pub = node.create_publisher(self.write_topic_msg_cls, robot['write_topic'], 10)
+
+            elif self.write_type == 'service':
+                self.write_service_srv_cls = get_service(robot['write_topic_msg'])
+                self.write_service_srv_data = None
+                self.move_robot_client = node.create_client(self.write_service_srv_cls, robot['write_topic'])
+                if not self.move_robot_client.wait_for_service(timeout_sec=5.0):
+                    print(f'Service {robot["write_topic"]} not available. Please check the connection.')
+
+            elif self.write_type == 'action':
+                self.write_action_goal_cls = get_action(robot['write_topic_msg']).Goal
+                self.write_action_goal_data = self.write_action_goal_cls()
+                self.move_robot_client = rclpy.action.ActionClient(node, get_action(robot['write_topic_msg']), robot['write_topic'])
+                if not self.move_robot_client.wait_for_server(timeout_sec=5.0):
+                    print(f'Action server {robot["write_topic"]} not available. Please check the connection.')
             self.is_waiting_for_goal = False
 
         self.ee_pos_cmd = None
@@ -137,7 +144,17 @@ class Agent:
             self.node.destroy_subscription(self.read_topic_sub)
             self.read_topic_sub = None
 
-        if self.write_type == 'topic':
+        if hasattr(self, '_interp_pub') and self._interp_pub is not None:
+            self.node.destroy_publisher(self._interp_pub)
+            self._interp_pub = None
+
+        if hasattr(self, '_direct_pub') and self._direct_pub is not None:
+            self.node.destroy_publisher(self._direct_pub)
+            self._direct_pub = None
+
+        if self.write_type == 'sdk':
+            pass  # SDK 모드: 위에서 이미 정리됨
+        elif self.write_type == 'topic':
             if hasattr(self, 'write_topic_sub') and self.write_topic_sub is not None:
                 self.node.destroy_subscription(self.write_topic_sub)
                 self.write_topic_sub = None
@@ -185,7 +202,17 @@ class Agent:
             # numpy를 사용하여 각 관절의 인덱스에 맞는 범위를 한 번에 적용합니다.
             action = np.clip(action, self.joint_lower_bounds, self.joint_upper_bounds).tolist()
 
-        if self.write_type == 'topic':
+        if self.write_type == 'sdk':
+            # SDK 모드: ec_joint_cmd → 보간 노드 → SDK
+            self._sdk_write_msg.name = self.joint_names
+            self._sdk_write_msg.position = action
+            self._sdk_write_msg.velocity = [0.0] * self.joint_len
+            if self.tool_inner:
+                self._sdk_write_msg.velocity[-1] = 100.0
+            self.joint_actions = action
+            self._interp_pub.publish(self._sdk_write_msg)
+            return
+        elif self.write_type == 'topic':
             self.move_joint_step_by_topic(action, velocity_arg)
         elif self.write_type == 'service':
             self.move_joint_step_by_service(action, velocity_arg)
@@ -709,8 +736,13 @@ class Agent:
             return [0.0] * self.joint_len
 
     def get_joint_actions(self):
+        if self.write_type == 'sdk':
+            # SDK: joint_actions는 list (move_joint_step에서 직접 할당)
+            return self.joint_actions if self.joint_actions is not None else self.get_joint_states()
+
         if self.joint_actions is None:
             return None
+
         if self.write_type == 'topic':
             joint_actions = []
             if self.write_topic_msg == 'sensor_msgs/JointState':
@@ -728,11 +760,13 @@ class Agent:
                     joint_actions.append(self.joint_actions.actual.positions[topic_index])
             elif self.write_topic_msg == 'trajectory_msgs/JointTrajectory':
                 if self.joint_actions.points:
-                    point = self.joint_actions.points[-1]  # 가장 최근 포인트 사용
+                    point = self.joint_actions.points[-1]
                     for i, joint_name in enumerate(self.joint_names):
                         joint_actions.append(point.positions[i])
         elif self.write_type == 'action' or self.write_type == 'service':
             joint_actions = self.joint_actions if self.joint_actions is not None else self.get_joint_states()
+        else:
+            return None
         return joint_actions
 
     def get_ee_position(self):
@@ -838,14 +872,25 @@ class Agent:
             print("Moving to target position:", target_pos)
             self.move_joint_step(target_pos)
             time.sleep(0.5)
+        elif self.sdk_control:
+            # SDK 모드: 보간 우회 직접 명령
+            print("Moving to target position (SDK direct):", target_pos)
+            self._sdk_write_msg.name = self.joint_names
+            self._sdk_write_msg.position = [float(x) for x in target_pos]
+            self._sdk_write_msg.velocity = [0.0] * self.joint_len
+            if self.tool_inner:
+                self._sdk_write_msg.velocity[-1] = 100.0
+            self._direct_pub.publish(self._sdk_write_msg)
+            time.sleep(0.5)
         elif self.robot_company == 'Piper':
             print("Moving to target position:", target_pos)
-            # write_topic(joint_states)으로 직접 보냄 — 보간 노드 우회
+            # 보간 우회 직접 토픽으로 보냄
             self.write_topic_msg_data.name = self.joint_names
             self.write_topic_msg_data.position = [float(x) for x in target_pos]
             self.write_topic_msg_data.velocity = [0.0] * self.joint_len
             self.write_topic_msg_data.velocity[-1] = 100.0
-            self.move_robot_pub.publish(self.write_topic_msg_data)
+            pub = self._direct_pub if self._direct_pub is not None else self.move_robot_pub
+            pub.publish(self.write_topic_msg_data)
             time.sleep(0.5)
         elif self.robot_company == 'Kinova' or self.write_topic_msg == 'trajectory_msgs/JointTrajectory':
             self.write_topic_msg_data.joint_names = self.joint_names

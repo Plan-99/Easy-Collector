@@ -20,18 +20,18 @@ exec > >(tee -a "$ROS2_LOG_FILE") 2>&1
 # --- ROS2 환경 소싱 ---
 source /opt/ros/humble/setup.bash
 
-if [ -f /root/ros2_ws/install/setup.bash ]; then
-    source /root/ros2_ws/install/setup.bash
+if [ -f /root/ros2/ros2_ws/install/setup.bash ]; then
+    source /root/ros2/ros2_ws/install/setup.bash
     echo "[ROS2 Bridge] ROS2 workspace sourced"
 else
     echo "[ROS2 Bridge] WARNING: ros2_ws/install/setup.bash not found, building..."
-    cd /root/ros2_ws
+    cd /root/ros2/ros2_ws
     colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
-    source /root/ros2_ws/install/setup.bash
+    source /root/ros2/ros2_ws/install/setup.bash
 fi
 
 # --- 환경 변수 설정 ---
-export PYTHONPATH="/root/src:/root/src/backend/lerobot/src:/opt/openrobots/lib/python3.10/site-packages:${PYTHONPATH}"
+export PYTHONPATH="/root/ros2:/root/src:/root/src/backend/lerobot/src:/opt/openrobots/lib/python3.10/site-packages:${PYTHONPATH}"
 export LD_LIBRARY_PATH="/opt/openrobots/lib:${LD_LIBRARY_PATH}"
 export RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}
 export ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}

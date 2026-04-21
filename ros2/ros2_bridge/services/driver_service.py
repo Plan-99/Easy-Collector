@@ -40,40 +40,62 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
         # 기존 프로세스 정리
         self._stop(process_id)
 
-        command = self._build_robot_command(company, rtype, robot_id, settings)
-        if not command:
-            return pb.DriverStatus(success=False, message=f'Unsupported company: {company}')
-
-        # Piper CAN 설정
+        # Piper CAN 설정 (SDK/ROS2 공통)
         if company == 'Piper':
             can_cmd = self._piper_can_setup(robot_id, settings)
             if can_cmd:
-                self._start_subprocess(f'can_config_{robot_id}', can_cmd)
+                self._start_subprocess(f'can_config_{robot_id}', can_cmd, log_name=process_id)
                 time.sleep(1)
 
-        proc = self._start_subprocess(process_id, command)
-        if proc is None:
-            return pb.DriverStatus(success=False, message='Failed to start process')
+        # SDK 제어 로봇: ROS2 드라이버/보간 노드 불필요 (Agent가 SDK로 직접 제어)
+        if settings.get('sdk_control'):
+            proc = None
+            # 프로세스 목록에 마커 등록 (status 확인용)
+            with self._lock:
+                self.processes[process_id] = None
+        else:
+            command = self._build_robot_command(company, rtype, robot_id, settings)
+            if not command:
+                return pb.DriverStatus(success=False, message=f'Unsupported company: {company}')
+            proc = self._start_subprocess(process_id, command)
+            if proc is None:
+                return pb.DriverStatus(success=False, message='Failed to start process')
 
         # 보간 노드 시작: interpolation=True인 로봇
         if settings.get('interpolation'):
             interp_id = f'interp_{robot_id}'
             self._stop(interp_id)
             ns = f'ec_robot_{robot_id}'
-            # write_topic에서 상대 토픽명만 추출 (e.g., /ec_robot_1/joint_states → joint_states)
-            write_topic = settings.get('write_topic', '/joint_states').rsplit('/', 1)[-1]
             interp_cmd = [
                 'python3', '-m', 'ros2_bridge.interpolation_node',
                 '--ros-args', '-r', f'__ns:=/{ns}',
-                '-p', f'output_topic:={write_topic}',
             ]
-            self._start_subprocess(interp_id, interp_cmd)
+
+            if settings.get('sdk_control'):
+                # SDK 모드: 보간 노드가 SDK로 직접 제어 + 상태 읽기
+                sdk_type = settings.get('sdk_type', '')
+                can_port = settings.get('can_port', 'can0')
+                has_gripper = rtype not in ('piper_no_gripper',)
+                interp_cmd += [
+                    '-p', 'control_mode:=sdk',
+                    '-p', f'sdk_type:={sdk_type}',
+                    '-p', f'sdk_can_port:={can_port}',
+                    '-p', f'sdk_has_gripper:={str(has_gripper).lower()}',
+                    '-p', 'read_topic:=interpolated_joint_cmd',
+                ]
+            else:
+                # 토픽 모드: 보간 결과를 write_topic으로 퍼블리시
+                write_topic = settings.get('write_topic', '/joint_states').rsplit('/', 1)[-1]
+                interp_cmd += ['-p', f'output_topic:={write_topic}']
+
+            self._start_subprocess(interp_id, interp_cmd, log_name=process_id)
 
         # JAKA servo enable
         if company == 'JAKA':
             self._jaka_servo_enable()
 
-        return pb.DriverStatus(success=True, message='Driver started', pid=proc.pid)
+        pid = proc.pid if proc else 0
+        return pb.DriverStatus(success=True, message='Driver started', pid=pid)
 
     def StopRobotDriver(self, request, context):
         self._stop(request.name)
@@ -210,7 +232,7 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
         return None
 
     def _piper_can_setup(self, robot_id, settings):
-        script_path = os.path.expanduser('~/ros2_ws/src/piper_ros/can_activate_main.sh')
+        script_path = os.path.expanduser('~/ros2/ros2_ws/src/piper_ros/can_activate_main.sh')
         if os.path.exists(script_path):
             return ['bash', script_path]
         return None
@@ -227,7 +249,8 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
         except Exception as e:
             print(f"[WARN] JAKA servo enable failed: {e}")
 
-    def _start_subprocess(self, name, command):
+    def _start_subprocess(self, name, command, log_name=None):
+        log_name = log_name or name
         with self._lock:
             if name in self.processes:
                 self._stop_locked(name)
@@ -238,7 +261,7 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
                     'text': True, 'bufsize': 1,
                 }
                 if os.name != 'nt':
-                    popen_args['preexec_fn'] = os.setsid
+                    popen_args['start_new_session'] = True
                     command = ['stdbuf', '-oL'] + command
 
                 proc = subprocess.Popen(command, **popen_args)
@@ -248,7 +271,7 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
                 def _log_reader(stream, label):
                     try:
                         for line in stream:
-                            print(f"[{name}/{label}] {line.strip()}", flush=True)
+                            print(f"[{log_name}/{label}] {line.strip()}", flush=True)
                     except Exception:
                         pass
 
