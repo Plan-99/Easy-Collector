@@ -158,6 +158,11 @@ def _parse_args() -> argparse.Namespace:
         default="cuda",
         help="cuda (default) or cpu",
     )
+    p.add_argument(
+        "--sample-data-dir",
+        default=str(_HERE / "sample_data"),
+        help="Path to sample_data/ directory for replay mode (default: ./sample_data)",
+    )
     return p.parse_args()
 
 
@@ -219,13 +224,23 @@ class InferenceServiceNode(Node):
             Trigger, "~/reset", self._handle_reset,
             callback_group=self._cb_group,
         )
+        self._replay_srv = self.create_service(
+            Trigger, "~/replay", self._handle_replay,
+            callback_group=self._cb_group,
+        )
+
+        # Pre-load sample data for replay if available
+        self._sample_actions = None
+        self._sample_fps = self.args.hz
+        self._load_sample_data()
 
         ns = self.get_name()
         self.get_logger().info(
             f"Inference service ready. Call:\n"
-            f"  ros2 service call /{ns}/start std_srvs/srv/Trigger\n"
-            f"  ros2 service call /{ns}/stop  std_srvs/srv/Trigger\n"
-            f"  ros2 service call /{ns}/reset std_srvs/srv/Trigger"
+            f"  ros2 service call /{ns}/start  std_srvs/srv/Trigger\n"
+            f"  ros2 service call /{ns}/stop   std_srvs/srv/Trigger\n"
+            f"  ros2 service call /{ns}/reset  std_srvs/srv/Trigger\n"
+            f"  ros2 service call /{ns}/replay std_srvs/srv/Trigger"
         )
 
     # ── property ──────────────────────────────────────────────────────────
@@ -284,6 +299,125 @@ class InferenceServiceNode(Node):
         response.message = "policy reset"
         self.get_logger().info("[reset] policy state cleared")
         return response
+
+    # ── sample data loading ──────────────────────────────────────────────
+    def _load_sample_data(self):
+        """Pre-load the sample episode parquet for replay mode."""
+        sample_dir = Path(self.args.sample_data_dir)
+        parquet_path = sample_dir / "episode_000000.parquet"
+        if not parquet_path.exists():
+            self.get_logger().info(
+                f"[replay] no sample data at {parquet_path}, replay disabled"
+            )
+            return
+
+        try:
+            import pyarrow.parquet as pq
+
+            table = pq.read_table(str(parquet_path))
+            columns = table.column_names
+
+            # Extract action columns (action is stored as a list per row)
+            if "action" in columns:
+                action_col = table.column("action")
+                self._sample_actions = np.array(
+                    [row.as_py() for row in action_col], dtype=np.float32
+                )
+            else:
+                self.get_logger().warn(
+                    "[replay] parquet has no 'action' column, replay disabled"
+                )
+                return
+
+            # Read fps from info.json if available
+            info_path = sample_dir / "info.json"
+            if info_path.exists():
+                with open(info_path) as f:
+                    info = json.load(f)
+                self._sample_fps = info.get("fps", self.args.hz)
+
+            self.get_logger().info(
+                f"[replay] loaded {len(self._sample_actions)} steps, "
+                f"fps={self._sample_fps}"
+            )
+        except Exception as e:
+            self.get_logger().error(f"[replay] failed to load sample data: {e}")
+
+    # ── /replay ──────────────────────────────────────────────────────────
+    def _handle_replay(self, request, response):
+        with self._lock:
+            if self.is_running:
+                response.success = False
+                response.message = "already running (inference or replay)"
+                self.get_logger().warn("[replay] rejected — loop already running")
+                return response
+
+            if self._sample_actions is None:
+                response.success = False
+                response.message = "no sample data loaded"
+                self.get_logger().warn("[replay] rejected — no sample data")
+                return response
+
+            self._stop_event.clear()
+            self._step_count = 0
+
+            self._worker = threading.Thread(
+                target=self._replay_loop, daemon=True,
+            )
+            self._worker.start()
+
+        response.success = True
+        response.message = (
+            f"replay started ({len(self._sample_actions)} steps at "
+            f"{self._sample_fps} Hz)"
+        )
+        self.get_logger().info(f"[replay] {response.message}")
+        return response
+
+    # ── Replay loop (runs in background thread) ─────────────────────────
+    def _replay_loop(self):
+        """Play back recorded actions from the sample episode."""
+        period = 1.0 / max(self._sample_fps, 0.1)
+        total_steps = len(self._sample_actions)
+
+        self.get_logger().info(
+            f"[replay] running {total_steps} steps at {self._sample_fps} Hz"
+        )
+
+        try:
+            for step_idx in range(total_steps):
+                if self._stop_event.is_set():
+                    break
+
+                loop_start = time.time()
+                action = self._sample_actions[step_idx]
+
+                # Split action across agents and publish
+                start = 0
+                for a in self.agents:
+                    target = action[start : start + a.joint_len]
+                    start += a.joint_len
+                    if step_idx % 10 == 0:
+                        self.get_logger().info(
+                            f"[replay step {step_idx}/{total_steps}] {a.name}: "
+                            f"{np.round(target, 4).tolist()}"
+                        )
+                    if not self.args.dry_run:
+                        a.move_joint_step(target)
+
+                self._step_count += 1
+
+                elapsed = time.time() - loop_start
+                remaining = period - elapsed
+                if remaining > 0:
+                    self._stop_event.wait(timeout=remaining)
+
+        except Exception as e:
+            self.get_logger().error(f"[replay] exception: {e}")
+        finally:
+            self.get_logger().info(
+                f"[replay] finished after {self._step_count}/{total_steps} steps"
+            )
 
     # ── Worker loop (runs in background thread) ──────────────────────────
     def _inference_loop(self):

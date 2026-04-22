@@ -364,6 +364,12 @@
                                                         <q-icon name="merge_type" size="xs" />
                                                     </q-item-section>
                                                 </q-item>
+                                                <q-item clickable v-ripple v-close-popup @click="openDownsampleForm(dataset)">
+                                                    <q-item-section>Downsample Dataset</q-item-section>
+                                                    <q-item-section side>
+                                                        <q-icon name="compress" size="xs" />
+                                                    </q-item-section>
+                                                </q-item>
                                                 <q-item clickable v-ripple class="text-negative" @click="deleteDataset(dataset)">
                                                     <q-item-section>Delete Dataset</q-item-section>
                                                     <q-item-section side>
@@ -573,6 +579,61 @@
                 :task-id="selectedWorkspaceId"
                 v-if="selectedWorkspaceId"
             />
+        </q-dialog>
+
+        <q-dialog v-model="showDownsampleForm" persistent>
+            <q-card class="bg-secondary border-rounded border-white" dark style="min-width: 400px">
+                <q-card-section class="bg-dark text-white row">
+                    <div class="text-h6">Downsample Dataset</div>
+                    <q-space />
+                    <q-btn dense color="white" round icon="close" text-color="dark" @click="closeDownsampleForm" :disable="downsampleProcessing" />
+                </q-card-section>
+                <q-separator />
+                <q-card-section class="q-pa-lg" v-if="!downsampleProcessing && downsampleProgress === 0">
+                    <div class="text-white q-mb-md">
+                        Keep <b>{{ downsampleKeep }}</b> out of every <b>{{ downsampleEvery }}</b> steps
+                        ({{ Math.round(downsampleKeep / downsampleEvery * 100) }}%)
+                    </div>
+                    <q-input
+                        v-model.number="downsampleKeep"
+                        type="number"
+                        label="Keep (frames to keep per group)"
+                        dark outlined dense
+                        :rules="[v => v > 0 || 'Must be > 0', v => v < downsampleEvery || 'Must be less than Every']"
+                        class="q-mb-md"
+                    />
+                    <q-input
+                        v-model.number="downsampleEvery"
+                        type="number"
+                        label="Every (group size)"
+                        dark outlined dense
+                        :rules="[v => v > 1 || 'Must be > 1', v => v > downsampleKeep || 'Must be greater than Keep']"
+                    />
+                </q-card-section>
+                <q-card-section class="q-pa-lg" v-else>
+                    <div class="text-white q-mb-md">Downsampling in progress...</div>
+                    <q-linear-progress
+                        :value="downsampleProgress"
+                        color="primary"
+                        track-color="black"
+                        size="30px"
+                        instant-feedback
+                    >
+                        <div class="absolute-full flex flex-center">
+                            <q-badge color="white" text-color="dark" :label="`${Number(downsampleProgress * 100).toFixed(0)}%`" />
+                        </div>
+                    </q-linear-progress>
+                </q-card-section>
+                <q-card-actions align="right" class="q-pa-md" v-if="!downsampleProcessing && downsampleProgress === 0">
+                    <q-btn flat label="Cancel" color="white" @click="showDownsampleForm = false" />
+                    <q-btn
+                        label="Downsample"
+                        color="primary"
+                        :disable="downsampleKeep <= 0 || downsampleEvery <= 1 || downsampleKeep >= downsampleEvery"
+                        @click="startDownsample"
+                    />
+                </q-card-actions>
+            </q-card>
         </q-dialog>
 
         <q-dialog v-model="showCheckpointInfo" full-width>
@@ -1141,7 +1202,7 @@ async function exportCheckpoint(checkpoint) {
             let message = text;
             try {
                 message = JSON.parse(text).message || text;
-            } catch (_) { /* not JSON */ }
+            } catch { /* not JSON */ }
             throw new Error(message);
         }
 
@@ -1371,6 +1432,50 @@ function mergeDatasets(form) {
     });
 }
 
+const showDownsampleForm = ref(false);
+const downsampleKeep = ref(1);
+const downsampleEvery = ref(2);
+const downsampleTargetDataset = ref(null);
+const downsampleProgress = ref(0);
+const downsampleProcessing = ref(false);
+
+function openDownsampleForm(dataset) {
+    if (!dataset.episodes.length) {
+        Notify.create({
+            color: 'negative',
+            message: 'Dataset must have at least one episode to downsample.'
+        });
+        return;
+    }
+    downsampleTargetDataset.value = dataset;
+    downsampleKeep.value = 1;
+    downsampleEvery.value = 2;
+    downsampleProgress.value = 0;
+    downsampleProcessing.value = false;
+    showDownsampleForm.value = true;
+}
+
+function closeDownsampleForm() {
+    if (!downsampleProcessing.value) {
+        showDownsampleForm.value = false;
+    }
+}
+
+function startDownsample() {
+    const dataset = downsampleTargetDataset.value;
+    downsampleProcessing.value = true;
+    downsampleProgress.value = 0;
+    api.post(`/dataset/${dataset.id}/downsample`, {
+        name: `${dataset.name}_ds${downsampleKeep.value}_${downsampleEvery.value}`,
+        task_id: selectedWorkspaceId.value,
+        keep: downsampleKeep.value,
+        every: downsampleEvery.value,
+    }).catch(err => {
+        downsampleProcessing.value = false;
+        Notify.create({ color: 'negative', message: 'Failed to start downsample: ' + err.message });
+    });
+}
+
 onUnmounted(() => {
     robots.value.forEach(robot => {
         if (robot.handler) {
@@ -1400,6 +1505,23 @@ onMounted(() => {
             }
         });
     })
+
+    socket.on('downsample_progress', (data) => {
+        downsampleProgress.value = data.progress;
+    });
+
+    socket.on('downsample_complete', (data) => {
+        downsampleProcessing.value = false;
+        downsampleProgress.value = 0;
+        showDownsampleForm.value = false;
+        Notify.create({ color: 'positive', message: 'Downsample complete!' });
+        listDatasets().then(() => {
+            const new_dataset = datasets.value.find(d => d.id === data.dataset_id);
+            if (new_dataset) {
+                selectedDatasetId.value = new_dataset.id;
+            }
+        });
+    });
 
     socket.on('episode_added', (data) => {
         selectedDataset.value?.episodes.push({

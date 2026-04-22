@@ -299,6 +299,31 @@ function getFormRobotInfo(form) {
     return supportingRobots.value.find(r => r.name === form.find((e) => e.key === 'type').value);
 }
 
+// Message type catalog collected from SUPPORT_ROBOTS in backend global_configs.py
+const READ_TOPIC_MSG_OPTIONS = [
+    { label: 'sensor_msgs/JointState', value: 'sensor_msgs/JointState' },
+    { label: 'control_msgs/msg/JointTrajectoryControllerState', value: 'control_msgs/msg/JointTrajectoryControllerState' },
+    { label: 'control_msgs/JointTrajectoryControllerState', value: 'control_msgs/JointTrajectoryControllerState' },
+    { label: 'tm_msgs/msg/FeedbackState', value: 'tm_msgs/msg/FeedbackState' },
+    { label: 'fairino_msgs/msg/RobotNonrtState', value: 'fairino_msgs/msg/RobotNonrtState' },
+]
+
+const WRITE_TOPIC_MSG_OPTIONS = {
+    topic: [
+        { label: 'sensor_msgs/JointState', value: 'sensor_msgs/JointState' },
+        { label: 'std_msgs/Float64MultiArray', value: 'std_msgs/Float64MultiArray' },
+        { label: 'trajectory_msgs/JointTrajectory', value: 'trajectory_msgs/JointTrajectory' },
+    ],
+    service: [
+        { label: 'tm_msgs/srv/SendScript', value: 'tm_msgs/srv/SendScript' },
+        { label: 'fairino_msgs/srv/RemoteCmdInterface', value: 'fairino_msgs/srv/RemoteCmdInterface' },
+        { label: 'jaka_msgs/srv/ServoMove', value: 'jaka_msgs/srv/ServoMove' },
+    ],
+    action: [
+        { label: 'control_msgs/action/GripperCommand', value: 'control_msgs/action/GripperCommand' },
+    ],
+}
+
 const robotForm = ref([
     { key: 'id', value: null },
     { label: 'Robot Name', key: 'name', type: 'text', value: '', default: '' },
@@ -328,26 +353,24 @@ const robotForm = ref([
     { label: 'Joint Lower Bounds', key: 'joint_lower_bounds', type: 'custom', value: [], default: [] , show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
     { label: 'Joint Upper Bounds', key: 'joint_upper_bounds', type: 'custom', value: [], default: [] , show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
     { label: 'Read Topic', key: 'read_topic', type: 'text', value: '', default: '', show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
-    { label: 'Read Topic Message Type', key: 'read_topic_msg', type: 'select', value: '', default: 'sensor_msgs/JointState', 
-        options: [
-            { label: 'sensor_msgs/JointState', value: 'sensor_msgs/JointState' },
-        ],
-        show: (form) => form.find((e) => e.key === 'type').value === 'custom' 
+    { label: 'Read Topic Message Type', key: 'read_topic_msg', type: 'select', value: '', default: 'sensor_msgs/JointState',
+        options: computed(() => READ_TOPIC_MSG_OPTIONS),
+        show: (form) => form.find((e) => e.key === 'type').value === 'custom'
     },
-    { label: 'Write Type', key: 'write_type', type: 'select', value: '', default: 'topic', 
+    { label: 'Write Type', key: 'write_type', type: 'select', value: '', default: 'topic',
         options: [
             { label: 'Topic', value: 'topic' },
             { label: 'Service', value: 'service' },
             { label: 'Action', value: 'action' },
         ],
-        show: (form) => form.find((e) => e.key === 'type').value === 'custom' 
+        show: (form) => form.find((e) => e.key === 'type').value === 'custom'
     },
     { label: 'Write Topic', key: 'write_topic', type: 'text', value: '', default: '', show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
     { label: 'Write Topic Message Type', key: 'write_topic_msg', type: 'select', value: '', default: 'sensor_msgs/JointState',
-        options: [
-            { label: 'sensor_msgs/JointState', value: 'sensor_msgs/JointState' },
-            { label: 'control_msgs/action/GripperCommand', value: 'control_msgs/action/GripperCommand' },
-        ],
+        options: computed(() => {
+            const wt = robotForm.value.find((e) => e.key === 'write_type')?.value || 'topic'
+            return WRITE_TOPIC_MSG_OPTIONS[wt] || []
+        }),
         show: (form) => form.find((e) => e.key === 'type').value === 'custom'
     },
     { label: 'IK Settings (JSON)', key: 'ik_json', type: 'custom', value: '', default: '', optional: true,

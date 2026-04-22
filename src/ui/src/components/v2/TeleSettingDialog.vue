@@ -79,7 +79,7 @@
                                                     <span class="text-primary">{{ j.robot_name }}</span> {{ j.joint_name }}
                                                 </div>
                                                 <q-input
-                                                    v-model="j.origin"
+                                                    v-model.number="j.origin"
                                                     :label="`ID ${j.dxl_id}`"
                                                     type="number"
                                                     dense
@@ -107,7 +107,7 @@
                                     <div class="row q-col-gutter-sm q-mt-md" v-if="dxlArray.length">
                                         <div class="col-3" v-for="(j, i) in dxlArray" :key="i">
                                             <q-input
-                                                v-model="j.origin"
+                                                v-model.number="j.origin"
                                                 :label="`ID ${j.dxl_id} (${j.port})`"
                                                 type="number"
                                                 dense

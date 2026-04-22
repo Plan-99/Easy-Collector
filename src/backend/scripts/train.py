@@ -326,8 +326,24 @@ def main(args):
     db = DatabaseManager(DATABASES)
     Model.set_connection_resolver(db)
     
-    # Create a temporary directory to store dataset files
-    temp_dir = os.path.join(DATASET_DIR, "tmp")
+    # Create a temporary directory to store dataset files.
+    # Prefer /dev/shm (RAM filesystem) for faster data loading during training.
+    # Fall back to disk if /dev/shm doesn't have enough free space.
+    use_ramdisk = False
+    ramdisk_path = os.path.join("/dev/shm", f"easytrainer_tmp_{os.getpid()}")
+    disk_path = os.path.join(DATASET_DIR, "tmp")
+    try:
+        shm_stat = os.statvfs("/dev/shm")
+        shm_free_gb = (shm_stat.f_bavail * shm_stat.f_frsize) / (1024 ** 3)
+        if shm_free_gb > 2.0:  # at least 2 GB free
+            use_ramdisk = True
+            print(f"[RAM] Using /dev/shm for training data ({shm_free_gb:.1f} GB free)")
+        else:
+            print(f"[RAM] /dev/shm too small ({shm_free_gb:.1f} GB free), using disk")
+    except OSError:
+        print("[RAM] /dev/shm not available, using disk")
+
+    temp_dir = ramdisk_path if use_ramdisk else disk_path
     if os.path.exists(temp_dir):
         shutil.rmtree(temp_dir)
     os.makedirs(temp_dir)
@@ -419,15 +435,39 @@ def main(args):
                         )
                         os.makedirs(os.path.dirname(dst_video), exist_ok=True)
                         if os.path.exists(src_video):
-                            shutil.copy2(src_video, dst_video)
-                            # Pre-decode MP4 to mmap-friendly .npy beside it so the
-                            # dataloader can numpy-slice frames instead of re-decoding
-                            # the entire video on every epoch.
-                            from ..api.process.lerobot_io import _decode_video_frames
-                            frames = _decode_video_frames(dst_video)
-                            if frames:
-                                arr = np.stack(frames)  # (T, H, W, 3) uint8
-                                np.save(dst_video[:-4] + ".npy", arr)
+                            try:
+                                shutil.copy2(src_video, dst_video)
+                                # Pre-decode MP4 to mmap-friendly .npy beside it so the
+                                # dataloader can numpy-slice frames instead of re-decoding
+                                # the entire video on every epoch.
+                                from ..api.process.lerobot_io import _decode_video_frames
+                                frames = _decode_video_frames(dst_video)
+                                if frames:
+                                    arr = np.stack(frames)  # (T, H, W, 3) uint8
+                                    np.save(dst_video[:-4] + ".npy", arr)
+                            except OSError as _disk_err:
+                                if use_ramdisk:
+                                    print(f"[RAM] /dev/shm full, migrating to disk: {_disk_err}")
+                                    old_temp = temp_dir
+                                    temp_dir = disk_path
+                                    if os.path.exists(temp_dir):
+                                        shutil.rmtree(temp_dir)
+                                    shutil.copytree(old_temp, temp_dir)
+                                    shutil.rmtree(old_temp)
+                                    use_ramdisk = False
+                                    # Re-set dst paths and retry this file
+                                    dst_video = os.path.join(
+                                        temp_dir, "videos", f"chunk-{new_chunk:03d}", feat_key,
+                                        f"episode_{episode_counter:06d}.mp4"
+                                    )
+                                    os.makedirs(os.path.dirname(dst_video), exist_ok=True)
+                                    shutil.copy2(src_video, dst_video)
+                                    frames = _decode_video_frames(dst_video)
+                                    if frames:
+                                        arr = np.stack(frames)
+                                        np.save(dst_video[:-4] + ".npy", arr)
+                                else:
+                                    raise
                     elif feat.get("dtype") == "image" and feat_key in df.columns:
                         # Legacy: copy embedded image paths
                         sensor_name = feat_key.replace("observation.images.", "")
@@ -552,8 +592,9 @@ def main(args):
         raise e
 
     finally:
-        # Clean up the temporary directory
-        shutil.rmtree(temp_dir)
+        # Clean up the temporary directory (RAM or disk)
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
     
     
 # Script entry point

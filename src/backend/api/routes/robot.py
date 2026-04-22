@@ -323,7 +323,7 @@ def move_robot(id):
         return {'status': 'error', 'message': 'Robot not found'}, 404
 
     goal_pos = data.get('goal_pos')
-    step_size = data.get('step_size', 0.1)
+    step_size = data.get('step_size', 0.0005)
 
     if not goal_pos:
         return {'status': 'error', 'message': 'Action is required'}, 400

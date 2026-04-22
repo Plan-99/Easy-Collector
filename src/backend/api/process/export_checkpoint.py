@@ -24,6 +24,7 @@ from pathlib import Path
 
 from ...database.models.assembly_model import Assembly as AssemblyModel
 from ...database.models.sensor_model import Sensor as SensorModel
+from ...configs.global_configs import DATASET_DIR
 
 # Where the trained checkpoints live inside the container.
 CHECKPOINT_DIR = "/root/src/backend/checkpoints"
@@ -202,6 +203,51 @@ def _add_dir_to_zip(
             zf.write(abs_path, arcname=str(Path(arc_root) / rel))
 
 
+def _bundle_sample_episode(
+    zf: zipfile.ZipFile,
+    checkpoint: dict,
+    meta: dict,
+) -> None:
+    """Add the first episode of the first training dataset as sample replay data.
+
+    Bundles:
+        sample_data/episode_000000.parquet   — state + action columns
+        sample_data/videos/observation.images.sensor_<id>/episode_000000.mp4
+        sample_data/info.json                — fps + feature shapes from the dataset
+    """
+    dataset_info = checkpoint.get("dataset_info") or {}
+    if not dataset_info:
+        return
+
+    first_ds_id = str(next(iter(dataset_info)))
+    ds_path = Path(DATASET_DIR) / first_ds_id
+
+    # Parquet: data/chunk-000/episode_000000.parquet
+    parquet_file = ds_path / "data" / "chunk-000" / "episode_000000.parquet"
+    if not parquet_file.exists():
+        return
+
+    zf.write(parquet_file, arcname="sample_data/episode_000000.parquet")
+
+    # info.json — contains fps, feature shapes, etc.
+    info_file = ds_path / "meta" / "info.json"
+    if info_file.exists():
+        zf.write(info_file, arcname="sample_data/info.json")
+
+    # Video files for episode 0, one per sensor
+    sensor_ids = [s["id"] for s in (meta.get("sensors") or [])]
+    for sid in sensor_ids:
+        video_file = (
+            ds_path / "videos" / "chunk-000"
+            / f"observation.images.sensor_{sid}" / "episode_000000.mp4"
+        )
+        if video_file.exists():
+            zf.write(
+                video_file,
+                arcname=f"sample_data/videos/observation.images.sensor_{sid}/episode_000000.mp4",
+            )
+
+
 def bundle_checkpoint_zip(checkpoint, task, policy) -> tuple[io.BytesIO, str]:
     """Build the zip in-memory.
 
@@ -265,7 +311,10 @@ def bundle_checkpoint_zip(checkpoint, task, policy) -> tuple[io.BytesIO, str]:
                 raise FileNotFoundError(f"Export template missing: {tpl}")
             zf.write(tpl, arcname=arcname)
 
-        # 5. export_meta.json — DB-derived metadata
+        # 5. sample_data/ — first episode from the first training dataset
+        _bundle_sample_episode(zf, checkpoint, meta)
+
+        # 6. export_meta.json — DB-derived metadata
         zf.writestr("export_meta.json", json.dumps(meta, indent=2, ensure_ascii=False))
 
     buf.seek(0)
