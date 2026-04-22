@@ -10,17 +10,23 @@
       "build": "colcon"
     },
     "sdk": {
-      "target": "robot_sdk/piper"
+      "target": "robot_sdk/piper",
+      "install_cmd": "pip3 install -e ."
     }
   },
   "dependencies": {
     "apt": [
-      "ros-humble-moveit",
       "ros-humble-ros2-control",
-      "ros-humble-ros2-controllers"
+      "ros-humble-ros2-controllers",
+      "ros-humble-controller-manager",
+      "ros-humble-moveit",
+      "ros-humble-xacro",
+      "can-utils",
+      "ethtool"
     ],
     "pip": [
-      "piper_sdk"
+      "python-can>=4.3.1",
+      "scipy"
     ]
   }
 }

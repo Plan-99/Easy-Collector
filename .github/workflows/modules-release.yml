@@ -2,7 +2,7 @@ name: Package Modules
 
 on:
   push:
-    branches: [main]
+    branches: [main, module_up]
     paths:
       - 'modules/**'
   workflow_dispatch:
