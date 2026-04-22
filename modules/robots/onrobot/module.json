@@ -1,7 +1,7 @@
 {
   "id": "gripper_onrobot",
   "name": "OnRobot Gripper",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "category": "robot",
   "description": "OnRobot 그리퍼 드라이버",
   "install": {
@@ -15,6 +15,8 @@
   },
   "dependencies": {
     "apt": [],
-    "pip": ["pymodbus"]
+    "pip": [
+      "pymodbus"
+    ]
   }
 }

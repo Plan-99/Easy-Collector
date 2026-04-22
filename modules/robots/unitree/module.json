@@ -1,7 +1,7 @@
 {
   "id": "robot_unitree",
   "name": "Unitree",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "category": "robot",
   "description": "Unitree 로봇 드라이버",
   "install": {

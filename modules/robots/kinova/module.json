@@ -1,7 +1,7 @@
 {
   "id": "robot_kinova",
   "name": "Kinova Kortex",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "category": "robot",
   "description": "Kinova Kortex 로봇 드라이버",
   "install": {
@@ -14,7 +14,10 @@
     }
   },
   "dependencies": {
-    "apt": ["ros-humble-moveit", "ros-humble-ros2-control"],
+    "apt": [
+      "ros-humble-moveit",
+      "ros-humble-ros2-control"
+    ],
     "pip": []
   }
 }

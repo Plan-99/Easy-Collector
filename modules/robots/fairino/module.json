@@ -1,7 +1,7 @@
 {
   "id": "robot_fairino",
   "name": "Fairino",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "category": "robot",
   "description": "Fairino 협동로봇 드라이버",
   "install": {
@@ -14,7 +14,9 @@
     }
   },
   "dependencies": {
-    "apt": ["ros-humble-moveit"],
+    "apt": [
+      "ros-humble-moveit"
+    ],
     "pip": []
   }
 }

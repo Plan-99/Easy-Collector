@@ -1,7 +1,7 @@
 {
   "id": "robot_rbpodo",
   "name": "RBPodo",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "category": "robot",
   "description": "Rainbow Robotics RBPodo 로봇 드라이버",
   "install": {
@@ -14,7 +14,11 @@
     }
   },
   "dependencies": {
-    "apt": ["ros-humble-moveit", "cmake", "build-essential"],
+    "apt": [
+      "ros-humble-moveit",
+      "cmake",
+      "build-essential"
+    ],
     "pip": []
   }
 }

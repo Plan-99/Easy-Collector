@@ -1,7 +1,7 @@
 {
   "id": "robot_techman",
   "name": "Techman TM",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "category": "robot",
   "description": "Techman TM 로봇 드라이버",
   "install": {
@@ -14,7 +14,9 @@
     }
   },
   "dependencies": {
-    "apt": ["ros-humble-moveit"],
+    "apt": [
+      "ros-humble-moveit"
+    ],
     "pip": []
   }
 }
