@@ -19,7 +19,7 @@ def create_policy():
         settings=data.get('settings')
     )
     return {
-        'status': 'success', 
+        'status': 'success',
         'message': 'Policy Created',
         'data': new_policy.to_dict()
     }, 200
@@ -35,7 +35,7 @@ def update_policy(id):
     policy.type = data.get('type', policy.type)
     policy.settings = data.get('settings', policy.settings)
     policy.save()
-    
+
     return {'status': 'success', 'message': 'Policy Updated'}, 200
 
 @policy_bp.route('/policy/<id>', methods=['DELETE'])
@@ -44,5 +44,5 @@ def delete_policy(id):
     if not policy:
         return {'status': 'error', 'message': 'Policy not found'}, 404
 
-    policy.delete()
+    policy.delete_instance()
     return {'status': 'success', 'message': 'Policy Deleted'}, 200

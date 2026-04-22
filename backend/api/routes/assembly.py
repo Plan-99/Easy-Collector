@@ -3,21 +3,21 @@ import json
 from ...database.models.assembly_model import Assembly as AssemblyModel
 from ..utils.runtime import attach_robot_runtime
 
-# 1. Blueprint 생성
-# 이 블루프린트는 어셈블리와 관련된 'HTTP' 라우트를 관리합니다.
 assembly_bp = Blueprint('assembly', __name__)
+
 @assembly_bp.route('/assemblies', methods=['GET'])
 def get_assemblies():
-    assemblies = AssemblyModel.where('hide', False).with_(
-        'teleoperators',
-        'left_arm',
-        'right_arm',
-        'left_tool',
-        'right_tool',
-        'mobile_base',    
-    ).get()
+    assemblies = AssemblyModel.select().where(AssemblyModel.hide == False, AssemblyModel.deleted_at.is_null())
     assemblies = [assembly.to_dict() for assembly in assemblies]
     processes = set(current_app.pm.list_processes())
+    try:
+        from ...bridge.client import get_bridge_client
+        from ...bridge.generated import robot_bridge_pb2 as pb
+        client = get_bridge_client()
+        ros2_procs = client.driver.ListProcesses(pb.Empty())
+        processes.update(ros2_procs.names)
+    except Exception:
+        pass
     for assembly in assemblies:
         if assembly.get('robots'):
             assembly['robots'] = [attach_robot_runtime(robot, processes) for robot in assembly['robots']]

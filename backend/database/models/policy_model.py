@@ -1,5 +1,7 @@
-from orator import Model, SoftDeletes
-from orator.orm import belongs_to
+from peewee import CharField, TextField, DateTimeField
+from ..config.database import SoftDeleteModel
+import json
+import datetime
 
 
 POLICY_CONFIGS = {
@@ -22,33 +24,40 @@ POLICY_CONFIGS = {
     }
 }
 
-class PolicyObserver:
-    def creating(self, policy):
-        if not getattr(policy, 'settings', None):
-            policy_type = policy.type
-            if policy_type in POLICY_CONFIGS:
-                policy.settings = POLICY_CONFIGS[policy_type]
-            else:
-                policy.settings = {}
-                
 
-class Policy(Model, SoftDeletes):
-
-    __fillable__ = [
-        'name',
-        'type',
-        'batch_size',
-        'num_epochs',
-        'settings',
-    ]
+class Policy(SoftDeleteModel):
+    class Meta:
+        table_name = 'policies'
 
     __casts__ = {
         'settings': 'json'
     }
-    
-    __timestamps__ = True
-    
-    
-    @staticmethod
-    def boot():
-        Policy.observe(PolicyObserver())
+
+    name = CharField(null=True)
+    type = CharField(null=True)
+    batch_size = CharField(null=True)
+    num_epochs = CharField(null=True)
+    settings = TextField(null=True)
+    created_at = DateTimeField(default=datetime.datetime.now)
+    updated_at = DateTimeField(default=datetime.datetime.now)
+    deleted_at = DateTimeField(null=True)
+
+    def save(self, *args, **kwargs):
+        self.updated_at = datetime.datetime.now()
+        val = getattr(self, 'settings', None)
+        if val is not None and not isinstance(val, str):
+            self.settings = json.dumps(val)
+        return super().save(*args, **kwargs)
+
+    @classmethod
+    def create(cls, **kwargs):
+        # Apply observer logic
+        if 'settings' not in kwargs or not kwargs['settings']:
+            policy_type = kwargs.get('type', '')
+            if policy_type in POLICY_CONFIGS:
+                kwargs['settings'] = POLICY_CONFIGS[policy_type]
+            else:
+                kwargs['settings'] = {}
+        if isinstance(kwargs.get('settings'), (dict, list)):
+            kwargs['settings'] = json.dumps(kwargs['settings'])
+        return super().create(**kwargs)

@@ -1,17 +1,20 @@
-from orator import Model, SoftDeletes
-from orator.orm import belongs_to
-from .task_model import Task
-from orator.orm import accessor
+from peewee import CharField, IntegerField, TextField, DateTimeField
+from ..config.database import SoftDeleteModel
+import json
 import os
+import datetime
 from ...configs.global_configs import DATASET_DIR
-from ...api.process.lerobot_io import get_episodes_as_file_list, get_dataset_metadata, get_dataset_info
+from ...api.process.lerobot_io import get_episodes_as_file_list, get_dataset_metadata
 
-class Dataset(Model, SoftDeletes):
 
-    __fillable__ = [
-        'name',
-        'task_id',
-    ]
+class Dataset(SoftDeleteModel):
+    class Meta:
+        table_name = 'datasets'
+
+    __casts__ = {
+        'sensor_ids': 'json',
+        'dataset_metadata': 'json',
+    }
 
     __appends__ = [
         'robot_ids',
@@ -21,44 +24,46 @@ class Dataset(Model, SoftDeletes):
         'dataset_metadata',
     ]
 
-    __casts__ = {
-        'sensor_ids': 'json',
-        'dataset_metadata': 'json',
-    }
+    name = CharField(null=True)
+    task_id = IntegerField(null=True)
+    created_at = DateTimeField(default=datetime.datetime.now)
+    updated_at = DateTimeField(default=datetime.datetime.now)
+    deleted_at = DateTimeField(null=True)
 
-    __timestamps__ = True
+    def save(self, *args, **kwargs):
+        self.updated_at = datetime.datetime.now()
+        return super().save(*args, **kwargs)
 
-
-    @belongs_to
+    @property
     def task(self):
-        return Task
+        from .task_model import Task
+        return Task.find(self.task_id) if self.task_id else None
 
-    @accessor
+    @property
     def robot_ids(self):
-        return self.task.robot_ids if self.task else None
+        task = self.task
+        return task._sensor_ids if task else None  # Note: original was task.robot_ids
 
-    @accessor
+    @property
     def sensor_ids(self):
-        return self.task.sensor_ids if self.task else None
+        task = self.task
+        return task._sensor_ids if task else None
 
-    @accessor
+    @property
     def episode_len(self):
-        return self.task.episode_len if self.task else None
+        task = self.task
+        return task.episode_len if task else None
 
-    @accessor
+    @property
     def episodes(self):
         folder_path = os.path.join(DATASET_DIR, str(self.id))
         if not os.path.exists(folder_path) or not os.path.isdir(folder_path):
             return []
+        return get_episodes_as_file_list(folder_path)
 
-        episodes = get_episodes_as_file_list(folder_path)
-        return episodes
-
-    @accessor
+    @property
     def dataset_metadata(self):
-        """Returns sensor/robot names from LeRobot dataset metadata."""
         folder_path = os.path.join(DATASET_DIR, str(self.id))
         if not os.path.exists(folder_path) or not os.path.isdir(folder_path):
             return {'sensors': [], 'robots': []}
-
         return get_dataset_metadata(folder_path)

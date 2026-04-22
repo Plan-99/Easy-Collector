@@ -1,54 +1,68 @@
-from orator import Model, accessor, SoftDeletes
-from orator.orm import has_many, belongs_to
-import json
-from ..models.teleoperator_model import Teleoperator as TeleoperatorModel
-from .robot_model import Robot as RobotModel
+from peewee import CharField, IntegerField, BooleanField, DateTimeField
+from ..config.database import SoftDeleteModel
+import datetime
 
 
-class Assembly(Model, SoftDeletes):
-    __fillable__ = [
-        'name',
-        'left_arm_id',
-        'right_arm_id',
-        'left_tool_id',
-        'right_tool_id',
-        'mobile_base_id',
-    ]
-
-    __timestamps__ = True
+class Assembly(SoftDeleteModel):
+    class Meta:
+        table_name = 'assemblies'
 
     __appends__ = [
         'robots'
     ]
 
-    @has_many
+    name = CharField(null=True)
+    left_arm_id = IntegerField(null=True)
+    right_arm_id = IntegerField(null=True)
+    left_tool_id = IntegerField(null=True)
+    right_tool_id = IntegerField(null=True)
+    mobile_base_id = IntegerField(null=True)
+    hide = BooleanField(default=False)
+    created_at = DateTimeField(default=datetime.datetime.now)
+    updated_at = DateTimeField(default=datetime.datetime.now)
+    deleted_at = DateTimeField(null=True)
+
+    def save(self, *args, **kwargs):
+        self.updated_at = datetime.datetime.now()
+        return super().save(*args, **kwargs)
+
+    @property
     def teleoperators(self):
-        return TeleoperatorModel
-    
-    @belongs_to('left_arm_id')
+        from .teleoperator_model import Teleoperator
+        return list(Teleoperator.select().where(
+            Teleoperator.assembly_id == self.id,
+            Teleoperator.deleted_at.is_null()
+        ))
+
+    @property
     def left_arm(self):
-        return RobotModel
-    
-    @belongs_to('right_arm_id')
+        from .robot_model import Robot
+        return Robot.find(self.left_arm_id) if self.left_arm_id else None
+
+    @property
     def right_arm(self):
-        return RobotModel
-    
-    @belongs_to('left_tool_id')
+        from .robot_model import Robot
+        return Robot.find(self.right_arm_id) if self.right_arm_id else None
+
+    @property
     def left_tool(self):
-        return RobotModel
-    
-    @belongs_to('right_tool_id')
+        from .robot_model import Robot
+        return Robot.find(self.left_tool_id) if self.left_tool_id else None
+
+    @property
     def right_tool(self):
-        return RobotModel
-    
-    @belongs_to('mobile_base_id')
+        from .robot_model import Robot
+        return Robot.find(self.right_tool_id) if self.right_tool_id else None
+
+    @property
     def mobile_base(self):
-        return RobotModel
-    
-    @accessor
+        from .robot_model import Robot
+        return Robot.find(self.mobile_base_id) if self.mobile_base_id else None
+
+    @property
     def robots(self):
+        from .robot_model import Robot
         robots = []
-        # 중복된 로봇은 한 번만 추가
         robot_ids = set([
             self.left_arm_id,
             self.right_arm_id,
@@ -58,7 +72,17 @@ class Assembly(Model, SoftDeletes):
         ])
         for robot_id in robot_ids:
             if robot_id is not None:
-                robot = RobotModel.find(robot_id).to_dict()
+                robot = Robot.find(robot_id)
                 if robot:
-                    robots.append(robot)
+                    robots.append(robot.to_dict())
         return robots
+
+    def to_dict(self):
+        data = super().to_dict()
+        # Include teleoperators
+        data['teleoperators'] = [t.to_dict() for t in self.teleoperators]
+        # Include related robot models
+        for rel in ('left_arm', 'right_arm', 'left_tool', 'right_tool', 'mobile_base'):
+            obj = getattr(self, rel)
+            data[rel] = obj.to_dict() if obj else None
+        return data

@@ -12,7 +12,7 @@ from app_context import load_config, save_config
 
 # API base URL — change to production domain when deployed
 _CONFIG_KEY = "license_server_url"
-_DEFAULT_URL = "http://localhost:3000"
+_DEFAULT_URL = "https://easytrainerhome.vercel.app"
 
 
 def _get_api_url() -> str:

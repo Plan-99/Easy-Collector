@@ -8,7 +8,7 @@ from backend.policies.utils import make_policy, VISION_BACKBONE_MAP, process_ima
 
 class EmbeddingHelper:
     def __init__(self, checkpoint_id):
-        self.policy = ACTPolicy.from_pretrained(f"/root/backend/checkpoints/{checkpoint_id}")
+        self.policy = ACTPolicy.from_pretrained(f"/root/src/backend/checkpoints/{checkpoint_id}")
         self.sensors = ["sensor_1", "sensor_2"]  # Example sensor IDs
         self.robots = ["robot_4"]  # Example robot IDs
         self.action_batch_size = 10

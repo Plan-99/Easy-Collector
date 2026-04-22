@@ -11,19 +11,30 @@ from ..process.export_checkpoint import bundle_checkpoint_zip
 
 checkpoint_bp = Blueprint('checkpoint_bp', __name__)
 
-CHECKPOINT_DIR = '/root/backend/checkpoints'
+CHECKPOINT_DIR = '/root/src/backend/checkpoints'
 
 @checkpoint_bp.route('/checkpoints', methods=['GET'])
 def get_checkpoints():
-    query = request.args.get('where', None)
-    query = query.split('|') if query else []
-    checkpointsQuery = CheckpointModel.with_('policy', 'task', 'load_model')
-    for q in query:
-        qarr = q.split(',')
-        checkpointsQuery = checkpointsQuery.where(qarr[0], qarr[1], qarr[2])
+    query_str = request.args.get('where', None)
+    query_parts = query_str.split('|') if query_str else []
 
-    checkpoints = checkpointsQuery.get()    
-    checkpoints = [checkpoint.to_dict() for checkpoint in checkpoints]
+    q = CheckpointModel.select().where(CheckpointModel.deleted_at.is_null())
+    for part in query_parts:
+        qarr = part.split(',')
+        field = getattr(CheckpointModel, qarr[0], None)
+        if field:
+            op = qarr[1]
+            val = qarr[2]
+            if op == '=':
+                q = q.where(field == val)
+            elif op == '!=':
+                q = q.where(field != val)
+            elif op == '>':
+                q = q.where(field > val)
+            elif op == '<':
+                q = q.where(field < val)
+
+    checkpoints = [checkpoint.to_dict() for checkpoint in q]
     return {
         'status': 'success', 'checkpoints': checkpoints}, 200
 
@@ -63,8 +74,8 @@ def check_create_successed(id):
         return {'check_create_successed': True, 'message': 'Checkpoint created successfully'}, 200
     else:
         return {'check_create_successed': False, 'message': 'Checkpoint creation failed'}, 200
-    
-    
+
+
 @checkpoint_bp.route('/checkpoint/<id>/:start_test', methods=['POST'])
 def start_test(id):
     data = request.json
@@ -87,7 +98,7 @@ def start_test(id):
         temporal_ensemble_coeff=data.get('temporal_ensemble_coeff', 0.01),
         action_type=data.get('action_type', None),
     )
-    
+
     return {'status': 'success', 'message': 'Checkpoint test started'}, 200
 
 @checkpoint_bp.route('/checkpoint/<id>/:stop_test', methods=['POST'])
@@ -129,7 +140,7 @@ def stop_failure_detection(id):
 @checkpoint_bp.route('/checkpoint/<id>/:export', methods=['POST', 'GET'])
 def export_checkpoint(id):
     """Bundle checkpoint files + standalone inference code into a zip download."""
-    checkpoint = CheckpointModel.with_('policy', 'task').find(id)
+    checkpoint = CheckpointModel.find(id)
     if not checkpoint:
         return {'status': 'error', 'message': 'Checkpoint not found'}, 404
     if not checkpoint.policy:
@@ -187,7 +198,7 @@ def update_checkpoint(id):
 
     checkpoint.name = data.get('name', checkpoint.name)
     checkpoint.save()
-    
+
     return {'status': 'success', 'message': 'Checkpoint Updated'}, 200
 
 
@@ -201,6 +212,5 @@ def delete_checkpoint(id):
     if os.path.exists(folder_path) and os.path.isdir(folder_path):
         shutil.rmtree(folder_path)
 
-    checkpoint.delete()
+    checkpoint.delete_instance()
     return {'status': 'success', 'message': 'Checkpoint Deleted'}, 200
-

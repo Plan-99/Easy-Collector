@@ -250,7 +250,8 @@ def augment_dataset(dataset_id, aug_dataset_id, lightness, rectangles, salt_and_
                         else:
                             img = apply_hsv(img, fixed_h_adj, fixed_s_adj, fixed_v_adj)
 
-                    frame_path = os.path.join(imgs_dir, f"frame_{frame_idx:06d}.png")
+                    # lerobot encode_video_frames는 "frame-NNNNNN.png"(하이픈)을 glob한다.
+                    frame_path = os.path.join(imgs_dir, f"frame-{frame_idx:06d}.png")
                     img.save(frame_path)
 
                 # Encode PNGs to MP4
@@ -292,12 +293,19 @@ def augment_dataset(dataset_id, aug_dataset_id, lightness, rectangles, salt_and_
             state_data = np.array(df["observation.state"].tolist(), dtype=np.float32)
             action_data = np.array(df["action"].tolist(), dtype=np.float32)
 
+            def _as_seq(arr, dtype):
+                # feature shape=[1]인 스칼라 필드는 length-1 리스트로 wrap해야 한다.
+                a = np.asarray(arr, dtype=dtype)
+                if a.ndim == 1:
+                    a = a.reshape(-1, 1)
+                return a
+
             episode_dict = {
-                "index": np.arange(global_start, global_start + num_frames, dtype=np.int64),
-                "episode_index": np.full(num_frames, aug_ep_idx, dtype=np.int64),
-                "frame_index": np.arange(num_frames, dtype=np.int64),
-                "timestamp": np.array(df["timestamp"].tolist(), dtype=np.float32),
-                "task_index": np.array(df["task_index"].tolist(), dtype=np.int64),
+                "index": _as_seq(np.arange(global_start, global_start + num_frames), np.int64),
+                "episode_index": _as_seq(np.full(num_frames, aug_ep_idx), np.int64),
+                "frame_index": _as_seq(np.arange(num_frames), np.int64),
+                "timestamp": _as_seq(df["timestamp"].tolist(), np.float32),
+                "task_index": _as_seq(df["task_index"].tolist(), np.int64),
                 "observation.state": state_data,
                 "action": action_data,
             }
@@ -309,7 +317,7 @@ def augment_dataset(dataset_id, aug_dataset_id, lightness, rectangles, salt_and_
                     episode_dict[col_name] = np.array(df[col_name].tolist(), dtype=np.float32)
 
             if "succeed" in df.columns:
-                episode_dict["succeed"] = np.array(df["succeed"].tolist(), dtype=np.float32)
+                episode_dict["succeed"] = _as_seq(df["succeed"].tolist(), np.float32)
 
             parquet_features = {k: v for k, v in features.items() if v.get("dtype") not in ("video", "image")}
             hf_features = get_hf_features_from_features(parquet_features)

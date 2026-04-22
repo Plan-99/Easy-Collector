@@ -1,24 +1,12 @@
-from orator import Model, SoftDeletes
-from orator.orm import belongs_to, accessor
-from .robot_model import Robot
-from .sensor_model import Sensor
-from .assembly_model import Assembly
+from peewee import CharField, IntegerField, TextField, DateTimeField
+from ..config.database import SoftDeleteModel
+import json
+import datetime
 
-class Task(Model, SoftDeletes):
 
-    __fillable__ = [
-        'name',
-        'home_pose',
-        'end_pose',
-        'image',
-        'episode_len',
-        'settings',
-        'assembly_id',
-        'sensor_ids',
-        'sensor_img_size',
-        'sensor_cropped_area',
-        'sensor_rotate',
-    ]
+class Task(SoftDeleteModel):
+    class Meta:
+        table_name = 'tasks'
 
     __casts__ = {
         'home_pose': 'json',
@@ -38,72 +26,130 @@ class Task(Model, SoftDeletes):
         'sensor_rotate'
     ]
 
-    __timestamps__ = True
+    name = CharField(null=True)
+    home_pose = TextField(null=True)
+    end_pose = TextField(null=True)
+    image = CharField(null=True)
+    episode_len = IntegerField(null=True)
+    settings = TextField(null=True)
+    assembly_id = IntegerField(null=True)
+    sensor_ids = TextField(null=True)
+    sensor_img_size = TextField(null=True)
+    sensor_cropped_area = TextField(null=True)
+    sensor_rotate = TextField(null=True)
+    created_at = DateTimeField(default=datetime.datetime.now)
+    updated_at = DateTimeField(default=datetime.datetime.now)
+    deleted_at = DateTimeField(null=True)
 
+    def save(self, *args, **kwargs):
+        self.updated_at = datetime.datetime.now()
+        for field_name in self.__casts__:
+            val = getattr(self, field_name, None)
+            if val is not None and not isinstance(val, str):
+                setattr(self, field_name, json.dumps(val))
+        return super().save(*args, **kwargs)
 
-    @accessor
-    def home_pose(self):
+    def _get_json(self, field_name):
+        val = getattr(self, field_name, None)
+        if isinstance(val, str):
+            try:
+                return json.loads(val)
+            except (json.JSONDecodeError, TypeError):
+                return val
+        return val
+
+    @property
+    def _settings(self):
+        return self._get_json('settings') or {}
+
+    @property
+    def _sensor_ids(self):
+        return self._get_json('sensor_ids') or []
+
+    @property
+    def assembly(self):
+        from .assembly_model import Assembly
+        return Assembly.find(self.assembly_id) if self.assembly_id else None
+
+    @property
+    def home_pose_computed(self):
+        from .robot_model import Robot
         home_pose = {}
-        if not self.assembly:
+        assembly = self.assembly
+        if not assembly:
             return home_pose
-        for robot in self.assembly.robots:
-            robot = Robot.find(robot['id'])
-            if str(robot.id) not in self.settings.get('robots', {}):
+        for robot_dict in assembly.robots:
+            robot = Robot.find(robot_dict['id'])
+            if str(robot.id) not in self._settings.get('robots', {}):
                 home_pose[str(robot.id)] = [0.0] * len(robot.joint_names)
             else:
-                home_pose[str(robot.id)] = self.settings['robots'][str(robot.id)].get('home_pose', [0.0] * len(robot.joint_names))
+                home_pose[str(robot.id)] = self._settings['robots'][str(robot.id)].get('home_pose', [0.0] * len(robot.joint_names))
         return home_pose
-    
-    @accessor
+
+    @property
     def joint_dim(self):
+        from .robot_model import Robot
         joint_dim = 0
-        if not self.assembly:
+        assembly = self.assembly
+        if not assembly:
             return joint_dim
-        for robot in self.assembly.robots:
-            robot = Robot.find(robot['id'])
+        for robot_dict in assembly.robots:
+            robot = Robot.find(robot_dict['id'])
             joint_dim += robot.joint_dim
         return joint_dim
-    
-    @accessor
+
+    @property
     def sensors(self):
+        from .sensor_model import Sensor
         sensors = []
-        for sensor_id in self.sensor_ids:
+        for sensor_id in self._sensor_ids:
             sensor = Sensor.find(sensor_id)
             if sensor:
                 sensors.append(sensor.to_dict())
         return sensors
-    
-    @accessor
-    def sensor_img_size(self):
+
+    @property
+    def sensor_img_size_computed(self):
         img_size = {}
-        for sensor_id in self.sensor_ids:
-            if str(sensor_id) not in self.settings.get('sensors', {}):
+        for sensor_id in self._sensor_ids:
+            if str(sensor_id) not in self._settings.get('sensors', {}):
                 img_size[str(sensor_id)] = [640, 480]
             else:
-                img_size[str(sensor_id)] = self.settings['sensors'][str(sensor_id)].get('img_size', [640, 480])
+                img_size[str(sensor_id)] = self._settings['sensors'][str(sensor_id)].get('img_size', [640, 480])
         return img_size
 
-    @accessor
-    def sensor_cropped_area(self):
+    @property
+    def sensor_cropped_area_computed(self):
         cropped_area = {}
-        for sensor_id in self.sensor_ids:
-            if str(sensor_id) not in self.settings.get('sensors', {}):
+        for sensor_id in self._sensor_ids:
+            if str(sensor_id) not in self._settings.get('sensors', {}):
                 cropped_area[str(sensor_id)] = [0, 0, 640, 480]
             else:
-                cropped_area[str(sensor_id)] = self.settings['sensors'][str(sensor_id)].get('cropped_area', [0, 0, 640, 480])
+                cropped_area[str(sensor_id)] = self._settings['sensors'][str(sensor_id)].get('cropped_area', [0, 0, 640, 480])
         return cropped_area
-    
-    @accessor
-    def sensor_rotate(self):
+
+    @property
+    def sensor_rotate_computed(self):
         rotation = {}
-        for sensor_id in self.sensor_ids:
-            if str(sensor_id) not in self.settings.get('sensors', {}):
+        for sensor_id in self._sensor_ids:
+            if str(sensor_id) not in self._settings.get('sensors', {}):
                 rotation[str(sensor_id)] = 0
             else:
-                rotation[str(sensor_id)] = self.settings['sensors'][str(sensor_id)].get('rotate', 0)
+                rotation[str(sensor_id)] = self._settings['sensors'][str(sensor_id)].get('rotate', 0)
         return rotation
-    
-    @belongs_to('assembly_id')
-    def assembly(self):
-        return Assembly
-        
+
+    def to_dict(self):
+        data = super().to_dict()
+        # Override appended properties
+        data['home_pose'] = self.home_pose_computed
+        data['joint_dim'] = self.joint_dim
+        data['sensors'] = self.sensors
+        data['sensor_img_size'] = self.sensor_img_size_computed
+        data['sensor_cropped_area'] = self.sensor_cropped_area_computed
+        data['sensor_rotate'] = self.sensor_rotate_computed
+        data['sensor_ids'] = self._sensor_ids
+        data['settings'] = self._settings
+        # Include assembly
+        assembly = self.assembly
+        data['assembly'] = assembly.to_dict() if assembly else None
+        return data

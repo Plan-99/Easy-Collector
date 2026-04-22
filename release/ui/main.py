@@ -183,8 +183,6 @@ def main() -> int:
         win._update_manager.schedule_check(delay_ms=0)
     except Exception:
         pass
-    if not win.auto_launch_enabled():
-        return 0
     return app.exec()
 
 

@@ -40,7 +40,7 @@ from lerobot.policies.act.modeling_act import ACTPolicy
 from ..policies.utils import make_easytrainer_processors, process_image
 
 
-CKPT_ROOT = Path("/root/backend/checkpoints")
+CKPT_ROOT = Path("/root/src/backend/checkpoints")
 DATASET_ROOT = Path("/opt/easytrainer/datasets")
 
 
@@ -97,7 +97,7 @@ def build_policy_input(state: np.ndarray, images: dict, vision_backbone: str = "
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ckpt", type=int, required=True, help="checkpoint id under /root/backend/checkpoints")
+    parser.add_argument("--ckpt", type=int, required=True, help="checkpoint id under /root/src/backend/checkpoints")
     parser.add_argument("--dataset", type=int, required=True, help="dataset id under /opt/easytrainer/datasets")
     parser.add_argument("--episode", type=int, default=0, help="episode index")
     parser.add_argument(

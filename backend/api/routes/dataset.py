@@ -7,6 +7,7 @@ from ..process.read_dataset import read_dataset, add_config
 from ..process.record_episode import record_episode
 from ..process.augment_dataset import augment_dataset
 from ..process.merge_dataset import merge_dataset
+from ..process.downsample_dataset import downsample_dataset
 from ..process.lerobot_io import (
     get_episodes_as_file_list, get_dataset_metadata, get_dataset_info,
     delete_episode as lerobot_delete_episode, list_episodes,
@@ -18,7 +19,10 @@ dataset_bp = Blueprint('dataset_bp', __name__)
 def get_datasets():
     params = request.args
     task_id = params.get('task_id')
-    datasets = DatasetModel.where('task_id', task_id).get() if task_id else DatasetModel.all()
+    if task_id:
+        datasets = DatasetModel.select().where(DatasetModel.task_id == task_id, DatasetModel.deleted_at.is_null())
+    else:
+        datasets = DatasetModel.all()
     datasets = [dataset.to_dict() for dataset in datasets]
     return {
         'status': 'success', 'datasets': datasets}, 200
@@ -58,7 +62,7 @@ def create_dataset():
     dataset_path = os.path.join(DATASET_DIR, str(new_dataset.id))
     os.makedirs(dataset_path, exist_ok=True)
 
-    return {'status': 'success', 'message': 'Dataset Created'}, 200
+    return {'status': 'success', 'message': 'Dataset Created', 'dataset_id': new_dataset.id}, 200
 
 
 @dataset_bp.route('/dataset/<id>', methods=['PUT'])
@@ -84,7 +88,7 @@ def delete_dataset(id):
     if os.path.exists(folder_path) and os.path.isdir(folder_path):
         shutil.rmtree(folder_path)
 
-    dataset.delete()
+    dataset.delete_instance()
     return {'status': 'success', 'message': 'Dataset Deleted'}, 200
 
 @dataset_bp.route('/dataset/<id>/<episode_name>', methods=['DELETE'])
@@ -94,7 +98,6 @@ def delete_dataset_file(id, episode_name):
     if not os.path.exists(folder_path):
         return {'status': 'error', 'message': 'Dataset not found'}, 404
 
-    # Parse episode index from name (episode_000000 or episode_0)
     ep_name_clean = episode_name.replace(".hdf5", "")
     ep_index_str = ep_name_clean.replace("episode_", "")
     episode_index = int(ep_index_str)
@@ -117,12 +120,7 @@ def get_datasets_metadata(id):
 
 @dataset_bp.route('/dataset/<id>/:edit_datasets_metadata', methods=['POST'])
 def edit_datasets_metadata(id):
-    """Remap sensor/robot names in a LeRobot dataset.
-
-    Expects JSON body:
-        sensor_mappings: { "sensor_3": 5 }   → rename sensor_3 to sensor_5
-        robot_mappings:  { "robot_1": 4 }     → rename robot_1 to robot_4
-    """
+    """Remap sensor/robot names in a LeRobot dataset."""
     from ..process.lerobot_io import (
         _read_json, _write_json, _read_jsonl, _write_jsonl,
         PARQUET_PATH_TEMPLATE, INFO_PATH, EPISODES_PATH, EPISODES_STATS_PATH,
@@ -138,7 +136,6 @@ def edit_datasets_metadata(id):
     robot_mappings = data.get('robot_mappings', {})
     print(f"[edit_datasets_metadata] sensor_mappings={sensor_mappings}, robot_mappings={robot_mappings}")
 
-    # Filter out None values
     sensor_mappings = {k: v for k, v in sensor_mappings.items() if v is not None}
     robot_mappings = {k: v for k, v in robot_mappings.items() if v is not None}
     print(f"[edit_datasets_metadata] After filter: sensor_mappings={sensor_mappings}, robot_mappings={robot_mappings}")
@@ -155,15 +152,13 @@ def edit_datasets_metadata(id):
     features = info.get("features", {})
     episodes = _read_jsonl(os.path.join(folder_path, EPISODES_PATH))
 
-    # 1. Build sensor rename map (ALL mappings, even identity ones are needed for swap)
-    sensor_col_remap = {}  # old_feature_key -> new_feature_key
+    sensor_col_remap = {}
     for old_name, new_id in sensor_mappings.items():
         old_col = f"observation.images.{old_name}"
         new_col = f"observation.images.sensor_{new_id}"
         if old_col in features:
             sensor_col_remap[old_col] = new_col
 
-    # 2. Build robot rename map
     robot_name_remap = {}
     for old_name, new_id in robot_mappings.items():
         robot_name_remap[old_name] = f"robot_{new_id}"
@@ -171,7 +166,6 @@ def edit_datasets_metadata(id):
     print(f"[edit_meta] sensor_col_remap={sensor_col_remap}")
     print(f"[edit_meta] robot_name_remap={robot_name_remap}")
 
-    # 3. Update features in info.json (swap-safe: build entirely new dict)
     new_features = {}
     for key, feat in features.items():
         new_key = sensor_col_remap.get(key, key)
@@ -191,10 +185,8 @@ def edit_datasets_metadata(id):
     _write_json(info, os.path.join(folder_path, INFO_PATH))
     print(f"[edit_meta] Updated info.json features keys: {list(new_features.keys())}")
 
-    # 4. Rename image/video directories (swap-safe via temp names)
     images_root = os.path.join(folder_path, "images")
     if os.path.isdir(images_root):
-        # Image mode dirs: sensor_N/
         img_dir_remap = {}
         for old_name, new_id in sensor_mappings.items():
             new_name = f"sensor_{new_id}"
@@ -210,12 +202,10 @@ def edit_datasets_metadata(id):
             chunk_path = os.path.join(videos_root, chunk_dir_name)
             if not os.path.isdir(chunk_path):
                 continue
-            # Video dirs: observation.images.{old_name} -> observation.images.sensor_{new_id}
             video_dir_remap = {}
             for old_col, new_col in sensor_col_remap.items():
                 if old_col != new_col:
                     video_dir_remap[old_col] = new_col
-            # Also check if dirs have original cam names (from convert_hdf5_package)
             existing_dirs = set(os.listdir(chunk_path))
             for old_name, new_id in sensor_mappings.items():
                 old_feature_key = f"observation.images.{old_name}"
@@ -226,7 +216,6 @@ def edit_datasets_metadata(id):
                 print(f"[edit_meta] Renaming video dirs in {chunk_dir_name}: {video_dir_remap}")
                 _rename_dirs_safe(chunk_path, video_dir_remap)
 
-    # 5. Update parquet files (rename columns if image-mode)
     for ep_entry in episodes:
         ep_idx = ep_entry["episode_index"]
         chunk = ep_idx // info.get("chunks_size", DEFAULT_CHUNK_SIZE)
@@ -418,3 +407,31 @@ def merge_datasets():
     merge_dataset(source_dataset, target_datasets)
 
     return {'status': 'success', 'message': 'Dataset merged successfully'}, 200
+
+@dataset_bp.route('/dataset/<id>/downsample', methods=['POST'])
+def downsample_dataset_route(id):
+    data = request.json
+    name = data.get('name')
+    task_id = data.get('task_id')
+    keep = int(data.get('keep', 1))
+    every = int(data.get('every', 2))
+
+    if keep <= 0 or every <= 0 or keep >= every:
+        return {'status': 'error', 'message': 'Invalid downsample ratio: keep must be < every, both > 0'}, 400
+
+    new_dataset = DatasetModel.create(
+        name=name,
+        task_id=task_id,
+    )
+
+    current_app.pm.start_function(
+        func=downsample_dataset,
+        dataset_id=id,
+        new_dataset_id=new_dataset.id,
+        keep=keep,
+        every=every,
+        socketio_instance=current_app.pm.socketio,
+        name="downsample_dataset",
+    )
+
+    return {'status': 'success', 'message': 'Dataset downsample started'}, 200

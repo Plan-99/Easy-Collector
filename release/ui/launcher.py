@@ -330,7 +330,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self._pad_import_choice = "DB"
         self._pad_export_choice = "DB"
         self._exit_action = "EXIT"
-        self._open_ui_mode = "NEW"
+        self._open_ui_mode = "EMBEDDED"
         self._disable_circle_tooltips = True
         self._pad_width = 300
         self._button_size = 60
@@ -381,14 +381,6 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self.path_hint_label.hide()
 
         circle_icons = self._circle_icon_paths()
-        self.btn_open_browser = self._create_circle_button(
-            "↗",
-            "UI 열기",
-            circle_icons[0] if len(circle_icons) > 0 else None,
-        )
-        self.btn_open_browser.clicked.connect(self.on_open_ui)
-        pill_layout.addWidget(self.btn_open_browser, 0, Qt.AlignHCenter)
-
         self.btn_quick_apply = self._create_circle_button(
             "⇆",
             "빠른 동기화",
@@ -405,21 +397,21 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self.btn_folder.clicked.connect(self._on_import_clicked)
         pill_layout.addWidget(self.btn_folder, 0, Qt.AlignHCenter)
 
-        self.btn_logs = self._create_circle_button(
+        self.btn_export = self._create_circle_button(
             "🧾",
             "내보내기",
             circle_icons[3] if len(circle_icons) > 3 else None,
         )
-        self.btn_logs.clicked.connect(self._on_export_clicked)
-        pill_layout.addWidget(self.btn_logs, 0, Qt.AlignHCenter)
+        self.btn_export.clicked.connect(self._on_export_clicked)
+        pill_layout.addWidget(self.btn_export, 0, Qt.AlignHCenter)
 
-        self.btn_settings = self._create_circle_button(
-            "⚙",
+        self.btn_logs = self._create_circle_button(
+            "📋",
             "로그",
             circle_icons[4] if len(circle_icons) > 4 else None,
         )
-        self.btn_settings.clicked.connect(self.open_logs_window)
-        pill_layout.addWidget(self.btn_settings, 0, Qt.AlignHCenter)
+        self.btn_logs.clicked.connect(self.open_logs_window)
+        pill_layout.addWidget(self.btn_logs, 0, Qt.AlignHCenter)
 
         self.btn_modules = self._create_circle_button(
             "🧩",
@@ -790,8 +782,8 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             getattr(self, "btn_open_browser", None),
             getattr(self, "btn_quick_apply", None),
             getattr(self, "btn_folder", None),
+            getattr(self, "btn_export", None),
             getattr(self, "btn_logs", None),
-            getattr(self, "btn_settings", None),
             getattr(self, "btn_exit", None),
             getattr(self, "pad_box_open_ui", None),
             getattr(self, "pad_box_sync", None),
@@ -1001,8 +993,8 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             getattr(self, "btn_open_browser", None),
             getattr(self, "btn_quick_apply", None),
             getattr(self, "btn_folder", None),
+            getattr(self, "btn_export", None),
             getattr(self, "btn_logs", None),
-            getattr(self, "btn_settings", None),
             getattr(self, "btn_exit", None),
         ]
         for idx, btn in enumerate(buttons):
@@ -1083,7 +1075,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self._style_choice_buttons(getattr(self, "_exit_action_buttons", {}))
 
     def _set_open_ui_mode(self, mode: str):
-        if mode not in ("NEW", "CURRENT"):
+        if mode not in ("NEW", "CURRENT", "EMBEDDED"):
             return
         self._open_ui_mode = mode
         self._update_open_ui_tooltip()
@@ -1107,18 +1099,22 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         except Exception:
             pass
         try:
-            self.btn_logs.setToolTip(f"{self._pad_export_choice} 내보내기")
+            self.btn_export.setToolTip(f"{self._pad_export_choice} 내보내기")
         except Exception:
             pass
 
     def _open_ui_mode_tooltip(self, mode: str) -> str:
         if mode == "NEW":
             return "새 창으로 UI 열기"
+        if mode == "EMBEDDED":
+            return "내장 웹뷰로 UI 열기"
         return "새 탭으로 UI 열기"
 
     def _open_ui_mode_label(self, mode: str) -> str:
         if mode == "NEW":
             return "1. 새 창으로 UI 열기"
+        if mode == "EMBEDDED":
+            return "1. 내장 웹뷰로 UI 열기"
         return "1. 새 탭으로 UI 열기"
 
     def _exit_action_label(self, action: str) -> str:
@@ -1374,6 +1370,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         choices = [
             ("NEW", "새 브라우저", "새 창으로 UI 열기"),
             ("CURRENT", "현재 브라우저", "새 탭으로 UI 열기"),
+            ("EMBEDDED", "내장 웹뷰", "런처 내장 웹뷰로 UI 열기"),
         ]
         for key, label, tooltip in choices:
             btn = QPushButton(label, mode2_page)
@@ -2397,6 +2394,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             getattr(self, "btn_open_browser", None),
             getattr(self, "btn_quick_apply", None),
             getattr(self, "btn_folder", None),
+            getattr(self, "btn_export", None),
             getattr(self, "btn_logs", None),
             getattr(self, "btn_exit", None),
         ):
@@ -2406,7 +2404,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                 btn.setEnabled(enabled)
             except Exception:
                 pass
-        log_btn = getattr(self, "btn_settings", None)
+        log_btn = getattr(self, "btn_logs", None)
         if log_btn is not None:
             try:
                 log_btn.setEnabled(True)
@@ -2922,38 +2920,12 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
     def _upgrade_migration_cmd(self) -> str:
         return (
-            "set -euxo pipefail; cd ~/backend/database; "
-            "python3 -m pip show orator >/dev/null 2>&1 || ("
-            "python3 -m pip install --no-deps --no-input -q "
-            "backpack==0.1 simplejson faker lazy-object-proxy cleo==0.6.8 inflection "
-            "pendulum==1.5.1 pytzdata python-dateutil && "
-            "python3 -m pip install --no-deps --no-input -q orator==0.9.9); "
-            "python3 - <<'PY'\n"
-            "import os, sys\n"
-            "sys.path.insert(0, os.getcwd())\n"
-            "try:\n"
-            "  from importlib import import_module\n"
-            "  cfg = import_module('config.database')\n"
-            "  if hasattr(cfg, 'DATABASES'):\n"
-            "    connections = {k:v for k,v in cfg.DATABASES.items() if isinstance(v, dict)}\n"
-            "  elif hasattr(cfg, 'config'):\n"
-            "    connections = cfg.config\n"
-            "  else:\n"
-            "    raise RuntimeError('No DATABASES/config mapping in config/database.py')\n"
-            "  from orator import DatabaseManager\n"
-            "  from orator.migrations import Migrator, DatabaseMigrationRepository\n"
-            "  db = DatabaseManager(connections)\n"
-            "  repo = DatabaseMigrationRepository(db, 'migrations')\n"
-            "  if not repo.repository_exists():\n"
-            "    repo.create_repository()\n"
-            "  migrator = Migrator(repo, db)\n"
-            "  path = os.path.join(os.getcwd(), 'migrations')\n"
-            "  migrator.run(path)\n"
-            "except Exception:\n"
-            "  import traceback\n"
-            "  traceback.print_exc()\n"
-            "  sys.exit(1)\n"
-            "PY\n"
+            "cd /root && python3 -c \""
+            "import sys; sys.path.insert(0, '/root'); "
+            "from backend.database.models import create_tables; "
+            "create_tables(); "
+            "print('[DB] Migration complete')"
+            "\""
         )
 
     def _apply_pill_mask(self):
@@ -3001,6 +2973,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         try:
             for btn in (
                 getattr(self, "btn_folder", None),
+                getattr(self, "btn_export", None),
                 getattr(self, "btn_logs", None),
             ):
                 if btn is not None:
@@ -4006,11 +3979,43 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             return False
 
     def _open_url_with_mode(self, url: QUrl, mode: str) -> bool:
+        if mode == "EMBEDDED":
+            return self._open_url_embedded(url)
         if mode == "CURRENT":
             return self._open_url_current_window(url)
         if self._open_url_new_window(url):
             return True
         return self._open_url_current_window(url)
+
+    def _open_url_embedded(self, url: QUrl) -> bool:
+        """Open URL in an embedded QWebEngineView window."""
+        if QWebEngineView is None:
+            self.append_log("[WEB] QWebEngineView not available, falling back to browser")
+            return self._open_url_new_window(url)
+        try:
+            from PySide6.QtWidgets import QMainWindow
+            from PySide6.QtCore import QSize
+        except ImportError:
+            from PyQt6.QtWidgets import QMainWindow
+            from PyQt6.QtCore import QSize
+
+        # Reuse existing window if still open
+        existing = getattr(self, "_embedded_window", None)
+        if existing is not None and existing.isVisible():
+            existing.findChild(QWebEngineView).setUrl(url)
+            existing.raise_()
+            existing.activateWindow()
+            return True
+
+        win = QMainWindow()
+        win.setWindowTitle("Easy Trainer")
+        win.resize(QSize(1280, 800))
+        view = QWebEngineView(win)
+        view.setUrl(url)
+        win.setCentralWidget(view)
+        win.show()
+        self._embedded_window = win
+        return True
 
     def _ensure_ui_wait_page(self, target_url: str) -> QUrl | None:
         try:
@@ -4073,7 +4078,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                 url_str = f"{url_str}{sep}_ts={int(time.time() * 1000)}"
         url = QUrl(url_str)
         mode = open_mode or getattr(self, "_open_ui_mode", "NEW")
-        if mode not in ("NEW", "CURRENT"):
+        if mode not in ("NEW", "CURRENT", "EMBEDDED"):
             mode = "NEW"
 
         def _open():

@@ -13,7 +13,7 @@ class CreateDatasetsTable(Migration):
             table.soft_deletes()
             
     def down(self):
-        datasets_dir = os.path.join('/root/backend', 'datasets')
+        datasets_dir = os.path.join('/root/src/backend', 'datasets')
 
         # 2. 폴더가 존재하는지 확인하고 삭제합니다.
         if os.path.exists(datasets_dir):

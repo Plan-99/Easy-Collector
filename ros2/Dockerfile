@@ -1,4 +1,4 @@
-# ROS 2 Humble: Robot/Sensor drivers only (no GPU)
+# ROS 2 Humble + IK Solver + gRPC Bridge + WebRTC Streaming
 FROM ros:humble
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -13,9 +13,9 @@ RUN sed -i 's/archive.ubuntu.com/mirror.kakao.com/g' /etc/apt/sources.list && \
 RUN apt-key adv --keyserver keyserver.ubuntu.com --recv-keys FB0B24895113F120 && \
     echo "deb https://librealsense.intel.com/Debian/apt-repo $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/librealsense.list > /dev/null
 
-# ROS 2 packages for robot/sensor drivers
+# ROS 2 packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # Sensor packages
+    # Sensor
     ros-humble-realsense2-camera \
     ros-humble-realsense2-description \
     ros-humble-usb-cam \
@@ -54,23 +54,40 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libyaml-cpp-dev \
     && apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*
 
-# Python packages for robot SDKs
-RUN python3 -m pip install --no-cache-dir \
-    setuptools==58.2.0 \
-    dynamixel_sdk \
-    piper_sdk \
-    pyusb \
-    python-can \
-    pymodbus==3.9.2
+# Pinocchio + CasADi (IK solver dependencies)
+RUN mkdir -p /etc/apt/keyrings && \
+    curl -sSL http://robotpkg.openrobots.org/packages/debian/robotpkg.asc | tee /etc/apt/keyrings/robotpkg.asc > /dev/null && \
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/robotpkg.asc] http://robotpkg.openrobots.org/packages/debian/pub $(lsb_release -cs) robotpkg" | tee /etc/apt/sources.list.d/robotpkg.list && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    robotpkg-simde=0.8.0 \
+    robotpkg-py310-pinocchio \
+    robotpkg-py310-casadi && \
+    rm -rf /var/lib/apt/lists/*
+
+ENV PATH="/opt/openrobots/bin:${PATH}"
+ENV PYTHONPATH="/opt/openrobots/lib/python3.10/site-packages:${PYTHONPATH}"
+ENV LD_LIBRARY_PATH="/opt/openrobots/lib:${LD_LIBRARY_PATH}"
+
+# Python packages for ROS2 bridge
+COPY ros2/requirements.ros2.txt /tmp/requirements.ros2.txt
+RUN python3 -m pip install --no-cache-dir -r /tmp/requirements.ros2.txt && \
+    rm /tmp/requirements.ros2.txt
 
 WORKDIR /root
 
-# Create empty workspace structure (modules installed at runtime via launcher)
+# Create empty workspace (modules installed at runtime via launcher)
 RUN mkdir -p /root/ros2_ws/src
+
+# Bundle ros2_bridge into image
+COPY ros2/ros2_bridge /root/ros2/ros2_bridge
 
 RUN echo "source /opt/ros/humble/setup.bash" >> /etc/bash.bashrc && \
     echo '[ -f /root/ros2_ws/install/setup.bash ] && source /root/ros2_ws/install/setup.bash' >> /etc/bash.bashrc
 
-COPY --chmod=755 ros2/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY ros2/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY ros2/start_ros2_services.sh /usr/local/bin/start_ros2_services.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/start_ros2_services.sh
 
-ENTRYPOINT ["/bin/bash", "/usr/local/bin/entrypoint.sh"]
+EXPOSE 50051
+
+ENTRYPOINT ["/bin/bash", "/usr/local/bin/start_ros2_services.sh"]

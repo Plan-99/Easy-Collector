@@ -5,14 +5,13 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 import torch
 from collections import deque
-import rclpy
-from rclpy.node import Node
-from std_msgs.msg import Float64
 
 from ...utils.image_parser import fetch_image_with_config
+from ...bridge.client import get_bridge_client
+from ...bridge.generated import robot_bridge_pb2 as pb
 
 # Define paths relative to this file's location to ensure robustness.
-FIPER_ROOT = "/root/backend/fiper"
+FIPER_ROOT = "/root/src/backend/fiper"
 BASE_CONFIG_PATH = FIPER_ROOT + "/configs"
 BASE_DATA_PATH = FIPER_ROOT + "/data"
 from ...configs.global_configs import DATASET_DIR as ORI_DATA_ROOT
@@ -26,17 +25,16 @@ from ...fiper.shared_utils.utility_functions import get_required_tensors, set_se
 from ...fiper.shared_utils.embedding_helper import EmbeddingHelper
 
 
-from ...env.env import Env
-from ...env.agent import Agent
+from ...bridge.remote_env import RemoteEnv
+from ...bridge.remote_agent import RemoteAgent
 
 import numpy as np
 
 
 def failure_detection(node, checkpoint, robots, sensors, task_obj, task_control, socketio_instance):
-    if not rclpy.ok():
-        rclpy.init(args=None)
-    ros_node = rclpy.create_node(f'failure_detector_{checkpoint.id}')
-    publisher = ros_node.create_publisher(Float64, '/failure_detection/uncertainty_score', 10)
+    bridge_client = get_bridge_client()
+    # UncertaintyService의 SetScore를 통해 score를 직접 전달 (ROS2 pub/sub 불필요)
+    bridge_client.uncertainty.StartSubscriber(pb.Empty())
 
     try:
         with hydra.initialize(config_path="../../fiper/configs", version_base="1.1", job_name="train_fiper"):
@@ -103,8 +101,8 @@ def failure_detection(node, checkpoint, robots, sensors, task_obj, task_control,
 
             agents = []
             for robot in robots:
-                agents.append(Agent(node, robot))
-            env = Env(node, agents=agents, sensors=sensors)
+                agents.append(RemoteAgent(robot))
+            env = RemoteEnv(agents=agents, sensors=sensors)
 
 
             while not task_control['stop']:
@@ -170,18 +168,17 @@ def failure_detection(node, checkpoint, robots, sensors, task_obj, task_control,
 
                     # print(f"Combined Uncertainty Score: {uncertainty_score}")
                     
-                    msg = Float64()
-                    msg.data = float(uncertainty_score)
-                    if rclpy.ok():
-                        publisher.publish(msg)
+                    bridge_client.uncertainty.SetScore(pb.UncertaintyScore(score=float(uncertainty_score)))
 
                     socketio_instance.emit('failure_detection_result', {
                         'uncertainty_score': float(uncertainty_score),
                         'failure_detected': bool(uncertainty_score > 1.2)
                     })
     finally:
-        ros_node.destroy_node()
-        rclpy.shutdown()
+        try:
+            bridge_client.uncertainty.StopSubscriber(pb.Empty())
+        except Exception:
+            pass
     return
     
 

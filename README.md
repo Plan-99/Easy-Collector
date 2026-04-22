@@ -47,6 +47,20 @@ sudo nvidia-ctk runtime configure --runtime=docker
 sudo systemctl restart docker
 ```
 
+### GPU 컨테이너 실행 시 libnvidia-egl-wayland 오류 해결
+
+`libnvidia-egl-wayland.so.1.1.x: no such file or directory` 에러 발생 시:
+
+```bash
+# 호스트에 설치된 실제 버전 확인
+ls /usr/lib/x86_64-linux-gnu/libnvidia-egl-wayland.so.1.*
+
+# 에러 메시지에 나온 버전으로 심볼릭 링크 생성 (예: 1.1.9를 찾는 경우)
+ACTUAL=$(ls /usr/lib/x86_64-linux-gnu/libnvidia-egl-wayland.so.1.*.* | head -1)
+sudo ln -sf "$ACTUAL" /usr/lib/x86_64-linux-gnu/libnvidia-egl-wayland.so.1.1.9
+sudo systemctl restart docker
+```
+
 ---
 
 ### 설치
@@ -119,6 +133,9 @@ docker compose -f docker-compose.cpu.yml up -d
 # 개별 서비스
 docker compose up -d backend
 docker compose logs -f backend
+
+# 로컬 변경사항을 실행 중인 컨테이너에 동기화 (재빌드 없이)
+bash scripts/quick_apply.sh ./ /opt/easytrainer/project
 
 # 중지
 docker compose stop

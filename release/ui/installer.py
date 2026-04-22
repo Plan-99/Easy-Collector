@@ -685,61 +685,15 @@ def run_setup_wizard(self: "MainWindow") -> bool:
                 p.finished.connect(on_finish)
             p.start()
 
-        # Step 1: migrate in an ephemeral run container with verbose diagnostics
+        # Step 1: run DB migrations (peewee create_tables)
         log.append(f"[POST] Running DB migrations in one-off container for '{svc}' ...")
         migrate_cmd = (
-            "set -euxo pipefail; cd ~/backend/database; "
-            "echo '[DBG] python:' $(python3 -V); "
-            "python3 - <<'PY'\n"
-            "import os, sys\n"
-            "import importlib, importlib.metadata as m\n"
-            "def v(p):\n"
-            "  try:\n"
-            "    print(f'[DBG] pkg {p}=', m.version(p))\n"
-            "  except Exception as e:\n"
-            "    print(f'[DBG] pkg {p}=n/a ({e})')\n"
-            "for p in ['orator','cleo','inflection','pyyaml','faker','pendulum','backpack']:\n"
-            "  v(p)\n"
-            "print('[DBG] cwd=', os.getcwd())\n"
-            "print('[DBG] files:', os.listdir())\n"
-            "PY\n"
-            "python3 -m pip show orator >/dev/null 2>&1 || ("
-            "python3 -m pip install --no-deps --no-input -q "
-            "backpack==0.1 simplejson faker lazy-object-proxy cleo==0.6.8 inflection "
-            "pendulum==1.5.1 pytzdata python-dateutil && "
-            "python3 -m pip install --no-deps --no-input -q orator==0.9.9); "
-            "ls -l; echo '[DBG] db before:'; ls -l main.db || true; "
-            # Run migrations via Orator Python API to avoid CLI/__main__ issues
-            "python3 - <<'PY'\n"
-            "import os, sys\n"
-            "sys.path.insert(0, os.getcwd())\n"
-            "try:\n"
-            "  from importlib import import_module\n"
-            "  cfg = import_module('config.database')\n"
-            "  if hasattr(cfg, 'DATABASES'):\n"
-            "    connections = {k:v for k,v in cfg.DATABASES.items() if isinstance(v, dict)}\n"
-            "  elif hasattr(cfg, 'config'):\n"
-            "    connections = cfg.config\n"
-            "  else:\n"
-            "    raise RuntimeError('No DATABASES/config mapping in config/database.py')\n"
-            "  from orator import DatabaseManager\n"
-            "  from orator.migrations import Migrator, DatabaseMigrationRepository\n"
-            "  db = DatabaseManager(connections)\n"
-            "  repo = DatabaseMigrationRepository(db, 'migrations')\n"
-            "  if not repo.repository_exists():\n"
-            "    print('[DBG] creating migrations repository table ...')\n"
-            "    repo.create_repository()\n"
-            "  migrator = Migrator(repo, db)\n"
-            "  path = os.path.join(os.getcwd(), 'migrations')\n"
-            "  print('[DBG] running migrations from', path)\n"
-            "  migrator.run(path)\n"
-            "  print('[DBG] migration complete')\n"
-            "except Exception as e:\n"
-            "  import traceback\n"
-            "  traceback.print_exc()\n"
-            "  sys.exit(1)\n"
-            "PY\n"
-            "echo '[DBG] db after:'; ls -l main.db || true"
+            "cd /root && python3 -c \""
+            "import sys; sys.path.insert(0, '/root'); "
+            "from backend.database.models import create_tables; "
+            "create_tables(); "
+            "print('[DB] Migration complete')"
+            "\""
         )
 
         def _after_migrate(rc: int):
@@ -789,12 +743,32 @@ def run_setup_wizard(self: "MainWindow") -> bool:
                 btn_next.setEnabled(True)
             self.run_compose_to_widget(["up", "-d"], log, on_finish=_after_up)
 
-        # Run migration without GPU (--no-deps avoids starting other services)
-        self.run_compose_to_widget(
-            ["run", "--rm", "--no-deps", "-e", "NVIDIA_VISIBLE_DEVICES=", "--entrypoint", "bash", svc, "-c", migrate_cmd],
-            log,
-            on_finish=_after_migrate
-        )
+        # Run migration using docker run (bypasses compose deploy GPU requirements)
+        def _run_docker_migrate():
+            proc = QProcess(dlg)
+            proc.setProgram("docker")
+            proc.setArguments([
+                "run", "--rm",
+                "-v", f"{self.project_root}/backend:/root/backend",
+                "-v", "/opt/easytrainer:/opt/easytrainer",
+                "--entrypoint", "bash",
+                "easytrainer-backend:latest",
+                "-c", migrate_cmd,
+            ])
+            proc.setWorkingDirectory(str(self.project_root))
+            def _r(is_err=False):
+                try:
+                    data = proc.readAllStandardError() if is_err else proc.readAllStandardOutput()
+                    text = bytes(data).decode(errors="ignore")
+                    if text:
+                        log.append(text.rstrip("\n"))
+                except Exception:
+                    pass
+            proc.readyReadStandardOutput.connect(lambda: _r(False))
+            proc.readyReadStandardError.connect(lambda: _r(True))
+            proc.finished.connect(_after_migrate)
+            proc.start()
+        _run_docker_migrate()
 
     btn_install.clicked.connect(on_install_click)
 

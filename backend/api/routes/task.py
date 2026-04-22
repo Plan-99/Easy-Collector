@@ -15,7 +15,7 @@ task_bp = Blueprint('task', __name__)
 
 @task_bp.route('/tasks', methods=['GET'])
 def get_tasks():
-    tasks = TaskModel.with_('assembly').get()
+    tasks = TaskModel.select().where(TaskModel.deleted_at.is_null())
     tasks = [task.to_dict() for task in tasks]
     processes = set(current_app.pm.list_processes())
     for task in tasks:
@@ -103,12 +103,15 @@ def start_training():
 
 @task_bp.route('/task:stop_training', methods=['POST'])
 def stop_training():
-    checkpoint = CheckpointModel.where('status', 'training').first()
+    checkpoint = CheckpointModel.select().where(
+        CheckpointModel.status == 'training',
+        CheckpointModel.deleted_at.is_null()
+    ).first()
     if checkpoint:
-        checkpoint.delete()  # Delete the checkpoint if it exists
+        checkpoint.delete_instance()
 
     current_app.pm.stop_process('train_task')
-    
+
     temp_dir = os.path.join(DATASET_DIR, "tmp")
     if os.path.exists(temp_dir):
         shutil.rmtree(temp_dir)
@@ -120,27 +123,19 @@ def cancel_training():
     checkpoint_id = data.get('checkpoint_id')
     checkpoint = CheckpointModel.find(checkpoint_id)
     if checkpoint:
-        checkpoint.delete()  # Delete the checkpoint if it exists
-    
-    current_app.pm.process_queue['train_task'] = [proc for proc in current_app.pm.process_queue['train_task'] if proc['checkpoint_id'] != checkpoint_id]
-    
-    return {'status': 'success', 'message': 'Training cancelled'}, 200
-    
+        checkpoint.delete_instance()
 
-    
+    current_app.pm.process_queue['train_task'] = [proc for proc in current_app.pm.process_queue['train_task'] if proc['checkpoint_id'] != checkpoint_id]
+
+    return {'status': 'success', 'message': 'Training cancelled'}, 200
+
+
+
 @task_bp.route('/task', methods=['POST'])
 def create_task():
     data = request.json
     TaskModel.create(
         name=data.get('name'),
-        # robot_ids=data.get('robot_ids'),
-        # sensor_ids=data.get('sensor_ids'),
-        # home_pose=data.get('home_pose'),
-        # end_pose=data.get('end_pose'),
-        # prompt=data.get('prompt'),
-        # image=data.get('image'),
-        # episode_len=data.get('episode_len'),
-        # dataset_dir=data.get('dataset_dir')
     )
     return {'status': 'success', 'message': 'Task Created'}, 200
 
@@ -161,46 +156,33 @@ def update_task(id):
     task.save()
     return {'status': 'success', 'message': 'Task Updated'}, 200
 
-@task_bp.route('/task/<id>/device_settings', methods=['PUT'])  
+@task_bp.route('/task/<id>/device_settings', methods=['PUT'])
 def update_task_device_settings(id):
     data = request.json
     task = TaskModel.find(id)
 
     key = data.get('key')
     setting = data.get('setting')
-    device_type = data.get('device_type')  # 'sensor' or 'robot'
+    device_type = data.get('device_type')
 
-    original_settings = task.settings
+    original_settings = task._settings
     for device_id, value in setting.items():
-        if device_id not in task.settings.get(device_type):
+        if device_id not in original_settings.get(device_type, {}):
+            if device_type not in original_settings:
+                original_settings[device_type] = {}
             original_settings[device_type][device_id] = {}
-        
+
         original_settings[device_type][device_id][key] = value
 
     task.settings = original_settings
 
-    print("Updated Device Settings:", task.settings)
+    print("Updated Device Settings:", task._settings)
 
     task.save()
     return {'status': 'success', 'message': 'Task Settings Updated'}, 200
 
-    # device_id = data.get('device_id')
-    # device_type = data.get('device_type')  # 'sensor' or 'robot'
-    # key = data.get('key')
-    # value = data.get('value')
-
-    # setting = task.settings[device_type + 's']
-    # if device_id not in setting:
-    #     setting[device_id] = {}
-
-    # setting[device_id][key] = value
-    # task.settings[device_type + 's'] = setting
-
-    # task.save()
-    # return {'status': 'success', 'message': 'Task Settings Updated'}, 200   
-
 @task_bp.route('/task/<id>', methods=['DELETE'])
 def delete_task(id):
     task = TaskModel.find(id)
-    task.delete()
+    task.delete_instance()
     return {'status': 'success', 'message': 'Task Deleted'}, 200

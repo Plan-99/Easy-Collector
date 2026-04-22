@@ -2,10 +2,10 @@
 기존 HDF5 에피소드 데이터를 LeRobot v2.1 포맷으로 변환하는 마이그레이션 스크립트.
 
 Usage:
-    python -m src.backend.scripts.migrate_hdf5_to_lerobot --dataset-dir /root/backend/datasets
+    python -m src.backend.scripts.migrate_hdf5_to_lerobot --dataset-dir /root/src/backend/datasets
 
 또는 특정 데이터셋만:
-    python -m src.backend.scripts.migrate_hdf5_to_lerobot --dataset-dir /root/backend/datasets --dataset-ids 1 2 3
+    python -m src.backend.scripts.migrate_hdf5_to_lerobot --dataset-dir /root/src/backend/datasets --dataset-ids 1 2 3
 """
 
 import argparse
@@ -19,12 +19,12 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
-from backend.api.process.lerobot_io import (
+from src.backend.api.process.lerobot_io import (
     create_dataset, _write_json, _append_jsonl, _read_json,
     PARQUET_PATH_TEMPLATE, IMAGE_PATH_TEMPLATE, INFO_PATH,
     EPISODES_PATH, TASKS_PATH, EPISODES_STATS_PATH, DEFAULT_CHUNK_SIZE,
 )
-from backend.configs.global_configs import DATASET_DIR
+from src.backend.configs.global_configs import DATASET_DIR
 import pyarrow as pa
 import pyarrow.parquet as pq
 from PIL import Image

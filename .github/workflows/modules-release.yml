@@ -1,0 +1,109 @@
+name: Package Modules
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'modules/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      changed_modules: ${{ steps.detect.outputs.changed_modules }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed modules
+        id: detect
+        run: |
+          # Compare with previous commit on main
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only HEAD)
+
+          MODULES=()
+          for category in robots sensors extensions; do
+            if [ ! -d "modules/$category" ]; then continue; fi
+            for module_dir in modules/$category/*/; do
+              [ ! -d "$module_dir" ] && continue
+              [ ! -f "$module_dir/module.json" ] && continue
+
+              module_name=$(basename "$module_dir")
+              # Check if any file in this module changed
+              if echo "$CHANGED_FILES" | grep -q "^modules/$category/$module_name/"; then
+                MODULES+=("$category/$module_name")
+              fi
+            done
+          done
+
+          if [ ${#MODULES[@]} -eq 0 ]; then
+            echo "changed_modules=[]" >> "$GITHUB_OUTPUT"
+          else
+            JSON=$(printf '%s\n' "${MODULES[@]}" | jq -R . | jq -s -c .)
+            echo "changed_modules=$JSON" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Changed modules: ${MODULES[*]}"
+
+  package:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.changed_modules != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module: ${{ fromJson(needs.detect-changes.outputs.changed_modules) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package and release module
+        run: |
+          MODULE_DIR="modules/${{ matrix.module }}"
+          MODULE_JSON="$MODULE_DIR/module.json"
+
+          module_id=$(python3 -c "import json; print(json.load(open('$MODULE_JSON'))['id'])")
+          module_version=$(python3 -c "import json; print(json.load(open('$MODULE_JSON'))['version'])")
+          module_name=$(python3 -c "import json; print(json.load(open('$MODULE_JSON'))['name'])")
+
+          category=$(dirname "${{ matrix.module }}")
+          folder_name=$(basename "${{ matrix.module }}")
+
+          tar_name="module-${module_id}-${module_version}.tar.gz"
+          mkdir -p dist
+          tar -czf "dist/$tar_name" -C "modules/$category" "$folder_name"
+
+          echo "MODULE_ID=$module_id" >> "$GITHUB_ENV"
+          echo "MODULE_VERSION=$module_version" >> "$GITHUB_ENV"
+          echo "MODULE_NAME=$module_name" >> "$GITHUB_ENV"
+          echo "TAR_NAME=$tar_name" >> "$GITHUB_ENV"
+          echo "PACKAGED: $tar_name (v${module_version})"
+
+      - name: Check if release exists
+        id: check_release
+        run: |
+          TAG="module-${MODULE_ID}-v${MODULE_VERSION}"
+          if gh release view "$TAG" --repo Plan-99/Easy-Trainer-Modules &>/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+        env:
+          GH_TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
+
+      - name: Create Release
+        if: steps.check_release.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: Plan-99/Easy-Trainer-Modules
+          token: ${{ secrets.PUBLIC_REPO_TOKEN }}
+          tag_name: ${{ env.TAG }}
+          name: "${{ env.MODULE_NAME }} v${{ env.MODULE_VERSION }}"
+          files: dist/${{ env.TAR_NAME }}
+          body: |
+            Module: **${{ env.MODULE_NAME }}** (`${{ env.MODULE_ID }}`)
+            Version: `${{ env.MODULE_VERSION }}`
+          generate_release_notes: false

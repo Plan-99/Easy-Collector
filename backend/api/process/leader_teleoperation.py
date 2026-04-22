@@ -1,12 +1,8 @@
 # #!/usr/bin/env python
 
 from concurrent.futures import thread
-import rclpy
-from rclpy.node import Node
 import math
-# import numpy as np
 import time
-import math
 import threading
 from ...env.dxl_controller import DxlController
 from .subscribe_dynamixel import get_available_ports
@@ -15,8 +11,23 @@ import sys
 
 from concurrent.futures import ThreadPoolExecutor
 
+
+class _SimpleRate:
+    """rclpy.Rate 대체. 지정 Hz로 sleep."""
+    def __init__(self, hz):
+        self._interval = 1.0 / hz
+        self._last = time.monotonic()
+
+    def sleep(self):
+        now = time.monotonic()
+        elapsed = now - self._last
+        remaining = self._interval - elapsed
+        if remaining > 0:
+            time.sleep(remaining)
+        self._last = time.monotonic()
+
 class Leader():
-    def __init__(self, node: Node, agents, socketio_instance, teleop_setting) -> None:
+    def __init__(self, node, agents, socketio_instance, teleop_setting) -> None:
         # ROS 노드 초기화ur5e/ur5e_scaled_pos_joint_traj_controller/command
         self.node = node
         self.socketio_instance = socketio_instance
@@ -56,6 +67,8 @@ class Leader():
         
 
         self.ema = float(teleop_setting.get('ema', 0.0)) # EMA 필터 값
+        # 한 스텝에 허용되는 최대 관절 변위(rad). threshold를 넘으면 clip.
+        self.max_step_rad = float(teleop_setting.get('max_step_rad', 0.005))
 
         self.time = time.time()
 
@@ -155,6 +168,8 @@ class Leader():
 
     def sync_leader_robot(self):
         self.is_synced = False
+        self._sync_done_ports = set()
+        self._torque_release_pending_ports = set(self.dxl_controllers.keys())
         self.read_agent_and_write_to_joint_map()
 
         groups_by_port = self.group_joints_by_port()
@@ -179,33 +194,13 @@ class Leader():
 
             print("Syncing Leader Robot")
             moved = dxl_controller.move_controller(dxl_joints)
-            if moved:
-                print("[NOTICE] Will you start teleoperation? Close Gripper to Start!")
-
-                gripper_closed = False
-
-                count = 0
-                while not gripper_closed:
-                    gripper_closed = True
-                    for gripper_dxl_id in dxl_controller.gripper_dxl_ids:
-                        gripper_pos = dxl_controller.read_dynamixel(gripper_dxl_id)  # 그리퍼의 현재 위치를 읽어오기
-                        gripper_range = self.get_joint_by_dxl_id(port, gripper_dxl_id)['gripper_dxl_range']                        
-                        if gripper_range[0] < gripper_range[1]:
-                            if gripper_pos < gripper_range[1]:
-                                gripper_closed = False
-                        else:
-                            if gripper_pos > gripper_range[1]:
-                                gripper_closed = False
-
-                        if count == 0 and gripper_closed:
-                            print("[ERROR] Teleoperation Failed. You have to keep controller's gripper opened")
-                            raise Exception
-                        
-                    count = 1
-
-                dxl_controller.remove_torque()
-            else:
+            if not moved:
                 raise Exception
+
+            # 홈포즈 도달 후 1초 뒤 sync 완료 처리 → position_pub 즉시 시작.
+            # 토크 해제는 position_pub 루프에서 그리퍼 닫힘 감지 시 수행 (포트 동시 접근 회피).
+            self._sync_done_ports.add(port)
+            print("[NOTICE] Close Gripper to release leader torque.")
         
         for port, joints in groups_by_port.items():
             self.socketio_instance.start_background_task(
@@ -214,18 +209,14 @@ class Leader():
                 dxl_joints=joints
             )
 
-        ## 컨트롤러 중 하나라도 동기화될 때까지 대기
-        time.sleep(0.5)
-        while not self.is_synced: # is_synced가 True가 될 때까지 반복
-            for dxl_controller in self.dxl_controllers.values():
-                if not dxl_controller.controlled:
-                    self.is_synced = True
-                    break # for 루프 탈출
-            
-            if not self.is_synced: # 아직 동기화 안 됐다면 대기
-                time.sleep(0.1)
+        ## 모든 컨트롤러가 홈포즈 이동 + 1초 대기를 마칠 때까지 대기
+        ## (is_synced는 여기서 세팅하지 않음 — 그리퍼 닫힘 + 토크 해제 후
+        ##  position_pub 루프에서 세팅되어야 녹화 시작 타이밍과 맞음)
+        expected_ports = set(self.dxl_controllers.keys())
+        while self._sync_done_ports != expected_ports:
+            time.sleep(0.05)
 
-        print("[SUCCESS] Leader Robot Synced!")
+        print("[SUCCESS] Leader home reached. Waiting for gripper close to start recording.")
 
     def get_gripper_pos(self, joint):
         gripper_pos_low = joint['joint_lower_bound']
@@ -243,7 +234,38 @@ class Leader():
 
         
 
+    def _read_dxl_loop(self, task_control):
+        """
+        Dynamixel 값을 최대한 빠르게 지속적으로 읽어 joint_map에 반영하는 루프.
+        별도 스레드에서 실행되며, publish 루프와 분리되어 있다.
+        """
+        while not task_control.get('stop', False) and not task_control.get('episode_stop', False):
+            try:
+                self.read_dxl_and_write_to_joint_map()
+                if not self._first_read_done.is_set():
+                    self._first_read_done.set()
+            except Exception as e:
+                print(f"[ERROR] Dynamixel Read Failed: {e}", flush=True)
+                task_control['stop'] = True
+                self._first_read_done.set()
+                break
+
+
     def position_pub(self, task_control):
+        self._first_read_done = threading.Event()
+        read_thread = threading.Thread(
+            target=self._read_dxl_loop,
+            args=(task_control,),
+            daemon=True,
+        )
+        read_thread.start()
+
+        if not self._first_read_done.wait(timeout=5.0):
+            print("[ERROR] Dynamixel first read timeout", flush=True)
+            task_control['stop'] = True
+            read_thread.join(timeout=1.0)
+            return
+
         try:
             is_joint_trajectory = False
             for agent in self.agents:
@@ -251,17 +273,10 @@ class Leader():
                     is_joint_trajectory = True
                     break
             if is_joint_trajectory:
-                rate = self.node.create_rate(3)  # 50Hz
+                rate = _SimpleRate(100)  # 100Hz
             else:
-                rate = self.node.create_rate(50)  # 50Hz
-            while rclpy.ok() and not task_control.get('stop', False) and not task_control.get('episode_stop', False):
-
-                # 1. 하드웨어 읽기 작업 (여기서 SerialException 등이 발생할 확률이 높음)
-                try:
-                    self.read_dxl_and_write_to_joint_map()
-                except Exception as e:
-                    print(f"[ERROR] Dynamixel Read Failed: {e}", flush=True)
-                    break # 읽기 실패 시 루프 중단
+                rate = _SimpleRate(50)  # 50Hz
+            while not task_control.get('stop', False) and not task_control.get('episode_stop', False):
 
                 group_by_agent = self.group_joints_by_agent()
 
@@ -275,7 +290,7 @@ class Leader():
                         joint_index = agent.joint_names.index(joint_name)
                         dxl_id = joint['dxl_id']
                         position = joint['dxl_position']
-                        if joint.get('is_gripper', True):
+                        if joint.get('is_gripper', False):
                             joint['target_agent_position'] = self.get_gripper_pos(joint)
                         else:
                             target_pos = self.get_rad_pos(joint)
@@ -284,8 +299,23 @@ class Leader():
                                 joint['prev_agent_position'] = target_pos
 
                             # EMA 필터 적용
-                            joint['target_agent_position'] = self.ema * joint['prev_agent_position'] + (1 - self.ema) * target_pos
-                            joint['prev_agent_position'] = joint['target_agent_position']
+                            filtered = self.ema * joint['prev_agent_position'] + (1 - self.ema) * target_pos
+                            joint['prev_agent_position'] = filtered
+
+                            # Step clipping: 직전 명령값 기준으로 max_step_rad를 넘지 못하도록 제한.
+                            # 첫 루프에서는 현재 관절 위치를 기준으로 초기화해 시작 스파이크를 방지.
+                            if 'prev_commanded_position' not in joint:
+                                current_agent_pos = joint.get('agent_position', filtered)
+                                joint['prev_commanded_position'] = current_agent_pos
+
+                            delta = filtered - joint['prev_commanded_position']
+                            if delta > self.max_step_rad:
+                                delta = self.max_step_rad
+                            elif delta < -self.max_step_rad:
+                                delta = -self.max_step_rad
+                            clipped = joint['prev_commanded_position'] + delta
+                            joint['prev_commanded_position'] = clipped
+                            joint['target_agent_position'] = clipped
 
 
                     action = agent.fetch_joint_map_to_action(joint_list)
@@ -296,6 +326,48 @@ class Leader():
                 #-----------------------------------------
 
 
+
+                # 초기 토크 해제: 사용자가 그리퍼를 닫으면 리더 토크를 해제한다.
+                # (joint_map의 dxl_position은 _read_dxl_loop에서 갱신되므로 포트 동시 접근 없음)
+                if self._torque_release_pending_ports:
+                    for port in list(self._torque_release_pending_ports):
+                        dxl_controller = self.dxl_controllers[port]
+                        if not dxl_controller.gripper_dxl_ids:
+                            # 그리퍼가 없는 포트는 즉시 해제
+                            dxl_controller.remove_torque()
+                            self._torque_release_pending_ports.discard(port)
+                            print(f"[NOTICE] No gripper on {port}; torque released.", flush=True)
+                            continue
+                        all_closed = True
+                        dbg_parts = []
+                        for gripper_dxl_id in dxl_controller.gripper_dxl_ids:
+                            gj = self.get_joint_by_dxl_id(port, gripper_dxl_id)
+                            if gj is None or 'dxl_position' not in gj:
+                                all_closed = False
+                                dbg_parts.append(f"id={gripper_dxl_id} NO_POS")
+                                break
+                            gpos = gj['dxl_position']
+                            grange = gj['gripper_dxl_range']
+                            # 캘리브레이션 오차를 감안해 50% 지점을 threshold로 사용.
+                            mid = (grange[0] + grange[1]) / 2.0
+                            dbg_parts.append(f"id={gripper_dxl_id} pos={gpos} range={grange} mid={mid}")
+                            if grange[0] < grange[1]:
+                                if gpos < mid:
+                                    all_closed = False
+                                    break
+                            else:
+                                if gpos > mid:
+                                    all_closed = False
+                                    break
+                        if not all_closed:
+                            print(f"[DEBUG] {port} gripper not closed yet: {dbg_parts}", flush=True)
+                        if all_closed:
+                            dxl_controller.remove_torque()
+                            self._torque_release_pending_ports.discard(port)
+                            print(f"[NOTICE] Leader torque released on port {port}.", flush=True)
+                    if not self._torque_release_pending_ports:
+                        self.is_synced = True
+                        print("[NOTICE] All leader grippers closed. Recording can start.", flush=True)
 
                 # 그리퍼를 벌리면 정지하도록 하는 코드--------------
                 should_pause = [False] * len(self.dxl_controllers)
@@ -347,6 +419,12 @@ class Leader():
         finally:
             # 에러가 나든 정상 종료되든 반드시 실행되는 블록
             print("Cleaning up Leader Robot resources...", flush=True)
+            task_control['stop'] = True
+            try:
+                read_thread.join(timeout=1.0)
+                print("Dxl read thread joined.", flush=True)
+            except Exception:
+                print("Failed to join dxl read thread.", flush=True)
             try:
                 self.thread_pool.shutdown(wait=False)
                 print("ThreadPoolExecutor shut down.", flush=True)

@@ -299,7 +299,7 @@ class HealthServiceMixin:
                 self._hide_preload_dialog(ready=True)
                 try:
                     if auto_open_new:
-                        self.load_ui(open_mode="NEW")
+                        self.load_ui(open_mode=self._open_ui_mode)
                     elif on_ready is not None:
                         on_ready()
                 except Exception:
@@ -519,9 +519,11 @@ class RuntimeServiceMixin:
             return False
         if not self._is_valid_project_root(self.project_root):
             return False
-        # Check that the compose image exists (defined in docker-compose.yml)
+        # Check that at least one compose image exists
         try:
-            return self._image_exists("easy-collector:latest")
+            return (self._image_exists("easytrainer-backend:latest")
+                    or self._image_exists("easytrainer-frontend:latest")
+                    or self._image_exists("easytrainer-ros2:latest"))
         except Exception:
             return False
 
@@ -531,10 +533,9 @@ class RuntimeServiceMixin:
                 return False
             required = [
                 path / "docker-compose.yml",
-                path / "Dockerfile",
-                path / "start_services.sh",
-                path / "src" / "backend",
-                path / "src" / "ui",
+                path / "backend" / "Dockerfile",
+                path / "frontend" / "Dockerfile",
+                path / "ros2" / "Dockerfile",
             ]
             return all(p.exists() for p in required)
         except Exception:

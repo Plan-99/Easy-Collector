@@ -40,7 +40,7 @@ import torch
 import shutil
 
 # Define paths relative to this file's location to ensure robustness.
-FIPER_ROOT = "/root/backend/fiper"
+FIPER_ROOT = "/root/src/backend/fiper"
 BASE_CONFIG_PATH = FIPER_ROOT + "/configs"
 BASE_DATA_PATH = FIPER_ROOT + "/data"
 from ..configs.global_configs import DATASET_DIR as ORI_DATA_ROOT

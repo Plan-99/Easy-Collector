@@ -36,6 +36,8 @@ import pyarrow.parquet as pq
 import datasets as hf_datasets
 from PIL import Image
 
+import sys as _sys
+_sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'lerobot', 'src'))
 from lerobot.datasets.feature_utils import get_hf_features_from_features, create_empty_dataset_info
 from lerobot.datasets.io_utils import embed_images
 from lerobot.datasets.utils import DEFAULT_IMAGE_PATH, DEFAULT_FEATURES

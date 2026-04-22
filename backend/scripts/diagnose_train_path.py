@@ -50,7 +50,7 @@ def main():
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
 
-    ckpt_dir = Path(f"/root/backend/checkpoints/{args.ckpt}")
+    ckpt_dir = Path(f"/root/src/backend/checkpoints/{args.ckpt}")
     dataset_dir = _resolve_dataset_dir(args.dataset)
 
     print("=" * 80)

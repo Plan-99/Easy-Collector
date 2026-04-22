@@ -46,7 +46,7 @@ services:
     working_dir: /root
     restart: unless-stopped
 
-  # ── ROS 2: same as GPU version (no GPU needed) ──
+  # ── ROS 2: gRPC Bridge + IK Solver + Robot/Sensor drivers ──
   ros2:
     build:
       context: .
@@ -59,9 +59,14 @@ services:
       - XAUTHORITY=${XAUTHORITY}
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
       - RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}
+      - EASYTRAINER_DATA_DIR=${EASYTRAINER_DATA_DIR:-/opt/easytrainer}
+      - EASYTRAINER_CONFIG_PATH=${EASYTRAINER_CONFIG_PATH:-/opt/easytrainer/config.json}
     volumes:
       - ./ros2/ros2_ws:/root/ros2_ws
+      - ./ros2/ros2_bridge:/root/ros2/ros2_bridge
+      - /opt/easytrainer:/opt/easytrainer
       - /dev:/dev
+      - /dev/shm:/dev/shm
       - /tmp/.X11-unix:/tmp/.X11-unix
     restart: unless-stopped
 

@@ -2,12 +2,10 @@ from flask import Blueprint, request, current_app
 from flask_socketio import Namespace, emit
 from ...database.models.leader_robot_preset_model import LeaderRobotPreset as LeaderRobotPresetModel
 from ..process.leader_teleoperation import Leader
-from ...env.agent import Agent
+from ...bridge.remote_agent import RemoteAgent as Agent
 from ...database.models.robot_model import Robot as RobotModel
 
 
-# 1. Blueprint 생성
-# 이 블루프린트는 카메라와 관련된 'HTTP' 라우트를 관리합니다.
 leader_robot_bp = Blueprint('leader_robot', __name__)
 
 reading_thread = None
@@ -16,7 +14,7 @@ reading_thread = None
 def start_leader_robot():
     data = request.json
     serial_port = data.get('serial_port')
-    
+
     current_app.pm.start_process(
         name='start_leader_robot',
         command=['ros2', 'launch', 'dynamixel_ros', 'dynamixel_node.launch.py', f'device_port:={serial_port}'],
@@ -40,7 +38,7 @@ def save_leader_robot():
     preset_form = data.get('preset')
 
     preset = LeaderRobotPresetModel.first_or_create(
-        name = 'preset_' + str(robot_id),
+        name='preset_' + str(robot_id),
         robot_id=robot_id,
     )
 
@@ -53,7 +51,7 @@ def save_leader_robot():
     preset.ema = preset_form['ema']
     preset.save()
 
-    
+
     return {'status': 'success', 'message': 'Leader robot preset saved'}, 200
 
 
@@ -67,13 +65,12 @@ def start_leader_teleoperation():
 
     current_app.pm.stop_process(name='start_leader_robot')
     agent = current_app.agents[robot['id']]
-    
+
     leader = Leader(current_app.node, agent, current_app.pm.socketio, preset)
-# 2. 전체 워크플로우를 start_function으로 실행
     current_app.pm.start_function(
-        name='leader_teleoperation', # 프로세스 이름
-        func=leader.leader_full_workflow,   # 위에서 만든 통합 함수
-        log_id=log_emit_id,          # 로그 아이디
+        name='leader_teleoperation',
+        func=leader.leader_full_workflow,
+        log_id=log_emit_id,
     )
 
     return {'status': 'success', 'message': 'Leader teleoperation started'}, 200
@@ -81,6 +78,6 @@ def start_leader_teleoperation():
 
 
 @leader_robot_bp.route('/leader_robot:tele_stop', methods=['POST'])
-def stop_leader_teleoperation():    
+def stop_leader_teleoperation():
     current_app.pm.stop_function(name='leader_teleoperation')
-    return {'status': 'success', 'message': 'Leader teleoperation stopped'}, 200 
+    return {'status': 'success', 'message': 'Leader teleoperation stopped'}, 200

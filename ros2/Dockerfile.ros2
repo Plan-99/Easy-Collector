@@ -1,0 +1,149 @@
+# ===================================================================
+# EasyTrainer ROS2 Bridge Container
+# ROS2 + 로봇/센서 드라이버 + gRPC 서버 + WebRTC 스트리밍
+# PyTorch/프론트엔드/학습 파이프라인 제외
+# ===================================================================
+
+FROM nvidia/cuda:12.4.1-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Asia/Seoul
+ENV PIP_NO_CACHE_DIR=1
+ENV PIP_DEFAULT_TIMEOUT=300
+ENV EC_SKIP_TORCHVISION_COMPAT=1
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+
+# Regional PyPI mirror
+ARG PIP_INDEX_URL=https://mirror.kakao.com/pypi/simple
+ARG PIP_EXTRA_INDEX_URL=https://pypi.org/simple
+ENV PIP_INDEX_URL=${PIP_INDEX_URL}
+ENV PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL}
+RUN printf "[global]\nindex-url = %s\nextra-index-url = %s\n" "$PIP_INDEX_URL" "$PIP_EXTRA_INDEX_URL" > /etc/pip.conf
+
+RUN mkdir -p /opt/easytrainer/logs /tmp/easytrainer/logs /dev/shm/easytrainer && \
+    chmod -R 777 /opt/easytrainer /tmp/easytrainer /dev/shm/easytrainer
+
+# --- 시스템 패키지 ---
+RUN sed -i 's/archive.ubuntu.com/mirror.kakao.com/g' /etc/apt/sources.list && \
+    sed -i 's/security.ubuntu.com/mirror.kakao.com/g' /etc/apt/sources.list && \
+    echo 'Acquire::http::Pipeline-Depth "32";' > /etc/apt/apt.conf.d/99parallel && \
+    echo 'Acquire::http::No-Cache "true";' >> /etc/apt/apt.conf.d/99parallel && \
+    echo 'Acquire::Retries "10";' >> /etc/apt/apt.conf.d/99parallel
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    apt-utils curl gnupg lsb-release ca-certificates software-properties-common apt-transport-https \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- ROS 2 저장소 ---
+RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] https://mirrors.ustc.edu.cn/ros2/ubuntu jammy main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
+
+RUN apt-key adv --keyserver keyserver.ubuntu.com --recv-keys FB0B24895113F120 && \
+    echo "deb https://librealsense.intel.com/Debian/apt-repo $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/librealsense.list > /dev/null
+
+# --- ROS 2 Humble 설치 ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-humble-desktop-full \
+    ros-humble-realsense2-camera \
+    ros-humble-realsense2-description \
+    ros-humble-usb-cam \
+    ros-humble-image-transport-plugins \
+    v4l-utils ethtool can-utils iproute2 libyaml-cpp-dev \
+    ros-humble-ruckig \
+    ros-humble-eigen-stl-containers \
+    ros-humble-geometric-shapes \
+    ros-humble-pybind11-vendor \
+    ros-humble-moveit-resources-panda-moveit-config \
+    ros-humble-ompl \
+    ros-humble-warehouse-ros \
+    ros-humble-moveit-msgs \
+    ros-humble-moveit-visual-tools \
+    ros-humble-srdfdom \
+    ros-humble-rosbridge-server \
+    ros-humble-ros2-control \
+    ros-humble-ros2-controllers \
+    ros-humble-controller-manager \
+    ros-humble-rmw-cyclonedds-cpp \
+    ros-humble-rosidl-generator-dds-idl \
+    ros-humble-ament-cmake \
+    ros-humble-joint-state-publisher \
+    ros-humble-moveit \
+    ros-humble-pluginlib \
+    ros-humble-robot-state-publisher \
+    ros-humble-urdf \
+    ros-humble-xacro \
+    python3-pip \
+    python3-rosdep \
+    python3-colcon-common-extensions \
+    python3-pykdl \
+    build-essential \
+    cmake \
+    && apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*
+
+# --- Pinocchio (IK solver) ---
+RUN mkdir -p /etc/apt/keyrings && \
+    curl -sSL http://robotpkg.openrobots.org/packages/debian/robotpkg.asc | tee /etc/apt/keyrings/robotpkg.asc > /dev/null && \
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/robotpkg.asc] http://robotpkg.openrobots.org/packages/debian/pub $(lsb_release -cs) robotpkg" | tee /etc/apt/sources.list.d/robotpkg.list && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    robotpkg-simde=0.8.0 \
+    robotpkg-py310-pinocchio \
+    robotpkg-py310-casadi && \
+    rm -rf /var/lib/apt/lists/*
+
+ENV PATH="/opt/openrobots/bin:${PATH}"
+ENV PYTHONPATH="/opt/openrobots/lib/python3.10/site-packages:${PYTHONPATH}"
+
+# --- Python 패키지 ---
+WORKDIR /root
+RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools==58.2.0
+
+# ROS2 bridge에 필요한 Python 패키지 설치
+COPY ros2/requirements.ros2.txt /root/requirements.ros2.txt
+RUN python3 -m pip install --no-cache-dir -r /root/requirements.ros2.txt
+
+# 커스텀 패키지 (로봇 제어용)
+COPY python_pkgs /root/python_pkgs
+RUN python3 -m pip install --no-cache-dir -e /root/python_pkgs/xr_teleoperate/teleop/robot_control/dex-retargeting && \
+    python3 -m pip install --no-cache-dir -e /root/python_pkgs/xr_teleoperate/teleop/televuer && \
+    python3 -m pip install --no-cache-dir -e /root/python_pkgs/unitree_sdk2_python
+
+# --- C++ 빌드 (rbpodo) ---
+COPY cmake_pkgs /root/cmake_pkgs
+WORKDIR /root/cmake_pkgs/rbpodo
+RUN mkdir -p build && cd build && cmake -DCMAKE_BUILD_TYPE=Release .. && make -j"$(nproc)" && make install
+
+# --- ROS 2 워크스페이스 빌드 ---
+RUN python3 -m pip uninstall -y setuptools && \
+    python3 -m pip install --no-cache-dir setuptools==58.2.0
+
+COPY ros2/ros2_ws /root/ros2/ros2_ws
+WORKDIR /root/ros2/ros2_ws
+ENV PYTHONWARNINGS="ignore:setup.py install is deprecated"
+RUN bash -c "source /opt/ros/humble/setup.bash && \
+    colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release"
+
+# --- GStreamer ---
+RUN apt-get update && apt-get install -y gstreamer1.0-tools \
+    gstreamer1.0-libav libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+    libgstreamer-plugins-good1.0-dev gstreamer1.0-plugins-good gstreamer1.0-plugins-base && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && apt-get install -y python3-opencv && rm -rf /var/lib/apt/lists/*
+
+# rclpy 업데이트
+RUN apt-get update && apt-get install --only-upgrade -y --no-install-recommends \
+    ros-humble-rclpy ros-humble-ros2cli ros-humble-ros2topic && \
+    rm -rf /var/lib/apt/lists/*
+
+# --- 최종 설정 ---
+WORKDIR /root
+RUN echo "source /opt/ros/humble/setup.bash" >> /etc/bash.bashrc && \
+    echo "source /root/ros2/ros2_ws/install/setup.bash" >> /etc/bash.bashrc
+
+COPY --chmod=755 ros2/start_ros2_services.sh /usr/local/bin/start_ros2_services.sh
+RUN chmod -R 777 /opt/easytrainer /tmp/easytrainer
+
+EXPOSE 50051 5002
+
+ENTRYPOINT ["/bin/bash", "/usr/local/bin/start_ros2_services.sh"]

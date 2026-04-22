@@ -1,5 +1,4 @@
 import cv2
-from sensor_msgs.msg import CompressedImage
 import numpy as np
 
 def fetch_image_with_config(image, config):
@@ -23,6 +22,7 @@ def fetch_image_with_config(image, config):
     return image
 
 def ros_image_to_numpy(image_msg):
+    from sensor_msgs.msg import CompressedImage
     if isinstance(image_msg, CompressedImage):
         # 압축 이미지 처리
         np_arr = np.frombuffer(image_msg.data, np.uint8)

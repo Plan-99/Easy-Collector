@@ -22,15 +22,13 @@ from ..policies.utils import make_policy, make_optimizer, forward_pass, detach_d
 from ..configs.global_configs import DATASET_DIR
 
 # Import database and data models
-from orator import DatabaseManager
-from orator.orm import Model
+from ..database.config.database import db as peewee_db
 from ..database.models.robot_model import Robot
 from ..database.models.policy_model import Policy
 from ..database.models.task_model import Task
 from ..database.models.gripper_model import Gripper
 from ..database.models.sensor_model import Sensor
 from ..database.models.checkpoint_model import Checkpoint
-from ..database.config.database import DATABASES
 
 from lerobot.policies.act.configuration_act import ACTConfig
 from lerobot.policies.act.modeling_act import ACTPolicy
@@ -65,7 +63,7 @@ def train(
     
     policy_settings = convert_lists_to_tuples(policy_obj['settings'])
     train_settings = convert_lists_to_tuples(checkpoint_obj['train_settings'])
-    load_model_path = f"/root/backend/checkpoints/{load_model['id']}" if load_model else None
+    load_model_path = f"/root/src/backend/checkpoints/{load_model['id']}" if load_model else None
 
     set_seed(seed) # Set seed for reproducibility
 
@@ -278,7 +276,7 @@ def train(
 
         
     # save dataset stats
-    ckpt_dir = f"/root/backend/checkpoints/{checkpoint_obj['id']}"
+    ckpt_dir = f"/root/src/backend/checkpoints/{checkpoint_obj['id']}"
 
     # Save the best checkpoint after training is finished
     best_epoch, min_val_loss, best_policy = best_ckpt_info
@@ -322,9 +320,8 @@ def train(
 def main(args):
     """Main execution function to load configs and start training."""
     
-    # Setup database connection using Orator
-    db = DatabaseManager(DATABASES)
-    Model.set_connection_resolver(db)
+    # Setup database connection using Peewee
+    peewee_db.connect(reuse_if_open=True)
     
     # Create a temporary directory to store dataset files
     temp_dir = os.path.join(DATASET_DIR, "tmp")

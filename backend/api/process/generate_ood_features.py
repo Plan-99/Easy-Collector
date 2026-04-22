@@ -9,7 +9,7 @@ from ...configs.global_configs import DATASET_DIR
 from torch.utils.data import DataLoader
 
 
-CHECKPOINT_DIR = '/root/backend/checkpoints'
+CHECKPOINT_DIR = '/root/src/backend/checkpoints'
 
 
 def generate_ood_features(checkpoint, policy_obj, task, task_control=None):

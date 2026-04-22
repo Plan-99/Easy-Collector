@@ -1,16 +1,18 @@
 from flask import Blueprint, request, current_app
 from flask_socketio import Namespace, emit
 from ...database.models.robot_model import Robot as RobotModel
+import json
 import time
 import os
 import subprocess
-from ...env.agent import Agent
+from ...bridge.remote_agent import RemoteAgent
+from ...bridge.client import get_bridge_client
+from ...bridge.generated import robot_bridge_pb2 as pb
 from ..process.subscribe_robot import subscribe_robot_topic
 from ...configs.global_configs import SUPPORT_ROBOTS
 from ..utils.runtime import attach_robot_runtime
 
 # 1. Blueprint 생성
-# 이 블루프린트는 카메라와 관련된 'HTTP' 라우트를 관리합니다.
 robot_bp = Blueprint('robot', __name__)
 
 
@@ -19,20 +21,19 @@ class RobotNamespace(Namespace):
         super().__init__(namespace)
         self.pm = process_manager
 
-    # def on_connect(self):
-    #     print(f'Client connected to /robot namespace: {request.sid}')
-    #     emit('response', {'data': '카메라 제어 채널에 연결되었습니다.'})
-
-    # def on_disconnect(self):
-    #     print(f'Client disconnected from /robot namespace: {request.sid}')
-
 
 @robot_bp.route('/robots', methods=['GET'])
 def get_robots():
-    robots = RobotModel.with_('leader_robot_preset').where('hide', False).get()
+    robots = RobotModel.select().where(RobotModel.hide == False, RobotModel.deleted_at.is_null())
     robots = [robot.to_dict() for robot in robots]
 
     processes = set(current_app.pm.list_processes())
+    try:
+        client = get_bridge_client()
+        ros2_procs = client.driver.ListProcesses(pb.Empty())
+        processes.update(ros2_procs.names)
+    except Exception:
+        pass
     for robot in robots:
         attach_robot_runtime(robot, processes)
 
@@ -78,138 +79,67 @@ def start_robot():
     company = data.get('company', '')
     settings = data.get('settings', {})
 
-    # Stop lingering processes from previous attempts to allow clean restart
-    try:
-        current_app.pm.stop_process(process_id)
-    except Exception:
-        pass
+    robot_model = RobotModel.find(id)
+    if robot_model:
+        robot_dict = robot_model.to_dict()
+        settings['interpolation'] = robot_dict.get('interpolation', False)
+        settings['write_topic'] = robot_dict.get('write_topic', '')
+        settings['sdk_control'] = robot_dict.get('sdk_control', False)
+        settings['sdk_type'] = robot_dict.get('sdk_type', '')
+
     try:
         current_app.pm.stop_function('subscribe_robot_' + str(id))
     except Exception:
         pass
 
-    command = ''
-    if company == 'Piper':
-        script_path = os.path.expanduser('~/ros2_ws/src/piper_ros/can_activate_main.sh')
-        current_app.pm.start_process(
-            name='can_config',
-            command=['bash', script_path],
-            log_emit_id = process_id
-        )
-        time.sleep(1)
+    print(f"[DEBUG start_robot] id={id} type={type} company='{company}' process_id={process_id}")
+    socketio = current_app.extensions.get('socketio')
+    def _log(msg, log_type='stdout'):
+        print(f"[robot:{id}] {msg}", flush=True)
+        if socketio:
+            socketio.emit('task_log', {'id': process_id, 'message': msg, 'type': log_type})
 
-        gripper_exist = 'true' if type == 'piper' else 'false'
-        can_port = settings.get("can_port", "can0")
-        if can_port.startswith("can_"):
-            can_port = "can" + can_port[4:]
-        can_port = _ensure_can_interface(can_port)
-        # If still missing, fail fast
-        if not os.path.exists(f"/sys/class/net/{can_port}"):
-            return {'status': 'error', 'message': f'CAN interface {can_port} not found'}, 400
-        command = ['ros2', 'launch', 'piper', 'start_single_piper.launch.py', 
-                   f'namespace:=ec_robot_{id}', 
-                   f'can_port:={can_port}', 
-                   'auto_enable:=true', 'rviz_ctrl_flag:=false', 
-                   f'gripper_exist:={gripper_exist}']
+    if type == 'custom':
+        return {'status': 'success', 'message': 'Custom robot uses external topic'}, 200
 
-    if company == 'Rainbow Robotics':
-        # moveit_command = ['ros2', 'launch', 'rbpodo_bringup', 'moveit.launch.py', f'namespace:=ec_robot_{id}', f'robot_ip:={settings.get("ip", "10.0.2.27")}', 'use_fake_hardware:=false']
-        
-        command = ['ros2', 'launch', 'rbpodo_bringup', 'rbpodo.launch.py', f'namespace:=ec_robot_{id}', f'robot_ip:={settings.get("ip", "10.0.2.27")}', 'use_fake_hardware:=false']
-        
-    if company == 'OnRobot':
-        command = ['ros2', 'launch', 'onrobot_rg_control', 'bringup.launch.py',
-                   f'namespace:=ec_robot_{id}',
-                   f'gripper:={type}',
-                   f'ip:={settings.get("ip_address", "10.0.2.27")}',
-                   f'port:={settings.get("port", 41414)}',
-                   f'changer_addr:={settings.get("changer_address", 5)}'
-        ]
+    _log(f'Starting robot driver: {type} ({company})')
 
-    if company == 'Robotiq':
-        command = ['ros2', 'launch', 'robotiq_description', 'robotiq_control.launch.py',
-                   f'namespace:=ec_robot_{id}',
-                   f'com_port:={settings.get("serial_port", "/dev/ttyUSB0")}'
-        ]
+    client = get_bridge_client()
+    result = client.driver.StartRobotDriver(pb.DriverConfig(
+        process_id=process_id,
+        robot_id=int(id),
+        type=type,
+        company=company,
+        settings_json=json.dumps(settings),
+    ))
 
-    if company == "Kinova":
-        command = ['ros2', 'launch', f'{type}_moveit_config', 'robot.launch.py',
-                f'namespace:=ec_robot_{id}',
-                f'robot_ip:={settings.get("ip_address", "192.168.1.10")}',
-                'launch_rviz:=false'
-        ]
-
-    if company == 'OMRON':
-        command = ['ros2', 'launch', 'tm_driver', 'tm_bringup.launch.py', 
-                   f'namespace:=ec_robot_{id}', 
-                   f'robot_ip:={settings.get("ip_address", "192.168.1.10")}']
-        
-    if company == 'JAKA':
-        command = ['ros2', 'launch', 'jaka_driver', 'robot_start.launch.py',
-                   f'namespace:=ec_robot_{id}',
-                   f'ip:={settings.get("ip_address", "192.168.1.10")}']
-
-    if company == 'Fairino':
-        command = ['ros2', 'run', 'fairino_hardware', 'ros2_cmd_server',
-                   '--ros-args',
-                   '-r', f'__ns:=/ec_robot_{id}',
-                   '-p', f'robot_ip:={settings.get("ip_address", "192.168.58.2")}']
-
-    if company == 'Test':
-        command = ['ros2', 'launch', 'test_arm', 'test_arm.launch.py',
-                   f'namespace:=ec_robot_{id}']
-
-    print(f"Attempting to start robot: {' '.join(command)}")
-
-    process = current_app.pm.start_process(
-        name=process_id,
-        command=command,
-    )
-
-    if company == 'JAKA':
-        # Give the driver a moment to start up before enabling servo mode
-        time.sleep(5)
-        
-        from jaka_msgs.srv import ServoMoveEnable
-        
-        # The service name in the driver has a leading '/', so it's absolute
-        service_name = '/jaka_driver/servo_move_enable'
-        servo_client = current_app.node.create_client(ServoMoveEnable, service_name)
-        
-        if not servo_client.wait_for_service(timeout_sec=5.0):
-            current_app.logger.error(f"JAKA servo_move_enable service not available.")
-            current_app.pm.stop_process(process_id)
-            return {'status': 'error', 'message': f'Failed to find JAKA servo_move_enable service'}, 500
-
-        req = ServoMoveEnable.Request()
-        req.enable = True
-        
-        # Fire and forget the service call
-        future = servo_client.call_async(req)
-        current_app.logger.info("Attempted to enable JAKA servo mode.")
-
-    # agent = Agent(current_app.node, data)
-
-    # current_app.agents[id] = agent
-
-    if process:
+    if result.success:
+        _log(f'Driver started (pid={result.pid})')
         return {
             'status': 'success',
-            'message': f'Robot process started',
-            'pid': process.pid
+            'message': 'Robot process started',
+            'pid': result.pid
         }, 200
     else:
-        return {'status': 'error', 'message': f'Failed to start robot'}, 500
-    
+        _log(f'Driver failed: {result.message}', 'error')
+        return {'status': 'error', 'message': result.message}, 500
+
 
 @robot_bp.route('/robot:stop', methods=['POST'])
 def stop_robot():
     robot_id = request.json.get('id')
     process_id = request.json.get('process_id')
-    current_app.pm.stop_process(process_id)
+
+    client = get_bridge_client()
+    client.driver.StopRobotDriver(pb.ProcessId(name=process_id))
+
     current_app.pm.stop_process('leader_teleoperation')
     current_app.pm.stop_function('subscribe_robot_' + str(robot_id))
-    current_app.agents.pop(int(robot_id), None)
+
+    agent = current_app.agents.pop(int(robot_id), None)
+    if agent:
+        agent.destroy()
+
     return {'status': 'success', 'message': 'Robot process stopped'}, 200
 
 
@@ -247,7 +177,6 @@ def create_robot():
     if 'is_sim' in request.json:
         settings['is_sim'] = request.json.get('is_sim', False)
 
-    # Normalize CAN port names (can0/can1) in case underscores are provided
     if 'can_port' in settings and settings['can_port'].startswith('can_'):
         settings['can_port'] = 'can' + settings['can_port'][4:]
 
@@ -255,10 +184,10 @@ def create_robot():
         name=name,
         type=type,
         role=role,
-        settings=settings,
-        homepose=homepose
+        settings=json.dumps(settings),
+        homepose=json.dumps(homepose)
     )
-    
+
     return {'status': 'success', 'message': 'Robot Created'}, 200
 
 
@@ -277,7 +206,7 @@ def update_robot(id):
     if 'role' in request.json:
         robot.role = request.json.get('role')
 
-    settings = robot.settings if robot.settings else {}
+    settings = robot._settings if robot._settings else {}
     if type == 'custom':
         settings = {
             'role': request.json.get('role', ''),
@@ -327,7 +256,7 @@ def move_robot(id):
 
     if not goal_pos:
         return {'status': 'error', 'message': 'Action is required'}, 400
-    
+
     print(current_app.agents)
     agent = current_app.agents[int(id)]
 
@@ -341,15 +270,12 @@ def subscribe_robot(id):
     int_id = int(id)
     func_name = 'subscribe_robot_' + str(id)
 
-    # 기존 Agent가 있으면 재사용 (rclpy.spin 중 destroy_subscription → segfault 방지)
     existing_agent = current_app.agents.get(int_id)
     if existing_agent is not None:
-        # background task만 재시작
         if func_name in current_app.pm.processes:
             return {'status': 'success', 'message': 'Already subscribed'}, 200
         current_app.pm.start_function(
             name=func_name,
-            node=current_app.node,
             func=subscribe_robot_topic,
             socketio_instance=current_app.pm.socketio,
             agent=existing_agent,
@@ -357,12 +283,11 @@ def subscribe_robot(id):
         return {'status': 'success', 'message': 'Subscribed to robot topic'}, 200
 
     robot = RobotModel.find(id).to_dict()
-    agent = Agent(current_app.node, robot)
+    agent = RemoteAgent(robot)
     current_app.agents[int_id] = agent
 
     current_app.pm.start_function(
         name=func_name,
-        node=current_app.node,
         func=subscribe_robot_topic,
         socketio_instance=current_app.pm.socketio,
         agent=agent,
@@ -373,8 +298,6 @@ def subscribe_robot(id):
 @robot_bp.route('/robot/<id>/:unsubscribe_robot', methods=['POST'])
 def unsubscribe_robot(id):
     current_app.pm.stop_function('subscribe_robot_' + str(id))
-    # Agent와 ROS2 구독은 유지 — rclpy.spin 중 destroy하면 segfault
-    # Agent는 다음 subscribe 시 재사용됨
     return {'status': 'success', 'message': 'Unsubscribed from robot topic'}, 200
 
 
@@ -392,16 +315,10 @@ def _apply_ik_settings(data: dict, settings: dict):
 
 
 def _ensure_can_interface(name: str):
-    """
-    Make sure the requested CAN interface exists.
-    If 'canX' is missing but 'can_X' exists, rename it to 'canX'.
-    """
     if not name.startswith("can"):
         return name
-    # Already exists
     if os.path.exists(f"/sys/class/net/{name}"):
         return name
-    # Try underscore variant
     num = name[3:]
     alt = f"can_{num}"
     if os.path.exists(f"/sys/class/net/{alt}"):

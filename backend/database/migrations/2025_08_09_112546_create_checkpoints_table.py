@@ -23,7 +23,7 @@ class CreateCheckpointsTable(Migration):
             table.soft_deletes()
 
     def down(self):
-        checkpoint_dir = os.path.join('/root/backend', 'checkpoints')
+        checkpoint_dir = os.path.join('/root/src/backend', 'checkpoints')
 
         # 2. 폴더가 존재하는지 확인하고 삭제합니다.
         if os.path.exists(checkpoint_dir):

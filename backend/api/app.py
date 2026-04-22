@@ -22,30 +22,20 @@ from .routes.checkpoint import checkpoint_bp
 from .routes.vla import vla_bp
 from .routes.teleoperator import teleoperator_bp
 from .routes.assembly import assembly_bp
-from .routes.remote_train import remote_train_bp
 
-try:
-    import rclpy
-    from rclpy.node import Node
-    from rclpy.executors import MultiThreadedExecutor
-    HAS_ROS = True
-except ImportError:
-    HAS_ROS = False
-    rclpy = None
-    Node = None
-    MultiThreadedExecutor = None
+from ..bridge.client import get_bridge_client
+from ..bridge.remote_agent import RemoteAgent
+from .ros2_log_streamer import ROS2LogStreamer
 
 import usb.core
 import usb.util
-
-from orator import DatabaseManager, Model
 
 import os
 import argparse
 import logging
 
 import threading
-from ..database.config.database import DATABASES
+from ..database.config.database import db as peewee_db
 
 argparse = argparse.ArgumentParser(description='Easy Collector Web API')
 argparse.add_argument('--debug', action='store_true', help='Enable debug mode')
@@ -69,18 +59,14 @@ socketio = SocketIO(
     app,
     cors_allowed_origins="*",
     async_mode='threading',
-    # logger=False,
-    # engineio_logger=False,
-    # allow_upgrades=False,  # disable websocket upgrade (Werkzeug can't serve websockets)
-    # transports=["polling"],  # force long-polling for compatibility
+    allow_upgrades=False,
+    transports=["polling"],
 )
 
 pm = ProcessManager(socketio, debug=debug)  # 프로세스 관리 객체 생성
 
-node = None
-if HAS_ROS:
-    rclpy.init(args=None)
-    node = Node("web_api_node")
+bridge_client = get_bridge_client()
+node = None  # ROS2 node는 ROS2 컨테이너에서 관리
 
 app.register_blueprint(sensor_bp, url_prefix='/api')
 app.register_blueprint(robot_bp, url_prefix='/api')
@@ -92,33 +78,23 @@ app.register_blueprint(checkpoint_bp, url_prefix='/api')
 app.register_blueprint(vla_bp, url_prefix='/api')
 app.register_blueprint(teleoperator_bp, url_prefix='/api')
 app.register_blueprint(assembly_bp, url_prefix='/api')
-app.register_blueprint(remote_train_bp, url_prefix='/api')
 
 socketio.on_namespace(SensorNamespace('/sensor', pm))
 socketio.on_namespace(RobotNamespace('/robot', pm))
 
 
-db = DatabaseManager(DATABASES)
-Model.set_connection_resolver(db)
+peewee_db.connect(reuse_if_open=True)
 
 
 pcs = set()
 
-pm.start_process(
-    'streaming',
-    ['python3', '-m', 'backend.api.streaming']
-)
-
-# pm.start_process(
-#     'rosbridge_websocket',
-#     ['ros2', 'launch', 'rosbridge_server', 'rosbridge_websocket_launch.xml', 'port:=9090']
-# )
+# 스트리밍은 ROS2 컨테이너에서 실행됨 (port 5002)
 
 @app.route('/api/healthz', methods=['GET'])
 def healthz():
     return {
         'status': 'ok',
-        'ros_ok': bool(rclpy.ok()) if HAS_ROS else False,
+        'ros_ok': bridge_client.is_ready(),
     }, 200
 
 @app.route('/api/db/path', methods=['GET'])
@@ -186,14 +162,15 @@ def list_devices():
 
 @app.route('/api/topics', methods=['GET'])
 def list_topics():
-    if not HAS_ROS or node is None:
-        return {'status': 'success', 'topics': []}, 200
-    all_topics = node.get_topic_names_and_types()
-    active_topic_list = [
-        {'name': topic_name, 'type': topic_types[0]}
-        for topic_name, topic_types in all_topics
-        if node.count_publishers(topic_name) > 0
-    ]
+    from ..bridge.generated import robot_bridge_pb2 as pb
+    try:
+        result = bridge_client.driver.ListTopics(pb.Empty())
+        active_topic_list = [
+            {'name': t.name, 'type': t.type}
+            for t in result.topics
+        ]
+    except Exception:
+        active_topic_list = []
 
     return {
         'status': 'success',
@@ -292,20 +269,21 @@ def handle_move_robot_ee_delta_event(data):
 
 
 def main():
-    app.node = node  # Flask 앱에 ROS 노드 할당 (None if no ROS)
+    app.node = node  # 호환성 유지 (None)
+    app.bridge_client = bridge_client  # gRPC bridge 클라이언트
     app.pm = pm  # Flask 앱에 프로세스 관리 객체 할당
-    app.agents = {}  # Flask 앱에 에이전트 딕셔너리 할당
+    app.agents = {}  # Flask 앱에 에이전트 딕셔너리 할당 (RemoteAgent)
 
     try:
+        # ROS2 bridge 연결 대기
+        print("Waiting for ROS2 bridge connection...")
+        bridge_client.wait_for_ready(timeout=60)
+
+        # ROS2 컨테이너 로그 스트리밍 시작
+        ros2_log_streamer = ROS2LogStreamer(socketio)
+        ros2_log_streamer.start()
+
         print("Starting Flask-SocketIO server...")
-        if HAS_ROS and node is not None:
-            ros_executor = MultiThreadedExecutor()
-            ros_executor.add_node(node)
-            executor_thread = threading.Thread(target=ros_executor.spin, daemon=True)
-            executor_thread.start()
-        else:
-            print("[WARN] ROS 2 not available — running without ROS integration")
-        # 이 함수는 서버가 종료(예: Ctrl+C)될 때까지 여기서 멈춥니다.
         socketio.run(
             app,
             host='0.0.0.0',

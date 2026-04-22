@@ -67,18 +67,6 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* ===== SOCIAL PROOF ===== */}
-      <section className="py-16 border-y border-white/5">
-        <div className="max-w-7xl mx-auto px-6">
-          <p className="reveal text-center text-sm text-surface-500 mb-8 tracking-wide">국내 로보틱스 팀이 선택한 학습 플랫폼</p>
-          <div className="reveal flex flex-wrap items-center justify-center gap-10 md:gap-16 opacity-40">
-            <span className="font-[var(--font-display)] font-bold text-xl tracking-tight">RoboLab</span>
-            <span className="font-[var(--font-display)] font-bold text-xl tracking-tight">AutoMFG</span>
-            <span className="font-[var(--font-display)] font-bold text-xl tracking-tight">SmartFactory AI</span>
-            <span className="font-[var(--font-display)] font-bold text-xl tracking-tight">KineticLabs</span>
-          </div>
-        </div>
-      </section>
 
       {/* ===== PROBLEM ===== */}
       <section className="py-24 md:py-32 lg:py-40" id="problem">

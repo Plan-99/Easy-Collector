@@ -17,8 +17,8 @@ if _gtk_modules:
 
 # Apply safe Qt WebEngine defaults BEFORE importing Qt modules
 _force_external_env = os.environ.get("EASYCOLLECTOR_FORCE_EXTERNAL_BROWSER")
-# Default to using an external browser (no embedded WebView) unless explicitly disabled
-_force_external = True if _force_external_env is None else (_force_external_env == "1")
+# Default to embedded WebView; set EASYCOLLECTOR_FORCE_EXTERNAL_BROWSER=1 to force external browser
+_force_external = (_force_external_env == "1") if _force_external_env is not None else False
 # On Wayland, default to X11/xcb to avoid noisy activation token warnings
 if os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland" and not os.environ.get("QT_QPA_PLATFORM"):
     os.environ["QT_QPA_PLATFORM"] = "xcb"

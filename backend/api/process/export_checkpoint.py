@@ -11,7 +11,7 @@ Bundle layout (see export_templates/README.md for the user-facing doc)::
     ├── README.md               (verbatim)
     ├── requirements.txt        (verbatim)
     ├── export_meta.json        (built from DB row)
-    ├── model/                  (every file in /root/backend/checkpoints/<id>/)
+    ├── model/                  (every file in /root/src/backend/checkpoints/<id>/)
     └── lerobot/                (vendored src/backend/lerobot/src/lerobot/)
 """
 from __future__ import annotations
@@ -26,7 +26,7 @@ from ...database.models.assembly_model import Assembly as AssemblyModel
 from ...database.models.sensor_model import Sensor as SensorModel
 
 # Where the trained checkpoints live inside the container.
-CHECKPOINT_DIR = "/root/backend/checkpoints"
+CHECKPOINT_DIR = "/root/src/backend/checkpoints"
 
 # Vendored lerobot package — copied wholesale into the bundle so the exported
 # inference script doesn't depend on the user pip-installing a matching version.

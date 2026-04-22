@@ -1,33 +1,15 @@
-from orator import Model, accessor, SoftDeletes
-from orator.orm import has_one
-from .leader_robot_preset_model import LeaderRobotPreset
+from peewee import (
+    CharField, TextField, BooleanField, DateTimeField, IntegerField
+)
+from ..config.database import SoftDeleteModel
 from ...configs.global_configs import SUPPORT_ROBOTS
+import json
+import datetime
 
 
-# ROBOT_CONFIGS = {
-#     'ur5e': {},
-#     'piper': {}
-# }
-
-
-# class RobotObserver:
-#     def creating(self, robot):
-#         if not getattr(robot, 'settings', None):
-#             robot_type = robot.type
-#             if robot_type in ROBOT_CONFIGS:
-#                 robot.settings = ROBOT_CONFIGS[robot_type]
-#             else:
-#                 robot.settings = {}
-
-
-class Robot(Model, SoftDeletes):
-    __fillable__ = [
-        'name',
-        'type',
-        'role',
-        'settings',
-        'hide'
-    ]
+class Robot(SoftDeleteModel):
+    class Meta:
+        table_name = 'robots'
 
     __casts__ = {
         'joint_names': 'json',
@@ -60,175 +42,237 @@ class Robot(Model, SoftDeletes):
         'serial_port',
         'ik_available',
         'is_sim',
+        'interpolation',
+        'sdk_control',
+        'sdk_type',
     ]
+
+    name = CharField(null=True)
+    type = CharField(null=True)
+    role = CharField(null=True)
+    settings = TextField(null=True)
+    homepose = TextField(null=True)
+    hide = BooleanField(default=False)
+    created_at = DateTimeField(default=datetime.datetime.now)
+    updated_at = DateTimeField(default=datetime.datetime.now)
+    deleted_at = DateTimeField(null=True)
+
+    def save(self, *args, **kwargs):
+        self.updated_at = datetime.datetime.now()
+        for field_name in ('settings', 'homepose'):
+            val = getattr(self, field_name, None)
+            if val is not None and not isinstance(val, str):
+                setattr(self, field_name, json.dumps(val))
+        return super().save(*args, **kwargs)
+
+    @property
+    def _settings(self):
+        """Parsed settings dict."""
+        val = self.settings
+        if isinstance(val, str):
+            try:
+                return json.loads(val)
+            except (json.JSONDecodeError, TypeError):
+                return {}
+        return val or {}
 
     def get_robot_type_info(self):
         return next(
-            (robot for robot in SUPPORT_ROBOTS if robot.get('name') == self.type), 
+            (robot for robot in SUPPORT_ROBOTS if robot.get('name') == self.type),
             {}
         )
-    
 
-    @has_one
+    @property
     def leader_robot_preset(self):
-        return LeaderRobotPreset
-    
-    @accessor
+        from .leader_robot_preset_model import LeaderRobotPreset
+        return LeaderRobotPreset.get_or_none(LeaderRobotPreset.robot_id == self.id)
+
+    @property
     def company(self):
         if self.type != 'custom':
             return self.get_robot_type_info().get('company', '')
         return 'custom'
-    
-    @accessor
+
+    @property
     def tools(self):
-        tool_ids = self.settings.get('tool_ids', [])
+        tool_ids = self._settings.get('tool_ids', [])
         if len(tool_ids) == 0:
             return []
-        
-        return Robot.where_in('id', tool_ids).get()
+        return list(Robot.select().where(Robot.id.in_(tool_ids)))
 
-    @accessor
+    @property
     def joint_dim(self):
         if self.type != 'custom':
             return self.get_robot_type_info().get('joint_dim', 6)
-        return self.settings['joint_names'].__len__()
-    
-    @accessor
+        return len(self._settings.get('joint_names', []))
+
+    @property
     def joint_names(self):
         if self.type != 'custom':
             return self.get_robot_type_info().get('joint_names', [])
+        return self._settings.get('joint_names', [])
 
-        return self.settings['joint_names']
-    
-    @accessor
+    @property
     def read_topic(self):
         if self.type != 'custom':
-            return f'/ec_robot_{self.id}' + self.get_robot_type_info().get('read_topic', '')
+            info = self.get_robot_type_info()
+            if info.get('sdk_control'):
+                return f'/ec_robot_{self.id}/interpolated_joint_cmd'
+            return f'/ec_robot_{self.id}' + info.get('read_topic', '')
+        return self._settings.get('read_topic', '')
 
-        return self.settings['read_topic']
-    
-    @accessor
+    @property
     def read_topic_msg(self):
         if self.type != 'custom':
-            return self.get_robot_type_info().get('read_topic_msg', '')
-        return self.settings['read_topic_msg']
-    
-    @accessor
+            info = self.get_robot_type_info()
+            if info.get('sdk_control'):
+                return 'sensor_msgs/JointState'
+            return info.get('read_topic_msg', '')
+        return self._settings.get('read_topic_msg', '')
+
+    @property
     def write_type(self):
         if self.type != 'custom':
-            return self.get_robot_type_info().get('write_type', 'topic')
-        return self.settings.get('write_type', 'topic')
-    
+            info = self.get_robot_type_info()
+            if info.get('sdk_control'):
+                return 'sdk'
+            return info.get('write_type', 'topic')
+        return self._settings.get('write_type', 'topic')
 
-    @accessor
+    @property
     def write_topic(self):
         if self.type != 'custom':
-            return f'/ec_robot_{self.id}' + self.get_robot_type_info().get('write_topic', '')
+            info = self.get_robot_type_info()
+            if info.get('sdk_control'):
+                return ''
+            return f'/ec_robot_{self.id}' + info.get('write_topic', '')
+        return self._settings.get('write_topic', '')
 
-        return self.settings['write_topic']
-    
-    @accessor
+    @property
     def write_topic_msg(self):
         if self.type != 'custom':
-            return self.get_robot_type_info().get('write_topic_msg', '')
-        
-        return self.settings['write_topic_msg']
-    
-    @accessor
+            info = self.get_robot_type_info()
+            if info.get('sdk_control'):
+                return ''
+            return info.get('write_topic_msg', '')
+        return self._settings.get('write_topic_msg', '')
+
+    @property
+    def interpolation(self):
+        if self.type != 'custom':
+            return self.get_robot_type_info().get('interpolation', False)
+        return self._settings.get('interpolation', False)
+
+    @property
+    def sdk_control(self):
+        if self.type != 'custom':
+            return self.get_robot_type_info().get('sdk_control', False)
+        return self._settings.get('sdk_control', False)
+
+    @property
+    def sdk_type(self):
+        if self.type != 'custom':
+            return self.get_robot_type_info().get('sdk_type', '')
+        return self._settings.get('sdk_type', '')
+
+    @property
     def move_action(self):
         return ''
-    
-    @accessor
+
+    @property
     def yml_path(self):
         return ''
-    
-    @accessor
+
+    @property
     def joint_upper_bounds(self):
         if self.type != 'custom':
             return self.get_robot_type_info().get('joint_upper_bounds', [])
-        return self.settings['joint_upper_bounds']
-    
-    @accessor
+        return self._settings.get('joint_upper_bounds', [])
+
+    @property
     def joint_lower_bounds(self):
         if self.type != 'custom':
             return self.get_robot_type_info().get('joint_lower_bounds', [])
-        return self.settings['joint_lower_bounds']
-    
+        return self._settings.get('joint_lower_bounds', [])
 
-    @accessor
+    @property
     def can_port(self):
         if self.type != 'custom':
             custom_fields = self.get_robot_type_info().get('custom_fields', [])
             if 'can_port' in custom_fields:
-                port = self.settings.get('can_port', 'can0')
+                port = self._settings.get('can_port', 'can0')
                 if port.startswith('can_'):
                     port = 'can' + port[4:]
                 return port
         return None
-    
-    @accessor
+
+    @property
     def ip_address(self):
         if self.type != 'custom':
             custom_fields = self.get_robot_type_info().get('custom_fields', [])
             if 'ip_address' in custom_fields:
-                return self.settings.get('ip_address', '')
+                return self._settings.get('ip_address', '')
         return None
-    
-    @accessor
+
+    @property
     def port(self):
         if self.type != 'custom':
             custom_fields = self.get_robot_type_info().get('custom_fields', [])
             if 'port' in custom_fields:
-                return self.settings.get('port', '')
+                return self._settings.get('port', '')
         return None
-    
-    @accessor
+
+    @property
     def changer_address(self):
         if self.type != 'custom':
             custom_fields = self.get_robot_type_info().get('custom_fields', [])
             if 'changer_address' in custom_fields:
-                return self.settings.get('changer_address', '')
+                return self._settings.get('changer_address', '')
         return None
-    
-    @accessor
+
+    @property
     def serial_port(self):
         if self.type != 'custom':
             custom_fields = self.get_robot_type_info().get('custom_fields', [])
             if 'serial_port' in custom_fields:
-                return self.settings.get('serial_port', '')
+                return self._settings.get('serial_port', '')
         return None
 
-    
-    @accessor
+    @property
     def role(self):
         if self.type != 'custom':
             return self.get_robot_type_info().get('role', 'single_arm')
-            
-        return self.settings.get('role', '')
-    
-    @accessor
+        return self._settings.get('role', '')
+
+    @property
     def tool_inner(self):
         if self.type != 'custom':
             return self.get_robot_type_info().get('tool_inner', False)
-        return self.settings.get('tool_inner', False)
-    
-    @accessor
+        return self._settings.get('tool_inner', False)
+
+    @property
     def tool_index(self):
         if self.type != 'custom':
             return self.get_robot_type_info().get('tool_index', [])
-        return self.settings.get('tool_index', [])
-    
-    @accessor
+        return self._settings.get('tool_index', [])
+
+    @property
     def ik_available(self):
         if self.type != 'custom':
             robot_info = self.get_robot_type_info()
             return 'ik_setting' in robot_info
-        return 'ik_setting' in (self.settings or {})
+        return 'ik_setting' in self._settings
 
-    @accessor
+    @property
     def is_sim(self):
-        return self.settings.get('is_sim', False)
-    
-    # @staticmethod
-    # def boot():
-    #     Robot.observe(RobotObserver())
+        return self._settings.get('is_sim', False)
+
+    def to_dict(self):
+        data = super().to_dict()
+        # Include leader_robot_preset
+        preset = self.leader_robot_preset
+        if preset:
+            data['leader_robot_preset'] = preset.to_dict()
+        else:
+            data['leader_robot_preset'] = None
+        return data

@@ -6,8 +6,6 @@ from ...api.process.subscribe_dynamixel import subscribe_dynamixel, scan_ids_on_
 from ...api.process.leader_teleoperation import Leader
 
 
-# 1. Blueprint 생성
-# 이 블루프린트는 텔레오퍼레이터와 관련된 'HTTP' 라우트를 관리합니다.
 teleoperator_bp = Blueprint('teleoperator', __name__)
 
 @teleoperator_bp.route('/teleoperators', methods=['GET'])
@@ -24,7 +22,6 @@ def dxl_check():
     ports = get_available_ports()
     res = {}
     for port in ports:
-        # 해당 포트의 다이나믹셀 ID 스캔
         connected_ids = scan_ids_on_port(port)
         res[port] = connected_ids
 
@@ -45,7 +42,7 @@ def dxl_read():
         socketio_instance=current_app.pm.socketio,
         log_id="start_leader_robot",
     )
-    
+
     return {
         'status': 'success',
     }, 200
@@ -53,7 +50,7 @@ def dxl_read():
 @teleoperator_bp.route('/teleoperator:stop_dxl_read', methods=['POST'])
 def stop_dxl_read():
     current_app.pm.stop_function("subscribe_dxl")
-    
+
     return {
         'status': 'success',
     }, 200
@@ -80,8 +77,7 @@ def start_leader_teleoperation():
     assembly_id = data.get('assembly_id')
 
     assembly = AssemblyModel.find(assembly_id).to_dict()
-    
-    # 로봇 ID 추출 로직 (동일)
+
     robot_ids = list(set(v for v in {
         'left_arm_id': assembly.get('left_arm_id'),
         'right_arm_id': assembly.get('right_arm_id'),
@@ -95,21 +91,21 @@ def start_leader_teleoperation():
     except KeyError as e:
         return {'status': 'error', 'message': f'Robot with ID {str(e)} not found.'}, 404
 
-    # 1. 기존에 실행 중인 관련 태스크 종료
     current_app.pm.stop_function(name='subscribe_dxl')
     current_app.pm.stop_function(name='leader_teleoperation')
 
-    teleoperator = TeleoperatorModel.where('assembly_id', assembly_id).where('type', 'leader').first()
-    
+    teleoperator = TeleoperatorModel.select().where(
+        TeleoperatorModel.assembly_id == assembly_id,
+        TeleoperatorModel.type == 'leader',
+        TeleoperatorModel.deleted_at.is_null()
+    ).first()
+
     try:
-        # 2. Leader 객체 초기화 (이 과정은 짧으므로 메인에서 수행)
-        leader = Leader(current_app.node, agents, current_app.pm.socketio, teleop_setting=teleoperator.settings)
-        
-        # 3. 전체 워크플로우를 백그라운드로 실행
-        # pm.start_function이 내부적으로 thread/background task를 생성함
+        leader = Leader(current_app.node, agents, current_app.pm.socketio, teleop_setting=teleoperator._settings)
+
         current_app.pm.start_function(
             name='leader_teleoperation',
-            func=leader.leader_teleop_workflow, # 통합 워크플로우 함수
+            func=leader.leader_teleop_workflow,
             log_id=log_emit_id,
         )
 
@@ -119,5 +115,4 @@ def start_leader_teleoperation():
         print(f"[ERROR] Error during episode recording:\n{traceback_msg}")
         return {'status': 'error', 'message': f'Init Failed: {str(traceback_msg)}'}, 500
 
-    # 즉시 응답 반환
     return {'status': 'success', 'message': 'Leader sync and teleop started in background'}, 200
