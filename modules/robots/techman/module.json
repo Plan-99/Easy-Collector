@@ -1,0 +1,20 @@
+{
+  "id": "robot_techman",
+  "name": "Techman TM",
+  "version": "1.0.0",
+  "category": "robot",
+  "description": "Techman TM 로봇 드라이버",
+  "install": {
+    "ros2": {
+      "target": "ros2_ws/src",
+      "build": "colcon"
+    },
+    "sdk": {
+      "target": "robot_sdk/techman"
+    }
+  },
+  "dependencies": {
+    "apt": ["ros-humble-moveit"],
+    "pip": []
+  }
+}

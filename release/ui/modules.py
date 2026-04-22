@@ -224,12 +224,11 @@ def _get_project_root() -> Path:
 
 
 def _get_install_dir(mod: ModuleInfo) -> Path:
-    """Return the directory where a module should be installed."""
+    """Return the base directory where a module should be installed (extensions only)."""
     project = _get_project_root()
-    # Read module.json from downloaded archive to get install_path
-    # Default: ros2 modules → ros2/ros2_ws/src/, extensions → backend/extensions/
     if mod.category in ("robot", "sensor"):
-        return project / "ros2" / "ros2_ws" / "src"
+        # robot/sensor modules are handled by _install_robot_sensor_module
+        return project / "ros2"
     else:
         return project / "backend" / "modules"
 
@@ -294,12 +293,13 @@ def download_module(
                     if on_progress:
                         on_progress(downloaded, total)
 
-        # Extract to install dir
-        with tarfile.open(tmp_path, "r:gz") as tar:
-            tar.extractall(path=str(install_dir))
-
-        # Read module.json from extracted folder and install dependencies
-        _install_module_deps(install_dir, module_id)
+        # Extract and install
+        if mod.category in ("robot", "sensor"):
+            _install_robot_sensor_module(tmp_path, module_id)
+        else:
+            with tarfile.open(tmp_path, "r:gz") as tar:
+                tar.extractall(path=str(install_dir))
+            _install_module_deps(install_dir, module_id)
 
         set_module_installed(module_id, True, version=remote_version)
         return True
@@ -344,6 +344,70 @@ def install_modules_batch(
             on_module_done(mid, ok, i, total)
 
     return results
+
+
+def _install_robot_sensor_module(tar_path: str, module_id: str) -> None:
+    """Extract a robot/sensor module and copy ros2/ and sdk/ to their targets.
+
+    Archive structure: module_name/{ros2/, sdk/, module.json}
+    - ros2/ contents → project/ros2/ros2_ws/src/
+    - sdk/ contents  → project/ros2/robot_sdk/<module_name>/
+    - module.json    → project/ros2/ros2_ws/src/<module_name>/module.json (for dep install)
+    """
+    import shutil
+
+    project = _get_project_root()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with tarfile.open(tar_path, "r:gz") as tar:
+            tar.extractall(path=tmpdir)
+
+        # Find the extracted module directory (top-level folder in tar)
+        extracted = [d for d in Path(tmpdir).iterdir() if d.is_dir()]
+        if not extracted:
+            return
+        module_dir = extracted[0]
+        module_name = module_dir.name
+
+        # Read module.json for install targets
+        mj_path = module_dir / "module.json"
+        install_cfg = {}
+        if mj_path.exists():
+            try:
+                install_cfg = json.loads(mj_path.read_text()).get("install", {})
+            except Exception:
+                pass
+
+        # Install ros2/ → ros2_ws/src/<module_name>/ (폴더째로 복사)
+        ros2_src = module_dir / "ros2"
+        if ros2_src.is_dir() and any(ros2_src.iterdir()):
+            ros2_base = project / (install_cfg.get("ros2", {}).get("target", "ros2/ros2_ws/src"))
+            ros2_target = ros2_base / module_name
+            if ros2_target.exists():
+                shutil.rmtree(ros2_target)
+            shutil.copytree(ros2_src, ros2_target)
+
+        # Install sdk/ contents
+        sdk_src = module_dir / "sdk"
+        if sdk_src.is_dir() and any(f for f in sdk_src.iterdir() if f.name != ".gitkeep"):
+            sdk_target = project / (install_cfg.get("sdk", {}).get("target", f"ros2/robot_sdk/{module_name}"))
+            sdk_target.mkdir(parents=True, exist_ok=True)
+            for item in sdk_src.iterdir():
+                if item.name == ".gitkeep":
+                    continue
+                dst = sdk_target / item.name
+                if dst.exists():
+                    shutil.rmtree(dst) if dst.is_dir() else dst.unlink()
+                shutil.copytree(item, dst) if item.is_dir() else shutil.copy2(item, dst)
+
+        # Copy module.json into ros2 target for dependency resolution
+        ros2_base = project / (install_cfg.get("ros2", {}).get("target", "ros2/ros2_ws/src"))
+        target_mj = ros2_base / module_name / "module.json"
+        if mj_path.exists() and not target_mj.exists():
+            shutil.copy2(mj_path, target_mj)
+
+        # Install dependencies
+        _install_module_deps(ros2_base / module_name, module_id)
 
 
 def _install_module_deps(install_dir: Path, module_id: str) -> None:

@@ -54,13 +54,10 @@ logging.getLogger('werkzeug').addFilter(_HealthzFilter())
 app = Flask(__name__)
 CORS(app)
 app.config['SECRET_KEY'] = 'mysecretkey!' # 실제 운영 환경에서는 더 복잡한 키 사용
-# Use threading mode to avoid eventlet/ROS compatibility issues
 socketio = SocketIO(
     app,
     cors_allowed_origins="*",
-    async_mode='threading',
-    allow_upgrades=False,
-    transports=["polling"],
+    async_mode='eventlet',
 )
 
 pm = ProcessManager(socketio, debug=debug)  # 프로세스 관리 객체 생성

@@ -7,7 +7,7 @@ import numpy as np
 _data_root = os.environ.get('EASYTRAINER_DATA_DIR')
 DATASET_DIR = os.path.join(_data_root, 'datasets') if _data_root else '/root/src/backend/datasets'
 
-SUPPORT_ROBOTS = [
+_ALL_ROBOTS = [
     {
         'name': 'test_arm',
         'role': 'single_arm',
@@ -36,6 +36,7 @@ SUPPORT_ROBOTS = [
     },
     {
         'name': 'piper_by_sdk',
+        'module_id': 'robot_piper',
         'role': 'single_arm',
         'company': 'Piper',
         'joint_dim': 7,
@@ -59,6 +60,7 @@ SUPPORT_ROBOTS = [
     },
     {
         'name': 'piper',
+        'module_id': 'robot_piper',
         'role': 'single_arm',
         'company': 'Piper',
         'joint_dim': 7,
@@ -85,6 +87,7 @@ SUPPORT_ROBOTS = [
     },
     {
         'name': 'piper(no gripper)',
+        'module_id': 'robot_piper',
         'role': 'single_arm',
         'company': 'Piper',
         'joint_dim': 6,
@@ -109,6 +112,7 @@ SUPPORT_ROBOTS = [
     },
     {
         'name': 'tm_12',
+        'module_id': 'robot_techman',
         'role': 'single_arm',
         'company': 'OMRON',
         'joint_dim': 6,
@@ -132,6 +136,7 @@ SUPPORT_ROBOTS = [
     },
     {
         'name': 'tm_12s',
+        'module_id': 'robot_techman',
         'role': 'single_arm',
         'company': 'OMRON',
         'joint_dim': 6,
@@ -155,6 +160,7 @@ SUPPORT_ROBOTS = [
     },
     {
         'name': 'tm_12_robotiq',
+        'module_id': 'robot_techman',
         'role': 'single_arm',
         'company': 'OMRON',
         'joint_dim': 7,
@@ -178,6 +184,7 @@ SUPPORT_ROBOTS = [
     },
     {
         'name': 'rb3_730es_u',
+        'module_id': 'robot_rbpodo',
         'role': 'single_arm',
         'company': 'Rainbow Robotics',
         'joint_dim': 6,
@@ -201,6 +208,7 @@ SUPPORT_ROBOTS = [
     },
     {
         'name': 'rb5_850e',
+        'module_id': 'robot_rbpodo',
         'role': 'single_arm',
         'company': 'Rainbow Robotics',
         'joint_dim': 6,
@@ -224,6 +232,7 @@ SUPPORT_ROBOTS = [
     },
     {
         'name': 'kinova_gen3_7dof_robotiq_2f_85',
+        'module_id': 'robot_kinova',
         'role': 'single_arm',
         'company': 'Kinova',
         'joint_dim': 7,
@@ -275,6 +284,7 @@ SUPPORT_ROBOTS = [
     # },
     {
         'name': 'fairino_fr5',
+        'module_id': 'robot_fairino',
         'role': 'single_arm',
         'company': 'Fairino',
         'joint_dim': 6,
@@ -298,6 +308,7 @@ SUPPORT_ROBOTS = [
     },
     {
         'name': 'jaka_zu12',
+        'module_id': 'robot_jaka',
         'role': 'single_arm',
         'company': 'JAKA',
         'joint_dim': 6,
@@ -321,6 +332,7 @@ SUPPORT_ROBOTS = [
     },
     {
         'name': 'robotiq_2f_85',
+        'module_id': 'gripper_robotiq',
         'role': 'tool',
         'company': 'Robotiq',
         'joint_dim': 1,
@@ -338,6 +350,7 @@ SUPPORT_ROBOTS = [
     },
     {
         'name': '2FG7',
+        'module_id': 'gripper_onrobot',
         'role': 'tool',
         'company': 'OnRobot',
         'joint_dim': 1,
@@ -396,6 +409,34 @@ SUPPORT_SENSORS = [
         'custom_fields': ['ip_address'],
         'resolution': [1980, 1080]
     }
+]
+
+def _get_installed_module_ids():
+    """설치된 모듈의 ID 목록을 반환한다."""
+    import json
+    modules_dir = os.path.join(os.environ.get('EASYTRAINER_DATA_DIR', '/opt/easytrainer'), 'modules')
+    # backend/modules도 체크 (Docker 내부)
+    fallback_dir = '/root/backend/modules'
+    installed = set()
+    for d in (modules_dir, fallback_dir):
+        if not os.path.isdir(d):
+            continue
+        for entry in os.listdir(d):
+            mj = os.path.join(d, entry, 'module.json')
+            if os.path.isfile(mj):
+                try:
+                    with open(mj) as f:
+                        installed.add(json.load(f).get('id', ''))
+                except Exception:
+                    pass
+    return installed
+
+_installed_modules = _get_installed_module_ids()
+
+# module_id가 없거나(custom/test), 설치된 모듈에 포함된 로봇만 노출
+SUPPORT_ROBOTS = [
+    r for r in _ALL_ROBOTS
+    if not r.get('module_id') or r['module_id'] in _installed_modules
 ]
 
 def get_robot_by_name(name):
