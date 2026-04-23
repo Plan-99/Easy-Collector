@@ -72,6 +72,7 @@ from modules import (
     modules_by_category,
     get_installed_modules,
     get_installed_version,
+    is_module_installed,
     get_remote_versions,
     set_module_installed,
     download_module,
@@ -486,45 +487,34 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         pad_layout.setSpacing(6)  # match pill button spacing
         pad_layout.setAlignment(Qt.AlignTop)
         (
-            self.pad_box_open_ui,
-            self.pad_label_open_ui,
-            self.pad_stack_open_ui,
-            self._open_ui_buttons,
-        ) = self._create_pad_open_mode_box(
-            "1. UI 열기",
-            self._open_ui_mode,
-            self._set_open_ui_mode,
-        )
-        (
             self.pad_box_sync,
             self.pad_label_sync,
             self.pad_stack_sync,
             self.pad_path_label,
             self.pad_path_change_btn,
-        ) = self._create_pad_path_box("2. 코드 동기화")
+        ) = self._create_pad_path_box("1. 코드 동기화")
         (
             self.pad_box_folder,
             self.pad_label_folder,
             self.pad_stack_folder,
             self.pad_import_buttons,
-        ) = self._create_pad_choice_box("3. 불러오기", self._pad_import_choice, self._set_import_choice)
+        ) = self._create_pad_choice_box("2. 불러오기", self._pad_import_choice, self._set_import_choice)
         (
         self.pad_box_logs,
         self.pad_label_logs,
         self.pad_stack_logs,
         self.pad_export_buttons,
-        ) = self._create_pad_choice_box("4. 내보내기", self._pad_export_choice, self._set_export_choice)
-        self.pad_box_settings, self.pad_label_settings, self.pad_stack_settings = self._create_pad_simple_box("5. 로그")
-        self.pad_box_modules, self.pad_label_modules, self.pad_stack_modules = self._create_pad_simple_box("6. 모듈 관리")
-        self.pad_box_training, self.pad_label_training, self.pad_stack_training = self._create_pad_simple_box("7. 학습 서버")
+        ) = self._create_pad_choice_box("3. 내보내기", self._pad_export_choice, self._set_export_choice)
+        self.pad_box_settings, self.pad_label_settings, self.pad_stack_settings = self._create_pad_simple_box("4. 로그")
+        self.pad_box_modules, self.pad_label_modules, self.pad_stack_modules = self._create_pad_simple_box("5. 모듈 관리")
+        self.pad_box_training, self.pad_label_training, self.pad_stack_training = self._create_pad_simple_box("6. 학습 서버")
         (
             self.pad_box_exit,
             self.pad_label_exit,
             self.pad_stack_exit,
             self._exit_action_buttons,
-        ) = self._create_pad_exit_action_box("8. 종료", self._exit_action, self._set_exit_action)
+        ) = self._create_pad_exit_action_box("7. 종료", self._exit_action, self._set_exit_action)
         self._pad_boxes = [
-            self.pad_box_open_ui,
             self.pad_box_sync,
             self.pad_box_folder,
             self.pad_box_logs,
@@ -537,7 +527,6 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self._pad_update_panel = self._create_pad_update_panel()
         self._setup_settings_status_mode()
         self._pad_desc_labels = [
-            self.pad_label_open_ui,
             self.pad_label_sync,
             self.pad_label_folder,
             self.pad_label_logs,
@@ -547,7 +536,6 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             self.pad_label_exit,
         ]
         self._pad_desc_stacks = [
-            self.pad_stack_open_ui,
             self.pad_stack_sync,
             self.pad_stack_folder,
             self.pad_stack_logs,
@@ -560,7 +548,6 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self._update_pad_choice_tooltips()
         self._update_exit_label()
         self._set_pad_description_indices(set(range(len(self._pad_desc_labels))))
-        pad_layout.addWidget(self.pad_box_open_ui)
         pad_layout.addWidget(self.pad_box_sync)
         pad_layout.addWidget(self.pad_box_folder)
         pad_layout.addWidget(self.pad_box_logs)
@@ -779,13 +766,11 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
     def _content_hover_bounds(self) -> list[int] | None:
         widgets = [
-            getattr(self, "btn_open_browser", None),
             getattr(self, "btn_quick_apply", None),
             getattr(self, "btn_folder", None),
             getattr(self, "btn_export", None),
             getattr(self, "btn_logs", None),
             getattr(self, "btn_exit", None),
-            getattr(self, "pad_box_open_ui", None),
             getattr(self, "pad_box_sync", None),
             getattr(self, "pad_box_folder", None),
             getattr(self, "pad_box_logs", None),
@@ -990,7 +975,6 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
     def _pill_button_entry(self, obj) -> tuple[int, QPushButton] | None:
         buttons = [
-            getattr(self, "btn_open_browser", None),
             getattr(self, "btn_quick_apply", None),
             getattr(self, "btn_folder", None),
             getattr(self, "btn_export", None),
@@ -1083,11 +1067,11 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
     def _update_pad_choice_labels(self):
         try:
-            self.pad_label_folder.setText(f"3. {self._pad_import_choice} 불러오기")
+            self.pad_label_folder.setText(f"2. {self._pad_import_choice} 불러오기")
         except Exception:
             pass
         try:
-            self.pad_label_logs.setText(f"4. {self._pad_export_choice} 내보내기")
+            self.pad_label_logs.setText(f"3. {self._pad_export_choice} 내보내기")
         except Exception:
             pass
 
@@ -1119,8 +1103,8 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
     def _exit_action_label(self, action: str) -> str:
         if action == "RESTART":
-            return "6. 재실행"
-        return "6. 종료"
+            return "7. 재실행"
+        return "7. 종료"
 
     def _update_open_ui_tooltip(self):
         mode = getattr(self, "_open_ui_mode", "NEW")
@@ -3394,8 +3378,9 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         """Open the module management dialog."""
         from app_context import QScrollArea
 
-        dlg = QDialog(self)
+        dlg = QDialog()
         dlg.setWindowTitle("모듈 관리")
+        dlg.setWindowFlags(dlg.windowFlags() | Qt.Window)
         dlg.resize(750, 600)
         layout = QVBoxLayout(dlg)
         layout.setContentsMargins(16, 16, 16, 16)
@@ -3413,7 +3398,6 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         layout.addWidget(desc)
         layout.addSpacing(4)
 
-        installed = get_installed_modules()
         by_cat = modules_by_category()
 
         # Fetch remote versions (best-effort)
@@ -3429,7 +3413,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                 if action == "install" or action == "update":
                     btn.setEnabled(False)
                     btn.setText("...")
-                    ok = download_module(module_id, release=release_ref)
+                    ok = download_module(module_id)
                     if ok:
                         rv = remote_vers.get(module_id, "")
                         status_lbl.setText(f"v{rv}" if rv else "설치됨")
@@ -3480,7 +3464,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             search_input.setStyleSheet("font-size: 11px; padding: 2px 8px;")
             col.addWidget(search_input)
 
-            sorted_mods = sorted(mods, key=lambda m: (0 if m.id in installed else 1, m.name))
+            sorted_mods = sorted(mods, key=lambda m: (0 if is_module_installed(m.id) else 1, m.name))
             row_widgets: list[tuple[QWidget, str]] = []
 
             for mod in sorted_mods:
@@ -3494,7 +3478,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                 row.addWidget(name_label)
                 row.addStretch(1)
 
-                is_installed = mod.id in installed
+                is_installed = is_module_installed(mod.id)
                 local_ver = get_installed_version(mod.id)
                 remote_ver = remote_vers.get(mod.id)
                 has_update = is_installed and remote_ver and local_ver and remote_ver != local_ver

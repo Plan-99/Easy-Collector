@@ -147,10 +147,10 @@ echo "[deb] Embedding project payload for HOME deployment..."
 # Exclude large/ephemeral build artifacts to speed up packaging
 RSYNC_EXCLUDES=(
   '.git'
+  '.github'
   'release'
   '.vscode'
   '.idea'
-  # Skip only the top-level datasets payload (user-provided data), keep code packages named datasets
   '/datasets'
   '/datasets/**'
   'node_modules'
@@ -161,17 +161,24 @@ RSYNC_EXCLUDES=(
   'build'
   'dist'
   'install'
+  # ros2: 모듈은 런처에서 설치, 빌드 산출물 제외
   'ros2/ros2_ws/src'
   'ros2/ros2_ws/build'
-  'backend/modules'
   'ros2/ros2_ws/install'
   'ros2/ros2_ws/log'
   'ros2/ros2_ws/logs'
+  'ros2/robot_sdk'
+  'backend/modules'
+  # 런타임 프로젝트에 불필요한 폴더
+  'home-next'
+  'modules'
+  'training_server'
+  'python_pkgs'
+  'cmake_pkgs'
+  'scripts'
+  'CLAUDE.md'
   '**/__pycache__'
   '*.pyc'
-  'python_pkgs/**/build'
-  'python_pkgs/**/dist'
-  'python_pkgs/**/*.egg-info'
 )
 RSYNC_EXCLUDE_ARGS=()
 for pat in "${RSYNC_EXCLUDES[@]}"; do

@@ -78,5 +78,57 @@ Entrypoint script (~700 lines) that handles memory detection, environment setup,
 - `src/` is bind-mounted into the container for live editing
 - The `lerobot/` directory under backend is a vendored copy, not an external dependency
 
+## Modules
+
+### 구조
+```
+modules/
+├── robots/          # 로봇 드라이버 (ros2 pkg + sdk)
+│   └── piper/
+│       ├── module.json
+│       ├── ros2/    → 설치 시 project/ros2/ros2_ws/src/piper/
+│       └── sdk/     → 설치 시 project/ros2/robot_sdk/piper/
+├── sensors/         # 센서 드라이버 (ros2 pkg)
+│   └── webcam_publisher/
+│       ├── module.json
+│       └── ros2/    → 설치 시 project/ros2/ros2_ws/src/webcam_publisher/
+└── extensions/      # 확장 모듈
+    └── test_arm/
+        ├── module.json
+        └── ...      → 설치 시 project/backend/extensions/test_arm/
+```
+
+### 모듈 배포 규칙 (필수)
+**모듈 관련 코드(module.json, ros2/, sdk/ 등)가 수정되면 반드시 다음 절차를 따른다:**
+1. `module.json`의 `version`을 올린다 (같은 버전은 릴리즈 스킵됨)
+2. `module_up` 또는 `main` 브랜치에 commit & push한다
+3. CI(`modules-release.yml`)가 변경된 모듈만 감지하여 Plan-99/Easy-Trainer-Modules repo에 릴리즈를 생성한다
+4. **배포된 tar.gz를 다운로드하여 module.json 내용이 올바른지 검증한다**
+5. 검증 실패 시 버전을 다시 올려서 재배포한다
+
+### 검증 명령어
+```bash
+# CI 상태 확인
+gh run list -w "Package Modules" -L 5
+
+# 배포된 tar.gz의 module.json 확인
+python3 -c "
+import urllib.request, json, tarfile, os
+url = 'https://api.github.com/repos/Plan-99/Easy-Trainer-Modules/releases'
+req = urllib.request.Request(url, headers={'Accept': 'application/vnd.github+json'})
+with urllib.request.urlopen(req) as resp:
+    for r in json.loads(resp.read().decode()):
+        if 'robot_piper' in r['tag_name']:
+            for a in r['assets']:
+                urllib.request.urlretrieve(a['browser_download_url'], '/tmp/check.tar.gz')
+                with tarfile.open('/tmp/check.tar.gz') as tar:
+                    for m in tar.getmembers():
+                        if 'module.json' in m.name:
+                            print(json.dumps(json.loads(tar.extractfile(m).read()), indent=2))
+                os.unlink('/tmp/check.tar.gz')
+            break
+"
+```
+
 ## MD 파일
 - 코드가 바뀔 때마다 /home/hjhj/.claude/projects/-home-hjhj-EasyTrainer-v2-3-1/memory 폴더에서 적절한 md 파일을 보고, 또는 만들어서 적절히 수정해줘.

@@ -1,4 +1,3 @@
-version: "3.9"
 name: easytrainer
 
 services:
@@ -39,10 +38,8 @@ services:
       - EASYTRAINER_LOG_DIR=${EASYTRAINER_LOG_DIR:-/tmp/easytrainer/logs}
       - EASYTRAINER_CONFIG_PATH=${EASYTRAINER_CONFIG_PATH:-/opt/easytrainer/config.json}
       - PIP_NO_CACHE_DIR=${PIP_NO_CACHE_DIR:-0}
-      - PIP_CACHE_DIR=${PIP_CACHE_DIR:-/root/python_pkgs/.cache/pip}
     volumes:
       - ./backend:/root/backend
-      - ./python_pkgs:/root/python_pkgs
       - ./requirements.txt:/root/requirements.txt
       - /opt/easytrainer:/opt/easytrainer
     working_dir: /root
@@ -65,6 +62,7 @@ services:
       - EASYTRAINER_CONFIG_PATH=${EASYTRAINER_CONFIG_PATH:-/opt/easytrainer/config.json}
     volumes:
       - ./ros2/ros2_ws:/root/ros2_ws
+      - ./ros2/robot_sdk:/root/robot_sdk
       - ./ros2/ros2_bridge:/root/ros2/ros2_bridge
       - /opt/easytrainer:/opt/easytrainer
       - /dev:/dev

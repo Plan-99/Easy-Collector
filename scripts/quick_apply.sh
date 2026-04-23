@@ -186,22 +186,17 @@ copy_file() {
   echo "[quick-apply] 파일 복사 완료: $rel"
 }
 
-copy_tree "backend" --exclude "modules"
+copy_tree "backend"
 copy_tree "frontend"
-# ros2/ros2_ws/src and backend/modules are managed by module installer — do not sync
+copy_tree "ros2/ros2_bridge"
+# ros2/ros2_ws/src and ros2/robot_sdk are managed by module installer — do not sync
+# modules/, home-next/, training_server/ are not part of the runtime project
 
 copy_file "docker-compose.yml"
-copy_file "docker-compose.dev.yml"
 copy_file "docker-compose.cpu.yml"
-copy_file "docker-compose.gpu.yml"
-copy_file "start_services.sh" 755
-copy_file "src/kill.sh" 755
-copy_file "Dockerfile"
-copy_file ".dockerignore"
 copy_file "requirements.txt"
-copy_file "requirements.min.txt"
 copy_file "scripts/quick_apply.sh" 755
-copy_file "scripts/install_nvidia_runtime.sh" 755
+copy_file "scripts/clean_easytrainer.sh" 755
 
 sync_deb_ui
 sync_deb_scripts

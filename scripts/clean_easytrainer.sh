@@ -68,6 +68,9 @@ echo "[clean] Pruning EasyTrainer Docker resources ..."
 for img in $(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^easytrainer-|^easy-collector'); do
   docker image rm "$img" 2>/dev/null || true
 done
+# Remove dangling images (previous build leftovers)
+echo "[clean] Removing dangling Docker images ..."
+docker image prune -f 2>/dev/null || true
 # Remove easytrainer build cache only (filter by label or prune project cache)
 docker builder prune -f --filter "until=0s" 2>/dev/null || true
 docker volume rm easytrainer_ui_node_modules 2>/dev/null || true

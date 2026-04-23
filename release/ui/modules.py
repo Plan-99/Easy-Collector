@@ -145,6 +145,28 @@ def _save_module_version(module_id: str, version: str | None) -> None:
 
 
 def is_module_installed(module_id: str) -> bool:
+    """Check if a module is actually installed by verifying its files exist."""
+    mod = get_module(module_id)
+    if not mod:
+        return module_id in get_installed_modules()
+
+    if mod.category in ("robot", "sensor"):
+        project = _get_project_root()
+        # 모듈 이름으로 ros2_ws/src 하위에 폴더가 있는지 확인
+        ros2_src = project / "ros2" / "ros2_ws" / "src"
+        if ros2_src.is_dir():
+            for d in ros2_src.iterdir():
+                mj = d / "module.json"
+                if mj.is_file():
+                    try:
+                        meta = json.loads(mj.read_text())
+                        if meta.get("id") == module_id:
+                            return True
+                    except Exception:
+                        pass
+        return False
+
+    # core/feature/extension: config 플래그 기반
     return module_id in get_installed_modules()
 
 
@@ -180,7 +202,6 @@ def _get_repo() -> str:
 def fetch_latest_release(repo: str | None = None) -> dict | None:
     """Fetch latest release info from GitHub API. Returns JSON dict or None."""
     import urllib.request
-    import urllib.error
 
     repo = repo or _get_repo()
     url = f"https://api.github.com/repos/{repo}/releases/latest"
@@ -192,25 +213,70 @@ def fetch_latest_release(repo: str | None = None) -> dict | None:
         return None
 
 
-def get_remote_versions(release: dict | None = None) -> dict[str, str]:
-    """Parse asset names from a release to get {module_id: version}.
+def fetch_module_release(module_id: str, version: str | None = None, repo: str | None = None) -> dict | None:
+    """Fetch a specific module's release by tag. Returns release dict or None.
 
-    Asset format: module-{id}-{version}.tar.gz
+    Tag format: module-{id}-v{version}
+    If version is None, searches recent releases for the latest version of this module.
     """
-    if release is None:
-        release = fetch_latest_release()
-    if not release:
+    import urllib.request
+
+    repo = repo or _get_repo()
+
+    if version:
+        tag = f"module-{module_id}-v{version}"
+        url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
+        req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return json.loads(resp.read().decode())
+        except Exception:
+            return None
+
+    # version not specified: find the latest release for this module
+    prefix = f"module-{module_id}-v"
+    url = f"https://api.github.com/repos/{repo}/releases?per_page=50"
+    req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            releases = json.loads(resp.read().decode())
+        for r in releases:
+            tag = r.get("tag_name", "")
+            if tag.startswith(prefix):
+                return r
+    except Exception:
+        pass
+    return None
+
+
+def get_remote_versions(release: dict | None = None) -> dict[str, str]:
+    """Scan recent releases to get {module_id: latest_version}.
+
+    Each module has its own release with tag: module-{id}-v{version}
+    """
+    import urllib.request
+
+    repo = _get_repo()
+    url = f"https://api.github.com/repos/{repo}/releases?per_page=100"
+    req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            releases = json.loads(resp.read().decode())
+    except Exception:
         return {}
+
     result: dict[str, str] = {}
-    for asset in release.get("assets", []):
-        name = asset.get("name", "")
-        if name.startswith("module-") and name.endswith(".tar.gz"):
-            # module-robot_piper-1.1.0.tar.gz → id=robot_piper, ver=1.1.0
-            stripped = name[len("module-"):-len(".tar.gz")]
-            # Find last dash followed by version (digit)
-            parts = stripped.rsplit("-", 1)
-            if len(parts) == 2 and parts[1] and parts[1][0].isdigit():
-                result[parts[0]] = parts[1]
+    for r in releases:
+        tag = r.get("tag_name", "")
+        # module-robot_piper-v1.0.1 → id=robot_piper, ver=1.0.1
+        if not tag.startswith("module-"):
+            continue
+        stripped = tag[len("module-"):]
+        parts = stripped.rsplit("-v", 1)
+        if len(parts) == 2 and parts[1] and parts[1][0].isdigit():
+            mid, ver = parts[0], parts[1]
+            if mid not in result:  # 최신순이므로 첫 번째만 유지
+                result[mid] = ver
     return result
 
 
@@ -230,7 +296,7 @@ def _get_install_dir(mod: ModuleInfo) -> Path:
         # robot/sensor modules are handled by _install_robot_sensor_module
         return project / "ros2"
     else:
-        return project / "backend" / "modules"
+        return project / "backend" / "extensions"
 
 
 def download_module(
@@ -253,13 +319,13 @@ def download_module(
     if not mod:
         return False
 
+    # 모듈별 릴리즈를 직접 조회
     if release is None:
-        release = fetch_latest_release()
+        release = fetch_module_release(module_id)
     if not release:
         return False
 
-    # Find the asset matching this module ID (any version)
-    # Asset naming: module-{id}-{version}.tar.gz
+    # Find the asset matching this module ID
     prefix = f"module-{module_id}-"
     asset_url = None
     remote_version = None
@@ -331,14 +397,13 @@ def install_modules_batch(
     Returns:
         Dict of {module_id: success_bool}.
     """
-    release = fetch_latest_release()
     results: dict[str, bool] = {}
     total = len(module_ids)
 
     for i, mid in enumerate(module_ids):
         if on_module_start:
             on_module_start(mid, i, total)
-        ok = download_module(mid, release=release, on_progress=on_progress)
+        ok = download_module(mid, on_progress=on_progress)
         results[mid] = ok
         if on_module_done:
             on_module_done(mid, ok, i, total)
@@ -378,10 +443,14 @@ def _install_robot_sensor_module(tar_path: str, module_id: str) -> None:
             except Exception:
                 pass
 
-        # Install ros2/ → ros2_ws/src/<module_name>/ (폴더째로 복사)
+        # Install ros2/ → ros2/ros2_ws/src/<module_name>/ (폴더째로 복사)
         ros2_src = module_dir / "ros2"
         if ros2_src.is_dir() and any(ros2_src.iterdir()):
-            ros2_base = project / (install_cfg.get("ros2", {}).get("target", "ros2/ros2_ws/src"))
+            ros2_target_cfg = install_cfg.get("ros2", {}).get("target", "ros2/ros2_ws/src")
+            # 구버전 module.json 호환: ros2/ prefix가 없으면 추가
+            if not ros2_target_cfg.startswith("ros2/"):
+                ros2_target_cfg = "ros2/" + ros2_target_cfg
+            ros2_base = project / ros2_target_cfg
             ros2_target = ros2_base / module_name
             if ros2_target.exists():
                 shutil.rmtree(ros2_target)
@@ -390,7 +459,10 @@ def _install_robot_sensor_module(tar_path: str, module_id: str) -> None:
         # Install sdk/ contents
         sdk_src = module_dir / "sdk"
         if sdk_src.is_dir() and any(f for f in sdk_src.iterdir() if f.name != ".gitkeep"):
-            sdk_target = project / (install_cfg.get("sdk", {}).get("target", f"ros2/robot_sdk/{module_name}"))
+            sdk_target_cfg = install_cfg.get("sdk", {}).get("target", f"ros2/robot_sdk/{module_name}")
+            if not sdk_target_cfg.startswith("ros2/"):
+                sdk_target_cfg = "ros2/" + sdk_target_cfg
+            sdk_target = project / sdk_target_cfg
             sdk_target.mkdir(parents=True, exist_ok=True)
             for item in sdk_src.iterdir():
                 if item.name == ".gitkeep":
@@ -401,7 +473,10 @@ def _install_robot_sensor_module(tar_path: str, module_id: str) -> None:
                 shutil.copytree(item, dst) if item.is_dir() else shutil.copy2(item, dst)
 
         # Copy module.json into ros2 target for dependency resolution
-        ros2_base = project / (install_cfg.get("ros2", {}).get("target", "ros2/ros2_ws/src"))
+        ros2_dep_cfg = install_cfg.get("ros2", {}).get("target", "ros2/ros2_ws/src")
+        if not ros2_dep_cfg.startswith("ros2/"):
+            ros2_dep_cfg = "ros2/" + ros2_dep_cfg
+        ros2_base = project / ros2_dep_cfg
         target_mj = ros2_base / module_name / "module.json"
         if mj_path.exists() and not target_mj.exists():
             shutil.copy2(mj_path, target_mj)

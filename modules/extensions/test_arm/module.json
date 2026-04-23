@@ -1,16 +1,14 @@
 {
   "id": "test_arm",
   "name": "Test Arm",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "category": "extension",
-  "target": "backend",
-  "install_path": "extensions",
-  "build": "none",
   "description": "테스트 로봇 암 시뮬레이션",
+  "install": {
+    "target": "backend/extensions"
+  },
   "dependencies": {
     "apt": [],
-    "pip": [],
-    "modules": []
-  },
-  "install_script": "install.sh"
+    "pip": []
+  }
 }
