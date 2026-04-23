@@ -1,13 +1,13 @@
 {
   "id": "robot_piper",
   "name": "Piper",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "category": "robot",
-  "description": "Agilex Piper 로봇 드라이버",
+  "description": "Agilex Piper 로봇 (SDK 제어)",
   "install": {
     "ros2": {
       "target": "ros2/ros2_ws/src",
-      "build": "colcon"
+      "build": "none"
     },
     "sdk": {
       "target": "ros2/robot_sdk/piper",
@@ -16,11 +16,6 @@
   },
   "dependencies": {
     "apt": [
-      "ros-humble-ros2-control",
-      "ros-humble-ros2-controllers",
-      "ros-humble-controller-manager",
-      "ros-humble-moveit",
-      "ros-humble-xacro",
       "can-utils",
       "ethtool"
     ],
@@ -28,5 +23,8 @@
       "python-can>=4.3.1",
       "scipy"
     ]
+  },
+  "check": {
+    "type": "path"
   }
 }
