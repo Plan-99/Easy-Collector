@@ -250,6 +250,24 @@ class ROSServiceResponse(_message.Message):
     response_json: str
     def __init__(self, success: bool = ..., response_json: _Optional[str] = ...) -> None: ...
 
+class WaitForTopicRequest(_message.Message):
+    __slots__ = ("topic_name", "msg_type", "timeout")
+    TOPIC_NAME_FIELD_NUMBER: _ClassVar[int]
+    MSG_TYPE_FIELD_NUMBER: _ClassVar[int]
+    TIMEOUT_FIELD_NUMBER: _ClassVar[int]
+    topic_name: str
+    msg_type: str
+    timeout: float
+    def __init__(self, topic_name: _Optional[str] = ..., msg_type: _Optional[str] = ..., timeout: _Optional[float] = ...) -> None: ...
+
+class WaitForTopicResponse(_message.Message):
+    __slots__ = ("success", "message_json")
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_JSON_FIELD_NUMBER: _ClassVar[int]
+    success: bool
+    message_json: str
+    def __init__(self, success: bool = ..., message_json: _Optional[str] = ...) -> None: ...
+
 class ViveConfig(_message.Message):
     __slots__ = ("agent_ids", "move_robot", "role", "scale_factor", "rotation_scale_factor", "step_rate", "smoothing_alpha", "deadzone_pos", "deadzone_rot")
     AGENT_IDS_FIELD_NUMBER: _ClassVar[int]

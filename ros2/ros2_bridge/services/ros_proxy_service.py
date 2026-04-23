@@ -5,6 +5,9 @@ ROS2 서비스를 동적으로 호출하는 프록시.
 """
 import json
 import importlib
+import threading
+import time
+
 import grpc
 
 from ..generated import robot_bridge_pb2 as pb
@@ -94,4 +97,83 @@ class ROSProxyServicer(pb_grpc.ROSProxyServicer):
         return pb.ROSServiceResponse(
             success=True,
             response_json=json.dumps(response_dict)
+        )
+
+    def _get_msg_class(self, msg_type: str):
+        """
+        ROS2 메시지 타입 문자열에서 Python 클래스를 동적으로 import.
+        지원 포맷: "std_msgs/msg/String" 또는 "std_msgs/String"
+        """
+        parts = msg_type.split('/')
+        if len(parts) == 3:
+            pkg, _, cls_name = parts
+        elif len(parts) == 2:
+            pkg, cls_name = parts
+        else:
+            raise ValueError(f"Invalid msg type format: {msg_type}")
+        module = importlib.import_module(f'{pkg}.msg')
+        return getattr(module, cls_name)
+
+    def WaitForTopic(self, request, context):
+        """지정된 토픽의 메시지 1건이 도착할 때까지 블로킹 대기."""
+        topic_name = request.topic_name
+        msg_type = request.msg_type
+        timeout = request.timeout
+
+        try:
+            msg_class = self._get_msg_class(msg_type)
+        except Exception as e:
+            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+            context.set_details(f"Failed to load msg type '{msg_type}': {e}")
+            return pb.WaitForTopicResponse(success=False, message_json=json.dumps({'error': str(e)}))
+
+        event = threading.Event()
+        received = {'msg': None}
+
+        def _callback(msg):
+            if not event.is_set():
+                received['msg'] = msg
+                event.set()
+
+        sub = self._node.create_subscription(msg_class, topic_name, _callback, 10)
+
+        try:
+            # timeout <= 0: wait forever, but still honor gRPC cancellation via polling
+            if timeout and timeout > 0:
+                triggered = event.wait(timeout=timeout)
+            else:
+                # Poll so RPC 취소/서버 종료 시 빠져나갈 수 있음
+                triggered = False
+                while not triggered:
+                    triggered = event.wait(timeout=0.5)
+                    if not triggered and not context.is_active():
+                        break
+        finally:
+            try:
+                self._node.destroy_subscription(sub)
+            except Exception:
+                pass
+
+        if not triggered:
+            return pb.WaitForTopicResponse(
+                success=False,
+                message_json=json.dumps({'error': 'timeout or cancelled'})
+            )
+
+        msg = received['msg']
+        msg_dict = {}
+        try:
+            for field in msg.get_fields_and_field_types():
+                val = getattr(msg, field, None)
+                try:
+                    json.dumps(val)
+                    msg_dict[field] = val
+                except (TypeError, ValueError):
+                    msg_dict[field] = str(val)
+        except Exception:
+            msg_dict = {'raw': str(msg)}
+
+        return pb.WaitForTopicResponse(
+            success=True,
+            message_json=json.dumps(msg_dict)
         )

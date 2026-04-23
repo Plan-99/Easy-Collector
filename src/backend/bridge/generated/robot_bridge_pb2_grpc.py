@@ -1294,12 +1294,23 @@ class ROSProxyStub(object):
                 request_serializer=robot__bridge__pb2.ROSServiceRequest.SerializeToString,
                 response_deserializer=robot__bridge__pb2.ROSServiceResponse.FromString,
                 _registered_method=True)
+        self.WaitForTopic = channel.unary_unary(
+                '/easytrainer.ROSProxy/WaitForTopic',
+                request_serializer=robot__bridge__pb2.WaitForTopicRequest.SerializeToString,
+                response_deserializer=robot__bridge__pb2.WaitForTopicResponse.FromString,
+                _registered_method=True)
 
 
 class ROSProxyServicer(object):
     """Missing associated documentation comment in .proto file."""
 
     def CallService(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def WaitForTopic(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -1312,6 +1323,11 @@ def add_ROSProxyServicer_to_server(servicer, server):
                     servicer.CallService,
                     request_deserializer=robot__bridge__pb2.ROSServiceRequest.FromString,
                     response_serializer=robot__bridge__pb2.ROSServiceResponse.SerializeToString,
+            ),
+            'WaitForTopic': grpc.unary_unary_rpc_method_handler(
+                    servicer.WaitForTopic,
+                    request_deserializer=robot__bridge__pb2.WaitForTopicRequest.FromString,
+                    response_serializer=robot__bridge__pb2.WaitForTopicResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -1341,6 +1357,33 @@ class ROSProxy(object):
             '/easytrainer.ROSProxy/CallService',
             robot__bridge__pb2.ROSServiceRequest.SerializeToString,
             robot__bridge__pb2.ROSServiceResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def WaitForTopic(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/easytrainer.ROSProxy/WaitForTopic',
+            robot__bridge__pb2.WaitForTopicRequest.SerializeToString,
+            robot__bridge__pb2.WaitForTopicResponse.FromString,
             options,
             channel_credentials,
             insecure,

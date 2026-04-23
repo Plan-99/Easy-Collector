@@ -120,6 +120,6 @@ function moveOneEE(tool_index, p_index, delta) {
     props.robot.handler.moveRobotEEDelta(deltaPos);
 }
 
-const robotStepSize = ref(0.006);
+const robotStepSize = ref(0.03);
 
 </script>

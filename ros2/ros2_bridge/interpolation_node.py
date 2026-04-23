@@ -44,10 +44,14 @@ class JointInterpolationNode(Node):
         self.declare_parameter('sdk_can_port', 'can0')       # SDK CAN 포트
         self.declare_parameter('sdk_has_gripper', True)      # SDK 그리퍼 유무
         self.declare_parameter('read_topic', 'interpolated_joint_cmd')  # SDK 모드: 상태 퍼블리시 토픽
+        self.declare_parameter('speed_factor', 1.0)       # 보간 속도 배율 (2.0 = 2배 빠르게)
+        self.declare_parameter('max_interp_duration', 0.5) # 최대 보간 시간 (초). 명령 간격이 이보다 길면 클램프
 
         self.publish_rate = self.get_parameter('publish_rate').value
         self.output_topic = self.get_parameter('output_topic').value
         self.control_mode = self.get_parameter('control_mode').value
+        self._speed_factor = self.get_parameter('speed_factor').value
+        self._max_interp_duration = self.get_parameter('max_interp_duration').value
         self._dt = 1.0 / self.publish_rate
 
         # State
@@ -85,7 +89,8 @@ class JointInterpolationNode(Node):
 
         self.get_logger().info(
             f'Interpolation node started: rate={self.publish_rate}Hz, '
-            f'mode={self.control_mode} (linear)'
+            f'mode={self.control_mode}, speed={self._speed_factor}x, '
+            f'max_duration={self._max_interp_duration}s'
         )
 
     def _init_topic_mode(self):
@@ -185,7 +190,8 @@ class JointInterpolationNode(Node):
             self.get_logger().info('Stale command discarded (>2s idle)')
             return
 
-        self._interp_progress += self._dt / self._cmd_interval
+        effective_interval = min(self._cmd_interval, self._max_interp_duration) / self._speed_factor
+        self._interp_progress += self._dt / effective_interval
         self._interp_progress = min(self._interp_progress, 1.0)
         t = self._interp_progress
 

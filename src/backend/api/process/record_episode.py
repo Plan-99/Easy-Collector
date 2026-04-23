@@ -105,12 +105,13 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                             agent.reset_ik_solver(js)
                 time.sleep(1)
 
-            time.sleep(2)
+            time.sleep(1)
             # --- motion_planning: ROS2 service 호출 (gRPC ROSProxy 경유) ---
             if tele_type == 'motion_planning' and ros2_service:
                 service_result = {'done': False, 'success': None, 'message': ''}
                 try:
                     import threading as _th
+                    import json as _json
                     def _call_ros2_service():
                         try:
                             client = get_bridge_client()
@@ -119,10 +120,20 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                                 service_name=ros2_service,
                                 request_json='',
                             ))
+                            # gRPC 레벨 성공 + 응답 JSON 내부의 success 필드도 함께 검사
+                            inner_success = True
+                            if resp.response_json:
+                                try:
+                                    parsed = _json.loads(resp.response_json)
+                                    if isinstance(parsed, dict) and 'success' in parsed:
+                                        inner_success = bool(parsed['success'])
+                                except (ValueError, TypeError):
+                                    pass
+                            overall_success = bool(resp.success) and inner_success
                             service_result['done'] = True
-                            service_result['success'] = resp.success
+                            service_result['success'] = overall_success
                             service_result['message'] = resp.response_json
-                            if resp.success:
+                            if overall_success:
                                 print(f'[NOTICE] ROS2 service "{ros2_service}" completed: {resp.response_json}')
                             else:
                                 print(f'[ERROR] ROS2 service "{ros2_service}" failed: {resp.response_json}')
@@ -200,9 +211,11 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                     # print('[NOTICE] Waiting for leader teleoperation to sync...')
                     time.sleep(0.1)
 
-            # joint commands 대기 (keyboard는 사용자 입력 전까지 actions 없으므로 스킵)
-            if tele_type != 'keyboard':
-                wait_timeout = 60.0 if tele_type == 'motion_planning' else 5.0
+            # joint commands 대기
+            # - keyboard: 사용자 입력 전까지 actions 없으므로 스킵
+            # - motion_planning: /start_moving 토픽 신호로 대체하므로 스킵
+            if tele_type not in ('keyboard', 'motion_planning'):
+                wait_timeout = 5.0
                 for agent in agents:
                     if agent.joint_actions is None:
                         print(f'[NOTICE] Waiting for joint commands from robot {agent.id}...')
@@ -219,6 +232,50 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                         print(f'[NOTICE] Joint commands received from robot {agent.id} ({elapsed:.1f}s)')
             for agent in agents:
                 agent.move_lock = False
+
+            # motion_planning: 외부 플래너가 /start_moving 토픽(std_msgs/String)을 발행할 때까지 대기
+            if tele_type == 'motion_planning':
+                import grpc as _grpc
+                _client = get_bridge_client()
+                print(f'[NOTICE] Waiting for /start_moving topic (std_msgs/msg/String)...')
+                _call = _client.ros_proxy.WaitForTopic.future(pb.WaitForTopicRequest(
+                    topic_name='/start_moving',
+                    msg_type='std_msgs/msg/String',
+                    timeout=0.0,  # 서버에서 무한 대기 (클라이언트 취소로 중단)
+                ))
+                _service_failed_early = False
+                while not _call.done():
+                    if task_control['stop']:
+                        _call.cancel()
+                        return
+                    if service_result['done'] and not service_result['success']:
+                        print(f'[ERROR] ROS2 service failed before /start_moving: {service_result["message"]}')
+                        _call.cancel()
+                        _service_failed_early = True
+                        break
+                    time.sleep(0.1)
+
+                if _service_failed_early:
+                    continue  # 에피소드 재시작
+
+                try:
+                    _resp = _call.result()
+                except _grpc.RpcError as _e:
+                    code = _e.code() if hasattr(_e, 'code') else None
+                    details = _e.details() if hasattr(_e, 'details') else str(_e)
+                    print(f'[ERROR] WaitForTopic RPC error: code={code} details={details}')
+                    if code == _grpc.StatusCode.UNIMPLEMENTED:
+                        print('[ERROR] ROS2 gRPC bridge does not have WaitForTopic registered. '
+                              'Restart easy_collector_ros2 container: docker restart easy_collector_ros2')
+                    task_control['stop'] = True
+                    return
+
+                if _resp.success:
+                    print(f'[NOTICE] /start_moving received: {_resp.message_json}')
+                else:
+                    print(f'[ERROR] WaitForTopic returned failure: {_resp.message_json}')
+                    task_control['stop'] = True
+                    return
 
             # reset 타임스텝: ee_delta_action, ee_delta = zeros (tool_inner인 경우 tool joint 포함)
             ts = env.reset()
@@ -257,7 +314,7 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                             return
                         if task_control.get('episode_complete'):
                             break
-                        time.sleep(0.1)
+                        time.sleep(0.02)
 
                 socketio_instance.emit('record_episode_progress', {
                     'progress': (t+1) / max_timesteps,
@@ -317,9 +374,9 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                 succeed_flags.append(1.0 if task_control.get('succeed') else 0.0)
                 timesteps.append(ts)
 
-                time.sleep(1.0 / hz)
-
-                if tele_type == 'keyboard':
+                if tele_type != 'keyboard':
+                    time.sleep(1.0 / hz)
+                else:
                     for agent in agents:
                         agent.moved_by_ui = False
 
