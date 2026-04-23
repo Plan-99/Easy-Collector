@@ -1,16 +1,16 @@
 {
   "id": "robot_fairino",
   "name": "Fairino",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "category": "robot",
   "description": "Fairino 협동로봇 드라이버",
   "install": {
     "ros2": {
-      "target": "ros2_ws/src",
+      "target": "ros2/ros2_ws/src",
       "build": "colcon"
     },
     "sdk": {
-      "target": "robot_sdk/fairino"
+      "target": "ros2/robot_sdk/fairino"
     }
   },
   "dependencies": {

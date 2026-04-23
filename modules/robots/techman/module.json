@@ -1,16 +1,16 @@
 {
   "id": "robot_techman",
   "name": "Techman TM",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "category": "robot",
   "description": "Techman TM 로봇 드라이버",
   "install": {
     "ros2": {
-      "target": "ros2_ws/src",
+      "target": "ros2/ros2_ws/src",
       "build": "colcon"
     },
     "sdk": {
-      "target": "robot_sdk/techman"
+      "target": "ros2/robot_sdk/techman"
     }
   },
   "dependencies": {
