@@ -43,6 +43,7 @@ services:
       - ./python_pkgs:/root/python_pkgs
       - ./requirements.txt:/root/requirements.txt
       - /opt/easytrainer:/opt/easytrainer
+      - /dev/shm:/dev/shm
     working_dir: /root
     restart: unless-stopped
 

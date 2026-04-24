@@ -64,7 +64,7 @@ copy_tree() {
       --exclude='database/*.db' \
       --exclude='/datasets/' \
       --exclude='.git/' \
-      "$src/" "$dst/"
+      "$src/" "$dst/" || true
   else
     # Portable fallback using tar over a pipe.
     (
@@ -195,6 +195,10 @@ copy_tree "ros2/ros2_bridge"
 copy_file "docker-compose.yml"
 copy_file "docker-compose.cpu.yml"
 copy_file "requirements.txt"
+# modules/ is NOT synced — project/modules/ only holds installed module manifests (*.json)
+# Source module definitions (robots/, sensors/, extensions/) are read-only and mounted separately
+copy_file "ros2/start_ros2_services.sh" 755
+copy_file "ros2/entrypoint.sh" 755
 copy_file "scripts/quick_apply.sh" 755
 copy_file "scripts/clean_easytrainer.sh" 755
 

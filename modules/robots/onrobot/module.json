@@ -18,5 +18,8 @@
     "pip": [
       "pymodbus"
     ]
+  },
+  "check": {
+    "type": "path"
   }
 }

@@ -44,11 +44,7 @@ def get_robots():
 
 @robot_bp.route('/robots:supporting', methods=['GET'])
 def get_supporting_robots():
-    support_robot_json = []
-    for robot in SUPPORT_ROBOTS:
-        robot_copy = robot.copy()
-        robot_copy.pop('ik_setting', None)
-        support_robot_json.append(robot_copy)
+    support_robot_json = [robot.copy() for robot in SUPPORT_ROBOTS]
     return {
         'status': 'success',
         'robots': support_robot_json

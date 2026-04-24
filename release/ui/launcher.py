@@ -3412,20 +3412,44 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             def _do():
                 if action == "install" or action == "update":
                     btn.setEnabled(False)
-                    btn.setText("...")
-                    ok = download_module(module_id)
-                    if ok:
-                        rv = remote_vers.get(module_id, "")
-                        status_lbl.setText(f"v{rv}" if rv else "설치됨")
-                        status_lbl.setStyleSheet("color: #86efac; font-size: 11px; font-weight: 600;")
-                        ver_lbl.setText("")
-                        btn.setText("제거")
-                        btn.setEnabled(True)
-                        btn.clicked.disconnect()
-                        btn.clicked.connect(_make_action(module_id, "remove", btn, status_lbl, ver_lbl, release_ref))
-                    else:
-                        btn.setText("실패")
-                        btn.setEnabled(True)
+                    btn.setText("⏳")
+                    status_lbl.setText("설치 중...")
+                    status_lbl.setStyleSheet("color: #facc15; font-size: 11px; font-weight: 600;")
+
+                    import threading
+                    result = [None]  # shared state
+
+                    def _run():
+                        result[0] = download_module(module_id)
+
+                    t = threading.Thread(target=_run, daemon=True)
+                    t.start()
+
+                    # Poll every 500ms until thread finishes
+                    timer = QTimer()
+                    def _check():
+                        if t.is_alive():
+                            return
+                        timer.stop()
+                        ok = result[0]
+                        if ok:
+                            rv = remote_vers.get(module_id, "")
+                            status_lbl.setText(f"v{rv}" if rv else "설치됨")
+                            status_lbl.setStyleSheet("color: #86efac; font-size: 11px; font-weight: 600;")
+                            ver_lbl.setText("")
+                            btn.setText("제거")
+                            btn.setEnabled(True)
+                            btn.clicked.disconnect()
+                            btn.clicked.connect(_make_action(module_id, "remove", btn, status_lbl, ver_lbl, release_ref))
+                        else:
+                            status_lbl.setText("실패")
+                            status_lbl.setStyleSheet("color: #ef4444; font-size: 11px; font-weight: 600;")
+                            btn.setText("재시도")
+                            btn.setEnabled(True)
+                    timer.timeout.connect(_check)
+                    timer.start(500)
+                    btn._poll_timer = timer  # prevent GC
+
                 elif action == "remove":
                     remove_module(module_id)
                     status_lbl.setText("미설치")
@@ -3536,13 +3560,15 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         layout.addLayout(columns_row, 1)
 
         btn_close = QPushButton("닫기")
-        btn_close.clicked.connect(dlg.accept)
+        btn_close.clicked.connect(dlg.close)
         close_row = QHBoxLayout()
         close_row.addStretch(1)
         close_row.addWidget(btn_close)
         layout.addLayout(close_row)
 
-        dlg.exec()
+        dlg.setAttribute(Qt.WA_DeleteOnClose)
+        self._module_dlg = dlg
+        dlg.show()
 
     def _on_exit_action(self):
         action = getattr(self, "_exit_action", "EXIT")
@@ -3993,11 +4019,19 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
         win = QMainWindow()
         win.setWindowTitle("Easy Trainer")
-        win.resize(QSize(1280, 800))
+        screen = win.screen()
+        if screen:
+            geom = screen.availableGeometry()
+            w = int(geom.width() * 0.8)
+            h = geom.height()
+            x = geom.x() + (geom.width() - w) // 2
+            win.setGeometry(x, geom.y(), w, h)
+        else:
+            win.resize(QSize(1280, 800))
         view = QWebEngineView(win)
         view.setUrl(url)
         win.setCentralWidget(view)
-        win.show()
+        win.showMaximized() if not screen else win.show()
         self._embedded_window = win
         return True
 

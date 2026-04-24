@@ -81,41 +81,21 @@
         >
             <template v-for="robot in robots" :key="robot.id" v-slot:[robot.id]>
                 <div class="row row q-gutter-x-md">
-                    <div class="col-5">
+                    <div class="col-4">
                         <robot-pendant
                             :robot="watchingRobot"
                         />
                     </div>
-                    <div class="col-6">
-                        <process-console 
-                            :process="robot.process_id" 
+                    <!-- SimView: 시뮬레이션 안정화 후 활성화
+                    <div class="col-3" v-if="watchingRobot && watchingRobot.type !== 'custom'" style="min-height: 300px;">
+                        <SimView :robot-id="watchingRobot.id" :auto-start="true" />
+                    </div>
+                    -->
+                    <div class="col">
+                        <process-console
+                            :process="robot.process_id"
                             style="height: 100%; min-height: 300px;"
                         />
-                    </div>
-                    <div class="col">
-                        <div class="q-gutter-y-sm">
-                            <q-btn @click="() => { 
-                                if (watchingRobot.homepose && watchingRobot.homepose.length === watchingRobot.joint_names.length) {
-                                    watchingRobot.handler.goOriginPos();
-                                    watchRobot(robots.find((e) => e.id === watchingRobot.id));
-                                } else {
-                                    openHomeposeSetting();
-                                }}"
-                                icon="home" color="green">
-                                <q-tooltip class="text-body2">Click to go origin position</q-tooltip>
-                                <q-badge @click.stop="openHomeposeSetting" color="orange" floating>
-                                    <q-icon name="settings" size="xs" class="cursor-pointer" />
-                                </q-badge>
-                            </q-btn>
-                            <div v-if="watchingRobot.leader_robot_preset">
-                                <q-btn class="full-width" @click="() => { startLeaderTele(watchingRobot, watchingRobot.leader_robot_preset, watchingRobot.process_id) }" icon="play_arrow" color="blue" v-if="!leaderTeleStarted">
-                                    <q-tooltip class="text-body2">Start teleoperation with leader robot</q-tooltip>
-                                </q-btn>
-                                <q-btn class="full-width" @click="() => { stopLeaderTele() }" icon="pause" color="blue" v-else>
-                                    <q-tooltip class="text-body2">Start teleoperation with leader robot</q-tooltip>
-                                </q-btn>
-                            </div>
-                        </div>
                     </div>
                 </div>
                 
@@ -224,39 +204,6 @@
             :robot="teleSettingRobot"
             @hide="closeTeleSetting"
         />
-        <q-dialog v-model="showHomeposeSettingDialog" persistent>
-            <q-card style="min-width: 400px;" dark>
-                <q-card-section>
-                    <div class="row full-width">
-                        <div class="text-h6 text-center">Homepose Setting</div>
-                        <q-space></q-space>
-                        <q-btn size="xs" outline color="pink-3" icon="sync" @click="scanRobotPose()" class="q-ml-sm" />
-                    </div>
-                </q-card-section>
-                <q-card-section>
-                    <div class="row q-col-gutter-sm" v-if="watchingRobot">
-                        <div class="col" 
-                            v-for="(joint, i) in watchingRobot.joint_names" :key="joint"
-                        >
-                            <div class="text-caption">{{ joint }}</div>
-                            <q-input
-                                v-model.number="homeposeForm[i]"
-                                type="number"
-                                dense
-                                dark
-                                bg-color="dark"
-                                outlined
-                            >
-                            </q-input>
-                        </div>
-                    </div>
-                </q-card-section>
-                <q-card-actions align="center" class="text-primary">
-                    <q-btn flat label="Save" @click="saveHomepose" />
-                    <q-btn flat color="grey-7" label="Close" v-close-popup @click="showHomeposeSettingDialog = false" />
-                </q-card-actions>
-            </q-card>
-        </q-dialog>
     </q-page>
 </template>
 
@@ -273,9 +220,10 @@ import BottomTerminal from 'src/components/v2/BottomTerminal.vue';
 import { useRobot } from 'src/composables/useRobot';
 import FormDialog from 'src/components/v2/FormDialog.vue';
 import RobotPendant from 'src/components/v2/RobotPendant.vue';
+// import SimView from 'src/components/v2/SimView.vue'; // 시뮬레이션 안정화 후 활성화
 
 const { socket } = useSocket();
-const { leaderTeleStarted, startLeaderTele, stopLeaderTele } = useLeaderTeleoperation();
+const { leaderTeleStarted, stopLeaderTele } = useLeaderTeleoperation();
 
 const robots = ref([]);
 
@@ -485,9 +433,11 @@ function watchRobot(robot) {
         return;
     }
     robot.handler.subscribeRobot((js) => {
-        if (!canControl.value && js) {
+        if (js) {
             robot.joint_pos = js
-            canControl.value = true;
+            if (!canControl.value) {
+                canControl.value = true
+            }
         }
     })
     watchingRobot.value = robot
@@ -499,47 +449,6 @@ const ikJsonError = ref('')
 
 const showTeleSetting = ref(false)
 const teleSettingRobot = ref(null)
-
-
-const homeposeForm = ref([]);
-const showHomeposeSettingDialog = ref(false);
-function openHomeposeSetting() {
-    if (watchingRobot.value) {
-        let initialHomepose = [];
-        if (watchingRobot.value.homepose && watchingRobot.value.homepose.length === watchingRobot.value.joint_names.length) {
-            initialHomepose = watchingRobot.value.homepose;
-        } else if (watchingRobot.value.joint_pos) {
-            initialHomepose = watchingRobot.value.joint_pos;
-        } else {
-            initialHomepose = Array(watchingRobot.value.joint_names.length).fill(0);
-        }
-        homeposeForm.value = [...initialHomepose]; // Create a copy for the form
-        showHomeposeSettingDialog.value = true;
-    }
-}
-
-function scanRobotPose() {
-    console.log(watchingRobot.value.jointState);
-    if (watchingRobot.value.jointState) {
-        homeposeForm.value = [...watchingRobot.value.jointState];
-    }
-}
-
-function saveHomepose() {
-    if (watchingRobot.value && watchingRobot.value.handler) {
-        if (watchingRobot.value.id) {
-            watchingRobot.value.homepose = [...homeposeForm.value];
-
-            return api.put(`/robot/${watchingRobot.value.id}`, watchingRobot.value).then(() => {
-                Notify.create({
-                    color: 'positive',
-                    message: 'Homepose saved successfully.'
-                });
-                showHomeposeSettingDialog.value = false;
-            })
-        }
-    }
-}
 
 
 watch(watchingRobot, (newVal, oldVal) => {

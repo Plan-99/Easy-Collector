@@ -1,5 +1,5 @@
 import os
-import numpy as np
+
 
 # Datasets are persistent runtime data and must NOT live under the bind-mounted
 # source tree (/root/src is bind-mounted from the dev checkout). Resolve under
@@ -24,18 +24,11 @@ _ALL_ROBOTS = [
         'interpolation': True,
         'tool_inner': True,
         'tool_index': [6],
+        'ik_available': True,
         'custom_fields': [],
-        'urdf_path': '/root/ros2/ros2_ws/src/piper_ros/src/piper_description/urdf/piper_description.urdf',
-        'urdf_package_dir': '/root/ros2/ros2_ws/src/piper_ros/src/piper_description/',
-        'ik_setting': {
-            'joints_to_lock': [
-                'joint6_to_gripper_base', 'joint7', 'joint8'
-            ],
-            'ee_definitions': [('ee', 'joint7', None)],
-        },
     },
     {
-        'name': 'piper_by_sdk',
+        'name': 'piper',
         'module_id': 'robot_piper',
         'role': 'single_arm',
         'company': 'Piper',
@@ -48,42 +41,8 @@ _ALL_ROBOTS = [
         'sdk_type': 'piper',
         'tool_inner': True,
         'tool_index': [6],
+        'ik_available': True,
         'custom_fields': ['can_port'],
-        'urdf_path': '/root/ros2/ros2_ws/src/piper_ros/src/piper_description/urdf/piper_description.urdf',
-        'urdf_package_dir': '/root/ros2/ros2_ws/src/piper_ros/src/piper_description/',
-        'ik_setting': {
-            'joints_to_lock': [
-                'joint6_to_gripper_base', 'joint7', 'joint8'
-            ],
-            'ee_definitions': [('ee', 'joint7', None)],
-        },
-    },
-    {
-        'name': 'piper',
-        'module_id': 'robot_piper',
-        'role': 'single_arm',
-        'company': 'Piper',
-        'joint_dim': 7,
-        'joint_names': ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"],
-        'joint_lower_bounds': [-2.618, 0, -2.618, -1.745, -1.22, -2.094, 0],
-        'joint_upper_bounds': [2.618, 2.618, 0, 1.745, 1.22, 2.094, 0.087],
-        'read_topic': '/joint_states_single',
-        'read_topic_msg': 'sensor_msgs/JointState',
-        'write_type': 'topic',
-        'write_topic': '/joint_states',
-        'write_topic_msg': 'sensor_msgs/JointState',
-        'interpolation': True,
-        'tool_inner': True,
-        'tool_index': [6],
-        'custom_fields': ['can_port'],
-        'urdf_path': '/root/ros2/ros2_ws/src/piper_ros/src/piper_description/urdf/piper_description.urdf',
-        'urdf_package_dir': '/root/ros2/ros2_ws/src/piper_ros/src/piper_description/',
-        'ik_setting': {
-            'joints_to_lock': [
-                'joint6_to_gripper_base', 'joint7', 'joint8'
-            ],
-            'ee_definitions': [('ee', 'joint7', None)],
-        },
     },
     {
         'name': 'piper(no gripper)',
@@ -94,21 +53,13 @@ _ALL_ROBOTS = [
         'joint_names': ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
         'joint_lower_bounds': [-2.618, 0, -2.618, -1.745, -1.22, -2.094],
         'joint_upper_bounds': [2.618, 2.618, 0, 1.745, 1.22, 2.094],
-        'read_topic': '/joint_states_single',
-        'read_topic_msg': 'sensor_msgs/JointState',
-        'write_type': 'topic',
-        'write_topic': '/joint_states',
-        'write_topic_msg': 'sensor_msgs/JointState',
         'interpolation': True,
+        'sdk_control': True,
+        'sdk_type': 'piper',
         'tool_inner': False,
         'tool_index': [],
+        'ik_available': True,
         'custom_fields': ['can_port'],
-        'urdf_path': '/root/ros2/ros2_ws/src/piper_ros/src/piper_description/urdf/piper_no_gripper_description.urdf',
-        'urdf_package_dir': '/root/ros2/ros2_ws/src/piper_ros/src/piper_description/',
-        'ik_setting': {
-            'joints_to_lock': [],
-            'ee_definitions': [('ee', 'joint6', np.array([0.20, 0, 0]).T)],
-        },
     },
     {
         'name': 'tm_12',
@@ -126,13 +77,8 @@ _ALL_ROBOTS = [
         'write_topic_msg': 'tm_msgs/srv/SendScript',
         'tool_inner': False,
         'tool_index': [],
+        'ik_available': True,
         'custom_fields': ['ip_address'],
-        'urdf_path': '/root/ros2/ros2_ws/src/tm2_ros2/tm_description/urdf/tm12s.urdf',
-        'urdf_package_dir': '/root/ros2/ros2_ws/src/tm2_ros2/tm_description/',
-        'ik_setting': {
-            'joints_to_lock': [],
-            'ee_definitions': [('ee', 'joint_6', np.array([0, 0, 0.15]).T)],
-        },
     },
     {
         'name': 'tm_12s',
@@ -150,13 +96,8 @@ _ALL_ROBOTS = [
         'write_topic_msg': 'tm_msgs/srv/SendScript',
         'tool_inner': False,
         'tool_index': [],
+        'ik_available': True,
         'custom_fields': ['ip_address'],
-        'urdf_path': '/root/ros2/ros2_ws/src/tm2_ros2/tm_description/urdf/tm12s.urdf',
-        'urdf_package_dir': '/root/ros2/ros2_ws/src/tm2_ros2/tm_description/',
-        'ik_setting': {
-            'joints_to_lock': [],
-            'ee_definitions': [('ee', 'joint_6', np.array([0, 0, 0.15]).T)],
-        },
     },
     {
         'name': 'tm_12_robotiq',
@@ -174,13 +115,8 @@ _ALL_ROBOTS = [
         'write_topic_msg': 'tm_msgs/srv/SendScript',
         'tool_inner': True,
         'tool_index': [6],
+        'ik_available': True,
         'custom_fields': ['ip_address'],
-        'urdf_path': '/root/ros2/ros2_ws/src/tm2_ros2/tm_description/urdf/tm12s.urdf',
-        'urdf_package_dir': '/root/ros2/ros2_ws/src/tm2_ros2/tm_description/',
-        'ik_setting': {
-            'joints_to_lock': [],
-            'ee_definitions': [('ee', 'joint_6', np.array([0, 0, 0.15]).T)],
-        },
     },
     {
         'name': 'rb3_730es_u',
@@ -198,13 +134,8 @@ _ALL_ROBOTS = [
         'write_topic_msg': 'std_msgs/Float64MultiArray',
         'tool_inner': False,
         'tool_index': [],
+        'ik_available': True,
         'custom_fields': ['ip_address'],
-        'urdf_path': '/root/ros2/ros2_ws/src/rbpodo_ros2/rbpodo_description/robots/rb3_730es_u.urdf',
-        'urdf_package_dir': '/root/ros2/ros2_ws/src/rbpodo_ros2/rbpodo_description/',
-        'ik_setting': {
-            'joints_to_lock': [],
-            'ee_definitions': [('ee', 'tcp_joint', None)],
-        },
     },
     {
         'name': 'rb5_850e',
@@ -223,12 +154,6 @@ _ALL_ROBOTS = [
         'tool_inner': False,
         'tool_index': [],
         'custom_fields': ['ip_address'],
-        # 'urdf_path': '/root/ros2/ros2_ws/src/rbpodo_ros2/rbpodo_description/robots/rb5_850e.urdf',
-        # 'urdf_package_dir': '/root/ros2/ros2_ws/src/rbpodo_ros2/rbpodo_description/',
-        # 'ik_setting': {
-        #     'joints_to_lock': [],
-        #     'ee_definitions': [('ee', 'tcp_joint', None)],
-        # },
     },
     {
         'name': 'kinova_gen3_7dof_robotiq_2f_85',
@@ -245,43 +170,9 @@ _ALL_ROBOTS = [
         'write_topic_msg': 'trajectory_msgs/JointTrajectory',
         'tool_inner': False,
         'tool_index': [],
+        'ik_available': True,
         'custom_fields': ['ip_address'],
-        'urdf_path': '/root/ros2/ros2_ws/src/ros2_kortex/kortex_description/robots/gen3_7dof.urdf',
-        'urdf_package_dir': '/root/ros2/ros2_ws/src/ros2_kortex/kortex_description/',
-        'ik_setting': {
-            'joints_to_lock': [],
-            'ee_definitions': [
-                # ('ee', 'joint_7', np.array([0, 0, -0.2]).T)
-                ('ee', 'joint_7', np.array([0, 0, 0]).T)
-            ],
-            'gravity_compensate': 0.00003,  # z축 gravity 보상값 (m). 로봇이 아래로 처질 때 양수로 설정
-        },
     },
-    # {
-    #     'name': 'ur3',
-    #     'role': 'single_arm',
-    #     'company': 'Universal Robots',
-    # },
-    # {
-    #     'name': 'ur5',
-    #     'role': 'single_arm',
-    #     'company': 'Universal Robots',
-    # },
-    # {
-    #     'name': 'ur10',
-    #     'role': 'single_arm',
-    #     'company': 'Universal Robots',
-    # },
-    # {
-    #     'name': 'ur5e',
-    #     'role': 'single_arm',
-    #     'company': 'Universal Robots',
-    # },
-    # {
-    #     'name': 'h1',
-    #     'role': 'dual_arm',
-    #     'company': 'Unitree',
-    # },
     {
         'name': 'fairino_fr5',
         'module_id': 'robot_fairino',
@@ -298,13 +189,8 @@ _ALL_ROBOTS = [
         'write_topic_msg': 'fairino_msgs/srv/RemoteCmdInterface',
         'tool_inner': False,
         'tool_index': [],
+        'ik_available': True,
         'custom_fields': ['ip_address'],
-        'urdf_path': '/root/ros2/ros2_ws/src/frcobot_ros2/fairino_description/urdf/fairino5_v6.urdf',
-        'urdf_package_dir': '/root/ros2/ros2_ws/src/frcobot_ros2/fairino_description/',
-        'ik_setting': {
-            'joints_to_lock': [],
-            'ee_definitions': [('ee', 'j6', np.array([0, 0, 0.1]).T)],
-        },
     },
     {
         'name': 'jaka_zu12',
@@ -322,13 +208,8 @@ _ALL_ROBOTS = [
         'write_topic_msg': 'jaka_msgs/srv/ServoMove',
         'tool_inner': False,
         'tool_index': [],
+        'ik_available': True,
         'custom_fields': ['ip_address'],
-        'urdf_path': '/root/ros2/ros2_ws/src/jaka_ros2/src/jaka_description/urdf/jaka_zu12.urdf',
-        'urdf_package_dir': '/root/ros2/ros2_ws/src/jaka_ros2/src/jaka_description/',
-        'ik_setting': {
-            'joints_to_lock': [],
-            'ee_definitions': [('ee', 'joint_6', None)],
-        },
     },
     {
         'name': 'robotiq_2f_85',
@@ -368,7 +249,7 @@ _ALL_ROBOTS = [
     }
 ]
 
-SUPPORT_SENSORS = [
+_ALL_SENSORS = [
     {
         'name': 'realsense_d435_color',
         'company': 'Intel',
@@ -377,7 +258,8 @@ SUPPORT_SENSORS = [
         'read_topic': '/camera/color/image_raw/compressed',
         'read_topic_msg': 'sensor_msgs/CompressedImage',
         'custom_fields': ['serial_no'],
-        'resolution': [1280, 720]
+        'resolution': [1280, 720],
+        'module_id': 'sensor_realsense',
     },
     {
         'name': 'realsense_d405_color',
@@ -387,7 +269,8 @@ SUPPORT_SENSORS = [
         'read_topic': '/camera/color/image_rect_raw/compressed',
         'read_topic_msg': 'sensor_msgs/CompressedImage',
         'custom_fields': ['serial_no'],
-        'resolution': [848, 480]
+        'resolution': [848, 480],
+        'module_id': 'sensor_realsense',
     },
     {
         'name': 'webcam_color',
@@ -397,7 +280,8 @@ SUPPORT_SENSORS = [
         'read_topic': '/image_raw/compressed',
         'read_topic_msg': 'sensor_msgs/CompressedImage',
         'custom_fields': ['device_index'],
-        'resolution': [600, 480]
+        'resolution': [600, 480],
+        'module_id': 'sensor_webcam',
     },
     {
         'name': 'kinova_vision_color',
@@ -407,40 +291,67 @@ SUPPORT_SENSORS = [
         'read_topic': '/color/image_raw/compressed',
         'read_topic_msg': 'sensor_msgs/CompressedImage',
         'custom_fields': ['ip_address'],
-        'resolution': [1980, 1080]
+        'resolution': [1980, 1080],
+        'module_id': 'robot_kinova',
     }
 ]
 
 def _get_installed_module_ids():
-    """설치된 모듈의 ID 목록을 반환한다."""
+    """설치된 모듈의 ID 목록을 반환한다.
+
+    Single source of truth: /opt/easytrainer/project/modules/*.json
+    런처에서 모듈 설치/제거 시 이 폴더에 manifest를 생성/삭제한다.
+    """
     import json
-    modules_dir = os.path.join(os.environ.get('EASYTRAINER_DATA_DIR', '/opt/easytrainer'), 'modules')
-    # backend/modules도 체크 (Docker 내부)
-    fallback_dir = '/root/backend/modules'
+    data_root = os.environ.get('EASYTRAINER_DATA_DIR', '/opt/easytrainer')
+    modules_dir = os.path.join(data_root, 'project', 'modules')
     installed = set()
-    for d in (modules_dir, fallback_dir):
-        if not os.path.isdir(d):
-            continue
-        for entry in os.listdir(d):
-            mj = os.path.join(d, entry, 'module.json')
-            if os.path.isfile(mj):
-                try:
-                    with open(mj) as f:
-                        installed.add(json.load(f).get('id', ''))
-                except Exception:
-                    pass
+
+    if os.path.isdir(modules_dir):
+        for fname in os.listdir(modules_dir):
+            if not fname.endswith('.json'):
+                continue
+            fpath = os.path.join(modules_dir, fname)
+            try:
+                with open(fpath) as f:
+                    meta = json.load(f)
+                mid = meta.get('id', fname[:-5])  # fallback to filename without .json
+                installed.add(mid)
+            except Exception:
+                pass
+
     return installed
 
-_installed_modules = _get_installed_module_ids()
 
-# module_id가 없거나(custom/test), 설치된 모듈에 포함된 로봇만 노출
-SUPPORT_ROBOTS = [
-    r for r in _ALL_ROBOTS
-    if not r.get('module_id') or r['module_id'] in _installed_modules
-]
+def _get_support_robots():
+    installed = _get_installed_module_ids()
+    return [r for r in _ALL_ROBOTS if not r.get('module_id') or r['module_id'] in installed]
+
+def _get_support_sensors():
+    installed = _get_installed_module_ids()
+    return [s for s in _ALL_SENSORS if not s.get('module_id') or s['module_id'] in installed]
+
+# 하위호환: 기존 코드에서 SUPPORT_ROBOTS / SUPPORT_SENSORS를 직접 참조하는 곳 대응
+class _DynamicList:
+    """매 접근 시 함수를 호출하여 최신 목록을 반환하는 프록시."""
+    def __init__(self, fn):
+        self._fn = fn
+    def __iter__(self):
+        return iter(self._fn())
+    def __len__(self):
+        return len(self._fn())
+    def __getitem__(self, idx):
+        return self._fn()[idx]
+    def __contains__(self, item):
+        return item in self._fn()
+    def __bool__(self):
+        return bool(self._fn())
+
+SUPPORT_ROBOTS = _DynamicList(_get_support_robots)
+SUPPORT_SENSORS = _DynamicList(_get_support_sensors)
 
 def get_robot_by_name(name):
-    return next((robot for robot in SUPPORT_ROBOTS if robot.get('name') == name), None)
+    return next((robot for robot in _get_support_robots() if robot.get('name') == name), None)
 
 def get_sensor_by_name(name):
-    return next((sensor for sensor in SUPPORT_SENSORS if sensor.get('name') == name), None)
+    return next((sensor for sensor in _get_support_sensors() if sensor.get('name') == name), None)

@@ -215,6 +215,23 @@ service EnvService {
 }
 
 // ============================================================
+// Observation Service (센서 구독 lifecycle)
+// ============================================================
+
+message SensorConfig {
+  string sensors_json = 1;  // JSON array of sensor dicts
+}
+
+message SensorSessionId {
+  int32 id = 1;
+}
+
+service ObsService {
+  rpc StartSensors(SensorConfig) returns (SensorSessionId);
+  rpc StopSensors(SensorSessionId) returns (StatusResponse);
+}
+
+// ============================================================
 // Generic ROS2 Service Proxy
 // ============================================================
 
@@ -305,8 +322,26 @@ message UpdateStreamConfig {
   string config_json = 2;
 }
 
+message ImageFrame {
+  bytes jpeg_data = 1;
+  int32 width = 2;
+  int32 height = 3;
+  string stream_id = 4;
+}
+
+message SubscribeImageRequest {
+  string topic = 1;
+  string msg_type = 2;  // sensor_msgs/CompressedImage or sensor_msgs/Image
+  string stream_id = 3;
+}
+
+message UnsubscribeImageRequest {
+  string stream_id = 1;
+}
+
 service StreamingService {
-  // WebRTC offer/answer is HTTP-based, keep it as REST on the ROS2 container
-  // These RPCs are for management only
+  // 카메라 토픽을 구독하고 JPEG 프레임을 server-streaming으로 전송
+  rpc SubscribeImage(SubscribeImageRequest) returns (stream ImageFrame);
+  rpc UnsubscribeImage(UnsubscribeImageRequest) returns (StatusResponse);
   rpc UpdateConfig(UpdateStreamConfig) returns (StatusResponse);
 }

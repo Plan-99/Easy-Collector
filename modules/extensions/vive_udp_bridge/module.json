@@ -10,5 +10,8 @@
   "dependencies": {
     "apt": [],
     "pip": []
+  },
+  "check": {
+    "type": "path"
   }
 }

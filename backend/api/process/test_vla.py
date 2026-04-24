@@ -8,7 +8,7 @@ from einops import rearrange
 from ...utils.image_parser import fetch_image_with_config
 
 from ...policies.utils import make_policy
-from ...bridge.remote_env import RemoteEnv as Env
+from ...env.env import Env
 
 from lerobot.configs.types import PolicyFeature, FeatureType
 

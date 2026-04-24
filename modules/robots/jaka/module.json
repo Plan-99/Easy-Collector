@@ -20,5 +20,8 @@
       "ros-humble-srdfdom"
     ],
     "pip": []
+  },
+  "check": {
+    "type": "path"
   }
 }

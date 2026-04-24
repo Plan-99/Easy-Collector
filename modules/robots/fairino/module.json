@@ -18,5 +18,8 @@
       "ros-humble-moveit"
     ],
     "pip": []
+  },
+  "check": {
+    "type": "path"
   }
 }

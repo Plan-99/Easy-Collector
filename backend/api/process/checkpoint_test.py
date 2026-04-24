@@ -10,7 +10,7 @@ from ...utils.image_parser import fetch_image_with_config
 
 from ...policies.utils import make_policy, VISION_BACKBONE_MAP, process_image, relative_trajectory_to_delta, make_easytrainer_processors
 from collections import deque
-from ...bridge.remote_env import RemoteEnv
+from ...env.env import Env as RemoteEnv
 
 from lerobot.policies.act.modeling_act import ACTPolicy
 from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy

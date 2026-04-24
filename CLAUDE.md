@@ -26,6 +26,7 @@ npm run format    # Prettier format
 ```
 
 ### Quick Sync (apply local changes to running container without rebuild)
+**코드 수정 후 반드시 실행하여 런타임에 반영할 것.**
 ```bash
 bash scripts/quick_apply.sh ./ /opt/easytrainer/project
 ```

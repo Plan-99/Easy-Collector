@@ -51,6 +51,7 @@ MODULE_REGISTRY: list[ModuleInfo] = [
     ModuleInfo(id="serial_comm", name="Serial Communication", category="robot", description="시리얼 통신 유틸리티", asset_name="module-serial_comm-{version}.tar.gz"),
     # ── Sensors ──
     ModuleInfo(id="sensor_webcam", name="Webcam", category="sensor", description="USB 웹캠 (Logitech 등)", asset_name="module-sensor_webcam-{version}.tar.gz"),
+    ModuleInfo(id="sensor_realsense", name="Intel RealSense", category="sensor", description="Intel RealSense 깊이 카메라 (D435, D405 등)", asset_name="module-sensor_realsense-{version}.tar.gz"),
     # ── Extensions ──
     ModuleInfo(id="vr_teleop", name="VR 텔레오퍼레이션", category="extension", description="VR 기반 원격 조종", asset_name="module-vr_teleop-{version}.tar.gz"),
     ModuleInfo(id="test_arm", name="Test Arm", category="extension", description="테스트 로봇 암 시뮬레이션", asset_name="module-test_arm-{version}.tar.gz"),
@@ -91,8 +92,9 @@ _MODULES_DIR_NAME = "modules"
 
 
 def _modules_dir() -> Path:
+    """Return /opt/easytrainer/project/modules/ — the single source of truth for installed modules."""
     data_dir = os.environ.get("EASYTRAINER_DATA_DIR", "/opt/easytrainer")
-    return Path(data_dir) / _MODULES_DIR_NAME
+    return Path(data_dir) / "project" / _MODULES_DIR_NAME
 
 
 _VERSIONS_KEY = "installed_module_versions"
@@ -130,6 +132,9 @@ def save_installed_modules(module_ids: list[str]) -> None:
     save_config(cfg)
 
 
+_MODULE_DEPS_KEY = "installed_module_deps"
+
+
 def _save_module_version(module_id: str, version: str | None) -> None:
     try:
         cfg = load_config()
@@ -144,33 +149,78 @@ def _save_module_version(module_id: str, version: str | None) -> None:
     save_config(cfg)
 
 
+def _ensure_modules_dir() -> Path:
+    """Ensure project/modules/ dir exists with correct permissions."""
+    import subprocess as _sp
+    d = _modules_dir()
+    if not d.exists():
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            _sp.run(["sudo", "mkdir", "-p", str(d)], check=True, timeout=5)
+    # Fix ownership if owned by root
+    if d.exists() and d.stat().st_uid == 0 and os.getuid() != 0:
+        try:
+            _sp.run(["sudo", "chown", "-R", f"{os.getuid()}:{os.getgid()}", str(d)],
+                     check=False, timeout=5)
+        except Exception:
+            pass
+    return d
+
+
+def _save_module_manifest(module_id: str, meta: dict) -> None:
+    """Save module.json as {module_id}.json in project/modules/ dir."""
+    d = _ensure_modules_dir()
+    (d / f"{module_id}.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False))
+
+
+def _remove_module_manifest(module_id: str) -> None:
+    """Remove {module_id}.json from project/modules/ dir."""
+    p = _modules_dir() / f"{module_id}.json"
+    if p.exists():
+        p.unlink()
+
+
+def _load_module_manifest(module_id: str) -> dict | None:
+    """Load {module_id}.json from project/modules/ dir."""
+    p = _modules_dir() / f"{module_id}.json"
+    if p.is_file():
+        try:
+            return json.loads(p.read_text())
+        except Exception:
+            pass
+    return None
+
+
+def get_all_installed_manifests() -> dict[str, dict]:
+    """Return {module_id: meta} for all installed modules from project/modules/."""
+    d = _modules_dir()
+    result = {}
+    if not d.is_dir():
+        return result
+    for f in d.glob("*.json"):
+        try:
+            meta = json.loads(f.read_text())
+            mid = meta.get("id", f.stem)
+            result[mid] = meta
+        except Exception:
+            pass
+    return result
+
+
+
 def is_module_installed(module_id: str) -> bool:
-    """Check if a module is actually installed by verifying its files exist."""
+    """Check if a module is installed by looking for its manifest in project/modules/."""
+    # core/feature modules are always installed
     mod = get_module(module_id)
-    if not mod:
-        return module_id in get_installed_modules()
+    if mod and mod.required:
+        return True
 
-    if mod.category in ("robot", "sensor"):
-        project = _get_project_root()
-        # 모듈 이름으로 ros2_ws/src 하위에 폴더가 있는지 확인
-        ros2_src = project / "ros2" / "ros2_ws" / "src"
-        if ros2_src.is_dir():
-            for d in ros2_src.iterdir():
-                mj = d / "module.json"
-                if mj.is_file():
-                    try:
-                        meta = json.loads(mj.read_text())
-                        if meta.get("id") == module_id:
-                            return True
-                    except Exception:
-                        pass
-        return False
-
-    # core/feature/extension: config 플래그 기반
-    return module_id in get_installed_modules()
+    # Single source of truth: project/modules/{module_id}.json
+    return _load_module_manifest(module_id) is not None
 
 
-def set_module_installed(module_id: str, installed: bool = True, version: str | None = None) -> None:
+def set_module_installed(module_id: str, installed: bool = True, version: str | None = None, deps: dict | None = None) -> None:
     modules = get_installed_modules()
     if installed and module_id not in modules:
         modules.append(module_id)
@@ -181,6 +231,19 @@ def set_module_installed(module_id: str, installed: bool = True, version: str | 
         _save_module_version(module_id, version)
     elif not installed:
         _save_module_version(module_id, None)
+    # 의존성 정보도 config에 저장 (ros2 컨테이너에서 참조)
+    if deps is not None or not installed:
+        try:
+            cfg = load_config()
+        except Exception:
+            cfg = {}
+        all_deps = cfg.get(_MODULE_DEPS_KEY, {})
+        if installed and deps:
+            all_deps[module_id] = deps
+        elif not installed:
+            all_deps.pop(module_id, None)
+        cfg[_MODULE_DEPS_KEY] = all_deps
+        save_config(cfg)
 
 
 # ---------------------------------------------------------------------------
@@ -199,13 +262,49 @@ def _get_repo() -> str:
         return _DEFAULT_REPO
 
 
+def _gh_token() -> str | None:
+    """Get GitHub token from environment, gh CLI, or gh config file."""
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if token:
+        return token
+    # Try gh auth token command
+    try:
+        import subprocess as _sp
+        result = _sp.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+    # Fallback: read from gh config file
+    gh_hosts = Path.home() / ".config" / "gh" / "hosts.yml"
+    if gh_hosts.is_file():
+        try:
+            for line in gh_hosts.read_text().splitlines():
+                line = line.strip()
+                if line.startswith("oauth_token:"):
+                    return line.split(":", 1)[1].strip()
+        except Exception:
+            pass
+    return None
+
+
+def _gh_request(url: str, timeout: int = 15):
+    """Create a urllib Request with GitHub API headers and optional auth token."""
+    import urllib.request
+    headers = {"Accept": "application/vnd.github+json"}
+    token = _gh_token()
+    if token:
+        headers["Authorization"] = f"token {token}"
+    return urllib.request.Request(url, headers=headers)
+
+
 def fetch_latest_release(repo: str | None = None) -> dict | None:
     """Fetch latest release info from GitHub API. Returns JSON dict or None."""
     import urllib.request
 
     repo = repo or _get_repo()
     url = f"https://api.github.com/repos/{repo}/releases/latest"
-    req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
+    req = _gh_request(url)
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             return json.loads(resp.read().decode())
@@ -226,7 +325,7 @@ def fetch_module_release(module_id: str, version: str | None = None, repo: str |
     if version:
         tag = f"module-{module_id}-v{version}"
         url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
-        req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
+        req = _gh_request(url)
         try:
             with urllib.request.urlopen(req, timeout=15) as resp:
                 return json.loads(resp.read().decode())
@@ -236,7 +335,7 @@ def fetch_module_release(module_id: str, version: str | None = None, repo: str |
     # version not specified: find the latest release for this module
     prefix = f"module-{module_id}-v"
     url = f"https://api.github.com/repos/{repo}/releases?per_page=50"
-    req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
+    req = _gh_request(url)
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             releases = json.loads(resp.read().decode())
@@ -258,7 +357,7 @@ def get_remote_versions(release: dict | None = None) -> dict[str, str]:
 
     repo = _get_repo()
     url = f"https://api.github.com/repos/{repo}/releases?per_page=100"
-    req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
+    req = _gh_request(url)
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             releases = json.loads(resp.read().decode())
@@ -278,6 +377,85 @@ def get_remote_versions(release: dict | None = None) -> dict[str, str]:
             if mid not in result:  # 최신순이므로 첫 번째만 유지
                 result[mid] = ver
     return result
+
+
+_ROS2_CONTAINER = "easytrainer_ros2"
+_BACKEND_CONTAINER = "easytrainer_backend"
+
+
+def _install_deps_in_containers(meta: dict) -> None:
+    """Install module dependencies inside running Docker containers via docker exec."""
+    import subprocess as _sp
+
+    deps = meta.get("dependencies", {})
+    install = meta.get("install", {})
+
+    # Determine which containers need deps
+    containers = []
+    category = meta.get("category", "")
+    if category in ("robot", "sensor"):
+        containers.append(_ROS2_CONTAINER)
+    elif category == "extension":
+        containers.append(_BACKEND_CONTAINER)
+    else:
+        containers.extend([_ROS2_CONTAINER, _BACKEND_CONTAINER])
+
+    for container in containers:
+        # Check container is running
+        try:
+            result = _sp.run(
+                ["docker", "inspect", "-f", "{{.State.Running}}", container],
+                capture_output=True, text=True, timeout=5,
+            )
+            if "true" not in result.stdout.lower():
+                continue
+        except Exception:
+            continue
+
+        # pip deps
+        pip_deps = deps.get("pip", [])
+        if pip_deps:
+            try:
+                _sp.run(
+                    ["docker", "exec", container, "python3", "-m", "pip", "install", "--quiet"] + pip_deps,
+                    timeout=120, check=False,
+                )
+            except Exception:
+                pass
+
+        # apt deps
+        apt_deps = deps.get("apt", [])
+        if apt_deps:
+            try:
+                _sp.run(
+                    ["docker", "exec", container, "bash", "-c",
+                     "apt-get update -qq && apt-get install -y --no-install-recommends " + " ".join(apt_deps)],
+                    timeout=300, check=False,
+                )
+            except Exception:
+                pass
+
+    # SDK install_cmd (e.g. "pip3 install -e .")
+    sdk_cfg = install.get("sdk", {})
+    install_cmd = sdk_cfg.get("install_cmd", "")
+    sdk_target = sdk_cfg.get("target", "")
+    if install_cmd and sdk_target:
+        # sdk_target is relative to project root, map to container path
+        # e.g. "ros2/robot_sdk/piper" → "/root/robot_sdk/piper"
+        container_sdk_path = sdk_target.replace("ros2/robot_sdk", "/root/robot_sdk")
+        try:
+            result = _sp.run(
+                ["docker", "inspect", "-f", "{{.State.Running}}", _ROS2_CONTAINER],
+                capture_output=True, text=True, timeout=5,
+            )
+            if "true" in result.stdout.lower():
+                _sp.run(
+                    ["docker", "exec", "-w", container_sdk_path, _ROS2_CONTAINER,
+                     "bash", "-c", install_cmd],
+                    timeout=120, check=False,
+                )
+        except Exception:
+            pass
 
 
 def _get_project_root() -> Path:
@@ -346,7 +524,7 @@ def download_module(
         # Download
         with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
             tmp_path = tmp.name
-            req = urllib.request.Request(asset_url)
+            req = _gh_request(asset_url, timeout=120)
             with urllib.request.urlopen(req, timeout=120) as resp:
                 total = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
@@ -360,16 +538,52 @@ def download_module(
                         on_progress(downloaded, total)
 
         # Extract and install
-        if mod.category in ("robot", "sensor"):
+        # module.json에서 메타정보 추출
+        _is_pkg_only = False
+        _module_deps = {}
+        _module_meta = {}
+        with tarfile.open(tmp_path, "r:gz") as tar:
+            for mj_member in tar.getmembers():
+                if mj_member.name.endswith("module.json"):
+                    try:
+                        _module_meta = json.loads(tar.extractfile(mj_member).read())
+                        check_type = _module_meta.get("check", {}).get("type", "path")
+                        if check_type in ("apt", "pip"):
+                            _is_pkg_only = True
+                        _module_deps = _module_meta.get("dependencies", {})
+                    except Exception:
+                        pass
+                    break
+
+        if _is_pkg_only:
+            # apt/pip 모듈: 파일 복사 없이 의존성만 설치
+            with tempfile.TemporaryDirectory() as tmpdir:
+                with tarfile.open(tmp_path, "r:gz") as tar:
+                    tar.extractall(path=tmpdir)
+                extracted = [d for d in Path(tmpdir).iterdir() if d.is_dir()]
+                if extracted:
+                    _install_module_deps(extracted[0], module_id)
+        elif mod.category in ("robot", "sensor"):
             _install_robot_sensor_module(tmp_path, module_id)
         else:
             with tarfile.open(tmp_path, "r:gz") as tar:
                 tar.extractall(path=str(install_dir))
             _install_module_deps(install_dir, module_id)
 
-        set_module_installed(module_id, True, version=remote_version)
+        # Save manifest to project/modules/{module_id}.json (single source of truth)
+        if _module_meta:
+            if remote_version:
+                _module_meta["installed_version"] = remote_version
+            _save_module_manifest(module_id, _module_meta)
+
+        # Install deps inside running containers via docker exec
+        _install_deps_in_containers(_module_meta)
+
+        set_module_installed(module_id, True, version=remote_version, deps=_module_deps)
         return True
-    except Exception:
+    except Exception as e:
+        import traceback
+        print(f"[MODULE ERROR] {module_id}: {e}\n{traceback.format_exc()}")
         return False
     finally:
         try:
@@ -443,18 +657,29 @@ def _install_robot_sensor_module(tar_path: str, module_id: str) -> None:
             except Exception:
                 pass
 
-        # Install ros2/ → ros2/ros2_ws/src/<module_name>/ (폴더째로 복사)
+        # Install ros2/ → ros2/ros2_ws/src/
         ros2_src = module_dir / "ros2"
         if ros2_src.is_dir() and any(ros2_src.iterdir()):
             ros2_target_cfg = install_cfg.get("ros2", {}).get("target", "ros2/ros2_ws/src")
-            # 구버전 module.json 호환: ros2/ prefix가 없으면 추가
             if not ros2_target_cfg.startswith("ros2/"):
                 ros2_target_cfg = "ros2/" + ros2_target_cfg
             ros2_base = project / ros2_target_cfg
+
+            # ros2_ws/src/<module_name>/ 안에 패키지들을 설치
             ros2_target = ros2_base / module_name
             if ros2_target.exists():
                 shutil.rmtree(ros2_target)
-            shutil.copytree(ros2_src, ros2_target)
+
+            # ros2/src/ 가 있으면 그 안의 패키지들을 module_name/ 아래에 복사
+            ros2_inner_src = ros2_src / "src"
+            if ros2_inner_src.is_dir():
+                ros2_target.mkdir(parents=True, exist_ok=True)
+                for pkg_dir in ros2_inner_src.iterdir():
+                    if pkg_dir.is_dir():
+                        shutil.copytree(pkg_dir, ros2_target / pkg_dir.name)
+            else:
+                # src/ 없으면 ros2/ 전체를 module_name/ 으로 복사
+                shutil.copytree(ros2_src, ros2_target)
 
         # Install sdk/ contents
         sdk_src = module_dir / "sdk"
@@ -477,7 +702,12 @@ def _install_robot_sensor_module(tar_path: str, module_id: str) -> None:
         if not ros2_dep_cfg.startswith("ros2/"):
             ros2_dep_cfg = "ros2/" + ros2_dep_cfg
         ros2_base = project / ros2_dep_cfg
-        target_mj = ros2_base / module_name / "module.json"
+        # ros2/src/ 구조일 때는 module_name과 같은 이름의 패키지에, 없으면 module_name/ 폴더에
+        ros2_inner_src = module_dir / "ros2" / "src"
+        if ros2_inner_src.is_dir() and (ros2_base / module_name).is_dir():
+            target_mj = ros2_base / module_name / "module.json"
+        else:
+            target_mj = ros2_base / module_name / "module.json"
         if mj_path.exists() and not target_mj.exists():
             shutil.copy2(mj_path, target_mj)
 
@@ -539,32 +769,113 @@ def _install_module_deps(install_dir: Path, module_id: str) -> None:
         break
 
 
+def _uninstall_deps(meta: dict) -> None:
+    """Uninstall pip packages listed in module dependencies (best-effort)."""
+    import subprocess as _sp
+    deps = meta.get("dependencies", {})
+    pip_deps = deps.get("pip", [])
+    if pip_deps:
+        pkg_names = [p.split(">=")[0].split("==")[0].split("[")[0] for p in pip_deps]
+        try:
+            _sp.run(["python3", "-m", "pip", "uninstall", "-y", "--quiet"] + pkg_names,
+                     timeout=60, check=False)
+        except Exception:
+            pass
+    # apt packages: 일반적으로 제거하지 않음 (다른 모듈이 공유할 수 있으므로)
+
+
 def remove_module(module_id: str) -> bool:
     """Remove an installed module."""
     mod = get_module(module_id)
     if not mod or mod.required:
         return False
 
-    # Remove from install dir
-    install_dir = _get_install_dir(mod)
-    # Find the actual folder name by checking module.json
-    for mj in install_dir.rglob("module.json"):
-        try:
-            meta = json.loads(mj.read_text())
-            if meta.get("id") == module_id:
-                pkg_dir = mj.parent
-                if pkg_dir.exists() and pkg_dir != install_dir:
-                    shutil.rmtree(pkg_dir, ignore_errors=True)
-                break
-        except Exception:
-            continue
+    project = _get_project_root()
 
-    # Also clean from legacy modules dir
-    legacy_dir = _modules_dir() / module_id
+    # Load manifest for uninstall info
+    manifest = _load_module_manifest(module_id)
+
+    if mod.category in ("robot", "sensor"):
+        # ros2_ws/src/ 에서 module.json으로 모듈 폴더 찾아 삭제
+        ros2_src = project / "ros2" / "ros2_ws" / "src"
+        if ros2_src.is_dir():
+            for d in ros2_src.iterdir():
+                if not d.is_dir():
+                    continue
+                mj = d / "module.json"
+                if mj.is_file():
+                    try:
+                        meta = json.loads(mj.read_text())
+                        if meta.get("id") == module_id:
+                            shutil.rmtree(d, ignore_errors=True)
+                            break
+                    except Exception:
+                        continue
+
+        # robot_sdk/ 에서도 삭제 — manifest의 install.sdk.target 경로 사용
+        sdk_target = None
+        if manifest:
+            sdk_target = manifest.get("install", {}).get("sdk", {}).get("target", "")
+        _log = f"[MODULE REMOVE] {module_id}: manifest={manifest is not None}, sdk_target={sdk_target!r}, project={project}\n"
+        if sdk_target:
+            sdk_path = project / sdk_target
+            _log += f"[MODULE REMOVE] sdk_path={sdk_path}, exists={sdk_path.is_dir()}\n"
+            if sdk_path.is_dir():
+                try:
+                    shutil.rmtree(sdk_path)
+                except PermissionError:
+                    # root 소유 파일(egg-info 등)이 있으면 docker exec로 삭제
+                    import subprocess as _sp
+                    container_path = sdk_target.replace("ros2/robot_sdk", "/root/robot_sdk")
+                    _sp.run(["docker", "exec", _ROS2_CONTAINER, "rm", "-rf", container_path],
+                            check=False, timeout=10)
+                    # 컨테이너가 없을 경우 sudo fallback
+                    if sdk_path.is_dir():
+                        _sp.run(["sudo", "rm", "-rf", str(sdk_path)], check=False, timeout=10)
+                _log += f"[MODULE REMOVE] Deleted {sdk_path}, still_exists={sdk_path.exists()}\n"
+        else:
+            # fallback: 이름 추측
+            sdk_dir = project / "ros2" / "robot_sdk"
+            if sdk_dir.is_dir():
+                expected_name = module_id.replace("robot_", "").replace("sensor_", "").replace("gripper_", "")
+                candidate = sdk_dir / expected_name
+                if candidate.is_dir():
+                    shutil.rmtree(candidate, ignore_errors=True)
+    else:
+        # extension: backend/extensions/ 에서 삭제
+        install_dir = project / "backend" / "extensions"
+        if install_dir.is_dir():
+            for mj in install_dir.rglob("module.json"):
+                try:
+                    meta = json.loads(mj.read_text())
+                    if meta.get("id") == module_id:
+                        pkg_dir = mj.parent
+                        if pkg_dir.exists() and pkg_dir != install_dir:
+                            shutil.rmtree(pkg_dir, ignore_errors=True)
+                        break
+                except Exception:
+                    continue
+
+    # Uninstall pip dependencies if manifest available
+    if manifest:
+        _uninstall_deps(manifest)
+
+    # Remove manifest from project/modules/
+    _remove_module_manifest(module_id)
+
+    # Legacy modules dir
+    legacy_dir = Path(os.environ.get("EASYTRAINER_DATA_DIR", "/opt/easytrainer")) / "modules" / module_id
     if legacy_dir.exists():
         shutil.rmtree(legacy_dir, ignore_errors=True)
 
     set_module_installed(module_id, False)
+
+    # Debug log to file
+    try:
+        Path("/tmp/easytrainer_module_remove.log").write_text(_log)
+    except Exception:
+        pass
+
     return True
 
 

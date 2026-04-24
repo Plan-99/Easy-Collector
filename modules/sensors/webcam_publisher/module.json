@@ -16,5 +16,8 @@
       "ros-humble-image-transport-plugins"
     ],
     "pip": []
+  },
+  "check": {
+    "type": "path"
   }
 }

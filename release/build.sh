@@ -406,6 +406,9 @@ if [ -d "$SRC" ]; then
     done
   fi
   cp -a "$SRC"/. "$DEST"/ || true
+  # Pre-create runtime directories excluded from the deb payload
+  install -d -m 775 -o "$TARGET_USER" -g "$TARGET_GROUP" "$DEST/ros2/robot_sdk" 2>/dev/null || true
+  install -d -m 775 -o "$TARGET_USER" -g "$TARGET_GROUP" "$DEST/modules" 2>/dev/null || true
   chown -R "$TARGET_USER":"$TARGET_GROUP" "$DEST" || true
   chmod -R u+rwX "$DEST" || true
   echo "Project placed at $DEST (owner: $TARGET_USER)"

@@ -18,5 +18,8 @@
       "ros-humble-ros2-control"
     ],
     "pip": []
+  },
+  "check": {
+    "type": "path"
   }
 }

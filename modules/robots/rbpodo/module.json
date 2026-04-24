@@ -20,5 +20,8 @@
       "build-essential"
     ],
     "pip": []
+  },
+  "check": {
+    "type": "path"
   }
 }

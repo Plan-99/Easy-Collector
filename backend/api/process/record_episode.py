@@ -1,6 +1,6 @@
 from tqdm import tqdm
 import os
-from ...bridge.remote_env import RemoteEnv
+from ...env.env import Env
 from ...configs.global_configs import DATASET_DIR
 from .leader_teleoperation import Leader
 from ...utils.image_parser import fetch_image_with_config
@@ -22,7 +22,7 @@ def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
 
 def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors, task, language_instruction, socketio_instance, task_control, tele_type='leader', ros2_service='', iter=100000, hz=20):
     agents = sorted(agents, key=lambda a: a.id)
-    env = RemoteEnv(agents=agents, sensors=sensors, virtual_agents=(tele_type == 'vive_only'))
+    env = Env(agents=agents, sensors=sensors, virtual_agents=(tele_type == 'vive_only'))
     dataset_dir = f"{DATASET_DIR}/{dataset_id}"
     thread_pool = ThreadPoolExecutor(max_workers=len(agents))
 
