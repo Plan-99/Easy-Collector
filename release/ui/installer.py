@@ -753,21 +753,41 @@ def run_setup_wizard(self: "MainWindow") -> bool:
                 if training_choice["value"] == "local":
                     log.append("[POST] 로컬 학습 서버 다운로드 중...")
                     import threading
+                    import queue as _queue
                     import training_server_install as _ts
 
+                    # Queue-based GUI thread bridge (QTimer.singleShot from a
+                    # worker thread isn't reliable when that thread has no Qt
+                    # event loop, so we drain queues from a GUI-thread timer).
+                    ts_log_q: _queue.Queue = _queue.Queue()
+                    ts_done = {'value': None}
+
                     def _ts_log(msg: str):
-                        QTimer.singleShot(0, lambda m=msg: log.append(f"[TRAIN-SERVER] {m}"))
+                        ts_log_q.put(msg)
 
                     def _ts_worker():
                         try:
                             ok, msg = _ts.download_from_release(on_log=_ts_log)
                         except Exception as e:
                             ok, msg = False, str(e)
-                        QTimer.singleShot(0, lambda: log.append(
-                            f"[TRAIN-SERVER] {'완료' if ok else '실패'}: {msg}"
-                        ))
-                        QTimer.singleShot(0, _finalize)
+                        ts_log_q.put(f"{'완료' if ok else '실패'}: {msg}")
+                        ts_done['value'] = (ok, msg)
 
+                    ts_drain = QTimer(dlg)
+                    ts_drain.setInterval(200)
+
+                    def _drain_ts():
+                        try:
+                            while True:
+                                line = ts_log_q.get_nowait()
+                                log.append(f"[TRAIN-SERVER] {line}")
+                        except _queue.Empty:
+                            pass
+                        if ts_done['value'] is not None:
+                            ts_drain.stop()
+                            _finalize()
+                    ts_drain.timeout.connect(_drain_ts)
+                    ts_drain.start()
                     threading.Thread(target=_ts_worker, daemon=True).start()
                 else:
                     _finalize()
@@ -781,6 +801,9 @@ def run_setup_wizard(self: "MainWindow") -> bool:
                 "run", "--rm",
                 "-v", f"{self.project_root}/backend:/root/backend",
                 "-v", "/opt/easytrainer:/opt/easytrainer",
+                # backend.database.models imports lerobot_io which imports the
+                # vendored lerobot package — needs to be on PYTHONPATH.
+                "-e", "PYTHONPATH=/root:/root/backend/lerobot/src",
                 "--entrypoint", "bash",
                 "easytrainer-backend:latest",
                 "-c", migrate_cmd,
