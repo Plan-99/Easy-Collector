@@ -3,7 +3,7 @@ from lerobot.policies.act.modeling_act import ACTPolicy
 import torch
 import numpy as np
 from backend.utils.image_parser import fetch_image_with_config
-from backend.policies.utils import make_policy, VISION_BACKBONE_MAP, process_image
+from backend.policies.utils import VISION_BACKBONE_MAP, process_image
 
 
 class EmbeddingHelper:

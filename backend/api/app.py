@@ -24,6 +24,7 @@ from .routes.teleoperator import teleoperator_bp
 from .routes.assembly import assembly_bp
 from .routes.sim import sim_bp
 from .routes.robot_pose import robot_pose_bp
+from .routes.remote_train import remote_train_bp
 
 from ..bridge.client import get_bridge_client
 from ..bridge.remote_agent import RemoteAgent
@@ -79,6 +80,7 @@ app.register_blueprint(teleoperator_bp, url_prefix='/api')
 app.register_blueprint(assembly_bp, url_prefix='/api')
 app.register_blueprint(sim_bp, url_prefix='/api')
 app.register_blueprint(robot_pose_bp, url_prefix='/api')
+app.register_blueprint(remote_train_bp, url_prefix='/api')
 
 socketio.on_namespace(SensorNamespace('/sensor', pm))
 socketio.on_namespace(RobotNamespace('/robot', pm))

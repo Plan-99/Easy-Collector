@@ -1,7 +1,7 @@
 import os
 import shutil
 from ...configs.global_configs import DATASET_DIR
-from .lerobot_io import (
+from ...utils.lerobot_io import (
     list_episodes, read_episode, get_dataset_info, create_dataset,
     _read_json, _write_json, _read_jsonl, _write_jsonl, _append_jsonl,
     PARQUET_PATH_TEMPLATE, IMAGE_PATH_TEMPLATE, INFO_PATH,

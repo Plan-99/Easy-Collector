@@ -2,6 +2,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import Link from "next/link";
+import ResetBindingButton from "./ResetBindingButton";
 
 export default async function AdminPage() {
   const session = await auth();
@@ -105,9 +106,10 @@ export default async function AdminPage() {
                       </td>
                       <td className="px-5 py-3">
                         {sk?.machineId ? (
-                          <span className="text-xs text-emerald-400 font-mono">
-                            {sk.machineId.slice(0, 12)}...
-                          </span>
+                          <ResetBindingButton
+                            serialKeyId={sk.id}
+                            machineId={sk.machineId}
+                          />
                         ) : (
                           <span className="text-xs text-surface-600">
                             미연결

@@ -19,7 +19,7 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
-from src.backend.api.process.lerobot_io import (
+from src.backend.utils.lerobot_io import (
     create_dataset, _write_json, _append_jsonl, _read_json,
     PARQUET_PATH_TEMPLATE, IMAGE_PATH_TEMPLATE, INFO_PATH,
     EPISODES_PATH, TASKS_PATH, EPISODES_STATS_PATH, DEFAULT_CHUNK_SIZE,

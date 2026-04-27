@@ -4,7 +4,10 @@ from __future__ import annotations
 import json
 import platform
 import hashlib
+import subprocess
+import sys
 import uuid
+from pathlib import Path
 import urllib.request
 import urllib.error
 
@@ -23,9 +26,57 @@ def _get_api_url() -> str:
         return _DEFAULT_URL
 
 
+def _read_stable_machine_id() -> str | None:
+    """Read OS-provided stable machine ID. Survives reboot and network changes."""
+    # Linux: /etc/machine-id (systemd) or /var/lib/dbus/machine-id
+    for path in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
+        try:
+            text = Path(path).read_text().strip()
+            if text:
+                return text
+        except Exception:
+            continue
+    # macOS: IOPlatformUUID
+    if sys.platform == "darwin":
+        try:
+            out = subprocess.check_output(
+                ["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+                text=True, timeout=5,
+            )
+            for line in out.splitlines():
+                if "IOPlatformUUID" in line:
+                    return line.split('"')[-2]
+        except Exception:
+            pass
+    # Windows: Registry MachineGuid
+    if sys.platform == "win32":
+        try:
+            import winreg
+            key = winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SOFTWARE\Microsoft\Cryptography",
+                0,
+                winreg.KEY_READ | winreg.KEY_WOW64_64KEY,
+            )
+            value, _ = winreg.QueryValueEx(key, "MachineGuid")
+            winreg.CloseKey(key)
+            return value
+        except Exception:
+            pass
+    return None
+
+
 def get_machine_fingerprint() -> str:
-    """Generate a stable machine-unique ID."""
+    """Generate a stable machine-unique ID.
+
+    Uses OS-provided stable ID (machine-id on Linux, IOPlatformUUID on macOS,
+    MachineGuid on Windows). Falls back to MAC+hostname only if unavailable.
+    """
     try:
+        stable_id = _read_stable_machine_id()
+        if stable_id:
+            return hashlib.sha256(stable_id.encode()).hexdigest()[:32]
+        # Fallback (less reliable — MAC may vary across network interfaces)
         mac = uuid.getnode()
         node_name = platform.node()
         raw = f"{mac}-{node_name}-{platform.machine()}"

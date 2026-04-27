@@ -111,6 +111,7 @@ def start_training():
         'policy': data.get('policy'),
         'train_settings': data.get('train_settings'),
         'dataset_info': data.get('dataset_info'),
+        'sensor_ids': data.get('sensor_ids', []),
         'callback_url': data.get('callback_url'),
     }
 

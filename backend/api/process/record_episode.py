@@ -6,7 +6,7 @@ from .leader_teleoperation import Leader
 from ...utils.image_parser import fetch_image_with_config
 import time
 from concurrent.futures import ThreadPoolExecutor
-from .lerobot_io import append_episode as lerobot_append_episode, get_episode_count
+from ...utils.lerobot_io import append_episode as lerobot_append_episode, get_episode_count
 from ...database.models.teleoperator_model import Teleoperator as TeleoperatorModel
 
 def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):

@@ -6,7 +6,7 @@ import cv2
 import base64
 import threading
 from .augment_dataset import adjust_lightness, draw_rectangles, add_salt_and_pepper_noise, add_gaussian_noise, generate_rect_params, prospective_transform, generate_prospective_transform, apply_hsv
-from .lerobot_io import read_episode, append_episode as lerobot_append_episode
+from ...utils.lerobot_io import read_episode, append_episode as lerobot_append_episode
 from ...configs.global_configs import DATASET_DIR
 from ...utils.image_parser import fetch_image_with_config
 from PIL import Image

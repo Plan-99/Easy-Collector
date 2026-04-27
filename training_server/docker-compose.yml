@@ -18,9 +18,16 @@ services:
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      # 호스트 드라이버 우선 사용 (compat 레이어 우회)
+      - LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/local/cuda/lib64:/usr/local/nvidia/lib:/usr/local/nvidia/lib64
       - TRAINING_SERVER_DATA_DIR=/data
     volumes:
       - training_data:/data
+      # Bind-mount source for live editing (no rebuild needed for code changes)
+      - ./app.py:/app/app.py
+      - ./train_worker.py:/app/train_worker.py
+      - ./policies:/app/policies
+      - ./lerobot:/app/lerobot
     restart: unless-stopped
 
 volumes:

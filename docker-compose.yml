@@ -31,6 +31,8 @@ services:
       - PYTHONPATH=/root:/root/backend/lerobot/src
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+      # 호스트 드라이버 우선 사용 (compat 레이어 우회)
+      - LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/local/cuda/lib64:/usr/local/nvidia/lib:/usr/local/nvidia/lib64
       - EC_DEBUG=${EC_DEBUG:-1}
       - EC_BACKEND_AUTORELOAD=${EC_BACKEND_AUTORELOAD:-1}
       - EC_MINIMAL_API=${EC_MINIMAL_API:-0}

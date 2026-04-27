@@ -12,7 +12,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from PIL import Image
 
-from .lerobot_io import (
+from ...utils.lerobot_io import (
     read_episode, list_episodes, get_dataset_info,
     _read_json, _write_json, _read_jsonl, _write_jsonl, _append_jsonl,
     PARQUET_PATH_TEMPLATE, INFO_PATH,

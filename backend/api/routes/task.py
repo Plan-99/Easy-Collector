@@ -3,13 +3,9 @@ from ...database.models.task_model import Task as TaskModel
 import json
 from ...database.models.checkpoint_model import Checkpoint as CheckpointModel
 from ...database.models.assembly_model import Assembly as AssemblyModel
-from ...configs.global_configs import DATASET_DIR
 from ..utils.runtime import attach_robot_runtime
 
 from ..process.failure_detection import failure_detection
-
-import os
-import shutil
 
 task_bp = Blueprint('task', __name__)
 
@@ -18,6 +14,14 @@ def get_tasks():
     tasks = TaskModel.select().where(TaskModel.deleted_at.is_null())
     tasks = [task.to_dict() for task in tasks]
     processes = set(current_app.pm.list_processes())
+    try:
+        from ...bridge.client import get_bridge_client
+        from ...bridge.generated import robot_bridge_pb2 as pb
+        client = get_bridge_client()
+        ros2_procs = client.driver.ListProcesses(pb.Empty())
+        processes.update(ros2_procs.names)
+    except Exception:
+        pass
     for task in tasks:
         if task.get('assembly') and task['assembly'].get('robots'):
             task['assembly']['robots'] = [
@@ -35,6 +39,14 @@ def get_task(id):
         return {'status': 'error', 'message': 'Task not found'}, 404
     task_dict = task.to_dict()
     processes = set(current_app.pm.list_processes())
+    try:
+        from ...bridge.client import get_bridge_client
+        from ...bridge.generated import robot_bridge_pb2 as pb
+        client = get_bridge_client()
+        ros2_procs = client.driver.ListProcesses(pb.Empty())
+        processes.update(ros2_procs.names)
+    except Exception:
+        pass
     if task_dict.get('assembly') and task_dict['assembly'].get('robots'):
         task_dict['assembly']['robots'] = [
             attach_robot_runtime(robot, processes) for robot in task_dict['assembly']['robots']
@@ -65,70 +77,6 @@ def create_checkpoint():
         load_model_id=load_model_id,
     )
     return {'status': 'success', 'message': 'Checkpoint Created', 'id': new_checkpoint.id}, 200
-
-
-@task_bp.route('/task:start_training', methods=['POST'])
-def start_training():
-    data = request.json
-    checkpoint_id = data.get('checkpoint_id')
-
-    command_list = ['python3', '-u', '-m', 'backend.scripts.train',
-                    '--checkpoint_id', str(checkpoint_id)]
-
-    process_id = "train_task"
-
-    if process_id not in current_app.pm.processes:
-        process = current_app.pm.start_process(process_id, command_list)
-
-        return {
-            'status': 'success',
-            'message': f'Training started for checkpoint {checkpoint_id}',
-            'process_id': process_id,
-            'checkpoint_id': checkpoint_id,
-            'pid': process.pid
-        }, 200
-    else:
-        current_app.pm.process_queue[process_id].append({
-            'checkpoint_id': checkpoint_id,
-            'command': command_list
-        })
-        return {
-            'status': 'success',
-            'message': f'Training queued for checkpoint {checkpoint_id}',
-            'process_id': process_id,
-            'checkpoint_id': checkpoint_id,
-            'pid': None
-        }, 200
-
-
-@task_bp.route('/task:stop_training', methods=['POST'])
-def stop_training():
-    checkpoint = CheckpointModel.select().where(
-        CheckpointModel.status == 'training',
-        CheckpointModel.deleted_at.is_null()
-    ).first()
-    if checkpoint:
-        checkpoint.delete_instance()
-
-    current_app.pm.stop_process('train_task')
-
-    temp_dir = os.path.join(DATASET_DIR, "tmp")
-    if os.path.exists(temp_dir):
-        shutil.rmtree(temp_dir)
-    return {'status': 'success', 'message': 'Training stopped'}, 200
-
-@task_bp.route('/task:cancel_training', methods=['POST'])
-def cancel_training():
-    data = request.json
-    checkpoint_id = data.get('checkpoint_id')
-    checkpoint = CheckpointModel.find(checkpoint_id)
-    if checkpoint:
-        checkpoint.delete_instance()
-
-    current_app.pm.process_queue['train_task'] = [proc for proc in current_app.pm.process_queue['train_task'] if proc['checkpoint_id'] != checkpoint_id]
-
-    return {'status': 'success', 'message': 'Training cancelled'}, 200
-
 
 
 @task_bp.route('/task', methods=['POST'])
