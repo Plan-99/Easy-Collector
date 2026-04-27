@@ -83,7 +83,9 @@ from modules import (
     set_training_server_installed,
     get_training_mode,
     set_training_mode,
+    get_training_server_config,
 )
+import training_server_install as _ts
 from service import ComposeServiceMixin, HealthServiceMixin, RuntimeServiceMixin, docker_compose_available
 from tools import ToolingMixin
 from update import UpdateManager, CONFIG_UPGRADE_KEY
@@ -3210,9 +3212,12 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
     def _on_training_clicked(self):
         """Open the training server management dialog."""
+        import threading
+        import queue as _queue
+
         dlg = QDialog(self)
         dlg.setWindowTitle("학습 서버 관리")
-        dlg.resize(500, 420)
+        dlg.resize(680, 620)
         layout = QVBoxLayout(dlg)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
@@ -3232,146 +3237,236 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         gpu_title = QLabel("GPU 정보")
         gpu_title.setStyleSheet("font-weight: bold; font-size: 12px;")
         gpu_layout.addWidget(gpu_title)
-
         gpus = detect_gpus()
         if not gpus:
             gpu_info = QLabel("⚠ NVIDIA GPU가 감지되지 않았습니다.")
             gpu_info.setStyleSheet("color: #ff9800; font-size: 11px;")
         else:
-            lines = []
-            for g in gpus:
-                lines.append(f"GPU {g.index}: {g.name}  —  VRAM {g.vram_total_mb}MB "
-                             f"(사용: {g.vram_used_mb}MB / 여유: {g.vram_free_mb}MB)")
+            lines = [f"GPU {g.index}: {g.name}  —  VRAM {g.vram_total_mb}MB "
+                     f"(사용: {g.vram_used_mb}MB / 여유: {g.vram_free_mb}MB)" for g in gpus]
             gpu_info = QLabel("\n".join(lines))
             gpu_info.setStyleSheet("color: #86efac; font-size: 11px;")
         gpu_info.setWordWrap(True)
         gpu_layout.addWidget(gpu_info)
         layout.addWidget(gpu_box)
 
-        # Status
-        installed = is_training_server_installed()
-        status_label = QLabel(f"상태: {'설치됨' if installed else '미설치'}")
-        status_label.setStyleSheet(
-            f"font-size: 13px; font-weight: 600; color: {'#86efac' if installed else '#999'};"
-        )
+        # Status row
+        status_label = QLabel()
+        status_label.setStyleSheet("font-size: 13px; font-weight: 600;")
         layout.addWidget(status_label)
-
-        # Running status check
-        running = False
-        try:
-            import subprocess as _sp
-            out = _sp.check_output(["docker", "ps", "--format", "{{.Names}}"], text=True)
-            running = "easytrainer_trainer" in out or "training_server_trainer" in out
-        except Exception:
-            pass
-
-        running_label = QLabel(f"실행 상태: {'🟢 실행 중' if running else '⚫ 중지'}")
+        running_label = QLabel()
         running_label.setStyleSheet("font-size: 12px;")
         layout.addWidget(running_label)
 
-        layout.addSpacing(6)
+        # Port input row
+        port_row = QHBoxLayout()
+        port_row.setSpacing(8)
+        port_label = QLabel("포트:")
+        port_label.setStyleSheet("font-size: 12px;")
+        port_input = QLineEdit(str(_ts.get_configured_port()))
+        port_input.setFixedWidth(80)
+        port_input.setStyleSheet("font-size: 12px;")
+        port_row.addWidget(port_label)
+        port_row.addWidget(port_input)
+        port_row.addStretch(1)
+        layout.addLayout(port_row)
 
-        # Buttons
+        # Action buttons row
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
-
-        if installed:
-            if running:
-                btn_stop = QPushButton("학습 서버 중지")
-                btn_stop.setStyleSheet("font-size: 12px;")
-
-                def _stop():
-                    try:
-                        import subprocess as _sp
-                        _sp.run(
-                            ["docker", "compose", "-f", "training_server/docker-compose.yml", "stop"],
-                            cwd=str(self.project_root), timeout=30,
-                        )
-                        running_label.setText("실행 상태: ⚫ 중지")
-                        btn_stop.setEnabled(False)
-                        btn_stop.setText("중지됨")
-                    except Exception as e:
-                        QMessageBox.warning(dlg, "오류", f"중지 실패: {e}")
-
-                btn_stop.clicked.connect(_stop)
-                btn_row.addWidget(btn_stop)
-            else:
-                btn_start = QPushButton("학습 서버 시작")
-                btn_start.setStyleSheet("font-size: 12px;")
-
-                def _start():
-                    try:
-                        import subprocess as _sp
-                        _sp.Popen(
-                            ["docker", "compose", "-f", "training_server/docker-compose.yml", "up", "-d"],
-                            cwd=str(self.project_root),
-                        )
-                        running_label.setText("실행 상태: 🟢 시작 중...")
-                        btn_start.setEnabled(False)
-                        btn_start.setText("시작 중...")
-                    except Exception as e:
-                        QMessageBox.warning(dlg, "오류", f"시작 실패: {e}")
-
-                btn_start.clicked.connect(_start)
-                btn_row.addWidget(btn_start)
-
-            btn_uninstall = QPushButton("학습 서버 제거")
-            btn_uninstall.setStyleSheet("font-size: 12px; color: #ef4444;")
-
-            def _uninstall():
-                res = QMessageBox.question(
-                    dlg, "확인", "학습 서버 Docker 이미지를 제거하시겠습니까?",
-                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
-                )
-                if res != QMessageBox.Yes:
-                    return
-                try:
-                    import subprocess as _sp
-                    _sp.run(
-                        ["docker", "compose", "-f", "training_server/docker-compose.yml", "down", "--rmi", "all", "--volumes"],
-                        cwd=str(self.project_root), timeout=60,
-                    )
-                    set_training_server_installed(False)
-                    status_label.setText("상태: 미설치")
-                    status_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #999;")
-                    running_label.setText("실행 상태: ⚫ 중지")
-                    btn_uninstall.setEnabled(False)
-                except Exception as e:
-                    QMessageBox.warning(dlg, "오류", f"제거 실패: {e}")
-
-            btn_uninstall.clicked.connect(_uninstall)
-            btn_row.addWidget(btn_uninstall)
-        else:
-            btn_install = QPushButton("학습 서버 설치")
-            btn_install.setStyleSheet("font-size: 12px;")
-
-            def _install():
-                btn_install.setEnabled(False)
-                btn_install.setText("설치 중...")
-                try:
-                    import subprocess as _sp
-                    _sp.Popen(
-                        ["docker", "compose", "-f", "training_server/docker-compose.yml", "build"],
-                        cwd=str(self.project_root),
-                    )
-                    set_training_server_installed(True)
-                    status_label.setText("상태: 설치됨 (빌드 진행 중)")
-                    status_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #7dd3fc;")
-                except Exception as e:
-                    btn_install.setEnabled(True)
-                    btn_install.setText("학습 서버 설치")
-                    QMessageBox.warning(dlg, "오류", f"설치 실패: {e}")
-
-            btn_install.clicked.connect(_install)
-            btn_row.addWidget(btn_install)
-
+        btn_install = QPushButton()
+        btn_start = QPushButton("시작")
+        btn_stop = QPushButton("중지")
+        btn_uninstall = QPushButton("제거")
+        for b in (btn_install, btn_start, btn_stop, btn_uninstall):
+            b.setStyleSheet("font-size: 12px;")
+        btn_uninstall.setStyleSheet("font-size: 12px; color: #ef4444;")
+        btn_row.addWidget(btn_install)
+        btn_row.addWidget(btn_start)
+        btn_row.addWidget(btn_stop)
+        btn_row.addWidget(btn_uninstall)
         btn_row.addStretch(1)
         btn_close = QPushButton("닫기")
-        btn_close.clicked.connect(dlg.accept)
         btn_row.addWidget(btn_close)
         layout.addLayout(btn_row)
 
-        layout.addStretch(1)
+        # Log viewer
+        log_widget = QTextEdit()
+        log_widget.setReadOnly(True)
+        log_widget.setStyleSheet(
+            "background-color: #111; color: #ddd; font-family: monospace; font-size: 11px;"
+        )
+        log_widget.setMinimumHeight(220)
+        layout.addWidget(log_widget, 1)
+
+        # ---- thread-safe log queue + drain timer ----
+        log_q: _queue.Queue[str] = _queue.Queue()
+        ts_state = {
+            'busy': False,
+            'docker_logs_proc': None,
+            'docker_logs_thread': None,
+        }
+
+        def _append_log(msg: str):
+            log_widget.append(msg)
+            sb = log_widget.verticalScrollBar()
+            sb.setValue(sb.maximum())
+
+        drain_timer = QTimer(dlg)
+        drain_timer.setInterval(150)
+
+        def _drain():
+            try:
+                while True:
+                    _append_log(log_q.get_nowait())
+            except _queue.Empty:
+                pass
+        drain_timer.timeout.connect(_drain)
+        drain_timer.start()
+
+        # ---- runtime log streaming (docker logs -f) ----
+        def _stop_log_stream():
+            proc = ts_state.get('docker_logs_proc')
+            if proc and proc.poll() is None:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+            ts_state['docker_logs_proc'] = None
+            ts_state['docker_logs_thread'] = None
+
+        def _start_log_stream():
+            _stop_log_stream()
+            proc = _ts.open_log_stream(tail=200)
+            if not proc:
+                return
+            ts_state['docker_logs_proc'] = proc
+
+            def _reader():
+                try:
+                    for line in proc.stdout:
+                        if proc.poll() is not None and not line:
+                            break
+                        log_q.put(line.rstrip())
+                except Exception:
+                    pass
+
+            t = threading.Thread(target=_reader, daemon=True)
+            t.start()
+            ts_state['docker_logs_thread'] = t
+
+        # ---- status refresh ----
+        def _refresh():
+            installed = _ts.is_installed()
+            running = _ts.is_running()
+            version = _ts.get_installed_version()
+            cfg = get_training_server_config() or {}
+            cfg_version = version or cfg.get('version')
+
+            if installed:
+                txt = f"상태: 설치됨"
+                if cfg_version:
+                    txt += f"  (v{cfg_version})"
+                status_label.setText(txt)
+                status_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #86efac;")
+            else:
+                status_label.setText("상태: 미설치")
+                status_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #999;")
+
+            running_label.setText(
+                f"실행 상태: 🟢 실행 중 (port {cfg.get('port', _ts.DEFAULT_PORT)})"
+                if running else "실행 상태: ⚫ 중지"
+            )
+
+            btn_install.setText("설치" if not installed else "업데이트")
+            btn_install.setEnabled(not ts_state['busy'])
+            btn_start.setEnabled(installed and not running and not ts_state['busy'])
+            btn_stop.setEnabled(installed and running and not ts_state['busy'])
+            btn_uninstall.setEnabled(installed and not ts_state['busy'])
+            port_input.setEnabled(installed and not running and not ts_state['busy'])
+
+            # Auto-stream logs when running
+            if running and ts_state.get('docker_logs_proc') is None:
+                _start_log_stream()
+            elif not running and ts_state.get('docker_logs_proc') is not None:
+                _stop_log_stream()
+
+        # ---- background action runner ----
+        def _run_action(fn):
+            ts_state['busy'] = True
+            _refresh()
+
+            def _worker():
+                try:
+                    ok, msg = fn()
+                except Exception as e:
+                    ok, msg = False, str(e)
+                log_q.put(f"[{'OK' if ok else 'FAIL'}] {msg}")
+
+                def _done():
+                    ts_state['busy'] = False
+                    _refresh()
+                    if not ok:
+                        QMessageBox.warning(dlg, "오류", msg)
+                QTimer.singleShot(0, _done)
+
+            threading.Thread(target=_worker, daemon=True).start()
+
+        # ---- handlers ----
+        def _on_install():
+            log_q.put(f"[INFO] 학습 서버 다운로드 중...")
+            _run_action(lambda: _ts.download_and_install(
+                on_log=lambda m: log_q.put(m),
+            ))
+
+        def _on_start():
+            try:
+                port = int(port_input.text().strip() or _ts.DEFAULT_PORT)
+            except ValueError:
+                QMessageBox.warning(dlg, "오류", "포트는 숫자여야 합니다.")
+                return
+            if not (1 <= port <= 65535):
+                QMessageBox.warning(dlg, "오류", "포트는 1~65535 사이여야 합니다.")
+                return
+            log_q.put(f"[INFO] 포트 {port}로 시작...")
+            _run_action(lambda: _ts.start(port=port, force=True))
+
+        def _on_stop():
+            log_q.put("[INFO] 중지 중...")
+            _run_action(lambda: _ts.stop())
+
+        def _on_uninstall():
+            res = QMessageBox.question(
+                dlg, "확인",
+                "학습 서버를 제거하시겠습니까?\n\n데이터(데이터셋/체크포인트)도 함께 삭제하시겠습니까?\n"
+                "  Yes  → 데이터 포함 전체 삭제\n  No   → 데이터는 보존\n  Cancel → 취소",
+                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel, QMessageBox.No,
+            )
+            if res == QMessageBox.Cancel:
+                return
+            remove_data = (res == QMessageBox.Yes)
+            log_q.put(f"[INFO] 제거 시작 (데이터 {'포함' if remove_data else '보존'})")
+            _run_action(lambda: _ts.uninstall(remove_data=remove_data))
+
+        btn_install.clicked.connect(_on_install)
+        btn_start.clicked.connect(_on_start)
+        btn_stop.clicked.connect(_on_stop)
+        btn_uninstall.clicked.connect(_on_uninstall)
+        btn_close.clicked.connect(dlg.accept)
+
+        # Periodic running-state check (Docker may change state out-of-band).
+        status_timer = QTimer(dlg)
+        status_timer.setInterval(3000)
+        status_timer.timeout.connect(_refresh)
+        status_timer.start()
+
+        def _on_finished():
+            status_timer.stop()
+            drain_timer.stop()
+            _stop_log_stream()
+        dlg.finished.connect(lambda *_: _on_finished())
+
+        _refresh()
         dlg.exec()
 
     def _on_modules_clicked(self):

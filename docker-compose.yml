@@ -45,6 +45,8 @@ services:
       - ./requirements.txt:/root/requirements.txt
       - /opt/easytrainer:/opt/easytrainer
       - /dev/shm:/dev/shm
+      # Host machine-id so backend's fingerprint matches the launcher's license check.
+      - /etc/machine-id:/etc/machine-id:ro
     working_dir: /root
     restart: unless-stopped
 

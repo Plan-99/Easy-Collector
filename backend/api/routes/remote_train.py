@@ -77,6 +77,19 @@ def remote_train_stop():
     """Stop the currently running training (local watcher + remote job)."""
     from ...database.models.checkpoint_model import Checkpoint as CheckpointModel
 
+    # Directly notify training_server first so the worker process dies quickly,
+    # without waiting for the backend's polling loop to forward the stop.
+    task = current_app.pm.processes.get(PROCESS_ID)
+    if task and task.get('type') == 'function':
+        ctl = task.get('obj') or {}
+        server_url = ctl.get('server_url')
+        job_id = ctl.get('job_id')
+        if server_url and job_id:
+            try:
+                requests.post(f'{server_url}/api/train/stop/{job_id}', timeout=10)
+            except Exception:
+                pass
+
     # Mark the training checkpoint as failed & remove it
     running = CheckpointModel.select().where(
         CheckpointModel.status == 'training',
@@ -269,8 +282,15 @@ def _download_and_install_model(server_url, job_id, checkpoint_id):
 def _remote_training_workflow(server_url, checkpoint_id, callback_url,
                                socketio_instance, task_control):
     """Background workflow: upload dataset → start → poll status → mark finished."""
-    job_id = f'ckpt_{checkpoint_id}'
+    from ...utils.machine_id import machine_id as _machine_id_fn
+    machine_id = _machine_id_fn()
+    job_id = f'{machine_id[:8]}_ckpt_{checkpoint_id}'
     log_id = PROCESS_ID
+
+    # Expose endpoint info to the stop route so it can directly notify
+    # training_server without waiting for the polling loop.
+    task_control['server_url'] = server_url
+    task_control['job_id'] = job_id
 
     checkpoint = CheckpointModel.find(checkpoint_id)
     if checkpoint is None:
@@ -286,20 +306,24 @@ def _remote_training_workflow(server_url, checkpoint_id, callback_url,
             _emit_log(socketio_instance, log_id, '[ERROR] No datasets assigned to checkpoint', 'error')
             checkpoint.update({'status': 'failed'})
             return
+        if len(dataset_ids) > 1:
+            raise NotImplementedError(
+                'Multi-dataset training on the remote server is not implemented yet.')
+        dataset_id = dataset_ids[0]
 
-        # 1) Upload dataset bundle
-        _emit_log(socketio_instance, log_id, f'Bundling datasets {dataset_ids}...')
+        # 1) Upload dataset bundle (stored at datasets/<machine_id>/<dataset_id>/)
+        _emit_log(socketio_instance, log_id, f'Bundling dataset {dataset_id}...')
         with tempfile.NamedTemporaryFile(suffix='.tar.gz', delete=False) as tmp:
             tar_path = tmp.name
         try:
-            _tar_datasets(dataset_ids, tar_path)
+            _tar_datasets([dataset_id], tar_path)
             size_mb = os.path.getsize(tar_path) / (1024 * 1024)
             _emit_log(socketio_instance, log_id, f'Uploading dataset ({size_mb:.1f} MB)...')
             with open(tar_path, 'rb') as f:
                 resp = requests.post(
                     f'{server_url}/api/train/upload-dataset',
                     files={'file': ('dataset.tar.gz', f, 'application/gzip')},
-                    data={'job_id': job_id},
+                    data={'machine_id': machine_id, 'dataset_id': str(dataset_id)},
                     timeout=600,
                 )
             if resp.status_code != 200:
@@ -322,7 +346,7 @@ def _remote_training_workflow(server_url, checkpoint_id, callback_url,
                     resp = requests.post(
                         f'{server_url}/api/train/upload-model',
                         files={'file': ('model.tar.gz', f, 'application/gzip')},
-                        data={'job_id': job_id},
+                        data={'machine_id': machine_id, 'checkpoint_id': str(checkpoint.load_model_id)},
                         timeout=300,
                     )
                 if resp.status_code != 200:
@@ -339,6 +363,10 @@ def _remote_training_workflow(server_url, checkpoint_id, callback_url,
             f'{server_url}/api/train/start',
             json={
                 'job_id': job_id,
+                'machine_id': machine_id,
+                'checkpoint_id': str(checkpoint_id),
+                'dataset_ids': [str(dataset_id)],
+                'load_model_checkpoint_id': str(checkpoint.load_model_id) if checkpoint.load_model_id else None,
                 'policy': config['policy'],
                 'train_settings': config['train_settings'],
                 'dataset_info': config['dataset_info'],
@@ -351,9 +379,10 @@ def _remote_training_workflow(server_url, checkpoint_id, callback_url,
         if resp.status_code != 200:
             raise RuntimeError(f'Training start failed: {resp.status_code} {resp.text}')
 
-        # 4) Poll status until done / stopped
+        # 4) Poll status + logs until done / stopped
         _emit_log(socketio_instance, log_id, 'Training started. Polling status...')
         last_progress = -1.0
+        last_log_cursor = 0
         while True:
             if task_control.get('stop'):
                 _emit_log(socketio_instance, log_id, 'Stop requested. Notifying remote server...', 'warning')
@@ -364,14 +393,33 @@ def _remote_training_workflow(server_url, checkpoint_id, callback_url,
                 checkpoint.update({'status': 'failed'})
                 return
 
+            # Pull new log lines and forward to the frontend.
+            try:
+                log_resp = requests.get(
+                    f'{server_url}/api/train/logs/{job_id}',
+                    params={'since': last_log_cursor},
+                    timeout=10,
+                )
+                if log_resp.status_code == 200:
+                    log_data = log_resp.json()
+                    for line in log_data.get('lines', []):
+                        socketio_instance.emit('task_log', {
+                            'id': log_id,
+                            'message': line.get('message', ''),
+                            'type': line.get('type', 'stdout'),
+                        })
+                    last_log_cursor = log_data.get('next', last_log_cursor)
+            except requests.exceptions.RequestException:
+                pass
+
             try:
                 resp = requests.get(f'{server_url}/api/train/status/{job_id}', timeout=10)
                 if resp.status_code != 200:
-                    time.sleep(3)
+                    time.sleep(2)
                     continue
                 job = resp.json().get('job', {})
             except requests.exceptions.RequestException:
-                time.sleep(3)
+                time.sleep(2)
                 continue
 
             status = job.get('status')

@@ -16,6 +16,7 @@ import time
 import traceback
 import subprocess
 import signal
+import collections
 
 from flask import Flask, request, jsonify, send_file
 from flask_socketio import SocketIO
@@ -31,7 +32,19 @@ for d in [DATASETS_DIR, CHECKPOINTS_DIR, UPLOADS_DIR]:
 
 app = Flask(__name__)
 CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet', max_http_buffer_size=500 * 1024 * 1024)
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading', max_http_buffer_size=500 * 1024 * 1024)
+
+LOG_BUFFER_SIZE = 10000
+
+
+def _append_log(job_id, msg_type, message):
+    with jobs_lock:
+        job = jobs.get(job_id)
+        if not job:
+            return
+        idx = job['log_next']
+        job['log_buffer'].append({'idx': idx, 'type': msg_type, 'message': message})
+        job['log_next'] = idx + 1
 
 # In-memory job registry
 # job_id -> { status, process, config, progress, error, callback_url }
@@ -44,84 +57,175 @@ def health():
     return jsonify({'status': 'ok', 'gpu_available': _check_gpu()}), 200
 
 
+def _safe_id(value: str) -> str:
+    """Reject path-traversal characters in machine_id / dataset_id / checkpoint_id."""
+    if not value:
+        raise ValueError('id required')
+    if '/' in value or '..' in value or value.startswith('.'):
+        raise ValueError(f'invalid id: {value}')
+    return value
+
+
+def _dataset_path(machine_id: str, dataset_id: str) -> str:
+    return os.path.join(DATASETS_DIR, _safe_id(machine_id), _safe_id(dataset_id))
+
+
+def _checkpoint_path(machine_id: str, checkpoint_id: str) -> str:
+    return os.path.join(CHECKPOINTS_DIR, _safe_id(machine_id), _safe_id(checkpoint_id))
+
+
 @app.route('/api/train/upload-dataset', methods=['POST'])
 def upload_dataset():
-    """Receive a dataset tar.gz and extract it."""
-    job_id = request.form.get('job_id')
-    if not job_id:
-        return jsonify({'status': 'error', 'message': 'job_id required'}), 400
+    """Receive a dataset tar.gz, extract to datasets/<machine_id>/<dataset_id>/."""
+    machine_id = request.form.get('machine_id')
+    dataset_id = request.form.get('dataset_id')
+    if not machine_id or not dataset_id:
+        return jsonify({'status': 'error', 'message': 'machine_id and dataset_id required'}), 400
 
     if 'file' not in request.files:
         return jsonify({'status': 'error', 'message': 'No file provided'}), 400
 
+    try:
+        target_dir = _dataset_path(machine_id, dataset_id)
+    except ValueError as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
+    # Replace any existing dataset for this id (re-upload).
+    if os.path.isdir(target_dir):
+        shutil.rmtree(target_dir, ignore_errors=True)
+    os.makedirs(target_dir, exist_ok=True)
+
     f = request.files['file']
-    job_dir = os.path.join(UPLOADS_DIR, job_id)
-    os.makedirs(job_dir, exist_ok=True)
-
-    tar_path = os.path.join(job_dir, 'dataset.tar.gz')
+    tar_path = target_dir + '.tar.gz'
     f.save(tar_path)
+    try:
+        os.system(f'tar -xzf "{tar_path}" -C "{target_dir}"')
+    finally:
+        try:
+            os.remove(tar_path)
+        except Exception:
+            pass
 
-    # Extract
-    dataset_dir = os.path.join(job_dir, 'dataset')
-    os.makedirs(dataset_dir, exist_ok=True)
-    os.system(f'tar -xzf {tar_path} -C {dataset_dir}')
-    os.remove(tar_path)
-
-    return jsonify({'status': 'success', 'message': 'Dataset uploaded', 'job_id': job_id}), 200
+    return jsonify({
+        'status': 'success', 'message': 'Dataset uploaded',
+        'machine_id': machine_id, 'dataset_id': dataset_id,
+    }), 200
 
 
 @app.route('/api/train/upload-model', methods=['POST'])
 def upload_model():
-    """Receive base model weights for finetuning."""
-    job_id = request.form.get('job_id')
-    if not job_id:
-        return jsonify({'status': 'error', 'message': 'job_id required'}), 400
+    """Receive base model weights, extract to checkpoints/<machine_id>/<checkpoint_id>/."""
+    machine_id = request.form.get('machine_id')
+    checkpoint_id = request.form.get('checkpoint_id')
+    if not machine_id or not checkpoint_id:
+        return jsonify({'status': 'error', 'message': 'machine_id and checkpoint_id required'}), 400
 
     if 'file' not in request.files:
         return jsonify({'status': 'error', 'message': 'No file provided'}), 400
 
+    try:
+        target_dir = _checkpoint_path(machine_id, checkpoint_id)
+    except ValueError as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
+    if os.path.isdir(target_dir):
+        shutil.rmtree(target_dir, ignore_errors=True)
+    os.makedirs(target_dir, exist_ok=True)
+
     f = request.files['file']
-    job_dir = os.path.join(UPLOADS_DIR, job_id)
-    os.makedirs(job_dir, exist_ok=True)
-
-    tar_path = os.path.join(job_dir, 'model.tar.gz')
+    tar_path = target_dir + '.tar.gz'
     f.save(tar_path)
+    try:
+        os.system(f'tar -xzf "{tar_path}" -C "{target_dir}"')
+    finally:
+        try:
+            os.remove(tar_path)
+        except Exception:
+            pass
 
-    model_dir = os.path.join(job_dir, 'base_model')
-    os.makedirs(model_dir, exist_ok=True)
-    os.system(f'tar -xzf {tar_path} -C {model_dir}')
-    os.remove(tar_path)
-
-    return jsonify({'status': 'success', 'message': 'Model uploaded', 'job_id': job_id}), 200
+    return jsonify({
+        'status': 'success', 'message': 'Model uploaded',
+        'machine_id': machine_id, 'checkpoint_id': checkpoint_id,
+    }), 200
 
 
 @app.route('/api/train/start', methods=['POST'])
 def start_training():
-    """Start a training job."""
-    data = request.json
+    """Start a training job.
+
+    Body must include: job_id, machine_id, checkpoint_id, dataset_ids[], policy, train_settings.
+    Optional: load_model_checkpoint_id (for transfer learning).
+    """
+    data = request.json or {}
     job_id = data.get('job_id')
-    if not job_id:
-        return jsonify({'status': 'error', 'message': 'job_id required'}), 400
+    machine_id = data.get('machine_id')
+    checkpoint_id = data.get('checkpoint_id')
+    dataset_ids = data.get('dataset_ids') or []
+
+    if not (job_id and machine_id and checkpoint_id and dataset_ids):
+        return jsonify({
+            'status': 'error',
+            'message': 'job_id, machine_id, checkpoint_id and dataset_ids are required',
+        }), 400
+
+    if len(dataset_ids) != 1:
+        return jsonify({
+            'status': 'error',
+            'message': 'Exactly one dataset_id is supported (multi-dataset merge is not yet implemented)',
+        }), 400
+
+    try:
+        dataset_dir = _dataset_path(machine_id, dataset_ids[0])
+        ckpt_out_dir = _checkpoint_path(machine_id, checkpoint_id)
+    except ValueError as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
+    if not os.path.isdir(dataset_dir):
+        return jsonify({
+            'status': 'error',
+            'message': f'Dataset {dataset_ids[0]} not uploaded for this machine',
+        }), 400
 
     with jobs_lock:
         if job_id in jobs and jobs[job_id].get('status') == 'training':
             return jsonify({'status': 'error', 'message': 'Job already running'}), 409
+
+    # Build a transient job dir that train_worker can read (config + dataset symlink + base_model link).
+    job_dir = os.path.join(UPLOADS_DIR, job_id)
+    if os.path.isdir(job_dir):
+        shutil.rmtree(job_dir, ignore_errors=True)
+    os.makedirs(job_dir, exist_ok=True)
+
+    ds_link = os.path.join(job_dir, 'dataset')
+    try:
+        os.symlink(dataset_dir, ds_link)
+    except OSError:
+        # Fallback for filesystems that don't allow symlinks.
+        shutil.copytree(dataset_dir, ds_link)
+
+    load_id = data.get('load_model_checkpoint_id')
+    if load_id:
+        try:
+            base_model_src = _checkpoint_path(machine_id, load_id)
+        except ValueError as e:
+            return jsonify({'status': 'error', 'message': str(e)}), 400
+        if os.path.isdir(base_model_src):
+            base_link = os.path.join(job_dir, 'base_model')
+            try:
+                os.symlink(base_model_src, base_link)
+            except OSError:
+                shutil.copytree(base_model_src, base_link)
 
     config = {
         'policy': data.get('policy'),
         'train_settings': data.get('train_settings'),
         'dataset_info': data.get('dataset_info'),
         'sensor_ids': data.get('sensor_ids', []),
-        'callback_url': data.get('callback_url'),
+        'machine_id': machine_id,
+        'checkpoint_id': checkpoint_id,
+        'dataset_ids': dataset_ids,
     }
-
-    job_dir = os.path.join(UPLOADS_DIR, job_id)
-    if not os.path.exists(os.path.join(job_dir, 'dataset')):
-        return jsonify({'status': 'error', 'message': 'Dataset not uploaded yet'}), 400
-
-    # Save config for the training subprocess
-    config_path = os.path.join(job_dir, 'train_config.json')
-    with open(config_path, 'w') as f:
+    with open(os.path.join(job_dir, 'train_config.json'), 'w') as f:
         json.dump(config, f)
 
     with jobs_lock:
@@ -130,11 +234,18 @@ def start_training():
             'config': config,
             'progress': 0,
             'error': None,
+            'log_buffer': collections.deque(maxlen=LOG_BUFFER_SIZE),
+            'log_next': 0,
+            'machine_id': machine_id,
+            'checkpoint_id': checkpoint_id,
+            'ckpt_out_dir': ckpt_out_dir,
+            'job_dir': job_dir,
         }
 
-    # Start training in background
-    socketio.start_background_task(target=_run_training, job_id=job_id, job_dir=job_dir, config=config)
-
+    socketio.start_background_task(
+        target=_run_training, job_id=job_id, job_dir=job_dir,
+        ckpt_out_dir=ckpt_out_dir, config=config,
+    )
     return jsonify({'status': 'success', 'message': 'Training started', 'job_id': job_id}), 200
 
 
@@ -165,9 +276,29 @@ def stop_training(job_id):
     process = job.get('process')
     if process and process.poll() is None:
         try:
-            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-            process.wait(timeout=5)
-        except Exception:
+            pgid = os.getpgid(process.pid)
+        except ProcessLookupError:
+            pgid = None
+
+        if pgid is not None:
+            try:
+                os.killpg(pgid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                # Worker still alive (likely stuck in a CUDA call). Kill the
+                # whole process group so child workers also die.
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+        else:
             process.kill()
 
     with jobs_lock:
@@ -176,16 +307,37 @@ def stop_training(job_id):
     return jsonify({'status': 'success', 'message': 'Training stopped'}), 200
 
 
+@app.route('/api/train/logs/<job_id>', methods=['GET'])
+def get_logs(job_id):
+    """Return new log lines with index >= since."""
+    try:
+        since = int(request.args.get('since', 0))
+    except (TypeError, ValueError):
+        since = 0
+    with jobs_lock:
+        job = jobs.get(job_id)
+        if not job:
+            return jsonify({'status': 'error', 'message': 'Job not found'}), 404
+        lines = [l for l in job['log_buffer'] if l['idx'] >= since]
+        next_idx = job['log_next']
+    return jsonify({'status': 'success', 'lines': lines, 'next': next_idx}), 200
+
+
 @app.route('/api/train/download/<job_id>', methods=['GET'])
 def download_model(job_id):
-    """Download the trained model as tar.gz."""
-    ckpt_dir = os.path.join(CHECKPOINTS_DIR, job_id)
-    if not os.path.exists(ckpt_dir):
+    """Download the trained model as tar.gz. Looks up the path from the job entry."""
+    with jobs_lock:
+        job = jobs.get(job_id)
+    if not job:
+        return jsonify({'status': 'error', 'message': 'Job not found'}), 404
+
+    ckpt_dir = job.get('ckpt_out_dir')
+    if not ckpt_dir or not os.path.isdir(ckpt_dir):
         return jsonify({'status': 'error', 'message': 'Checkpoint not found'}), 404
 
-    tar_path = os.path.join(CHECKPOINTS_DIR, f'{job_id}.tar.gz')
+    tar_path = ckpt_dir.rstrip('/') + '.tar.gz'
     if not os.path.exists(tar_path):
-        os.system(f'tar -czf {tar_path} -C {ckpt_dir} .')
+        os.system(f'tar -czf "{tar_path}" -C "{ckpt_dir}" .')
 
     return send_file(tar_path, mimetype='application/gzip', as_attachment=True,
                      download_name=f'checkpoint_{job_id}.tar.gz')
@@ -212,14 +364,15 @@ def _check_gpu():
         return False
 
 
-def _run_training(job_id, job_dir, config):
+def _run_training(job_id, job_dir, ckpt_out_dir, config):
     """Run the training subprocess and stream logs via SocketIO."""
     with jobs_lock:
         jobs[job_id]['status'] = 'training'
 
-    socketio.emit('train_status', {'job_id': job_id, 'status': 'training'})
-
-    ckpt_dir = os.path.join(CHECKPOINTS_DIR, job_id)
+    ckpt_dir = ckpt_out_dir
+    if os.path.isdir(ckpt_dir):
+        # Wipe stale contents from a previous training run for this checkpoint id.
+        shutil.rmtree(ckpt_dir, ignore_errors=True)
     os.makedirs(ckpt_dir, exist_ok=True)
 
     try:
@@ -266,12 +419,8 @@ def _run_training(job_id, job_dir, config):
             elif stripped.startswith('[WARNING]'):
                 msg_type = 'warning'
 
-            # Emit to all connected clients
-            socketio.emit('task_log', {
-                'id': f'train_{job_id}',
-                'message': stripped,
-                'type': msg_type,
-            })
+            # Append to log buffer (backend pulls via /api/train/logs/<id>?since=N)
+            _append_log(job_id, msg_type, stripped)
 
             # Parse TRAIN_LOG for progress
             if '[TRAIN_LOG]' in stripped:
@@ -285,33 +434,21 @@ def _run_training(job_id, job_dir, config):
 
         return_code = process.wait()
 
-        if return_code == 0:
+        # If stop_training already set status to 'stopped', keep it.
+        with jobs_lock:
+            current_status = jobs[job_id].get('status')
+        if current_status == 'stopped':
+            _append_log(job_id, 'warning', '[WARNING] Training stopped')
+        elif return_code == 0:
             with jobs_lock:
                 jobs[job_id]['status'] = 'finished'
                 jobs[job_id]['progress'] = 1.0
-
-            socketio.emit('train_status', {
-                'job_id': job_id,
-                'status': 'finished',
-            })
-            socketio.emit('task_log', {
-                'id': f'train_{job_id}',
-                'message': '[SUCCESS] Training completed',
-                'type': 'success',
-            })
-
-            # Auto-send model back to local server
-            _auto_send_model(job_id, config)
+            _append_log(job_id, 'success', '[SUCCESS] Training completed')
         else:
             with jobs_lock:
                 jobs[job_id]['status'] = 'failed'
                 jobs[job_id]['error'] = f'Process exited with code {return_code}'
-
-            socketio.emit('train_status', {
-                'job_id': job_id,
-                'status': 'failed',
-                'error': f'Process exited with code {return_code}',
-            })
+            _append_log(job_id, 'error', f'[ERROR] Process exited with code {return_code}')
 
     except Exception as e:
         error_msg = traceback.format_exc()
@@ -319,47 +456,7 @@ def _run_training(job_id, job_dir, config):
         with jobs_lock:
             jobs[job_id]['status'] = 'failed'
             jobs[job_id]['error'] = str(e)
-
-        socketio.emit('train_status', {
-            'job_id': job_id,
-            'status': 'failed',
-            'error': str(e),
-        })
-
-
-def _auto_send_model(job_id, config):
-    """After training finishes, push the model back to the local server."""
-    callback_url = config.get('callback_url')
-    if not callback_url:
-        print(f'[INFO] No callback_url for job {job_id}, model available for download.', flush=True)
-        return
-
-    ckpt_dir = os.path.join(CHECKPOINTS_DIR, job_id)
-    tar_path = os.path.join(CHECKPOINTS_DIR, f'{job_id}.tar.gz')
-
-    try:
-        os.system(f'tar -czf {tar_path} -C {ckpt_dir} .')
-
-        import requests
-        with open(tar_path, 'rb') as f:
-            resp = requests.post(
-                callback_url,
-                files={'file': (f'checkpoint_{job_id}.tar.gz', f, 'application/gzip')},
-                data={'job_id': job_id},
-                timeout=300,
-            )
-        if resp.status_code == 200:
-            print(f'[SUCCESS] Model auto-sent to {callback_url} for job {job_id}', flush=True)
-            socketio.emit('train_status', {
-                'job_id': job_id,
-                'status': 'delivered',
-            })
-        else:
-            print(f'[WARNING] Auto-send failed ({resp.status_code}): {resp.text}', flush=True)
-            # Model still available for manual download
-    except Exception as e:
-        print(f'[WARNING] Auto-send failed for job {job_id}: {e}', flush=True)
-        # Model still available for manual download
+        _append_log(job_id, 'error', f'[ERROR] {e}')
 
 
 if __name__ == '__main__':
@@ -368,4 +465,4 @@ if __name__ == '__main__':
     print(f'Data directory: {DATA_DIR}')
     print(f'GPU available: {_check_gpu()}')
     print('=' * 60)
-    socketio.run(app, host='0.0.0.0', port=5100, debug=False)
+    socketio.run(app, host='0.0.0.0', port=5100, debug=False, allow_unsafe_werkzeug=True)

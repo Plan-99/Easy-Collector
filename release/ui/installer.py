@@ -626,10 +626,12 @@ def run_setup_wizard(self: "MainWindow") -> bool:
         # Save selected modules to config
         selected = [mid for mid, chk in module_checkboxes.items() if chk.isChecked()]
         save_installed_modules(selected)
-        # Save training server choice
+        # Save training server choice. Installed=True is set later by
+        # training_server_install.download_and_install() after the build succeeds.
         mode = training_choice["value"]
         set_training_mode(mode)
-        set_training_server_installed(mode == "local")
+        if mode != "local":
+            set_training_server_installed(False)
         nonlocal current
         current = 4; set_page(current)
         log.clear()
@@ -735,12 +737,37 @@ def run_setup_wizard(self: "MainWindow") -> bool:
                         log.append(f"[MODULE][WARN] 모듈 설치 중 오류: {e}")
                     log.append("[POST] 모듈 설치 완료")
 
-                _mark_progress_complete()
-                try:
-                    MARKER_FILE.write_text("ok")
-                except Exception:
-                    pass
-                btn_next.setEnabled(True)
+                # Step 4: install local training server if requested
+                def _finalize():
+                    _mark_progress_complete()
+                    try:
+                        MARKER_FILE.write_text("ok")
+                    except Exception:
+                        pass
+                    btn_next.setEnabled(True)
+
+                if training_choice["value"] == "local":
+                    log.append("[POST] 학습 서버 설치 시작...")
+                    import threading
+                    import training_server_install as _ts
+
+                    def _ts_log(msg: str):
+                        # Marshal log appends back to the GUI thread.
+                        QTimer.singleShot(0, lambda m=msg: log.append(f"[TRAIN-SERVER] {m}"))
+
+                    def _ts_worker():
+                        try:
+                            ok, msg = _ts.download_and_install(on_log=_ts_log)
+                        except Exception as e:
+                            ok, msg = False, str(e)
+                        QTimer.singleShot(0, lambda: log.append(
+                            f"[TRAIN-SERVER] {'완료' if ok else '실패'}: {msg}"
+                        ))
+                        QTimer.singleShot(0, _finalize)
+
+                    threading.Thread(target=_ts_worker, daemon=True).start()
+                else:
+                    _finalize()
             self.run_compose_to_widget(["up", "-d"], log, on_finish=_after_up)
 
         # Run migration using docker run (bypasses compose deploy GPU requirements)
