@@ -46,6 +46,8 @@ jobs:
         if: steps.check_release.outputs.exists == 'false'
         run: |
           mkdir -p dist
+          # Tar contains a single top-level entry "training_server".
+          # Launcher extracts INTO <project_root>/backend/training_server/ at install time.
           tar -czf "dist/$TAR_NAME" -C . training_server
           ls -lh "dist/$TAR_NAME"
 

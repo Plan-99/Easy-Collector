@@ -943,13 +943,21 @@ def save_training_server_config(ts_cfg: dict) -> None:
 
 
 def is_training_server_installed() -> bool:
-    return get_training_server_config().get("installed", False)
+    """학습 서버 소스가 설치되어 있는가?
+
+    training_server lives under backend/training_server/ and is bind-mounted
+    into the backend container as part of the regular ./backend mount.
+    """
+    cfg = get_training_server_config()
+    project_root = cfg.get("project_root") or "/opt/easytrainer/project"
+    app_py = Path(project_root) / "backend" / "training_server" / "app.py"
+    compose = Path(project_root) / "docker-compose.yml"
+    return app_py.is_file() and compose.is_file()
 
 
 def set_training_server_installed(installed: bool) -> None:
-    ts = get_training_server_config()
-    ts["installed"] = installed
-    save_training_server_config(ts)
+    """Legacy no-op — install state is now derived from filesystem (see is_training_server_installed)."""
+    pass
 
 
 def get_training_mode() -> str:

@@ -169,10 +169,12 @@ RSYNC_EXCLUDES=(
   'ros2/ros2_ws/logs'
   'ros2/robot_sdk'
   'backend/modules'
+  # training_server is downloaded on-demand by the launcher when the user opts
+  # into local training (CI publishes it as a separate Easy-Trainer-Modules tar.gz).
+  'training_server'
   # 런타임 프로젝트에 불필요한 폴더
   'home-next'
   'modules'
-  'training_server'
   'python_pkgs'
   'cmake_pkgs'
   'scripts'
@@ -377,6 +379,10 @@ SRC="/usr/share/easytrainer-project"
 # Ensure destination exists with correct ownership/permissions
 install -d -m 775 -o "$TARGET_USER" -g "$TARGET_GROUP" /opt/easytrainer
 install -d -m 775 -o "$TARGET_USER" -g "$TARGET_GROUP" "$DEST"
+# Pre-create training_server data dir (used when EASYTRAINER_LOCAL_TRAINING=1
+# spawns training_server inside the backend container).
+install -d -m 775 -o "$TARGET_USER" -g "$TARGET_GROUP" /opt/easytrainer/training_data
+install -d -m 775 -o "$TARGET_USER" -g "$TARGET_GROUP" /opt/easytrainer/logs
 # Logs live in /tmp for runtime; keep this dir for legacy safety only
 install -d -m 775 -o "$TARGET_USER" -g "$TARGET_GROUP" /opt/easytrainer/logs
 touch /opt/easytrainer/logs/.keep >/dev/null 2>&1 || true
@@ -401,7 +407,7 @@ if [ -d "$SRC" ]; then
   # Clean old project files (preserve user data: modules, databases)
   if [ -d "$DEST" ]; then
     find "$DEST" -maxdepth 1 -type f -delete 2>/dev/null || true
-    for d in backend frontend ros2 release scripts cmake_pkgs python_pkgs training_server; do
+    for d in backend frontend ros2 release scripts cmake_pkgs python_pkgs; do
       rm -rf "$DEST/$d" 2>/dev/null || true
     done
   fi

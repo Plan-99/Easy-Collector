@@ -626,12 +626,16 @@ def run_setup_wizard(self: "MainWindow") -> bool:
         # Save selected modules to config
         selected = [mid for mid, chk in module_checkboxes.items() if chk.isChecked()]
         save_installed_modules(selected)
-        # Save training server choice. Installed=True is set later by
-        # training_server_install.download_and_install() after the build succeeds.
+        # Save training server choice. Local mode just flips a flag; the backend
+        # entrypoint reads EASYTRAINER_LOCAL_TRAINING and spawns training_server
+        # in-container, sharing torch/CUDA with the API process.
         mode = training_choice["value"]
         set_training_mode(mode)
-        if mode != "local":
-            set_training_server_installed(False)
+        try:
+            import training_server_install as _ts
+            _ts.set_local_training_enabled(mode == "local")
+        except Exception:
+            set_training_server_installed(mode == "local")
         nonlocal current
         current = 4; set_page(current)
         log.clear()
@@ -737,7 +741,7 @@ def run_setup_wizard(self: "MainWindow") -> bool:
                         log.append(f"[MODULE][WARN] 모듈 설치 중 오류: {e}")
                     log.append("[POST] 모듈 설치 완료")
 
-                # Step 4: install local training server if requested
+                # Step 4: download backend/training_server source if user opted in.
                 def _finalize():
                     _mark_progress_complete()
                     try:
@@ -747,17 +751,16 @@ def run_setup_wizard(self: "MainWindow") -> bool:
                     btn_next.setEnabled(True)
 
                 if training_choice["value"] == "local":
-                    log.append("[POST] 학습 서버 설치 시작...")
+                    log.append("[POST] 로컬 학습 서버 다운로드 중...")
                     import threading
                     import training_server_install as _ts
 
                     def _ts_log(msg: str):
-                        # Marshal log appends back to the GUI thread.
                         QTimer.singleShot(0, lambda m=msg: log.append(f"[TRAIN-SERVER] {m}"))
 
                     def _ts_worker():
                         try:
-                            ok, msg = _ts.download_and_install(on_log=_ts_log)
+                            ok, msg = _ts.download_from_release(on_log=_ts_log)
                         except Exception as e:
                             ok, msg = False, str(e)
                         QTimer.singleShot(0, lambda: log.append(

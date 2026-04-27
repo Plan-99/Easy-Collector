@@ -3211,7 +3211,12 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self.load_ui(open_mode=self._open_ui_mode)
 
     def _on_training_clicked(self):
-        """Open the training server management dialog."""
+        """Open the training server management dialog.
+
+        Local mode: training_server runs as a subprocess inside easytrainer_backend.
+        The dialog only toggles the local-training flag (which recreates backend),
+        and tails its log file.
+        """
         import threading
         import queue as _queue
 
@@ -3250,45 +3255,40 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         gpu_layout.addWidget(gpu_info)
         layout.addWidget(gpu_box)
 
-        # Status row
-        status_label = QLabel()
-        status_label.setStyleSheet("font-size: 13px; font-weight: 600;")
-        layout.addWidget(status_label)
+        installed_label = QLabel()
+        installed_label.setStyleSheet("font-size: 13px; font-weight: 600;")
+        layout.addWidget(installed_label)
+
         running_label = QLabel()
-        running_label.setStyleSheet("font-size: 12px;")
+        running_label.setStyleSheet("font-size: 13px; font-weight: 600;")
         layout.addWidget(running_label)
 
-        # Port input row
-        port_row = QHBoxLayout()
-        port_row.setSpacing(8)
+        # Port + action buttons row
+        ctrl_row = QHBoxLayout()
+        ctrl_row.setSpacing(8)
         port_label = QLabel("포트:")
         port_label.setStyleSheet("font-size: 12px;")
         port_input = QLineEdit(str(_ts.get_configured_port()))
         port_input.setFixedWidth(80)
         port_input.setStyleSheet("font-size: 12px;")
-        port_row.addWidget(port_label)
-        port_row.addWidget(port_input)
-        port_row.addStretch(1)
-        layout.addLayout(port_row)
-
-        # Action buttons row
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(8)
-        btn_install = QPushButton()
-        btn_start = QPushButton("시작")
+        ctrl_row.addWidget(port_label)
+        ctrl_row.addWidget(port_input)
+        ctrl_row.addStretch(1)
+        btn_install = QPushButton("설치")
+        btn_install.setStyleSheet("font-size: 12px;")
+        btn_start = QPushButton("실행")
+        btn_start.setStyleSheet("font-size: 12px;")
         btn_stop = QPushButton("중지")
-        btn_uninstall = QPushButton("제거")
-        for b in (btn_install, btn_start, btn_stop, btn_uninstall):
-            b.setStyleSheet("font-size: 12px;")
-        btn_uninstall.setStyleSheet("font-size: 12px; color: #ef4444;")
-        btn_row.addWidget(btn_install)
-        btn_row.addWidget(btn_start)
-        btn_row.addWidget(btn_stop)
-        btn_row.addWidget(btn_uninstall)
-        btn_row.addStretch(1)
+        btn_stop.setStyleSheet("font-size: 12px;")
+        btn_remove = QPushButton("제거")
+        btn_remove.setStyleSheet("font-size: 12px; color: #ef4444;")
+        ctrl_row.addWidget(btn_install)
+        ctrl_row.addWidget(btn_start)
+        ctrl_row.addWidget(btn_stop)
+        ctrl_row.addWidget(btn_remove)
         btn_close = QPushButton("닫기")
-        btn_row.addWidget(btn_close)
-        layout.addLayout(btn_row)
+        ctrl_row.addWidget(btn_close)
+        layout.addLayout(ctrl_row)
 
         # Log viewer
         log_widget = QTextEdit()
@@ -3296,16 +3296,15 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         log_widget.setStyleSheet(
             "background-color: #111; color: #ddd; font-family: monospace; font-size: 11px;"
         )
-        log_widget.setMinimumHeight(220)
+        log_widget.setMinimumHeight(260)
         layout.addWidget(log_widget, 1)
 
-        # ---- thread-safe log queue + drain timer ----
         log_q: _queue.Queue[str] = _queue.Queue()
-        ts_state = {
-            'busy': False,
-            'docker_logs_proc': None,
-            'docker_logs_thread': None,
-        }
+        # Worker results queue — drained on the GUI thread by drain_timer below.
+        # We do NOT use QTimer.singleShot from the worker thread because it isn't
+        # reliable when the calling thread has no event loop.
+        result_q: _queue.Queue = _queue.Queue()
+        ts_state = {'busy': False, 'tail_proc': None}
 
         def _append_log(msg: str):
             log_widget.append(msg)
@@ -3314,33 +3313,42 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
         drain_timer = QTimer(dlg)
         drain_timer.setInterval(150)
-
-        def _drain():
+        drain_timer.timeout.connect(lambda: _drain_q())
+        def _drain_q():
+            # 1) log lines
             try:
                 while True:
                     _append_log(log_q.get_nowait())
             except _queue.Empty:
                 pass
-        drain_timer.timeout.connect(_drain)
+            # 2) action results — clear busy flag and refresh UI on the GUI thread
+            try:
+                while True:
+                    ok, msg = result_q.get_nowait()
+                    ts_state['busy'] = False
+                    ts_state['transition_target'] = None
+                    _refresh()
+                    if not ok:
+                        QMessageBox.warning(dlg, "오류", msg)
+            except _queue.Empty:
+                pass
         drain_timer.start()
 
-        # ---- runtime log streaming (docker logs -f) ----
-        def _stop_log_stream():
-            proc = ts_state.get('docker_logs_proc')
-            if proc and proc.poll() is None:
+        def _stop_tail():
+            p = ts_state.get('tail_proc')
+            if p and p.poll() is None:
                 try:
-                    proc.terminate()
+                    p.terminate()
                 except Exception:
                     pass
-            ts_state['docker_logs_proc'] = None
-            ts_state['docker_logs_thread'] = None
+            ts_state['tail_proc'] = None
 
-        def _start_log_stream():
-            _stop_log_stream()
+        def _start_tail():
+            _stop_tail()
             proc = _ts.open_log_stream(tail=200)
             if not proc:
                 return
-            ts_state['docker_logs_proc'] = proc
+            ts_state['tail_proc'] = proc
 
             def _reader():
                 try:
@@ -3350,49 +3358,62 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                         log_q.put(line.rstrip())
                 except Exception:
                     pass
+            threading.Thread(target=_reader, daemon=True).start()
 
-            t = threading.Thread(target=_reader, daemon=True)
-            t.start()
-            ts_state['docker_logs_thread'] = t
-
-        # ---- status refresh ----
         def _refresh():
             installed = _ts.is_installed()
             running = _ts.is_running()
-            version = _ts.get_installed_version()
             cfg = get_training_server_config() or {}
-            cfg_version = version or cfg.get('version')
+            port = cfg.get('port', _ts.DEFAULT_PORT)
+            target = ts_state.get('transition_target')
+            busy = ts_state['busy']
 
+            # 1) 설치 여부
             if installed:
-                txt = f"상태: 설치됨"
-                if cfg_version:
-                    txt += f"  (v{cfg_version})"
-                status_label.setText(txt)
-                status_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #86efac;")
+                installed_label.setText("설치 상태: ✓ 설치됨")
+                installed_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #86efac;")
             else:
-                status_label.setText("상태: 미설치")
-                status_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #999;")
+                installed_label.setText("설치 상태: ✗ 미설치")
+                installed_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #ef4444;")
 
-            running_label.setText(
-                f"실행 상태: 🟢 실행 중 (port {cfg.get('port', _ts.DEFAULT_PORT)})"
-                if running else "실행 상태: ⚫ 중지"
-            )
+            # 2) 켜짐 여부 — busy면 전이 진행 표시
+            if busy and target is not None and running is not target:
+                verb = '실행' if target else '중지'
+                running_label.setText(f"실행 상태: ⏳ {verb} 중...")
+                running_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #fbbf24;")
+            elif running:
+                running_label.setText(f"실행 상태: 🟢 켜짐 (port {port})")
+                running_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #86efac;")
+            else:
+                running_label.setText("실행 상태: ⚫ 꺼짐")
+                running_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #999;")
 
-            btn_install.setText("설치" if not installed else "업데이트")
-            btn_install.setEnabled(not ts_state['busy'])
-            btn_start.setEnabled(installed and not running and not ts_state['busy'])
-            btn_stop.setEnabled(installed and running and not ts_state['busy'])
-            btn_uninstall.setEnabled(installed and not ts_state['busy'])
-            port_input.setEnabled(installed and not running and not ts_state['busy'])
+            # 3) Buttons — [설치] when missing, [실행]/[중지] always visible while
+            #    installed (only one is enabled at a time), [제거] hidden while running.
+            btn_install.setVisible(not installed)
+            btn_start.setVisible(installed)
+            btn_stop.setVisible(installed)
+            btn_remove.setVisible(installed and not running)
 
-            # Auto-stream logs when running
-            if running and ts_state.get('docker_logs_proc') is None:
-                _start_log_stream()
-            elif not running and ts_state.get('docker_logs_proc') is not None:
-                _stop_log_stream()
+            btn_install.setEnabled(not installed and not busy)
+            btn_start.setEnabled(installed and not running and not busy)
+            btn_stop.setEnabled(installed and running and not busy)
+            btn_remove.setEnabled(installed and not running and not busy)
+            # Port is editable only while server is off (prevents accidentally
+            # changing the port mid-run; user must stop, edit, then start).
+            port_input.setEnabled(installed and not running and not busy)
 
-        # ---- background action runner ----
+            # Speed up polling while we're waiting for a transition.
+            target_interval = 500 if busy else 3000
+            if status_timer.interval() != target_interval:
+                status_timer.setInterval(target_interval)
+
+            if ts_state.get('tail_proc') is None:
+                _start_tail()
+
         def _run_action(fn):
+            if ts_state.get('busy'):
+                return  # ignore re-entry during an in-flight action
             ts_state['busy'] = True
             _refresh()
 
@@ -3402,59 +3423,78 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                 except Exception as e:
                     ok, msg = False, str(e)
                 log_q.put(f"[{'OK' if ok else 'FAIL'}] {msg}")
-
-                def _done():
-                    ts_state['busy'] = False
-                    _refresh()
-                    if not ok:
-                        QMessageBox.warning(dlg, "오류", msg)
-                QTimer.singleShot(0, _done)
-
+                # Push the result; drain_timer (GUI thread) clears busy and refreshes.
+                result_q.put((ok, msg))
             threading.Thread(target=_worker, daemon=True).start()
 
-        # ---- handlers ----
+        def _read_port() -> int | None:
+            try:
+                p = int(port_input.text().strip() or _ts.DEFAULT_PORT)
+            except ValueError:
+                QMessageBox.warning(dlg, "오류", "포트는 숫자여야 합니다.")
+                return None
+            if not (1 <= p <= 65535):
+                QMessageBox.warning(dlg, "오류", "포트는 1~65535 사이여야 합니다.")
+                return None
+            return p
+
+        def _toggle_action(target: bool, port: int):
+            """Apply local-training flag and poll until is_running() == target."""
+            verb = '실행' if target else '중지'
+            log_q.put(f"[INFO] 백엔드 재생성 중 ({verb}, port {port})...")
+            pr = self.project_root if hasattr(self, 'project_root') else None
+            ts_state['transition_target'] = target
+
+            def _action():
+                import time as _time
+                ok, msg = _ts.apply_local_training(target, port=port, project_root=pr)
+                if not ok:
+                    return ok, msg
+                deadline = _time.monotonic() + 60
+                while _time.monotonic() < deadline:
+                    if _ts.is_running() is target:
+                        return True, f"{verb} 완료"
+                    _time.sleep(0.5)
+                return False, f"{verb} 요청은 보냈지만 60초 안에 상태 전환을 확인하지 못했습니다."
+
+            _run_action(_action)
+
         def _on_install():
-            log_q.put(f"[INFO] 학습 서버 다운로드 중...")
-            _run_action(lambda: _ts.download_and_install(
+            log_q.put("[INFO] 학습 서버 다운로드 중...")
+            _run_action(lambda: _ts.download_from_release(
                 on_log=lambda m: log_q.put(m),
             ))
 
         def _on_start():
-            try:
-                port = int(port_input.text().strip() or _ts.DEFAULT_PORT)
-            except ValueError:
-                QMessageBox.warning(dlg, "오류", "포트는 숫자여야 합니다.")
+            port = _read_port()
+            if port is None:
                 return
-            if not (1 <= port <= 65535):
-                QMessageBox.warning(dlg, "오류", "포트는 1~65535 사이여야 합니다.")
-                return
-            log_q.put(f"[INFO] 포트 {port}로 시작...")
-            _run_action(lambda: _ts.start(port=port, force=True))
+            _toggle_action(True, port)
 
         def _on_stop():
-            log_q.put("[INFO] 중지 중...")
-            _run_action(lambda: _ts.stop())
+            port = _read_port() or _ts.DEFAULT_PORT
+            _toggle_action(False, port)
 
-        def _on_uninstall():
+        def _on_remove():
             res = QMessageBox.question(
                 dlg, "확인",
-                "학습 서버를 제거하시겠습니까?\n\n데이터(데이터셋/체크포인트)도 함께 삭제하시겠습니까?\n"
-                "  Yes  → 데이터 포함 전체 삭제\n  No   → 데이터는 보존\n  Cancel → 취소",
-                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel, QMessageBox.No,
+                "학습 서버 소스를 제거하시겠습니까?\n\n"
+                "학습 데이터(데이터셋/체크포인트)는 그대로 보존됩니다.\n"
+                "deb 패키지 업데이트 시 소스는 다시 설치됩니다.",
+                QMessageBox.Yes | QMessageBox.Cancel,
+                QMessageBox.Cancel,
             )
-            if res == QMessageBox.Cancel:
+            if res != QMessageBox.Yes:
                 return
-            remove_data = (res == QMessageBox.Yes)
-            log_q.put(f"[INFO] 제거 시작 (데이터 {'포함' if remove_data else '보존'})")
-            _run_action(lambda: _ts.uninstall(remove_data=remove_data))
+            log_q.put("[INFO] 소스 제거 중 (데이터 보존)...")
+            _run_action(lambda: _ts.remove())
 
         btn_install.clicked.connect(_on_install)
         btn_start.clicked.connect(_on_start)
         btn_stop.clicked.connect(_on_stop)
-        btn_uninstall.clicked.connect(_on_uninstall)
+        btn_remove.clicked.connect(_on_remove)
         btn_close.clicked.connect(dlg.accept)
 
-        # Periodic running-state check (Docker may change state out-of-band).
         status_timer = QTimer(dlg)
         status_timer.setInterval(3000)
         status_timer.timeout.connect(_refresh)
@@ -3463,7 +3503,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         def _on_finished():
             status_timer.stop()
             drain_timer.stop()
-            _stop_log_stream()
+            _stop_tail()
         dlg.finished.connect(lambda *_: _on_finished())
 
         _refresh()

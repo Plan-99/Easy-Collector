@@ -460,9 +460,11 @@ def _run_training(job_id, job_dir, ckpt_out_dir, config):
 
 
 if __name__ == '__main__':
+    port = int(os.environ.get('TRAINING_SERVER_PORT', 5100))
     print('=' * 60)
     print('EasyTrainer Training Server')
     print(f'Data directory: {DATA_DIR}')
+    print(f'Port: {port}')
     print(f'GPU available: {_check_gpu()}')
     print('=' * 60)
-    socketio.run(app, host='0.0.0.0', port=5100, debug=False, allow_unsafe_werkzeug=True)
+    socketio.run(app, host='0.0.0.0', port=port, debug=False, allow_unsafe_werkzeug=True)

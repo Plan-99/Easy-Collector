@@ -44,6 +44,27 @@ if [ ! -f "$DEPS_MARKER" ]; then
     touch "$DEPS_MARKER"
 fi
 
+# --- Optional: local training server (in-container, shares torch/CUDA with backend) ---
+if [ "${EASYTRAINER_LOCAL_TRAINING:-0}" = "1" ]; then
+    if [ -f /root/backend/training_server/app.py ]; then
+        TS_DATA_DIR="${TRAINING_SERVER_DATA_DIR:-/opt/easytrainer/training_data}"
+        # Keep training_server log on host-visible path so the launcher can tail it.
+        TS_LOG_DIR="${EASYTRAINER_DATA_DIR:-/opt/easytrainer}/logs"
+        mkdir -p "$TS_DATA_DIR" "$TS_LOG_DIR"
+        TS_LOG="$TS_LOG_DIR/training_server.log"
+        echo "[backend] Starting local training_server on port ${TRAINING_SERVER_PORT:-5100} (logs: $TS_LOG)"
+        TRAINING_SERVER_DATA_DIR="$TS_DATA_DIR" \
+        PYTHONPATH="/root/backend/training_server:/root/backend/lerobot/src" \
+            python3 -u /root/backend/training_server/app.py >> "$TS_LOG" 2>&1 &
+        TS_PID=$!
+        echo "[backend] training_server PID=$TS_PID"
+        # If backend exits, take down training_server too.
+        trap "kill $TS_PID 2>/dev/null || true" EXIT
+    else
+        echo "[backend][WARN] EASYTRAINER_LOCAL_TRAINING=1 but /root/backend/training_server/app.py is missing." >&2
+    fi
+fi
+
 # --- Start Flask API ---
 cd /root
 echo "[backend] Starting Flask-SocketIO on port 5000..."

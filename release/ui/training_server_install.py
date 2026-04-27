@@ -1,71 +1,152 @@
-"""Training server install / start / stop / log helpers.
+"""Training server helpers for the launcher.
 
-Downloads the `training-server-vX.Y.Z` release tar.gz from
-Plan-99/Easy-Trainer-Modules and unpacks it into /opt/easytrainer_server/.
-The launcher uses these helpers to manage the lifecycle.
+Two modes:
+  - **local**: training_server runs INSIDE the backend container as a sub-process,
+    sharing torch/CUDA. No separate install. The launcher only shows status + logs.
+  - **remote**: backend talks to a training_server on a different host. Nothing
+    runs locally; the launcher only shows the configured URL.
+
+The standalone training_server Dockerfile and CI release exist solely so a remote
+GPU box can be provisioned by extracting the tar.gz there — that flow is *not*
+driven from this launcher.
 """
 from __future__ import annotations
 
 import json
 import os
 import shutil
+import socket
 import subprocess
 import tarfile
 import tempfile
 from pathlib import Path
 
-from modules import _gh_request, _get_repo, get_training_server_config, save_training_server_config
+from modules import get_training_server_config, save_training_server_config, _gh_request, _get_repo
 
-
-INSTALL_DIR = Path("/opt/easytrainer_server")
-COMPOSE_FILE = INSTALL_DIR / "docker-compose.yml"
-ENV_FILE = INSTALL_DIR / ".env"
-DATA_DIR = INSTALL_DIR / "data"
-VERSION_FILE = INSTALL_DIR / "version.json"
-CONTAINER_NAME = "easytrainer_training_server"
+BACKEND_CONTAINER = "easytrainer_backend"
 DEFAULT_PORT = 5100
 
+# Host-visible log file (entrypoint.sh writes here when EASYTRAINER_LOCAL_TRAINING=1).
+DATA_ROOT = Path(os.environ.get("EASYTRAINER_DATA_DIR", "/opt/easytrainer"))
+LOG_FILE = DATA_ROOT / "logs" / "training_server.log"
+
 
 # ---------------------------------------------------------------------------
-# Filesystem / install state
+# Configuration
 # ---------------------------------------------------------------------------
 
-def _ensure_install_dir() -> Path:
-    """Create /opt/easytrainer_server (escalating to sudo if /opt isn't writable)."""
-    if not INSTALL_DIR.exists():
-        try:
-            INSTALL_DIR.mkdir(parents=True, exist_ok=True)
-        except PermissionError:
-            subprocess.run(
-                ["sudo", "mkdir", "-p", str(INSTALL_DIR)],
-                check=True, timeout=10,
-            )
-    if INSTALL_DIR.exists() and INSTALL_DIR.stat().st_uid == 0 and os.getuid() != 0:
-        try:
-            subprocess.run(
-                ["sudo", "chown", "-R", f"{os.getuid()}:{os.getgid()}", str(INSTALL_DIR)],
-                check=False, timeout=10,
-            )
-        except Exception:
-            pass
-    return INSTALL_DIR
+def get_configured_port() -> int:
+    return int(get_training_server_config().get("port", DEFAULT_PORT))
+
+
+def set_configured_port(port: int) -> None:
+    ts = get_training_server_config()
+    ts["port"] = int(port)
+    save_training_server_config(ts)
+
+
+def get_local_training_enabled() -> bool:
+    """Whether the launcher should ask backend to host training_server in-process."""
+    return get_training_server_config().get("local_training", False)
+
+
+def set_local_training_enabled(enabled: bool) -> None:
+    ts = get_training_server_config()
+    ts["local_training"] = bool(enabled)
+    save_training_server_config(ts)
+
+
+# ---------------------------------------------------------------------------
+# Status
+# ---------------------------------------------------------------------------
+
+def _project_root() -> Path:
+    """Resolve the project root that contains docker-compose.yml + training_server/."""
+    cfg = get_training_server_config()
+    p = cfg.get("project_root")
+    if p and Path(p, "docker-compose.yml").is_file():
+        return Path(p)
+    return Path("/opt/easytrainer/project")
 
 
 def is_installed() -> bool:
-    return COMPOSE_FILE.is_file()
+    """학습 서버가 설치되어 있는가?
+
+    Source files exist at <project_root>/backend/training_server/app.py and a
+    backend docker-compose.yml is present (so the launcher can recreate the
+    container).
+    """
+    pr = _project_root()
+    if not (pr / "docker-compose.yml").is_file():
+        return False
+    return (pr / "backend" / "training_server" / "app.py").is_file()
 
 
-def get_installed_version() -> str | None:
-    if not VERSION_FILE.is_file():
-        return None
+def is_backend_running() -> bool:
     try:
-        return json.loads(VERSION_FILE.read_text()).get("version")
+        out = subprocess.check_output(
+            ["docker", "ps", "--format", "{{.Names}}", "--filter", f"name={BACKEND_CONTAINER}"],
+            text=True, timeout=10,
+        ).strip()
+        return out == BACKEND_CONTAINER
     except Exception:
-        return None
+        return False
+
+
+def is_port_listening(port: int | None = None) -> bool:
+    """Check whether something is bound to localhost:<port>."""
+    port = port or get_configured_port()
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def is_running() -> bool:
+    """학습 서버가 켜져 있는가? (port 5100 responds)"""
+    return is_port_listening()
 
 
 # ---------------------------------------------------------------------------
-# Release fetching
+# Lifecycle (recreates the backend container with the local-training flag)
+# ---------------------------------------------------------------------------
+
+def _set_project_root(path: Path) -> None:
+    ts = get_training_server_config()
+    ts["project_root"] = str(path)
+    save_training_server_config(ts)
+
+
+def apply_local_training(enabled: bool, port: int | None = None,
+                          project_root: Path | None = None) -> tuple[bool, str]:
+    """Persist the flag and recreate the backend container so the entrypoint picks it up."""
+    set_local_training_enabled(enabled)
+    if port is not None:
+        set_configured_port(port)
+    pr = project_root or _project_root()
+    if not (pr / "docker-compose.yml").is_file():
+        return False, f"docker-compose.yml not found at {pr}"
+    _set_project_root(pr)
+
+    env = os.environ.copy()
+    env["EASYTRAINER_LOCAL_TRAINING"] = "1" if enabled else "0"
+    env["TRAINING_SERVER_PORT"] = str(port or get_configured_port())
+    try:
+        result = subprocess.run(
+            ["docker", "compose", "up", "-d", "--force-recreate", "backend"],
+            cwd=str(pr), env=env, timeout=120,
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            return False, f"docker compose up failed: {result.stderr.strip() or result.stdout.strip()}"
+    except Exception as e:
+        return False, f"Failed to recreate backend: {e}"
+    return True, ("로컬 학습 활성화" if enabled else "로컬 학습 비활성화")
+
+
+# ---------------------------------------------------------------------------
+# Log streaming
 # ---------------------------------------------------------------------------
 
 _TAG_PREFIX = "training-server-v"
@@ -87,24 +168,11 @@ def fetch_latest_release() -> dict | None:
     return None
 
 
-def get_remote_version(release: dict | None = None) -> str | None:
-    release = release or fetch_latest_release()
-    if not release:
-        return None
-    tag = release.get("tag_name", "")
-    if tag.startswith(_TAG_PREFIX):
-        return tag[len(_TAG_PREFIX):]
-    return None
+def download_from_release(on_log=None, on_progress=None) -> tuple[bool, str]:
+    """Download backend/training_server/ source from Easy-Trainer-Modules release.
 
-
-# ---------------------------------------------------------------------------
-# Install / uninstall
-# ---------------------------------------------------------------------------
-
-def download_and_install(on_progress=None, on_log=None) -> tuple[bool, str]:
-    """Download tar.gz, extract into /opt/easytrainer_server/, and `docker compose build`.
-
-    Returns (success, message).
+    Extracts to <project_root>/backend/training_server/. The tar.gz produced by CI
+    contains a single top-level entry named `training_server`, which we re-root.
     """
     import urllib.request
 
@@ -114,31 +182,28 @@ def download_and_install(on_progress=None, on_log=None) -> tuple[bool, str]:
 
     release = fetch_latest_release()
     if not release:
-        return False, "No training-server release found in Easy-Trainer-Modules."
+        return False, "training-server release를 찾지 못했습니다."
 
-    tag = release.get("tag_name", "")
     asset_url = None
     asset_name = None
-    for asset in release.get("assets", []):
-        name = asset.get("name", "")
+    for a in release.get("assets", []):
+        name = a.get("name", "")
         if name.startswith("training-server-v") and name.endswith(".tar.gz"):
-            asset_url = asset.get("browser_download_url")
+            asset_url = a.get("browser_download_url")
             asset_name = name
             break
     if not asset_url:
-        return False, f"Release {tag} has no training-server tar.gz asset."
+        return False, "release에 tar.gz asset이 없습니다."
 
-    _ensure_install_dir()
+    pr = _project_root()
+    target_dir = pr / "backend" / "training_server"
+    target_dir.parent.mkdir(parents=True, exist_ok=True)
 
-    # If a previous install exists, preserve data/ and replace the rest.
-    preserve_data = DATA_DIR.is_dir()
-
-    _log(f"Downloading {asset_name} from {tag}...")
+    _log(f"Downloading {asset_name}...")
     try:
         with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
             tmp_path = tmp.name
-            req = _gh_request(asset_url, timeout=300)
-            with urllib.request.urlopen(req, timeout=300) as resp:
+            with urllib.request.urlopen(_gh_request(asset_url, timeout=300), timeout=300) as resp:
                 total = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
                 while True:
@@ -150,24 +215,20 @@ def download_and_install(on_progress=None, on_log=None) -> tuple[bool, str]:
                     if on_progress:
                         on_progress(downloaded, total)
     except Exception as e:
-        return False, f"Download failed: {e}"
+        return False, f"download 실패: {e}"
 
-    # Wipe old install (except data/), then extract fresh.
+    if target_dir.is_dir():
+        try:
+            shutil.rmtree(target_dir)
+        except PermissionError:
+            try:
+                subprocess.run(["sudo", "rm", "-rf", str(target_dir)], check=True, timeout=30)
+            except Exception as e:
+                return False, f"기존 디렉터리 삭제 실패: {e}"
+
     _log("Extracting...")
     try:
-        for entry in INSTALL_DIR.iterdir():
-            if preserve_data and entry.name == "data":
-                continue
-            if entry.is_dir():
-                shutil.rmtree(entry, ignore_errors=True)
-            else:
-                try:
-                    entry.unlink()
-                except Exception:
-                    pass
-
         with tarfile.open(tmp_path, "r:gz") as tar:
-            # Tar root is `training_server/` — strip that prefix.
             members = []
             for m in tar.getmembers():
                 if m.name == "training_server" or m.name.startswith("training_server/"):
@@ -176,191 +237,62 @@ def download_and_install(on_progress=None, on_log=None) -> tuple[bool, str]:
                         continue
                     m.name = rel
                     members.append(m)
-            tar.extractall(INSTALL_DIR, members=members)
+            tar.extractall(target_dir, members=members)
     except Exception as e:
-        return False, f"Extraction failed: {e}"
+        return False, f"extract 실패: {e}"
     finally:
         try:
             os.unlink(tmp_path)
         except Exception:
             pass
 
-    if not COMPOSE_FILE.is_file():
-        return False, "docker-compose.yml not found in extracted archive."
-
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Persist version + installed flag in launcher config.
-    ts = get_training_server_config()
-    ts["installed"] = True
-    ts["version"] = get_remote_version(release)
-    ts["install_dir"] = str(INSTALL_DIR)
-    save_training_server_config(ts)
-
-    # Build the docker image.
-    _log("Building Docker image (first build can take several minutes)...")
-    try:
-        proc = subprocess.Popen(
-            ["docker", "compose", "-f", str(COMPOSE_FILE), "build"],
-            cwd=str(INSTALL_DIR),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
-        if on_log:
-            for line in proc.stdout:
-                on_log(line.rstrip())
-        rc = proc.wait()
-        if rc != 0:
-            return False, f"docker compose build failed (exit {rc})."
-    except Exception as e:
-        return False, f"Build failed: {e}"
-
-    return True, f"Installed {asset_name}."
+    if not (target_dir / "app.py").is_file():
+        return False, "압축 해제 후 app.py를 찾을 수 없습니다."
+    return True, f"{asset_name} 설치 완료"
 
 
-def uninstall(remove_data: bool = False) -> tuple[bool, str]:
-    """Stop the container, remove the image, and optionally wipe data."""
-    if not is_installed():
-        return True, "Already uninstalled."
-    try:
-        subprocess.run(
-            ["docker", "compose", "-f", str(COMPOSE_FILE), "down", "--rmi", "all"],
-            cwd=str(INSTALL_DIR), timeout=120,
-        )
-    except Exception:
-        pass
+def remove() -> tuple[bool, str]:
+    """Stop the server (if running) and delete training_server source files.
 
-    # Hard-remove the container if it still exists for any reason.
-    try:
-        subprocess.run(["docker", "rm", "-f", CONTAINER_NAME], timeout=30,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception:
-        pass
+    Persistent data (datasets/, checkpoints/) is *always* preserved under
+    TRAINING_SERVER_DATA_DIR — only the source code is removed.
+    Note: deb upgrades will restore the source files on next package update.
+    """
+    pr = _project_root()
+    src_dir = pr / "backend" / "training_server"
 
-    if INSTALL_DIR.exists():
+    if is_running():
+        ok, msg = apply_local_training(False, project_root=pr)
+        if not ok:
+            return False, f"중지 실패로 제거 중단: {msg}"
+
+    if src_dir.is_dir():
         try:
-            for entry in INSTALL_DIR.iterdir():
-                if not remove_data and entry.name == "data":
-                    continue
-                if entry.is_dir():
-                    shutil.rmtree(entry, ignore_errors=True)
-                else:
-                    try:
-                        entry.unlink()
-                    except Exception:
-                        pass
-            if remove_data and INSTALL_DIR.exists():
-                shutil.rmtree(INSTALL_DIR, ignore_errors=True)
+            shutil.rmtree(src_dir)
+        except PermissionError:
+            try:
+                subprocess.run(["sudo", "rm", "-rf", str(src_dir)],
+                               check=True, timeout=30)
+            except Exception as e:
+                return False, f"소스 삭제 실패: {e}"
         except Exception as e:
-            return False, f"Failed to clean install dir: {e}"
+            return False, f"소스 삭제 실패: {e}"
 
-    ts = get_training_server_config()
-    ts["installed"] = False
-    ts.pop("version", None)
-    save_training_server_config(ts)
-    return True, "Uninstalled."
+    set_local_training_enabled(False)
+    return True, "소스 삭제 완료 (학습 데이터는 보존됨)"
 
-
-# ---------------------------------------------------------------------------
-# Start / stop / status
-# ---------------------------------------------------------------------------
-
-def get_running_container() -> str | None:
-    try:
-        out = subprocess.check_output(
-            ["docker", "ps", "--format", "{{.Names}}", "--filter", f"name={CONTAINER_NAME}"],
-            text=True, timeout=10,
-        ).strip()
-        return out or None
-    except Exception:
-        return None
-
-
-def is_running() -> bool:
-    return get_running_container() is not None
-
-
-def remove_existing_container() -> None:
-    """Force-remove any existing trainer container (running or stopped)."""
-    try:
-        subprocess.run(
-            ["docker", "rm", "-f", CONTAINER_NAME],
-            timeout=30, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-    except Exception:
-        pass
-
-
-def get_configured_port() -> int:
-    return int(get_training_server_config().get("port", DEFAULT_PORT))
-
-
-def set_configured_port(port: int) -> None:
-    ts = get_training_server_config()
-    ts["port"] = int(port)
-    save_training_server_config(ts)
-
-
-def _write_env_file(port: int) -> None:
-    ENV_FILE.write_text(f"TRAINING_SERVER_PORT={int(port)}\n")
-
-
-def start(port: int | None = None, force: bool = True) -> tuple[bool, str]:
-    """Start the trainer container on the given port. Force-replaces an existing one."""
-    if not is_installed():
-        return False, "Training server is not installed."
-
-    port = int(port or get_configured_port())
-    set_configured_port(port)
-    _write_env_file(port)
-
-    if force:
-        remove_existing_container()
-
-    try:
-        result = subprocess.run(
-            ["docker", "compose", "-f", str(COMPOSE_FILE), "up", "-d"],
-            cwd=str(INSTALL_DIR), timeout=120,
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            return False, f"docker compose up failed: {result.stderr.strip() or result.stdout.strip()}"
-    except Exception as e:
-        return False, f"Start failed: {e}"
-
-    return True, f"Started on port {port}."
-
-
-def stop() -> tuple[bool, str]:
-    if not is_installed():
-        return True, "Not installed."
-    try:
-        result = subprocess.run(
-            ["docker", "compose", "-f", str(COMPOSE_FILE), "stop"],
-            cwd=str(INSTALL_DIR), timeout=60,
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            return False, f"docker compose stop failed: {result.stderr.strip()}"
-    except Exception as e:
-        return False, f"Stop failed: {e}"
-    return True, "Stopped."
-
-
-# ---------------------------------------------------------------------------
-# Log streaming
-# ---------------------------------------------------------------------------
 
 def open_log_stream(tail: int = 200) -> subprocess.Popen | None:
-    """Spawn `docker logs -f --tail N` for the trainer container.
-
-    Returns the Popen so the caller can read line-by-line and terminate on close.
-    """
+    """Tail the host-visible training_server log file. Returns None if missing."""
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    if not LOG_FILE.exists():
+        try:
+            LOG_FILE.touch()
+        except Exception:
+            return None
     try:
         return subprocess.Popen(
-            ["docker", "logs", "-f", "--tail", str(int(tail)), CONTAINER_NAME],
+            ["tail", "-F", "-n", str(int(tail)), str(LOG_FILE)],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, bufsize=1,
         )
