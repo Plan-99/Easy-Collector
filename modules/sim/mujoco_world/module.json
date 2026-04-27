@@ -1,0 +1,23 @@
+{
+  "id": "sim_mujoco_tutorial",
+  "name": "MuJoCo Tutorial World",
+  "version": "1.0.0",
+  "category": "sim",
+  "description": "튜토리얼용 MuJoCo 시뮬레이션 환경 (테이블 + 6DOF 로봇 + 그리퍼 + RGB 카메라 + 블럭). ROS2 토픽으로 노출되어 EasyTrainer의 robot/sensor 파이프라인과 그대로 연동됨.",
+  "install": {
+    "ros2": {
+      "target": "ros2/ros2_ws/src",
+      "build": "colcon"
+    }
+  },
+  "dependencies": {
+    "apt": [],
+    "pip": [
+      "mujoco>=3.2.0",
+      "numpy"
+    ]
+  },
+  "check": {
+    "type": "path"
+  }
+}

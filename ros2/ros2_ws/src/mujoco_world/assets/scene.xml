@@ -1,0 +1,179 @@
+<!--
+  EasyTrainer Tutorial World
+  ===========================
+  Self-contained MJCF: 6DOF arm + 1DOF gripper + cube + overhead RGB camera.
+  Joint names match Piper convention so policies/IK trained on Piper can reuse this sim.
+
+  Joints (7 actuated):
+    joint1 .. joint6   - arm rotational joints
+    gripper            - prismatic joint (0 = closed, 0.04 = fully open per finger)
+
+  Convention: positive joint values lift / open intuitively.
+    joint1: yaw  (+ = counter-clockwise viewed from above)
+    joint2: shoulder pitch  (+ = arm raises UP)
+    joint3: elbow pitch     (+ = elbow flexes UP toward shoulder)
+    joint4: forearm roll    (axis along arm)
+    joint5: wrist pitch     (+ = end-effector tilts UP)
+    joint6: tool roll       (axis along arm)
+-->
+<mujoco model="easytrainer_tutorial_world">
+  <compiler angle="radian" autolimits="true"/>
+
+  <option timestep="0.002" iterations="50" solver="Newton" tolerance="1e-8" gravity="0 0 -9.81"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="135" elevation="-25"/>
+  </visual>
+
+  <!--
+    Bitmask conventions (contype/conaffinity bits):
+      1 : floor / world
+      2 : graspable objects (cube)
+      4 : gripper fingertips
+      8 : arm links
+
+    Pair table (only pairs where contype_A & conaffinity_B  OR  contype_B & conaffinity_A):
+      floor  ↔ cube/finger/arm    (cube rests on floor; arm/fingers blocked by floor)
+      cube   ↔ floor/finger/arm   (gripper grasp; arm can push cube)
+      finger ↔ floor/cube         (NOT arm: avoids spurious self-contacts)
+      arm    ↔ floor/cube         (NOT itself, NOT finger)
+    Decorative geoms (front marker, base pedestal, gripper_base shell) stay
+    contype=0 / conaffinity=0 — visual only, never generate contacts.
+  -->
+  <default>
+    <!-- arm bodies set gravcomp=1 in their <body> tag to cancel gravity sag,
+         so position actuators can hold target precisely without overshoot/drift.
+         (튜토리얼 목적: 실로봇의 토크 부담 시뮬레이션이 아니라 직관적 PD 추종) -->
+    <default class="arm_link">
+      <geom type="capsule" rgba="0.85 0.85 0.85 1" mass="0.5"
+            contype="8" conaffinity="3" friction="1.0 0.005 0.001"/>
+      <joint type="hinge" damping="2.0" armature="0.05" frictionloss="0.05"/>
+    </default>
+    <default class="arm_visual">
+      <geom rgba="0.85 0.85 0.85 1" mass="0.0" contype="0" conaffinity="0"/>
+    </default>
+    <default class="gripper_finger">
+      <geom type="box" size="0.010 0.004 0.024" rgba="0.2 0.2 0.2 1" mass="0.03"
+            contype="4" conaffinity="3" friction="2.0 0.05 0.001" condim="6"/>
+    </default>
+  </default>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.5 0.7 0.9" rgb2="0.1 0.2 0.4" width="512" height="512"/>
+    <texture name="floor_tex" type="2d" builtin="checker" rgb1="0.2 0.3 0.4" rgb2="0.3 0.4 0.5" width="300" height="300"/>
+    <material name="floor_mat" texture="floor_tex" texrepeat="2 2" reflectance="0.1"/>
+    <material name="cube_mat" rgba="0.85 0.15 0.15 1"/>
+    <material name="marker_mat" rgba="0.95 0.55 0.10 1"/>
+  </asset>
+
+  <worldbody>
+    <light name="top_light" pos="0 0 2.0" dir="0 0 -1" diffuse="0.6 0.6 0.6" specular="0.1 0.1 0.1"/>
+    <light name="side_light" pos="0.8 0.8 1.5" dir="-0.5 -0.5 -1" diffuse="0.3 0.3 0.3"/>
+
+    <geom name="floor" type="plane" size="3 3 0.1" material="floor_mat"
+          contype="1" conaffinity="14" friction="1.0 0.005 0.001"/>
+
+    <!-- Robot arm: simple 6DOF kinematic chain mounted on a small pedestal -->
+    <body name="base" pos="0 0 0.05">
+      <geom type="cylinder" size="0.06 0.05" rgba="0.3 0.3 0.3 1" mass="2.0"
+            contype="0" conaffinity="0"/>
+
+      <body name="link1" pos="0 0 0.05" gravcomp="1">
+        <joint name="joint1" class="arm_link" axis="0 0 1" range="-3.14 3.14"/>
+        <geom class="arm_link" fromto="0 0 0  0 0 0.10" size="0.045"/>
+        <!-- Asymmetric "front marker" so joint1 yaw is visually obvious from any angle. -->
+        <geom class="arm_visual" type="box" size="0.025 0.012 0.012" pos="0.045 0 0.05"
+              material="marker_mat"/>
+
+        <body name="link2" pos="0 0 0.10" gravcomp="1">
+          <!-- axis (0,-1,0): + rotation lifts the upper arm UP -->
+          <joint name="joint2" class="arm_link" axis="0 -1 0" range="-1.57 1.57"/>
+          <geom class="arm_link" fromto="0 0 0  0.20 0 0" size="0.04"/>
+
+          <body name="link3" pos="0.20 0 0" gravcomp="1">
+            <!-- axis (0,-1,0): + rotation flexes the elbow UPWARD -->
+            <joint name="joint3" class="arm_link" axis="0 -1 0" range="-2.40 0.50"/>
+            <geom class="arm_link" fromto="0 0 0  0.18 0 0" size="0.035"/>
+
+            <body name="link4" pos="0.18 0 0" gravcomp="1">
+              <joint name="joint4" class="arm_link" axis="1 0 0" range="-3.14 3.14"/>
+              <geom class="arm_link" fromto="0 0 0  0.08 0 0" size="0.030"/>
+              <!-- Visual stripe so joint4 roll is obvious -->
+              <geom class="arm_visual" type="box" size="0.040 0.034 0.004" pos="0.040 0 0.030"
+                    material="marker_mat"/>
+
+              <body name="link5" pos="0.08 0 0" gravcomp="1">
+                <joint name="joint5" class="arm_link" axis="0 -1 0" range="-1.40 1.40"/>
+                <geom class="arm_link" fromto="0 0 0  0.06 0 0" size="0.028"/>
+
+                <body name="link6" pos="0.06 0 0" gravcomp="1">
+                  <joint name="joint6" class="arm_link" axis="1 0 0" range="-3.14 3.14"/>
+                  <geom class="arm_visual" type="cylinder" size="0.025 0.020"
+                        pos="0.020 0 0" euler="0 1.5708 0" mass="0.2"/>
+
+                  <!-- Gripper base + two fingers; fingers slide outward (+y / -y).
+                       Bodies are placed offset so rest pose has fingers at y=±0.018. -->
+                  <body name="gripper_base" pos="0.045 0 0" gravcomp="1">
+                    <geom type="box" size="0.020 0.030 0.012" rgba="0.2 0.2 0.2 1" mass="0.1"
+                          contype="0" conaffinity="0"/>
+                    <site name="ee_site" pos="0.05 0 0" size="0.005" rgba="0 1 0 0.8"/>
+
+                    <body name="finger_left" pos="0.030 0.018 0" gravcomp="1">
+                      <joint name="gripper" type="slide" axis="0 1 0" range="0 0.04"
+                             damping="50" frictionloss="0.05"/>
+                      <geom class="gripper_finger"/>
+                    </body>
+                    <body name="finger_right" pos="0.030 -0.018 0" gravcomp="1">
+                      <joint name="gripper_mirror" type="slide" axis="0 -1 0" range="0 0.04"
+                             damping="50" frictionloss="0.05"/>
+                      <geom class="gripper_finger"/>
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+
+    <!-- Manipulable cube on the floor, in front of the robot, within reach. -->
+    <body name="cube" pos="0.30 0.08 0.02">
+      <freejoint name="cube_free"/>
+      <geom name="cube_geom" type="box" size="0.020 0.020 0.020" material="cube_mat"
+            contype="2" conaffinity="13" friction="1.0 0.005 0.001" condim="6" mass="0.05"/>
+    </body>
+
+    <!-- Overhead RGB camera looking down at the workspace -->
+    <camera name="tutorial_cam" pos="0.30 0 1.00" xyaxes="1 0 0 0 1 0" fovy="60"/>
+  </worldbody>
+
+  <!-- Mirror gripper joints so a single command drives both fingers symmetrically -->
+  <equality>
+    <joint joint1="gripper" joint2="gripper_mirror" polycoef="0 1 0 0 0"/>
+  </equality>
+
+  <!-- Position actuators: control directly maps to target qpos -->
+  <actuator>
+    <position name="act_joint1" joint="joint1" kp="80"  kv="6"  ctrlrange="-3.14 3.14"/>
+    <position name="act_joint2" joint="joint2" kp="120" kv="10" ctrlrange="-1.57 1.57"/>
+    <position name="act_joint3" joint="joint3" kp="100" kv="8"  ctrlrange="-2.40 0.50"/>
+    <position name="act_joint4" joint="joint4" kp="60"  kv="5"  ctrlrange="-3.14 3.14"/>
+    <position name="act_joint5" joint="joint5" kp="50"  kv="4"  ctrlrange="-1.40 1.40"/>
+    <position name="act_joint6" joint="joint6" kp="40"  kv="3"  ctrlrange="-3.14 3.14"/>
+    <position name="act_gripper" joint="gripper" kp="200" kv="15" ctrlrange="0 0.04"/>
+  </actuator>
+
+  <!--
+    Home pose: arm reaches forward at ~30 cm and slightly down so the
+    end-effector is just above the cube (which sits on the floor).
+    qpos order: 6 arm joints + gripper(2) + cube(7=xyz+quat).
+  -->
+  <keyframe>
+    <key name="home"
+         qpos="0 0.6 -1.0 0 -0.7 0   0 0   0.30 0.08 0.02 1 0 0 0"
+         ctrl="0 0.6 -1.0 0 -0.7 0   0"/>
+  </keyframe>
+</mujoco>
