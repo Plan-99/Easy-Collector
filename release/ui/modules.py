@@ -35,6 +35,7 @@ MODULE_REGISTRY: list[ModuleInfo] = [
     ModuleInfo(id="controller", name="Easy Controller", category="feature", description="텔레오퍼레이션 제어", required=True, default=True),
     ModuleInfo(id="training", name="학습 (Training)", category="feature", description="모방학습 정책 훈련", required=True, default=True),
     ModuleInfo(id="inference", name="추론 (Inference)", category="feature", description="학습된 정책 실행", required=True, default=True),
+    ModuleInfo(id="sim_mujoco_tutorial", name="튜토리얼 시뮬레이터", category="feature", description="MuJoCo 기반 튜토리얼 환경 (가상 로봇/카메라/테이블/블록)", required=True, default=True, asset_name="module-sim_mujoco_tutorial-{version}.tar.gz"),
     # ── Robot drivers (from GitHub: Plan-99/Easy-Trainer-Modules) ──
     ModuleInfo(id="robot_piper", name="Piper", category="robot", description="Agilex Piper 로봇", asset_name="module-robot_piper-{version}.tar.gz"),
     ModuleInfo(id="robot_dynamixel", name="Dynamixel", category="robot", description="Robotis 서보 모터", asset_name="module-robot_dynamixel-{version}.tar.gz"),
@@ -563,7 +564,8 @@ def download_module(
                 extracted = [d for d in Path(tmpdir).iterdir() if d.is_dir()]
                 if extracted:
                     _install_module_deps(extracted[0], module_id)
-        elif mod.category in ("robot", "sensor"):
+        elif mod.category in ("robot", "sensor") or _module_meta.get("install", {}).get("ros2"):
+            # ros2/ 트리를 가진 모듈은 같은 layout을 사용 (robot/sensor + sim 등)
             _install_robot_sensor_module(tmp_path, module_id)
         else:
             with tarfile.open(tmp_path, "r:gz") as tar:

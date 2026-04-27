@@ -54,6 +54,16 @@ class DriverServiceStub(object):
                 request_serializer=robot__bridge__pb2.ProcessId.SerializeToString,
                 response_deserializer=robot__bridge__pb2.StatusResponse.FromString,
                 _registered_method=True)
+        self.StartLaunch = channel.unary_unary(
+                '/easytrainer.DriverService/StartLaunch',
+                request_serializer=robot__bridge__pb2.LaunchConfig.SerializeToString,
+                response_deserializer=robot__bridge__pb2.DriverStatus.FromString,
+                _registered_method=True)
+        self.StopLaunch = channel.unary_unary(
+                '/easytrainer.DriverService/StopLaunch',
+                request_serializer=robot__bridge__pb2.ProcessId.SerializeToString,
+                response_deserializer=robot__bridge__pb2.StatusResponse.FromString,
+                _registered_method=True)
         self.ListProcesses = channel.unary_unary(
                 '/easytrainer.DriverService/ListProcesses',
                 request_serializer=robot__bridge__pb2.Empty.SerializeToString,
@@ -93,6 +103,18 @@ class DriverServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def StartLaunch(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def StopLaunch(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def ListProcesses(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -125,6 +147,16 @@ def add_DriverServiceServicer_to_server(servicer, server):
             ),
             'StopSensorDriver': grpc.unary_unary_rpc_method_handler(
                     servicer.StopSensorDriver,
+                    request_deserializer=robot__bridge__pb2.ProcessId.FromString,
+                    response_serializer=robot__bridge__pb2.StatusResponse.SerializeToString,
+            ),
+            'StartLaunch': grpc.unary_unary_rpc_method_handler(
+                    servicer.StartLaunch,
+                    request_deserializer=robot__bridge__pb2.LaunchConfig.FromString,
+                    response_serializer=robot__bridge__pb2.DriverStatus.SerializeToString,
+            ),
+            'StopLaunch': grpc.unary_unary_rpc_method_handler(
+                    servicer.StopLaunch,
                     request_deserializer=robot__bridge__pb2.ProcessId.FromString,
                     response_serializer=robot__bridge__pb2.StatusResponse.SerializeToString,
             ),
@@ -245,6 +277,60 @@ class DriverService(object):
             request,
             target,
             '/easytrainer.DriverService/StopSensorDriver',
+            robot__bridge__pb2.ProcessId.SerializeToString,
+            robot__bridge__pb2.StatusResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StartLaunch(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/easytrainer.DriverService/StartLaunch',
+            robot__bridge__pb2.LaunchConfig.SerializeToString,
+            robot__bridge__pb2.DriverStatus.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StopLaunch(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/easytrainer.DriverService/StopLaunch',
             robot__bridge__pb2.ProcessId.SerializeToString,
             robot__bridge__pb2.StatusResponse.FromString,
             options,

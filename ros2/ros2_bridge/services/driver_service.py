@@ -133,6 +133,46 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
         return pb.StatusResponse(success=True, message='Stopped')
 
     # ------------------------------------------------------------------
+    # Generic ros2 launch (used by tutorial mode / future sim modules)
+    # ------------------------------------------------------------------
+    def StartLaunch(self, request, context):
+        process_id = request.process_id
+        package = request.package
+        launch_file = request.launch_file
+        try:
+            args = json.loads(request.args_json) if request.args_json else {}
+        except json.JSONDecodeError as e:
+            return pb.DriverStatus(success=False, message=f'Invalid args_json: {e}')
+
+        if not package or not launch_file:
+            return pb.DriverStatus(success=False, message='package and launch_file are required')
+
+        # ros2 launch <pkg> <file> key:=val key:=val ...
+        # 워크스페이스를 매번 source — bridge 기동 후에 colcon build 된 패키지도 인식
+        launch_argv = ['ros2', 'launch', package, launch_file]
+        for k, v in args.items():
+            launch_argv.append(f'{k}:={v}')
+
+        ws_setup = '/root/ros2_ws/install/setup.bash'
+        bash_cmd = (
+            'source /opt/ros/humble/setup.bash && '
+            f'[ -f {ws_setup} ] && source {ws_setup}; '
+            'exec ' + ' '.join(self._shell_quote(a) for a in launch_argv)
+        )
+        command = ['bash', '-lc', bash_cmd]
+
+        # Replace any prior instance with the same process_id
+        self._stop(process_id)
+        proc = self._start_subprocess(process_id, command)
+        if proc is None:
+            return pb.DriverStatus(success=False, message='Failed to start launch')
+        return pb.DriverStatus(success=True, message='Launch started', pid=proc.pid)
+
+    def StopLaunch(self, request, context):
+        self._stop(request.name)
+        return pb.StatusResponse(success=True, message='Stopped')
+
+    # ------------------------------------------------------------------
     # Queries
     # ------------------------------------------------------------------
     def ListProcesses(self, request, context):
@@ -248,6 +288,11 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
                 client.call_async(req)
         except Exception as e:
             print(f"[WARN] JAKA servo enable failed: {e}")
+
+    @staticmethod
+    def _shell_quote(s):
+        import shlex
+        return shlex.quote(str(s))
 
     def _start_subprocess(self, name, command, log_name=None):
         log_name = log_name or name

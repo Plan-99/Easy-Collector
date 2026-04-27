@@ -8,12 +8,20 @@ import json
 import threading
 import time
 
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import Image, CompressedImage
 
 from ..generated import robot_bridge_pb2 as pb
 from ..generated import robot_bridge_pb2_grpc as pb_grpc
 from .image_bridge import ImageBridgeWriter
 from ..utils.image_parser import ros_image_to_numpy
+
+# Sensor 이미지 토픽은 관례상 BEST_EFFORT 퍼블리시. RELIABLE 구독이면 incompatible.
+_SENSOR_QOS = QoSProfile(
+    reliability=ReliabilityPolicy.BEST_EFFORT,
+    history=HistoryPolicy.KEEP_LAST,
+    depth=1,
+)
 
 
 class ObsServiceServicer(pb_grpc.ObsServiceServicer):
@@ -57,7 +65,7 @@ class ObsServiceServicer(pb_grpc.ObsServiceServicer):
                 except Exception as e:
                     print(f"[ObsService] sensor callback error ({key}): {e}", flush=True)
 
-            sub = node.create_subscription(msg_type, topic, _cb, 10)
+            sub = node.create_subscription(msg_type, topic, _cb, _SENSOR_QOS)
             subs.append(sub)
             print(f"[ObsService] Subscribed: {topic} -> shm/{sensor_key}", flush=True)
 

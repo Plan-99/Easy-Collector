@@ -15,13 +15,17 @@
           Easy Trainer
         </q-toolbar-title>
         <q-space></q-space>
-        <!-- <q-btn
-          flat
-          dense
-          round
-          icon="refresh"
-          @click="$router.go()"
-        ></q-btn> -->
+
+        <q-chip
+          v-if="tutorial.running"
+          color="primary"
+          text-color="dark"
+          icon="school"
+          size="sm"
+          class="q-mr-sm"
+        >
+          Tutorial Mode
+        </q-chip>
       </q-toolbar>
     </q-header>
     <q-drawer
@@ -30,14 +34,43 @@
       dark
       class="q-pa-lg"
     >
-      <div class="full-height bg-secondary border-rounded">
-        <q-list class="q-pa-md">
+      <div class="full-height bg-secondary border-rounded column">
+        <q-list class="q-pa-md col">
           <EssentialLink
             v-for="link in linksList"
             :key="link.title"
             v-bind="link"
           />
         </q-list>
+
+        <q-separator dark class="q-mx-md" />
+
+        <div class="q-pa-md">
+          <q-item class="border-rounded bg-dark">
+            <q-item-section avatar>
+              <q-icon name="school" :color="tutorial.running ? 'primary' : 'grey-5'" />
+            </q-item-section>
+            <q-item-section>
+              <q-item-label class="text-white">Tutorial Mode</q-item-label>
+              <q-item-label caption>
+                <span v-if="tutorial.busy" class="text-orange">Switching…</span>
+                <span v-else-if="tutorial.running" class="text-primary">Sim running</span>
+                <span v-else class="text-grey-5">Off</span>
+              </q-item-label>
+            </q-item-section>
+            <q-item-section side>
+              <q-toggle
+                :model-value="tutorial.running"
+                color="primary"
+                :disable="tutorial.busy"
+                @update:model-value="onTutorialToggle"
+              />
+            </q-item-section>
+          </q-item>
+          <div v-if="tutorial.lastError" class="text-negative text-caption q-mt-xs q-px-sm">
+            {{ tutorial.lastError }}
+          </div>
+        </div>
       </div>
     </q-drawer>
 
@@ -49,7 +82,9 @@
 
 <script setup>
 import { ref } from 'vue'
-import EssentialLink from 'components/v2/EssentialLink.vue' // 경로 주의 (components/v2/... 라면 그에 맞게 수정)
+import { Notify } from 'quasar'
+import EssentialLink from 'components/v2/EssentialLink.vue'
+import { useTutorialStore } from 'src/stores/tutorialStore.js'
 
 const linksList = [
   {
@@ -60,16 +95,15 @@ const linksList = [
   {
     title: 'Robots',
     icon: 'adb',
-    // link: '/robots', // 상위 메뉴는 링크를 제거하거나 '#'으로 둡니다.
     children: [
       {
         title: 'Management',
-        icon: 'file_upload', // 적절한 아이콘 예시
+        icon: 'file_upload',
         link: '/robots/management'
       },
       {
         title: 'Assemble',
-        icon: 'build', // 적절한 아이콘 예시
+        icon: 'build',
         link: '/robots/assemble'
       }
     ]
@@ -87,10 +121,35 @@ const linksList = [
 ]
 
 const leftDrawerOpen = ref(false)
+const tutorial = useTutorialStore()
 
 function toggleLeftDrawer () {
   leftDrawerOpen.value = !leftDrawerOpen.value
 }
 
-
+async function onTutorialToggle (next) {
+  try {
+    if (next) {
+      await tutorial.start()
+      Notify.create({
+        type: 'positive',
+        message: 'Tutorial world is starting up — robot/sensor topics will appear shortly.',
+        timeout: 4000,
+      })
+    } else {
+      await tutorial.stop()
+      Notify.create({
+        type: 'info',
+        message: 'Tutorial world stopped.',
+        timeout: 2500,
+      })
+    }
+  } catch (e) {
+    Notify.create({
+      type: 'negative',
+      message: 'Tutorial mode toggle failed: ' + (e?.response?.data?.message || e.message || e),
+      timeout: 5000,
+    })
+  }
+}
 </script>

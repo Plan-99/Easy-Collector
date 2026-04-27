@@ -19,3 +19,6 @@ opencv-python-headless
 # --- [IK solver] ---
 pin-pink
 proxsuite
+
+# --- [Sim] --- (sim_mujoco_tutorial 번들 모듈; 항상 사용)
+mujoco>=3.2.0

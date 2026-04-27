@@ -11,7 +11,16 @@ import numpy as np
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import CompressedImage, Image
+
+# Sensor 데이터는 관례상 BEST_EFFORT. RELIABLE publisher와도 호환됨(다운그레이드).
+# RELIABLE 구독자는 BEST_EFFORT 퍼블리셔와 incompatible → 메시지 안 옴.
+_SENSOR_QOS = QoSProfile(
+    reliability=ReliabilityPolicy.BEST_EFFORT,
+    history=HistoryPolicy.KEEP_LAST,
+    depth=1,
+)
 
 from ..generated import robot_bridge_pb2 as pb
 from ..generated import robot_bridge_pb2_grpc as pb_grpc
@@ -32,7 +41,7 @@ class _TopicSubscriber:
         ros_type = CompressedImage if is_compressed else Image
         self._is_compressed = is_compressed
 
-        self._sub = node.create_subscription(ros_type, topic, self._callback, 1)
+        self._sub = node.create_subscription(ros_type, topic, self._callback, _SENSOR_QOS)
 
     def _callback(self, msg):
         try:

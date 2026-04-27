@@ -69,6 +69,7 @@ services:
     container_name: easytrainer_ros2
     network_mode: host
     privileged: true
+    runtime: nvidia
     environment:
       - DISPLAY=${DISPLAY}
       - XAUTHORITY=${XAUTHORITY}
@@ -76,6 +77,9 @@ services:
       - RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}
       - EASYTRAINER_DATA_DIR=${EASYTRAINER_DATA_DIR:-/opt/easytrainer}
       - EASYTRAINER_CONFIG_PATH=${EASYTRAINER_CONFIG_PATH:-/opt/easytrainer/config.json}
+      # NVIDIA OpenGL/EGL을 컨테이너에서도 쓸 수 있게 — mujoco viewer 등 GUI용
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,graphics,utility,display
     volumes:
       - ./ros2/ros2_ws:/root/ros2_ws
       - ./ros2/robot_sdk:/root/robot_sdk
