@@ -212,7 +212,10 @@ copy_tree_to() {
   echo "[quick-apply] 디렉터리 동기화 완료: $rel_src → $rel_dst"
 }
 copy_tree_to "training_server" "backend/training_server"
-# ros2/ros2_ws/src and ros2/robot_sdk are managed by module installer — do not sync
+# ros2/ros2_ws/src and ros2/robot_sdk are managed by the module installer — do not
+# sync them wholesale. Exception: mujoco_world is a bundled (non-module) ROS2
+# package shipped with the app for tutorial mode, so sync just that subtree.
+copy_tree_to "ros2/ros2_ws/src/mujoco_world" "ros2/ros2_ws/src/mujoco_world"
 # modules/, home-next/ are not part of the runtime project
 
 copy_file "docker-compose.yml"
