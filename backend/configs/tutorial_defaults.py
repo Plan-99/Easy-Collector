@@ -2,7 +2,7 @@
 """
 Tutorial mode defaults.
 
-The tutorial mode bundles a MuJoCo world (modules/sim/mujoco_world) that
+The tutorial mode bundles a MuJoCo world (ros2/ros2_ws/src/mujoco_world) that
 publishes ROS2 topics for a virtual robot and camera. Tutorial robot/sensor
 DB rows are stored with `type='custom'` so the rest of EasyTrainer treats
 them like any other external-topic device — no driver process is launched
@@ -33,11 +33,19 @@ TUTORIAL_ROBOT = {
         'write_topic': f'{TUTORIAL_TOPIC_PREFIX}/joint_command',
         'write_topic_msg': 'sensor_msgs/JointState',
         'joint_names': ['joint1', 'joint2', 'joint3', 'joint4', 'joint5', 'joint6', 'gripper'],
-        'joint_lower_bounds': [-2.618, 0.0, -2.618, -1.745, -1.22, -2.094, 0.0],
-        'joint_upper_bounds': [2.618, 2.618, 0.0, 1.745, 1.22, 2.094, 0.087],
+        'joint_lower_bounds': [-3.14, -1.57, -2.40, -3.14, -1.40, -3.14, 0.0],
+        'joint_upper_bounds': [3.14, 1.57, 0.50, 3.14, 1.40, 3.14, 0.04],
         'tool_index': [6],
         'tool_inner': True,
         'interpolation': False,
+        # Task-space (IK) support: kinematics mirror assets/scene.xml.
+        # End-effector frame = link6 + (0.045 + 0.05) along x = 0.095 from joint6.
+        'urdf_path': '/root/ros2_ws/src/mujoco_world/urdf/tutorial_arm.urdf',
+        'urdf_package_dir': '/root/ros2_ws/src/mujoco_world/',
+        'ik_setting': {
+            'joints_to_lock': ['gripper', 'gripper_mirror'],
+            'ee_definitions': [['ee', 'joint6', [0.095, 0.0, 0.0]]],
+        },
     },
 }
 

@@ -58,11 +58,7 @@ def checkpoint_test(
         thread_pool = ThreadPoolExecutor(max_workers=len(agents))
         executor = None
         
-        # 기본 정책 로드
-        if checkpoint['is_base_model']:
-            ckpt_dir = "lerobot/pi0_base"
-        else:
-            ckpt_dir = os.path.join("/root/src/backend/checkpoints", str(checkpoint['id']))
+        ckpt_dir = os.path.join("/root/src/backend/checkpoints", str(checkpoint['id']))
 
         action_key = action_type or policy_obj.get('settings', {}).get('action_type') or checkpoint.get('train_settings', {}).get('action_type', 'qaction')
         _obs_keys = policy_obj.get('settings', {}).get('obs_state_keys')

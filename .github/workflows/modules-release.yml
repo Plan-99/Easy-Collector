@@ -28,7 +28,7 @@ jobs:
           CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only HEAD)
 
           MODULES=()
-          for category in robots sensors extensions sim; do
+          for category in robots sensors extensions; do
             if [ ! -d "modules/$category" ]; then continue; fi
             for module_dir in modules/$category/*/; do
               [ ! -d "$module_dir" ] && continue

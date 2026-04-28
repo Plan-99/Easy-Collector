@@ -8,6 +8,9 @@
                 <div class="text-body text-white">{{ $t('sensorIntroBody2') }}</div>
             </div>
         </div>
+
+        <TutorialHint class="q-mb-md" :text="$t('tutorialSensorIntro')" />
+
         <div class="row q-col-gutter-md">
             <div class="col-6 col-sm-4 col-md-3 col-lg-2"  v-for="sensor in sensors" :key="sensor.id">
                 <q-card class="q-pa-md bg-secondary border-rounded border-white text-white" :class="watchingSensor && sensor.id === watchingSensor.id ? 'border-primary' : ''">
@@ -54,6 +57,12 @@
                         <div class="text-grey-7 text-caption" v-else-if="sensor.status === 'off'">TOPIC OFF</div>
                         <div class="text-grey-7 text-caption" v-else>LOADING</div>
                     </q-card-section>
+                    <TutorialHint
+                        v-if="tutorial.running && tutorial.sensorId === sensor.id"
+                        step="1"
+                        class="q-mt-sm"
+                        :text="$t('tutorialSensorCard')"
+                    />
                     <q-inner-loading :showing="sensor.status === 'loading'">
                         <q-spinner-gears size="50px" color="primary" />
                     </q-inner-loading>
@@ -71,6 +80,7 @@
             
             <div class="col-6 col-sm-4 col-md-3  col-lg-2" style="min-height: 220px;" >
                 <q-btn color="white" class="full-height full-width border-rounded" outline size="lg" icon="add" @click="openAddSensorForm"></q-btn>
+                <TutorialHint step="2" class="q-mt-sm" :text="$t('tutorialSensorAdd')" />
             </div>
         </div>
         <bottom-terminal
@@ -82,6 +92,7 @@
             @update:model-value="watchSensor($event)"
         >
             <template v-for="sensor in sensors.filter((e) => e.status !== 'off')" :key="sensor.id" v-slot:[sensor.id]>
+                <TutorialHint class="q-mb-sm" :text="$t('tutorialSensorPreview')" />
                 <div class="row q-gutter-x-md">
                     <web-rtc-video
                         :process-id="`sensor_${sensor.id}`"
@@ -92,8 +103,8 @@
                         style="height: 300px"
                     ></web-rtc-video>
                     <div class="col">
-                        <process-console 
-                            :process="sensor.process_id" 
+                        <process-console
+                            :process="sensor.process_id"
                             :key="sensor.id"
                         />
                     </div>
@@ -106,7 +117,9 @@
             :form="sensorForm"
             @submit="saveSensor"
             :ok-button-label="$t(sensorForm.find((e) => e.key === 'id').value ? 'save' : 'add')"
-        ></form-dialog>
+        >
+            <TutorialHint class="q-mb-md" :text="$t('tutorialSensorForm')" />
+        </form-dialog>
     </q-page>
 </template>
 
@@ -120,9 +133,12 @@ import BottomTerminal from 'src/components/v2/BottomTerminal.vue';
 import WebRtcVideo from 'src/components/v2/WebRtcVideo.vue';
 import { useSensor } from '../../composables/useSensor';
 import FormDialog from 'src/components/v2/FormDialog.vue';
+import TutorialHint from 'src/components/v2/TutorialHint.vue';
+import { useTutorialStore } from 'src/stores/tutorialStore.js';
 
 import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
+const tutorial = useTutorialStore();
 
 
 const sensors = ref([]);

@@ -8,6 +8,9 @@
                 <div class="text-body text-white">{{ $t('robotIntroBody2') }}</div>
             </div>
         </div>
+
+        <TutorialHint class="q-mb-md" :text="$t('tutorialRobotIntro')" />
+
         <div class="row q-col-gutter-md">
             <div class="col-6 col-sm-4 col-md-3 col-lg-2" v-for="robot in robots" :key="robot.id">
                 <q-card class="q-pa-md bg-secondary border-rounded border-white text-white" :class="watchingRobot && watchingRobot.status === 'on' && robot.id === watchingRobot.id ? 'border-primary' : ''">
@@ -52,7 +55,13 @@
                         <div class="text-negative text-caption" v-else-if="robot.status === 'error'">ERROR</div>
                         <div class="text-grey-7 text-caption" v-else-if="robot.status === 'off'">TOPIC OFF</div>
                         <div class="text-grey-7 text-caption" v-else>LOADING</div>
-                    </q-card-section>   
+                    </q-card-section>
+                    <TutorialHint
+                        v-if="tutorial.running && tutorial.robotId === robot.id"
+                        step="1"
+                        class="q-mt-sm"
+                        :text="$t('tutorialRobotCard')"
+                    />
                     <q-inner-loading :showing="robot.status === 'loading'">
                         <q-spinner-gears size="50px" color="primary" />
                     </q-inner-loading>
@@ -68,6 +77,7 @@
             </div>
             <div class="col-6 col-sm-4 col-md-3  col-lg-2" style="min-height: 220px;" >
                 <q-btn color="white" class="full-height full-width border-rounded" outline size="lg" icon="add" @click="openAddSensorForm"></q-btn>
+                <TutorialHint step="2" class="q-mt-sm" :text="$t('tutorialRobotAdd')" />
             </div>
         </div>
 
@@ -82,6 +92,7 @@
             <template v-for="robot in robots" :key="robot.id" v-slot:[robot.id]>
                 <div class="row row q-gutter-x-md">
                     <div class="col-4">
+                        <TutorialHint class="q-mb-sm" :text="$t('tutorialRobotPendant')" />
                         <robot-pendant
                             :robot="watchingRobot"
                         />
@@ -98,7 +109,7 @@
                         />
                     </div>
                 </div>
-                
+
             </template>
         </bottom-terminal>
         <form-dialog
@@ -108,6 +119,7 @@
             @submit="saveRobot"
             :ok-button-label="$t(robotForm.find((e) => e.key === 'id').value ? 'save' : 'add')"
         >
+            <TutorialHint class="q-mb-md" :text="$t('tutorialRobotForm')" />
             <template v-slot:joint_names>
                 <div class="row q-mb-md q-col-gutter-sm">
                     <div
@@ -220,10 +232,13 @@ import BottomTerminal from 'src/components/v2/BottomTerminal.vue';
 import { useRobot } from 'src/composables/useRobot';
 import FormDialog from 'src/components/v2/FormDialog.vue';
 import RobotPendant from 'src/components/v2/RobotPendant.vue';
+import TutorialHint from 'src/components/v2/TutorialHint.vue';
+import { useTutorialStore } from 'src/stores/tutorialStore.js';
 // import SimView from 'src/components/v2/SimView.vue'; // 시뮬레이션 안정화 후 활성화
 
 const { socket } = useSocket();
 const { leaderTeleStarted, stopLeaderTele } = useLeaderTeleoperation();
+const tutorial = useTutorialStore();
 
 const robots = ref([]);
 

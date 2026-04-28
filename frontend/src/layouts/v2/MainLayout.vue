@@ -46,6 +46,20 @@
         <q-separator dark class="q-mx-md" />
 
         <div class="q-pa-md">
+          <q-btn
+            class="border-rounded bg-dark q-pa-md full-width q-mb-md text-left"
+            flat
+            no-caps
+            @click="showPipelineGuide = true"
+          >
+            <div class="row items-center no-wrap full-width">
+              <q-icon name="help_outline" color="primary" size="md" class="q-mr-md" />
+              <div class="column items-start">
+                <div class="text-white">{{ $t('pipelineGuideTitle') }}</div>
+                <div class="text-caption text-grey-5">{{ $t('pipelineGuideSubtitle') }}</div>
+              </div>
+            </div>
+          </q-btn>
           <q-item class="border-rounded bg-dark">
             <q-item-section avatar>
               <q-icon name="school" :color="tutorial.running ? 'primary' : 'grey-5'" />
@@ -77,6 +91,8 @@
     <q-page-container class="bg-dark">
       <router-view />
     </q-page-container>
+
+    <PipelineGuideDialog v-model="showPipelineGuide" />
   </q-layout>
 </template>
 
@@ -84,6 +100,7 @@
 import { ref } from 'vue'
 import { Notify } from 'quasar'
 import EssentialLink from 'components/v2/EssentialLink.vue'
+import PipelineGuideDialog from 'components/v2/PipelineGuideDialog.vue'
 import { useTutorialStore } from 'src/stores/tutorialStore.js'
 
 const linksList = [
@@ -121,6 +138,7 @@ const linksList = [
 ]
 
 const leftDrawerOpen = ref(false)
+const showPipelineGuide = ref(false)
 const tutorial = useTutorialStore()
 
 function toggleLeftDrawer () {

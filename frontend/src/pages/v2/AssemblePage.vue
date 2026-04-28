@@ -8,6 +8,9 @@
                 <div class="text-body text-white">{{ $t('assembleIntroBody2') }}</div>
             </div>
         </div>
+
+        <TutorialHint class="q-mb-md" :text="$t('tutorialAssembleIntro')" />
+
         <div class="row q-col-gutter-md">
             <div class="col-6 col-sm-4 col-md-3 col-lg-2" v-for="assembly in assemblies" :key="assembly.id">
                 <q-card class="q-pa-md bg-secondary border-rounded border-white text-white cursor-pointer" @click="watchingAssembly = assembly"
@@ -50,6 +53,7 @@
             no-close
         >
             <template #new>
+                <TutorialHint class="q-mb-sm" :text="$t('tutorialAssembleNew')" />
                 <assembly-form
                     :assembly="null"
                     @save="saveAssembly"
@@ -77,6 +81,7 @@ import { api } from 'src/boot/axios';
 import AssemblyForm from 'src/components/v2/AssemblyForm.vue';
 import BottomTerminal from 'src/components/v2/BottomTerminal.vue';
 import TeleSettingDialog from 'src/components/v2/TeleSettingDialog.vue';
+import TutorialHint from 'src/components/v2/TutorialHint.vue';
 
 const assemblies = ref([]);
 // const watchingAssembly = ref(null);

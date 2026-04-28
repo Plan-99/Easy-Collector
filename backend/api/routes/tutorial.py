@@ -2,7 +2,7 @@
 """
 Tutorial mode API routes.
 
-Tutorial mode boots a bundled MuJoCo simulation (modules/sim/mujoco_world)
+Tutorial mode boots a bundled MuJoCo simulation (ros2/ros2_ws/src/mujoco_world)
 that publishes a virtual robot and RGB camera as standard ROS2 topics. The
 tutorial_arm / tutorial_camera DB rows are seeded as `type='custom'` so the
 rest of EasyTrainer treats them like ordinary external-topic devices — no
@@ -75,7 +75,13 @@ def _find_tutorial_sensor():
 
 
 def _ensure_tutorial_rows():
-    """Create tutorial robot/sensor DB rows if they don't already exist."""
+    """Create tutorial robot/sensor DB rows if they don't already exist.
+
+    Also migrates already-seeded tutorial rows by merging in any newer keys
+    from TUTORIAL_ROBOT/SENSOR['settings'] that the existing row is missing
+    (e.g. urdf_path / ik_setting added after first install). Existing keys
+    are preserved so user edits aren't clobbered.
+    """
     robot = _find_tutorial_robot()
     if robot is None:
         # Robot.role is a getter-only @property; for custom robots it falls
@@ -86,6 +92,13 @@ def _ensure_tutorial_rows():
             settings=json.dumps(TUTORIAL_ROBOT['settings']),
             homepose=json.dumps(TUTORIAL_ROBOT['homepose']),
         )
+    else:
+        current = _settings_dict(robot)
+        added = {k: v for k, v in TUTORIAL_ROBOT['settings'].items() if k not in current}
+        if added:
+            current.update(added)
+            robot.settings = json.dumps(current)
+            robot.save()
 
     sensor = _find_tutorial_sensor()
     if sensor is None:
@@ -94,6 +107,13 @@ def _ensure_tutorial_rows():
             type=TUTORIAL_SENSOR['type'],
             settings=json.dumps(TUTORIAL_SENSOR['settings']),
         )
+    else:
+        current = _settings_dict(sensor)
+        added = {k: v for k, v in TUTORIAL_SENSOR['settings'].items() if k not in current}
+        if added:
+            current.update(added)
+            sensor.settings = json.dumps(current)
+            sensor.save()
 
     return robot, sensor
 

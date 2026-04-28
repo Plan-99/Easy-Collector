@@ -60,6 +60,9 @@
                 <div class="text-body text-white">{{ $t('workspaceIntroBody2') }}</div>
             </div>
         </div>
+
+        <TutorialHint class="q-mb-md" :text="$t('tutorialWorkspaceIntro')" />
+
         <div class="col q-mb-lg border-rounded border-grey text-grey flex-center flex text-h6" v-if="!selectedWorkspaceId">
             Select Workspace First
         </div>
@@ -77,6 +80,7 @@
                     <q-tab name="inference" label="inference"></q-tab>
                 </q-tabs>
                 <div v-if="selectedTab === 'setting'" class="q-pt-md q-px-sm text-white">
+                    <TutorialHint class="q-mb-sm" :text="$t('tutorialWorkspaceSetting')" />
                     <q-list dark bordered separator class="border-rounded bg-dark" >
                         <q-expansion-item
                             icon="camera"
@@ -202,6 +206,8 @@
                     </q-list>
                     <div v-if="focused.id" class="q-mt-md text-white h6">
                         <div>{{ $t(`${focused.device_type} Config`) }} <span class="text-primary">{{ focused.name }}</span></div>
+                        <TutorialHint class="q-mt-sm" :text="$t('tutorialWorkspaceSensorConfig')" v-if="focused.device_type === 'sensor'" />
+                        <TutorialHint class="q-mt-sm" :text="$t('tutorialWorkspaceRobotConfig')" v-else-if="focused.device_type === 'robot'" />
                         <div
                             class="q-pa-sm q-px-md q-mt-sm border-rounded row border-white"
                             v-if="focused.device_type === 'sensor'"
@@ -315,6 +321,7 @@
                     class="q-pt-md q-px-sm text-white"
                     style="height: 90%"
                 >
+                    <TutorialHint class="q-mb-sm" :text="$t('tutorialWorkspaceData')" />
                     <q-btn
                         outline
                         class="full-width q-mb-sm"
@@ -406,6 +413,7 @@
                     </q-scroll-area>
                 </div>
                 <div v-else-if="selectedTab === 'inference'" style="height: 90%" class="q-pt-md q-px-sm text-white">
+                    <TutorialHint class="q-mb-sm" :text="$t('tutorialWorkspaceInference')" />
                     <q-scroll-area class="full-height">
                         <div class="row q-col-gutter-md">
                         <div class="col-6" v-for="checkpoint in checkpoints" :key="checkpoint.id">
@@ -469,20 +477,23 @@
                     </q-scroll-area>
                 </div>
             </div>
-            <monitoring-window
-                class="col"
-                :workspace="selectedWorkspace"
-                :robots="robots"
-                :sensors="selectedSensors"
-                v-model:selected-dataset-id="selectedDatasetId"
-                v-model:selected-checkpoint-id="selectedCheckpointId"
-                v-model:focused="focused"
-                v-model:selected-episode="selectedEpisode"
-                :datasets="datasets"
-                :checkpoints="checkpoints"
-                :status="status"
-                :class="isFailureDetected ? 'border-red' : 'border-white'"
-            />
+            <div class="col column">
+                <TutorialHint class="q-mb-sm" :text="$t('tutorialWorkspaceMonitoring')" />
+                <monitoring-window
+                    class="col"
+                    :workspace="selectedWorkspace"
+                    :robots="robots"
+                    :sensors="selectedSensors"
+                    v-model:selected-dataset-id="selectedDatasetId"
+                    v-model:selected-checkpoint-id="selectedCheckpointId"
+                    v-model:focused="focused"
+                    v-model:selected-episode="selectedEpisode"
+                    :datasets="datasets"
+                    :checkpoints="checkpoints"
+                    :status="status"
+                    :class="isFailureDetected ? 'border-red' : 'border-white'"
+                />
+            </div>
         </div>
         <form-dialog
             v-model="showWorkspaceForm"
@@ -612,6 +623,7 @@ import { useProcessStore } from 'src/stores/processStore';
 import MonitoringWindow from 'src/components/v2/MonitoringWindow.vue';
 import CheckpointInfo from 'src/components/v2/CheckpointInfo.vue';
 import WebRtcVideo from 'src/components/v2/WebRtcVideo.vue';
+import TutorialHint from 'src/components/v2/TutorialHint.vue';
 
 const processStore = useProcessStore();
 
@@ -1077,33 +1089,14 @@ const selectedCheckpoint = computed(() => {
 });
 const checkpoints = ref([]);
 function listCheckpoints() {
-    const myCheckpointsReq = api.get('/checkpoints', {
+    return api.get('/checkpoints', {
         params: {
             where: `task_id,=,${selectedWorkspaceId.value}|status,=,finished`,
             order: 'created_at DESC'
         }
+    }).then((res) => {
+        checkpoints.value = res.data.checkpoints || [];
     });
-
-    // 2. 베이스 모델 조회
-    const baseModelsReq = api.get('/checkpoints', {
-        params: {
-            where: `is_base_model,=,1`,
-            order: 'created_at DESC'
-        }
-    });
-
-    // 3. 두 요청을 동시에 실행하고 결과 합치기
-    return Promise.all([myCheckpointsReq, baseModelsReq])
-        .then(([myRes, baseRes]) => {
-            const myData = myRes.data.checkpoints || [];
-            const baseData = baseRes.data.checkpoints || [];
-            
-            // 두 배열을 합침 (중복 제거가 필요하다면 id로 필터링 추가)
-            checkpoints.value = [...baseData, ...myData];
-            
-            // 합친 후 다시 날짜순 정렬 (필요 시)
-            // checkpoints.value.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-        });
 }
 
 const showCheckpointForm = ref(false);

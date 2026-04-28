@@ -26,6 +26,9 @@
                 <div class="text-body text-white">{{ $t('trainIntroBody2') }}</div>
             </div>
         </div>
+
+        <TutorialHint class="q-mb-md" :text="$t('tutorialTrainIntro')" />
+
         <div class="col q-mb-lg border-rounded border-grey text-grey flex-center flex text-h6" v-if="!selectedWorkspaceId">
             Select Workspace First
         </div>
@@ -38,6 +41,7 @@
                 class="border-white border-rounded q-mt-lg bg-secondary col"
             >
                 <div class="text-h6 q-mb-md">Select datasets for training</div>
+                <TutorialHint step="1" class="q-mb-md" :text="$t('tutorialTrainStep1')" />
                 <q-scroll-area style="height: 420px">                
                     <div class="row q-col-gutter-md">
                         <div class="col-6 col-sm-4 col-md-3 col-lg-2" v-for="dataset in availableDatasets" :key="dataset.id">
@@ -82,6 +86,7 @@
                 class="border-white border-rounded q-mt-lg bg-secondary col"
             >
                 <div class="text-h6 q-mb-md">Configure Policy</div>
+                <TutorialHint step="2" class="q-mb-md" :text="$t('tutorialTrainStep2')" />
                 <div class="row">
                     <q-scroll-area class="col-12" style="height: 420px">                
                         <div class="row q-col-gutter-md">
@@ -255,6 +260,7 @@
 
             >
                 <div class="text-h6 q-mb-md">Training Configuration</div>
+                <TutorialHint step="3" class="q-mb-md" :text="$t('tutorialTrainStep3')" />
                 <q-scroll-area class="col-12" style="height: 420px">
                     <div class="q-gutter-y-md">
                         <!-- Training Server -->
@@ -386,6 +392,7 @@ import { api } from 'src/boot/axios';
 import { POLICY_CONFIGS, TRAIN_CONFIGS } from 'src/configs/modelConfigs';
 // import { useTraining } from 'src/composables/useTraining';
 import TrainingDialog from 'src/components/v2/TrainingDialog.vue';
+import TutorialHint from 'src/components/v2/TutorialHint.vue';
 import { useSocket } from 'src/composables/useSocket';
 import { useProcessStore } from 'src/stores/processStore';
 
