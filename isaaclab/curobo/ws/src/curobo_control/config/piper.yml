@@ -1,0 +1,18 @@
+##
+## Piper 6-DOF robot configuration for cuRobo
+##
+
+robot_cfg:
+  kinematics:
+    use_usd_kinematics: False
+    urdf_path: "/root/ws/src/piper_description/urdf/piper_description.urdf"
+    asset_root_path: "/root/ws/src/piper_description"
+    base_link: "base_link"
+    ee_link: "tcp"
+    cspace:
+      joint_names: ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
+      retract_config: [0.0, 1.57, -1.57, 0.0, 0.0, 0.0]
+      null_space_weight: [1, 1, 1, 1, 1, 1]
+      cspace_distance_weight: [1, 1, 1, 1, 1, 1]
+      max_acceleration: 10.0
+      max_jerk: 500.0

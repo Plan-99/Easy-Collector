@@ -84,6 +84,10 @@ from modules import (
     get_training_mode,
     set_training_mode,
     get_training_server_config,
+    refresh_remote_state,
+    get_module_price_krw,
+    is_module_entitled,
+    fetch_owned_module_ids,
 )
 import training_server_install as _ts
 from service import ComposeServiceMixin, HealthServiceMixin, RuntimeServiceMixin, docker_compose_available
@@ -1852,6 +1856,16 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             save_config(cfg)
         except Exception:
             pass
+        # 실행 중인 compose 모듈(sim_isaaclab 등) 재시작
+        try:
+            from modules import get_installed_modules, restart_module, _load_module_meta
+            for mid in get_installed_modules():
+                meta = _load_module_meta(mid)
+                if meta and meta.get("install", {}).get("compose"):
+                    self.append_log(f"[SETTINGS] {mid} 재시작 중 (ROS_DOMAIN_ID 적용)...")
+                    restart_module(mid)
+        except Exception as e:
+            self.append_log(f"[SETTINGS][WARN] 모듈 재시작 실패: {e}")
         synced = self._sync_ros_domain_compose_files(value)
         if synced:
             self.append_log(f"[SETTINGS] ROS_DOMAIN_ID={value} 저장 완료.")
@@ -3535,6 +3549,13 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
         by_cat = modules_by_category()
 
+        # Pull the latest catalog (prices) + this user's owned modules so
+        # button labels reflect "₩50,000 결제" vs plain "설치".
+        try:
+            refresh_remote_state()
+        except Exception:
+            pass
+
         # Fetch remote versions (best-effort)
         remote_vers: dict[str, str] = {}
         try:
@@ -3542,6 +3563,114 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             remote_vers = get_remote_versions(release)
         except Exception:
             release = None
+
+        def _format_krw(amount: int) -> str:
+            try:
+                return f"{amount:,}원"
+            except Exception:
+                return f"{amount}원"
+
+        def _open_checkout(module_id: str, btn=None, status_lbl=None, ver_lbl=None,
+                           release_ref=None):
+            """Open the PortOne checkout page in the user's browser and poll
+            /api/entitlements until the module is owned. On success, kick off
+            the install via _make_action(...).
+
+            If poll-success runs out (10 min) or the user cancels, we just
+            close the dialog and leave the row as-is.
+            """
+            import webbrowser
+            from modules import get_api_base_url
+
+            checkout_url = f"{get_api_base_url()}/checkout/{module_id}"
+            try:
+                webbrowser.open(checkout_url, new=2)
+            except Exception:
+                pass
+
+            wait_dlg = QDialog(dlg)
+            wait_dlg.setWindowTitle("결제 진행")
+            wait_dlg.setModal(True)
+            wait_dlg.setMinimumWidth(480)
+            wlayout = QVBoxLayout(wait_dlg)
+            msg = QLabel(
+                "브라우저에서 결제를 완료해 주세요.\n"
+                "결제가 확인되면 자동으로 설치를 시작합니다.\n\n"
+                "창이 열리지 않았다면 아래 주소를 복사해 직접 여세요:"
+            )
+            msg.setWordWrap(True)
+            wlayout.addWidget(msg)
+
+            url_row = QHBoxLayout()
+            url_edit = QLineEdit(checkout_url)
+            url_edit.setReadOnly(True)
+            copy_btn = QPushButton("복사")
+            copy_btn.setFixedWidth(60)
+            url_row.addWidget(url_edit, 1)
+            url_row.addWidget(copy_btn)
+            wlayout.addLayout(url_row)
+
+            def _copy_url():
+                try:
+                    QApplication.clipboard().setText(checkout_url)
+                    copy_btn.setText("복사됨")
+                    QTimer.singleShot(1500, lambda: copy_btn.setText("복사"))
+                except Exception:
+                    pass
+            copy_btn.clicked.connect(_copy_url)
+
+            cancel_btn = QPushButton("취소")
+            wlayout.addWidget(cancel_btn)
+
+            timer = QTimer(wait_dlg)
+            deadline = time.monotonic() + 10 * 60  # 10 min
+            poll_state = {"running": True}
+
+            def _stop():
+                poll_state["running"] = False
+                timer.stop()
+                if wait_dlg.isVisible():
+                    wait_dlg.accept()
+
+            def _poll():
+                if not poll_state["running"]:
+                    return
+                if time.monotonic() > deadline:
+                    _stop()
+                    QMessageBox.warning(
+                        dlg, "시간 초과",
+                        "결제 확인 대기 시간이 만료되었습니다. 결제를 완료하셨다면 모듈 창을 다시 열어주세요.",
+                    )
+                    return
+                try:
+                    owned = fetch_owned_module_ids()
+                except Exception:
+                    owned = set()
+                if module_id in owned:
+                    _stop()
+                    try:
+                        refresh_remote_state()
+                    except Exception:
+                        pass
+                    if btn is not None and status_lbl is not None and ver_lbl is not None:
+                        try:
+                            _make_action(module_id, "install", btn, status_lbl, ver_lbl, release_ref)()
+                        except Exception:
+                            QMessageBox.information(
+                                dlg, "결제 완료",
+                                "결제가 확인되었습니다. 모듈 창을 다시 열어 설치를 진행해 주세요.",
+                            )
+                    else:
+                        QMessageBox.information(
+                            dlg, "결제 완료",
+                            "결제가 확인되었습니다. 모듈 창을 다시 열어 설치를 진행해 주세요.",
+                        )
+
+            timer.timeout.connect(_poll)
+            timer.start(3000)  # 3s polling
+            cancel_btn.clicked.connect(_stop)
+            wait_dlg.rejected.connect(_stop)
+            wait_dlg.exec()
 
         def _make_action(module_id, action, btn, status_lbl, ver_lbl, release_ref):
             def _do():
@@ -3673,10 +3802,29 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                     btn.setStyleSheet("font-size: 11px; border-radius: 6px;")
                     btn.clicked.connect(_make_action(mod.id, "remove", btn, status, ver_lbl, release))
                 else:
-                    btn = QPushButton("설치")
-                    btn.setFixedSize(52, 26)
-                    btn.setStyleSheet("font-size: 11px; border-radius: 6px;")
-                    btn.clicked.connect(_make_action(mod.id, "install", btn, status, ver_lbl, release))
+                    price_krw = get_module_price_krw(mod.id)
+                    entitled = is_module_entitled(mod.id)
+                    if price_krw > 0 and not entitled:
+                        # Paid module the user has not bought yet.
+                        btn = QPushButton(f"결제 · {_format_krw(price_krw)}")
+                        btn.setFixedSize(120, 26)
+                        btn.setStyleSheet(
+                            "font-size: 11px; border-radius: 6px; "
+                            "background-color: #4338ca; color: #ffffff; border: 1px solid #6366f1;"
+                        )
+                        btn.clicked.connect(
+                            lambda _checked, mid=mod.id, b=btn, s=status, v=ver_lbl, r=release:
+                            _open_checkout(mid, b, s, v, r)
+                        )
+                    else:
+                        # Free or already owned.
+                        label = "설치"
+                        if price_krw > 0 and entitled:
+                            label = "설치 (구매 완료)"
+                        btn = QPushButton(label)
+                        btn.setFixedSize(120 if price_krw > 0 else 52, 26)
+                        btn.setStyleSheet("font-size: 11px; border-radius: 6px;")
+                        btn.clicked.connect(_make_action(mod.id, "install", btn, status, ver_lbl, release))
                 row.addWidget(btn)
 
                 col.addWidget(row_widget)

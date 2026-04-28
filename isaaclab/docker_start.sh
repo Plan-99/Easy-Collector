@@ -1,0 +1,23 @@
+docker run -it --rm \
+    --runtime=nvidia \
+    --gpus all \
+    --shm-size 2gb \
+    --network host \
+    -e "ACCEPT_EULA=Y" \
+    -e "OMNI_KIT_ALLOW_ROOT=1" \
+    -e "ISAACSIM_PATH=/workspace/isaaclab/_isaac_sim" \
+    -e "RMW_IMPLEMENTATION=rmw_cyclonedds_cpp" \
+    -e "ROS_DOMAIN_ID=31" \
+    -e "LD_LIBRARY_PATH=/isaac-sim/exts/isaacsim.ros2.bridge/humble/lib" \
+    -e DISPLAY=$DISPLAY \
+    -e XAUTHORITY=/tmp/.Xauthority \
+    -e LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libspdlog.so.1.9.2 \
+    -v /tmp/.X11-unix:/tmp/.X11-unix \
+    -v $HOME/.Xauthority:/tmp/.Xauthority:ro \
+    -v $(pwd):/workspace/isaaclab \
+    -v ~/docker/isaac-sim/cache/kit:/isaac-sim/kit/cache/Kit:rw \
+    -v ~/docker/isaac-sim/cache/ov:/root/.cache/ov:rw \
+    -v ~/docker/isaac-sim/cache/pip:/root/.cache/pip:rw \
+    -v ~/docker/isaac-sim/cache/glcache:/root/.cache/nvidia/GLCache:rw \
+    --name isaac_lab_dev \
+    isaac-lab-ros2:latest

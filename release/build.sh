@@ -175,6 +175,8 @@ RSYNC_EXCLUDES=(
   # 런타임 프로젝트에 불필요한 폴더
   'home-next'
   'modules'
+  # isaaclab은 모듈로 별도 다운로드 (CI가 tar.gz로 패키징)
+  'isaaclab'
   'python_pkgs'
   'cmake_pkgs'
   'scripts'

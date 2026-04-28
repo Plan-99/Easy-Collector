@@ -5,6 +5,7 @@ on:
     branches: [main, module_up]
     paths:
       - 'modules/**'
+      - 'isaaclab/**'
   workflow_dispatch:
 
 permissions:
@@ -41,6 +42,16 @@ jobs:
             done
           done
 
+          # isaaclab/ 변경 시 sim_isaaclab 모듈이 변경된 것으로 처리
+          if echo "$CHANGED_FILES" | grep -q "^isaaclab/"; then
+            if [ -f "modules/extensions/sim_isaaclab/module.json" ]; then
+              # 중복 방지
+              if [[ ! " ${MODULES[*]} " =~ " extensions/sim_isaaclab " ]]; then
+                MODULES+=("extensions/sim_isaaclab")
+              fi
+            fi
+          fi
+
           if [ ${#MODULES[@]} -eq 0 ]; then
             echo "changed_modules=[]" >> "$GITHUB_OUTPUT"
           else
@@ -73,7 +84,17 @@ jobs:
 
           tar_name="module-${module_id}-${module_version}.tar.gz"
           mkdir -p dist
-          tar -czf "dist/$tar_name" -C "modules/$category" "$folder_name"
+
+          # sim_isaaclab은 isaaclab/ 소스도 함께 패키징
+          if [ "$module_id" = "sim_isaaclab" ]; then
+            STAGE_DIR=$(mktemp -d)
+            cp -r "$MODULE_DIR" "$STAGE_DIR/$folder_name"
+            cp -r "isaaclab" "$STAGE_DIR/$folder_name/isaaclab"
+            tar -czf "dist/$tar_name" -C "$STAGE_DIR" "$folder_name"
+            rm -rf "$STAGE_DIR"
+          else
+            tar -czf "dist/$tar_name" -C "modules/$category" "$folder_name"
+          fi
 
           echo "MODULE_ID=$module_id" >> "$GITHUB_ENV"
           echo "MODULE_VERSION=$module_version" >> "$GITHUB_ENV"

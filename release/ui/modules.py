@@ -6,6 +6,9 @@ import os
 import shutil
 import tarfile
 import tempfile
+import threading
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -28,7 +31,11 @@ class ModuleInfo:
     dependencies: list[str] = field(default_factory=list)
 
 
-MODULE_REGISTRY: list[ModuleInfo] = [
+# Hardcoded fallback used when the launcher can't reach home-next AND no cache
+# exists yet. The home-next /api/modules response is the source of truth at
+# runtime — see _refresh_registry_from_remote(). Keep this list in sync with
+# home-next/prisma/seed-modules.sql so a fresh install works offline.
+_FALLBACK_REGISTRY: list[ModuleInfo] = [
     # ── Core (always installed, hidden in UI) ──
     ModuleInfo(id="core", name="메인 프레임워크", category="core", description="Flask API, Frontend, DB 등 기본 시스템", required=True, default=True),
     ModuleInfo(id="import", name="로봇/센서 Import", category="feature", description="로봇·센서 불러오기", required=True, default=True),
@@ -56,10 +63,21 @@ MODULE_REGISTRY: list[ModuleInfo] = [
     # ── Extensions ──
     ModuleInfo(id="vr_teleop", name="VR 텔레오퍼레이션", category="extension", description="VR 기반 원격 조종", asset_name="module-vr_teleop-{version}.tar.gz"),
     ModuleInfo(id="test_arm", name="Test Arm", category="extension", description="테스트 로봇 암 시뮬레이션", asset_name="module-test_arm-{version}.tar.gz"),
+    ModuleInfo(id="sim_isaaclab", name="Isaac Lab 시뮬레이션", category="extension", description="NVIDIA Isaac Lab + cuRobo (GPU 필요, NGC 로그인 필요)", asset_name="module-sim_isaaclab-{version}.tar.gz"),
 ]
 
-# Lookup helpers
+# Mutable runtime registry, swapped in-place on remote refresh. Importers
+# (`from modules import MODULE_REGISTRY`) keep their reference valid because
+# we mutate the list, not rebind it.
+MODULE_REGISTRY: list[ModuleInfo] = list(_FALLBACK_REGISTRY)
 _REGISTRY_MAP: dict[str, ModuleInfo] = {m.id: m for m in MODULE_REGISTRY}
+
+
+def _apply_registry(items: list["ModuleInfo"]) -> None:
+    """Replace runtime registry contents in place."""
+    MODULE_REGISTRY[:] = items
+    _REGISTRY_MAP.clear()
+    _REGISTRY_MAP.update({m.id: m for m in items})
 
 CATEGORY_LABELS = {
     "core": "코어 기능 (필수)",
@@ -498,6 +516,16 @@ def download_module(
     if not mod:
         return False
 
+    # Entitlement gate. The home-next API is also the source of truth for
+    # "owned vs. not owned"; checking here is defense-in-depth so a user with
+    # a tampered launcher can't sideload a paid module.
+    # If the catalog isn't loaded yet (offline first run) we let it through —
+    # the payment phase is opt-in for paid modules and we don't want to break
+    # the wizard for users who lost network mid-install.
+    if remote_state_loaded() and not is_module_entitled(module_id):
+        print(f"[MODULE] {module_id}: not entitled — purchase required")
+        return False
+
     # 모듈별 릴리즈를 직접 조회
     if release is None:
         release = fetch_module_release(module_id)
@@ -564,6 +592,9 @@ def download_module(
                 extracted = [d for d in Path(tmpdir).iterdir() if d.is_dir()]
                 if extracted:
                     _install_module_deps(extracted[0], module_id)
+        elif _module_meta.get("install", {}).get("compose"):
+            # Docker compose 모듈 (sim_isaaclab 등): compose 파일 + 소스 디렉토리 별도 설치
+            _install_compose_module(tmp_path, module_id, _module_meta)
         elif mod.category in ("robot", "sensor") or _module_meta.get("install", {}).get("ros2"):
             # ros2/ 트리를 가진 모듈은 같은 layout을 사용 (robot/sensor + sim 등)
             _install_robot_sensor_module(tmp_path, module_id)
@@ -580,6 +611,9 @@ def download_module(
 
         # Install deps inside running containers via docker exec
         _install_deps_in_containers(_module_meta)
+
+        # 모듈에 post_install 스크립트가 있으면 실행
+        _run_module_script(module_id, _module_meta, "post_install")
 
         set_module_installed(module_id, True, version=remote_version, deps=_module_deps)
         return True
@@ -717,6 +751,64 @@ def _install_robot_sensor_module(tar_path: str, module_id: str) -> None:
         _install_module_deps(ros2_base / module_name, module_id)
 
 
+def _install_compose_module(tar_path: str, module_id: str, meta: dict) -> None:
+    """Install a Docker compose-based module (e.g. sim_isaaclab).
+
+    Archive structure: <module_name>/{module.json, docker-compose.*.yml, scripts/, <source_dir>/}
+    - compose 파일 + 스크립트 → project/modules/<module_id>/
+    - source 디렉토리 (e.g. isaaclab/) → project/<source_target>/
+    """
+    import shutil
+
+    project = _get_project_root()
+    install = meta.get("install", {})
+    compose_cfg = install.get("compose", {})
+    source_cfg = install.get("source", {})
+
+    compose_target_rel = compose_cfg.get("target", f"modules/{module_id}")
+    source_target_rel = source_cfg.get("target", "")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with tarfile.open(tar_path, "r:gz") as tar:
+            tar.extractall(path=tmpdir)
+        extracted = [d for d in Path(tmpdir).iterdir() if d.is_dir()]
+        if not extracted:
+            return
+        module_dir = extracted[0]
+
+        # 1) module 폴더 → project/modules/<module_id>/ (compose 파일, 스크립트 등)
+        compose_target = project / compose_target_rel
+        if compose_target.exists():
+            shutil.rmtree(compose_target)
+        compose_target.parent.mkdir(parents=True, exist_ok=True)
+
+        # source 디렉토리는 별도 위치로 옮기므로 일단 모듈 폴더에 포함된 채 복사
+        # (이후 source 디렉토리만 분리 이동)
+        shutil.copytree(module_dir, compose_target)
+
+        # 2) source 디렉토리 분리 (예: isaaclab/ → project/isaaclab/)
+        if source_target_rel:
+            source_inside = compose_target / source_target_rel.split("/")[-1]
+            if source_inside.is_dir():
+                source_target = project / source_target_rel
+                if source_target.exists():
+                    shutil.rmtree(source_target)
+                source_target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(source_inside), str(source_target))
+
+        # 3) 권한 설정 (스크립트 실행 가능)
+        scripts_dir = compose_target / "scripts"
+        if scripts_dir.is_dir():
+            for script in scripts_dir.iterdir():
+                if script.suffix == ".sh":
+                    try:
+                        script.chmod(0o755)
+                    except Exception:
+                        pass
+
+        print(f"[MODULE] {module_id}: installed compose to {compose_target}, source to {project / source_target_rel if source_target_rel else 'N/A'}")
+
+
 def _install_module_deps(install_dir: Path, module_id: str) -> None:
     """Install dependencies and run install script from module.json."""
     import subprocess as _sp
@@ -786,6 +878,101 @@ def _uninstall_deps(meta: dict) -> None:
     # apt packages: 일반적으로 제거하지 않음 (다른 모듈이 공유할 수 있으므로)
 
 
+def _run_module_script(module_id: str, meta: dict, script_key: str) -> bool:
+    """Run a module's lifecycle script (post_install, start_command, stop_command).
+
+    Returns True if executed (or no script defined), False on error.
+    """
+    import subprocess as _sp
+
+    script_rel = meta.get(script_key)
+    if not script_rel:
+        return True
+
+    project = _get_project_root()
+    install = meta.get("install", {})
+    compose_target_rel = install.get("compose", {}).get("target")
+    if compose_target_rel:
+        module_dir = project / compose_target_rel
+    else:
+        # fallback: project/modules/<module_id>
+        module_dir = project / "modules" / module_id
+
+    script_path = module_dir / script_rel
+    if not script_path.is_file():
+        print(f"[MODULE] {module_id}: {script_key} script not found: {script_path}")
+        return False
+
+    # 환경변수 — config.json의 ros_domain_id 전달
+    env = os.environ.copy()
+    try:
+        cfg = load_config()
+        env["ROS_DOMAIN_ID"] = str(cfg.get("ros_domain_id", 0))
+        env["EASYTRAINER_DATA_DIR"] = os.environ.get("EASYTRAINER_DATA_DIR", "/opt/easytrainer")
+    except Exception:
+        pass
+
+    try:
+        result = _sp.run(
+            ["bash", str(script_path)],
+            cwd=str(module_dir),
+            env=env,
+            timeout=600,
+            check=False,
+        )
+        return result.returncode == 0
+    except Exception as e:
+        print(f"[MODULE] {module_id}: {script_key} failed: {e}")
+        return False
+
+
+def _load_module_meta(module_id: str) -> dict | None:
+    """Load module.json from installed location."""
+    project = _get_project_root()
+    # compose 모듈
+    candidate = project / "modules" / module_id / "module.json"
+    if candidate.is_file():
+        try:
+            return json.loads(candidate.read_text())
+        except Exception:
+            return None
+    # ros2_ws/src 모듈
+    ros2_src = project / "ros2" / "ros2_ws" / "src"
+    if ros2_src.is_dir():
+        for d in ros2_src.iterdir():
+            mj = d / "module.json"
+            if mj.is_file():
+                try:
+                    meta = json.loads(mj.read_text())
+                    if meta.get("id") == module_id:
+                        return meta
+                except Exception:
+                    continue
+    return None
+
+
+def start_module(module_id: str) -> bool:
+    """Start a module's runtime (e.g. docker compose up)."""
+    meta = _load_module_meta(module_id)
+    if not meta:
+        return False
+    return _run_module_script(module_id, meta, "start_command")
+
+
+def stop_module(module_id: str) -> bool:
+    """Stop a module's runtime."""
+    meta = _load_module_meta(module_id)
+    if not meta:
+        return False
+    return _run_module_script(module_id, meta, "stop_command")
+
+
+def restart_module(module_id: str) -> bool:
+    """Restart a module (used when ROS_DOMAIN_ID changes)."""
+    stop_module(module_id)
+    return start_module(module_id)
+
+
 def remove_module(module_id: str) -> bool:
     """Remove an installed module."""
     mod = get_module(module_id)
@@ -796,6 +983,21 @@ def remove_module(module_id: str) -> bool:
 
     # Load manifest for uninstall info
     manifest = _load_module_manifest(module_id)
+
+    # Compose 모듈 (sim_isaaclab 등): stop 후 폴더 + source 디렉토리 삭제
+    if manifest and manifest.get("install", {}).get("compose"):
+        stop_module(module_id)
+        compose_target = manifest["install"]["compose"].get("target", f"modules/{module_id}")
+        compose_path = project / compose_target
+        if compose_path.is_dir():
+            shutil.rmtree(compose_path, ignore_errors=True)
+        source_target = manifest.get("install", {}).get("source", {}).get("target", "")
+        if source_target:
+            source_path = project / source_target
+            if source_path.is_dir():
+                shutil.rmtree(source_path, ignore_errors=True)
+        set_module_installed(module_id, False)
+        return True
 
     if mod.category in ("robot", "sensor"):
         # ros2_ws/src/ 에서 module.json으로 모듈 폴더 찾아 삭제
@@ -971,3 +1173,237 @@ def set_training_mode(mode: str) -> None:
     ts = get_training_server_config()
     ts["mode"] = mode
     save_training_server_config(ts)
+
+
+# ---------------------------------------------------------------------------
+# Catalog + entitlements (home-next API)
+# ---------------------------------------------------------------------------
+#
+# Two pieces of remote state:
+#   - Catalog: { module_id: priceKrw }       — public, /api/modules
+#   - Owned:   set of entitled module_ids    — Bearer-auth, /api/entitlements
+#
+# Both are cached in process for the launcher session. UI dialogs call
+# refresh_remote_state() before opening so the catalog is fresh.
+
+_REMOTE_LOCK = threading.Lock()
+_REMOTE_CATALOG: dict[str, dict] = {}     # module_id -> {name, category, priceKrw, ...}
+_REMOTE_OWNED: set[str] = set()
+_REMOTE_LOADED = False
+
+
+# Vercel moved the canonical alias to easy-trainer-home.vercel.app; the old
+# host now returns 307 redirects which break POST/Bearer flows on urllib.
+_LEGACY_HOSTS = ("easytrainerhome.vercel.app",)
+_DEFAULT_API_URL = "https://easy-trainer-home.vercel.app"
+
+
+def _canonicalize_api_url(url: str) -> str:
+    out = url
+    for legacy in _LEGACY_HOSTS:
+        out = out.replace(legacy, "easy-trainer-home.vercel.app")
+    return out
+
+
+def _api_base_url() -> str:
+    try:
+        cfg = load_config()
+    except Exception:
+        return _DEFAULT_API_URL
+    raw = (cfg.get("license_server_url") or _DEFAULT_API_URL).rstrip("/")
+    fixed = _canonicalize_api_url(raw)
+    if fixed != raw:
+        try:
+            cfg["license_server_url"] = fixed
+            from app_context import save_config
+            save_config(cfg)
+        except Exception:
+            pass
+    return fixed
+
+
+def get_api_base_url() -> str:
+    """Public alias of _api_base_url for callers outside this module."""
+    return _api_base_url()
+
+
+def _get_bearer() -> str | None:
+    """Read the saved access_token written by device_auth.save_auth()."""
+    try:
+        from app_context import APP_HOME
+        auth_file = APP_HOME / "auth.json"
+        if not auth_file.exists():
+            return None
+        data = json.loads(auth_file.read_text(encoding="utf-8"))
+        return data.get("access_token")
+    except Exception:
+        return None
+
+
+def _http_get_json(url: str, *, bearer: str | None = None, timeout: float = 10) -> tuple[int, dict]:
+    headers = {"Accept": "application/json"}
+    if bearer:
+        headers["Authorization"] = f"Bearer {bearer}"
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status, json.loads((resp.read() or b"{}").decode())
+    except urllib.error.HTTPError as e:
+        try:
+            body = json.loads((e.read() or b"{}").decode())
+        except Exception:
+            body = {"error": f"HTTP {e.code}"}
+        return e.code, body
+    except Exception as e:
+        return 0, {"error": str(e)}
+
+
+def fetch_catalog() -> dict[str, dict]:
+    """Fetch /api/modules and return {id: {name, category, priceKrw, description}}."""
+    url = f"{_api_base_url()}/api/modules"
+    status, payload = _http_get_json(url)
+    if status != 200:
+        return {}
+    out: dict[str, dict] = {}
+    for m in payload.get("modules", []):
+        mid = m.get("id")
+        if mid:
+            out[mid] = m
+    return out
+
+
+def fetch_owned_module_ids() -> set[str]:
+    """Fetch /api/entitlements (Bearer required) and return the set of owned module IDs."""
+    bearer = _get_bearer()
+    if not bearer:
+        return set()
+    url = f"{_api_base_url()}/api/entitlements"
+    status, payload = _http_get_json(url, bearer=bearer)
+    if status != 200:
+        return set()
+    return set(payload.get("moduleIds", []))
+
+
+def _module_info_from_payload(m: dict) -> Optional[ModuleInfo]:
+    """Convert one /api/modules entry into a ModuleInfo, defensive about missing keys."""
+    try:
+        mid = m.get("id")
+        if not mid:
+            return None
+        deps = m.get("dependencies") or []
+        return ModuleInfo(
+            id=mid,
+            name=m.get("name") or mid,
+            category=m.get("category") or "extension",
+            description=m.get("description") or "",
+            required=bool(m.get("required")),
+            default=bool(m.get("installByDefault")),
+            asset_name=m.get("assetName") or "",
+            dependencies=list(deps) if isinstance(deps, list) else [],
+        )
+    except Exception:
+        return None
+
+
+def _registry_cache_path() -> Path:
+    from app_context import APP_HOME
+    return APP_HOME / "modules-cache.json"
+
+
+def _load_cached_registry() -> Optional[list[ModuleInfo]]:
+    """Read the last-known-good API response from disk so the launcher works
+    offline (after at least one successful online launch)."""
+    try:
+        path = _registry_cache_path()
+        if not path.exists():
+            return None
+        data = json.loads(path.read_text(encoding="utf-8"))
+        items = []
+        for raw in data.get("modules", []):
+            mi = _module_info_from_payload(raw)
+            if mi:
+                items.append(mi)
+        return items if items else None
+    except Exception:
+        return None
+
+
+def _save_cached_registry(payload: dict) -> None:
+    try:
+        path = _registry_cache_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def refresh_remote_state() -> None:
+    """Pull the latest module catalog + owned-set from home-next.
+
+    On success: refresh MODULE_REGISTRY in place, persist cache, update
+    catalog/owned snapshot. On failure (network down, server error): leave
+    existing registry contents (loaded from fallback or cache) untouched.
+    """
+    global _REMOTE_LOADED
+
+    # Catalog → registry + cache
+    url = f"{_api_base_url()}/api/modules"
+    status, payload = _http_get_json(url)
+    catalog: dict[str, dict] = {}
+    if status == 200 and isinstance(payload, dict):
+        modules = payload.get("modules") or []
+        items: list[ModuleInfo] = []
+        for raw in modules:
+            mi = _module_info_from_payload(raw)
+            if mi:
+                items.append(mi)
+                catalog[mi.id] = raw
+        if items:
+            _apply_registry(items)
+            _save_cached_registry({"modules": modules})
+
+    owned = fetch_owned_module_ids()
+    with _REMOTE_LOCK:
+        _REMOTE_CATALOG.clear()
+        _REMOTE_CATALOG.update(catalog)
+        _REMOTE_OWNED.clear()
+        _REMOTE_OWNED.update(owned)
+        _REMOTE_LOADED = True
+
+
+# On import, prefer the cached registry over the hardcoded fallback so the
+# launcher reflects the latest catalog even before refresh_remote_state runs.
+_cached = _load_cached_registry()
+if _cached:
+    _apply_registry(_cached)
+
+
+def get_module_price_krw(module_id: str) -> int:
+    """Return the cached price in KRW. 0 means free or catalog miss."""
+    with _REMOTE_LOCK:
+        m = _REMOTE_CATALOG.get(module_id)
+    if not m:
+        return 0
+    try:
+        return int(m.get("priceKrw") or 0)
+    except Exception:
+        return 0
+
+
+def is_module_entitled(module_id: str) -> bool:
+    """Whether the signed-in user owns this module.
+
+    Required-by-spec modules (core/feature) are always considered entitled
+    locally — they ship with every launcher and are not gated by purchase even
+    if the catalog says so.
+    """
+    mod = get_module(module_id)
+    if mod and mod.required:
+        return True
+    with _REMOTE_LOCK:
+        return module_id in _REMOTE_OWNED
+
+
+def remote_state_loaded() -> bool:
+    with _REMOTE_LOCK:
+        return _REMOTE_LOADED

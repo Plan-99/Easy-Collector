@@ -1,0 +1,31 @@
+{
+  "id": "sim_isaaclab",
+  "name": "Isaac Lab 시뮬레이션",
+  "version": "1.0.0",
+  "category": "extension",
+  "description": "NVIDIA Isaac Lab + cuRobo 기반 시뮬레이션 환경 (Piper 6-DOF 매니퓰레이션)",
+  "install": {
+    "compose": {
+      "target": "modules/sim_isaaclab",
+      "compose_file": "docker-compose.isaaclab.yml"
+    },
+    "source": {
+      "target": "isaaclab"
+    }
+  },
+  "check": {
+    "type": "path"
+  },
+  "dependencies": {
+    "apt": [],
+    "pip": []
+  },
+  "post_install": "scripts/post_install.sh",
+  "start_command": "scripts/start.sh",
+  "stop_command": "scripts/stop.sh",
+  "requires": {
+    "gpu": true,
+    "min_vram_gb": 8,
+    "ngc_login": true
+  }
+}
