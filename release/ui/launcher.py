@@ -3547,14 +3547,17 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         layout.addWidget(desc)
         layout.addSpacing(4)
 
-        by_cat = modules_by_category()
-
-        # Pull the latest catalog (prices) + this user's owned modules so
-        # button labels reflect "₩50,000 결제" vs plain "설치".
+        # Kick off catalog + owned refresh in the background. The dialog
+        # renders against the currently cached registry (loaded on import) so
+        # it pops up instantly; the next open picks up any newly-fetched
+        # changes from this background pass.
         try:
-            refresh_remote_state()
+            import threading
+            threading.Thread(target=refresh_remote_state, daemon=True).start()
         except Exception:
             pass
+
+        by_cat = modules_by_category()
 
         # Fetch remote versions (best-effort)
         remote_vers: dict[str, str] = {}
@@ -3580,9 +3583,22 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             close the dialog and leave the row as-is.
             """
             import webbrowser
+            from urllib.parse import urlencode
             from modules import get_api_base_url
+            from device_auth import get_signed_in_user
 
-            checkout_url = f"{get_api_base_url()}/checkout/{module_id}"
+            # Pass the launcher's signed-in user id so the checkout page can
+            # detect if the browser is logged in as a different account and
+            # warn before payment.
+            params: dict[str, str] = {}
+            try:
+                u = get_signed_in_user()
+                if u and u.get("id"):
+                    params["u"] = str(u["id"])
+            except Exception:
+                pass
+            qs = ("?" + urlencode(params)) if params else ""
+            checkout_url = f"{get_api_base_url()}/checkout/{module_id}{qs}"
             try:
                 webbrowser.open(checkout_url, new=2)
             except Exception:

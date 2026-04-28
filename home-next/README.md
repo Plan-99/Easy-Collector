@@ -93,10 +93,23 @@ curl -X POST https://your-domain.com/api/serial-key/validate \
 
 ## Vercel 배포
 
+프로젝트는 이미 Vercel에 링크되어 있습니다 (`.vercel/project.json`). 작업 트리를 그대로 프로덕션에 올리려면:
+
 ```bash
-npm i -g vercel
-vercel
+bash home-next/scripts/deploy-vercel.sh           # 프로덕션 (--prod)
+bash home-next/scripts/deploy-vercel.sh preview   # 프리뷰
 ```
+
+스크립트가 하는 일:
+
+1. `.vercel/project.json` 링크 확인
+2. 로컬 `next build`로 타입 에러 미리 차단
+3. `npx vercel deploy [--prod] --yes`로 현재 작업 트리 업로드 (커밋·푸시 없음)
+4. 배포 URL 추출 + `/`, `/auth/signin`, `/api/modules` HTTP 스모크 체크
+
+> Prisma 스키마를 변경했을 때는 `npx prisma migrate deploy`를 별도로 돌리세요. 스크립트는 의도적으로 마이그레이션을 실행하지 않습니다.
+
+링크가 풀린 새 환경이라면 `npx vercel link` 한 번 실행한 뒤 위 스크립트를 사용합니다.
 
 ### 커스텀 도메인 연결
 

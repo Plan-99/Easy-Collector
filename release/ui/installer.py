@@ -11,7 +11,6 @@ from app_context import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -31,11 +30,7 @@ from app_context import (
 )
 from modules import (
     MODULE_REGISTRY,
-    CATEGORY_LABELS,
-    VISIBLE_CATEGORIES,
-    modules_by_category,
     save_installed_modules,
-    get_installed_modules,
     install_modules_batch,
     detect_gpus,
     set_training_mode,
@@ -83,7 +78,7 @@ def run_setup_wizard(self: "MainWindow") -> bool:
 
     # Sidebar
     steps = QListWidget(); steps.setFixedWidth(170); steps.setEnabled(False)
-    for s in ["소프트웨어 사용권 계약", "설치 준비", "모듈 선택", "학습 서버", "설치 중", "완료"]:
+    for s in ["소프트웨어 사용권 계약", "설치 준비", "학습 서버", "설치 중", "완료"]:
         QListWidgetItem(s, steps)
 
     # Pages inside a bordered content box
@@ -191,76 +186,12 @@ def run_setup_wizard(self: "MainWindow") -> bool:
     v2b.addStretch(1)
     page_variant.setLayout(v2b)
 
-    # ── Module selection page ──
-    page_modules = QWidget()
-    v_mod = QVBoxLayout()
-    v_mod.addWidget(QLabel("설치할 모듈을 선택하세요."))
-    v_mod.addSpacing(6)
-
-    module_checkboxes: dict[str, QCheckBox] = {}
-    by_cat = modules_by_category()
-    # Auto-include core/feature (hidden)
-    for cat in ("core", "feature"):
-        for mod in by_cat.get(cat, []):
-            chk = QCheckBox(mod.name)
-            chk.setChecked(True)
-            module_checkboxes[mod.id] = chk
-
-    installed = get_installed_modules()
-    columns_row = QHBoxLayout()
-    columns_row.setSpacing(12)
-
-    def _make_filter(search_input, widget_list):
-        def _do_filter():
-            query = search_input.text().strip().lower()
-            for widget, key in widget_list:
-                widget.setVisible(not query or query in key)
-        search_input.textChanged.connect(_do_filter)
-
-    for cat in VISIBLE_CATEGORIES:
-        mods = by_cat.get(cat, [])
-        if not mods:
-            continue
-        col = QVBoxLayout()
-        col.setSpacing(4)
-        cat_label = QLabel(f"■ {CATEGORY_LABELS.get(cat, cat)}")
-        cat_label.setStyleSheet("font-weight: bold; font-size: 13px;")
-        col.addWidget(cat_label)
-
-        search_input = QLineEdit()
-        search_input.setPlaceholderText("검색...")
-        search_input.setFixedHeight(28)
-        search_input.setStyleSheet("font-size: 11px; padding: 2px 8px;")
-        col.addWidget(search_input)
-
-        sorted_mods = sorted(mods, key=lambda m: (0 if m.id in installed else 1, m.name))
-        widget_list: list[tuple[QWidget, str]] = []
-
-        for mod in sorted_mods:
-            row_widget = QWidget()
-            row = QHBoxLayout(row_widget)
-            row.setContentsMargins(4, 2, 4, 2)
-            row.setSpacing(6)
-            chk = QCheckBox(mod.name)
-            chk.setChecked(mod.id in installed)
-            module_checkboxes[mod.id] = chk
-            row.addWidget(chk)
-            row.addStretch(1)
-            col.addWidget(row_widget)
-            search_key = f"{mod.name} {mod.description} {mod.id}".lower()
-            widget_list.append((row_widget, search_key))
-
-        _make_filter(search_input, widget_list)
-        col.addStretch(1)
-        if columns_row.count() > 0:
-            sep = QFrame()
-            sep.setFrameShape(QFrame.VLine)
-            sep.setStyleSheet("color: #444;")
-            columns_row.addWidget(sep)
-        columns_row.addLayout(col, 1)
-
-    v_mod.addLayout(columns_row, 1)
-    page_modules.setLayout(v_mod)
+    # Module selection happens after first launch (in the launcher's modules
+    # dialog), not during initial install. Users typically don't know what
+    # they need until they've explored the app, and paid modules require
+    # a sign-in flow that isn't available here.
+    # core/feature modules are tracked as "required" in the catalog and the
+    # backend treats them as always-installed regardless of this list.
 
     # ── Training server page ──
     page_training = QWidget()
@@ -347,7 +278,7 @@ def run_setup_wizard(self: "MainWindow") -> bool:
     v4.addStretch(1)
     page_done.setLayout(v4)
 
-    pages = [page_eula, page_prepare, page_modules, page_training, page_install, page_done]
+    pages = [page_eula, page_prepare, page_training, page_install, page_done]
 
     def set_page(idx: int):
         steps.setCurrentRow(idx)
@@ -356,12 +287,12 @@ def run_setup_wizard(self: "MainWindow") -> bool:
             if w is not None:
                 w.setParent(None)
         container_layout.addWidget(pages[idx])
-        # Pages: 0=EULA, 1=준비, 2=모듈, 3=학습서버, 4=설치중, 5=완료
-        btn_prev.setVisible(idx in (1, 2, 3))
-        btn_prev.setEnabled(idx in (1, 2, 3))
-        btn_next.setVisible(idx in (0, 1, 4))
-        btn_install.setVisible(idx == 3)
-        btn_finish.setVisible(idx == 5)
+        # Pages: 0=EULA, 1=준비, 2=학습서버, 3=설치중, 4=완료
+        btn_prev.setVisible(idx in (1, 2))
+        btn_prev.setEnabled(idx in (1, 2))
+        btn_next.setVisible(idx in (0, 1, 3))
+        btn_install.setVisible(idx == 2)
+        btn_finish.setVisible(idx == 4)
         if idx == 0:
             # EULA
             btn_next.setEnabled(chk_eula_agree.isChecked())
@@ -377,14 +308,10 @@ def run_setup_wizard(self: "MainWindow") -> bool:
                 has_space = True
             btn_next.setEnabled(has_space and docker_compose_available())
         elif idx == 2:
-            # 모듈 선택 — next goes to 학습서버
-            btn_next.setVisible(True)
-            btn_next.setEnabled(True)
-        elif idx == 3:
             # 학습 서버 — install button
             _refresh_gpu_info()
             btn_install.setEnabled(True)
-        elif idx == 4:
+        elif idx == 3:
             # 설치 중
             btn_next.setEnabled(False)
         else:
@@ -443,11 +370,11 @@ def run_setup_wizard(self: "MainWindow") -> bool:
             current -= 1; set_page(current)
     def on_next():
         nonlocal current
-        if current in (0, 1, 2):
+        if current in (0, 1):
             current += 1; set_page(current)
-        elif current == 4:
+        elif current == 3:
             # 설치중 → 완료
-            current = 5; set_page(current)
+            current = 4; set_page(current)
     def _record_launch_choice():
         try:
             self._auto_launch_after_install = chk_launch.isChecked()
@@ -623,9 +550,10 @@ def run_setup_wizard(self: "MainWindow") -> bool:
         if not self._apply_compose_variant(variant):
             QMessageBox.critical(dlg, "오류", "선택한 설치 옵션에 맞는 docker-compose 템플릿을 찾을 수 없습니다.")
             return
-        # Save selected modules to config
-        selected = [mid for mid, chk in module_checkboxes.items() if chk.isChecked()]
-        save_installed_modules(selected)
+        # Mark required modules (core/feature) as installed; everything else
+        # is opt-in via the launcher's "모듈 관리" dialog after first launch.
+        required_ids = [m.id for m in MODULE_REGISTRY if m.required]
+        save_installed_modules(required_ids)
         # Save training server choice. Local mode just flips a flag; the backend
         # entrypoint reads EASYTRAINER_LOCAL_TRAINING and spawns training_server
         # in-container, sharing torch/CUDA with the API process.
@@ -637,7 +565,7 @@ def run_setup_wizard(self: "MainWindow") -> bool:
         except Exception:
             set_training_server_installed(mode == "local")
         nonlocal current
-        current = 4; set_page(current)
+        current = 3; set_page(current)
         log.clear()
 
         progress_state.update({
@@ -718,12 +646,16 @@ def run_setup_wizard(self: "MainWindow") -> bool:
                         QMessageBox.critical(dlg, "오류", f"서비스 시작 실패 (code={exit_code})")
                         return
                     log.append(f"[POST][WARN] 서비스 시작 exit_code={exit_code}, 하지만 컨테이너가 실행 중입니다.")
-                # Step 3: Install selected modules from GitHub
-                # Filter to only visible (installable) modules that user checked
-                installable = [mid for mid, chk in module_checkboxes.items()
-                               if chk.isChecked() and mid in _REGISTRY_MAP and not _REGISTRY_MAP[mid].required]
+                # Step 3: Install required modules that ship as separate
+                # GitHub Release assets (e.g. sim_mujoco_tutorial). Optional
+                # modules are installed later from the launcher's "모듈 관리"
+                # dialog after first launch.
+                installable = [
+                    m.id for m in MODULE_REGISTRY
+                    if m.required and m.asset_name
+                ]
                 if installable:
-                    log.append(f"[POST] 선택한 모듈 {len(installable)}개 설치 중...")
+                    log.append(f"[POST] 필수 모듈 {len(installable)}개 설치 중...")
                     def _on_mod_start(mid, i, total):
                         mod = _REGISTRY_MAP.get(mid)
                         name = mod.name if mod else mid
@@ -872,7 +804,7 @@ def run_setup_wizard(self: "MainWindow") -> bool:
     def _on_close(ev):
         try:
             if _confirm_exit():
-                if current == 5:
+                if current == 4:
                     _record_launch_choice()
                 ev.accept()
             else:
@@ -882,7 +814,7 @@ def run_setup_wizard(self: "MainWindow") -> bool:
 
     def _on_reject():
         if _confirm_exit():
-            if current == 5:
+            if current == 4:
                 _record_launch_choice()
             QDialog.reject(dlg)
 

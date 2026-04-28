@@ -15,12 +15,26 @@ model User {
   image         String?
   role          String    @default("user") // "user" | "admin"
   plan          String    @default("free") // "free" | "business"
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
 
-  accounts   Account[]
-  sessions   Session[]
-  serialKeys SerialKey[]
+  // Onboarding profile (collected on first login after Google OAuth)
+  organization String?
+  department   String?
+  jobRole      String?
+
+  termsAcceptedAt   DateTime?
+  privacyAcceptedAt DateTime?
+  refundAcceptedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  accounts     Account[]
+  sessions     Session[]
+  devices      Device[]
+  deviceAuths  DeviceAuthRequest[]
+  entitlements Entitlement[]
+  payments     Payment[]
+  billingKeys  BillingKey[]
 }
 
 model Account {
@@ -59,16 +73,119 @@ model VerificationToken {
   @@unique([identifier, token])
 }
 
-model SerialKey {
-  id        String   @id @default(cuid())
-  key       String   @unique
-  userId    String
-  machineId String?  // Bound to one PC
-  plan      String   @default("free")
-  active       Boolean  @default(true)
-  lastActiveAt DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt DateTime @updatedAt
+// One active install per user. Bound to a stable machineId (sha256 of /etc/machine-id etc.).
+// accessToken is the Bearer token the launcher sends on every request.
+model Device {
+  id          String   @id @default(cuid())
+  userId      String
+  machineId   String   @unique
+  hostname    String?
+  os          String?
+  accessToken String   @unique
+  active      Boolean  @default(true)
+  lastSeenAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// Short-lived OAuth-device-flow record. Launcher polls `nonce`; web page approves.
+model DeviceAuthRequest {
+  nonce      String   @id
+  machineId  String
+  hostname   String?
+  os         String?
+  status     String   @default("PENDING") // PENDING | APPROVED | REJECTED | EXPIRED | CONSUMED
+  userId     String?
+  deviceId   String?
+  errorCode  String?  // e.g. "DEVICE_ALREADY_BOUND"
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([machineId])
+}
+
+// Catalog of installable modules. id matches launcher MODULE_REGISTRY id.
+// Columns marked "(launcher metadata)" are pulled by the launcher on startup
+// to render the install wizard — moves source-of-truth out of Python source.
+model Module {
+  id          String   @id // e.g. "robot_piper"
+  name        String
+  category    String   // "robot" | "sensor" | "extension" (visible) | "core" | "feature" (hidden)
+  description String?
+  priceKrw    Int      @default(0) // 0 = free
+  active      Boolean  @default(true)
+
+  // Launcher metadata (used to be hardcoded in release/ui/modules.py)
+  required         Boolean  @default(false) // core/feature → true (always installed, hidden in UI)
+  installByDefault Boolean  @default(false) // checked-by-default in install wizard
+  assetName        String?  // GitHub Release asset filename pattern, e.g. "module-robot_piper-{version}.tar.gz"
+  dependencies     String[] @default([])    // module ids this depends on; usually empty
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payments     Payment[]
+  entitlements Entitlement[]
+}
+
+// User owns this module forever (one-time purchase, account-scoped).
+model Entitlement {
+  id        String   @id @default(cuid())
+  userId    String
+  moduleId  String
+  paymentId String?  // null for free modules / admin-granted
+  grantedAt DateTime @default(now())
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  module  Module   @relation(fields: [moduleId], references: [id])
+  payment Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, moduleId])
+  @@index([userId])
+}
+
+// Each PortOne payment attempt. Source of truth for billing history.
+model Payment {
+  id               String    @id @default(cuid())
+  userId           String
+  moduleId         String?
+  portonePaymentId String    @unique // paymentId we send to PortOne
+  status           String    @default("PENDING") // PENDING | PAID | FAILED | CANCELLED | REFUNDED
+  amountKrw        Int
+  method           String?   // CARD | KAKAOPAY | TOSSPAY | NAVERPAY | ...
+  pgProvider       String?   // tosspayments | kakaopay | ...
+  receiptUrl       String?
+  paidAt           DateTime?
+  cancelledAt      DateTime?
+  raw              Json?     // last PortOne response for debugging
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  module      Module?       @relation(fields: [moduleId], references: [id])
+  entitlement Entitlement[]
+
+  @@index([userId])
+}
+
+// PortOne-issued billing key for repeat charges. We never store the raw PAN.
+model BillingKey {
+  id         String   @id @default(cuid())
+  userId     String
+  billingKey String   @unique
+  cardName   String?  // e.g. "신한카드"
+  cardLast4  String?
+  isDefault  Boolean  @default(false)
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }

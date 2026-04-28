@@ -29,52 +29,15 @@ from app_context import (
     save_config,
 )
 
-import license_validator
+import device_auth
 
-def check_license_gui() -> bool:
-        """
-        저장된 키가 있으면 검사하고, 없거나 틀리면 입력 팝업을 띄움.
-        """
-        license_file = APP_HOME / "license.key"
-        
-        # 1. 기존에 저장된 키가 있는지 확인
-        if license_file.exists():
-            try:
-                saved_key = license_file.read_text(encoding="utf-8").strip()
-                if license_validator.verify_license(saved_key):
-                    return True # 통과!
-            except Exception:
-                pass # 파일 읽기 실패하면 다시 물어봄
 
-        # 2. 키가 없거나 틀렸으면 팝업창 띄워서 물어보기 (무한 루프)
-        while True:
-            machine_id = license_validator.get_machine_fingerprint()
-            key, ok = QInputDialog.getText(
-                None, 
-                "Easy Trainer 정품 인증", 
-                f"라이선스 키를 입력하세요.\n(기기 ID: {machine_id})",
-                QLineEdit.Normal
-            )
-            
-            if not ok:
-                # 취소 버튼 누르면 프로그램 종료
-                return False
-                
-            key = key.strip()
-            if not key:
-                continue
+def ensure_signed_in() -> bool:
+    """Ensure the user has a valid Google-OAuth Bearer token saved locally.
 
-            if license_validator.verify_license(key):
-                # 3. 인증 성공 시 파일에 저장
-                try:
-                    APP_HOME.mkdir(parents=True, exist_ok=True)
-                    license_file.write_text(key, encoding="utf-8")
-                    QMessageBox.information(None, "인증 성공", "정품 인증이 완료되었습니다.")
-                except Exception:
-                    pass
-                return True
-            else:
-                QMessageBox.warning(None, "인증 실패", "유효하지 않은 라이선스 키입니다.\n다시 확인해주세요.")
+    Returns True on success, False if the user cancels or auth fails terminally.
+    """
+    return device_auth.ensure_signed_in_gui()
 
 
 

@@ -1,5 +1,6 @@
 import Navbar from "@/components/Navbar";
 import ScrollReveal from "@/components/ScrollReveal";
+import Footer from "@/components/Footer";
 import Link from "next/link";
 import { auth } from "@/auth";
 
@@ -314,23 +315,7 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* ===== FOOTER ===== */}
-      <footer className="border-t border-white/5 py-12">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-            <div className="flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-[10px] font-extrabold">ET</div>
-              <span className="font-[var(--font-display)] font-bold tracking-tight">Easy Trainer</span>
-            </div>
-            <div className="flex items-center gap-6">
-              <a href="#" className="text-sm text-surface-500 hover:text-surface-300 spring-transition">Documentation</a>
-              <a href="#" className="text-sm text-surface-500 hover:text-surface-300 spring-transition">GitHub</a>
-              <a href="mailto:contact@easytrainer.io" className="text-sm text-surface-500 hover:text-surface-300 spring-transition">Contact</a>
-            </div>
-            <p className="text-sm text-surface-600">© 2026 Easy Trainer. All rights reserved.</p>
-          </div>
-        </div>
-      </footer>
+      <Footer />
     </>
   );
 }

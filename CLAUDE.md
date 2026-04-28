@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 어느 폴더를 수정해야 하는지 판단하기
+
+작업이 들어오면 **먼저 [FOLDERS.md](FOLDERS.md)를 참고해서 어느 폴더를 건드려야 하는지 결정한다.** 각 폴더(`backend/`, `frontend/`, `home-next/`, `isaaclab/`, `modules/`, `release/`, `ros2/`, `training_server/`)의 역할, 주요 하위 구조, "이런 요청이면 여기를 수정" 예시가 정리되어 있다. 폴더 책임이 바뀌면 FOLDERS.md도 함께 갱신할 것.
+
 ## Project Overview
 
 EasyTrainer is a robotics training and data collection platform for robot teleoperation, imitation learning, and policy training. It uses a Python/Flask backend with ROS 2 integration and a Vue 3/Quasar frontend, all running inside Docker containers with NVIDIA GPU support.
@@ -131,5 +135,5 @@ with urllib.request.urlopen(req) as resp:
 "
 ```
 
-## MD 파일
-- 코드가 바뀔 때마다 /home/hjhj/.claude/projects/-home-hjhj-EasyTrainer-v2-3-1/memory 폴더에서 적절한 md 파일을 보고, 또는 만들어서 적절히 수정해줘.
+<!-- ## MD 파일
+- 코드가 바뀔 때마다 /home/hjhj/.claude/projects/-home-hjhj-EasyTrainer-v2-3-1/memory 폴더에서 적절한 md 파일을 보고, 또는 만들어서 적절히 수정해줘. -->

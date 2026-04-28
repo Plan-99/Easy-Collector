@@ -1343,31 +1343,47 @@ def refresh_remote_state() -> None:
     On success: refresh MODULE_REGISTRY in place, persist cache, update
     catalog/owned snapshot. On failure (network down, server error): leave
     existing registry contents (loaded from fallback or cache) untouched.
+
+    Catalog and owned-set fetches run in parallel since they're independent
+    HTTP requests (cuts wall time roughly in half on Vercel cold-start).
     """
     global _REMOTE_LOADED
 
-    # Catalog → registry + cache
-    url = f"{_api_base_url()}/api/modules"
-    status, payload = _http_get_json(url)
-    catalog: dict[str, dict] = {}
-    if status == 200 and isinstance(payload, dict):
-        modules = payload.get("modules") or []
-        items: list[ModuleInfo] = []
-        for raw in modules:
-            mi = _module_info_from_payload(raw)
-            if mi:
-                items.append(mi)
-                catalog[mi.id] = raw
-        if items:
-            _apply_registry(items)
-            _save_cached_registry({"modules": modules})
+    catalog_box: dict[str, dict] = {}
+    items_box: list[ModuleInfo] = []
+    raw_modules_box: list[dict] = []
+    owned_box: set[str] = set()
 
-    owned = fetch_owned_module_ids()
+    def _fetch_catalog():
+        url = f"{_api_base_url()}/api/modules"
+        status, payload = _http_get_json(url)
+        if status == 200 and isinstance(payload, dict):
+            for raw in payload.get("modules") or []:
+                mi = _module_info_from_payload(raw)
+                if mi:
+                    items_box.append(mi)
+                    catalog_box[mi.id] = raw
+                    raw_modules_box.append(raw)
+
+    def _fetch_owned():
+        owned_box.update(fetch_owned_module_ids())
+
+    t1 = threading.Thread(target=_fetch_catalog, daemon=True)
+    t2 = threading.Thread(target=_fetch_owned, daemon=True)
+    t1.start()
+    t2.start()
+    t1.join(timeout=15)
+    t2.join(timeout=15)
+
+    if items_box:
+        _apply_registry(items_box)
+        _save_cached_registry({"modules": raw_modules_box})
+
     with _REMOTE_LOCK:
         _REMOTE_CATALOG.clear()
-        _REMOTE_CATALOG.update(catalog)
+        _REMOTE_CATALOG.update(catalog_box)
         _REMOTE_OWNED.clear()
-        _REMOTE_OWNED.update(owned)
+        _REMOTE_OWNED.update(owned_box)
         _REMOTE_LOADED = True
 
 

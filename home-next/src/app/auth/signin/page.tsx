@@ -1,9 +1,11 @@
 import { signIn } from "@/auth";
 import Link from "next/link";
+import Footer from "@/components/Footer";
 
 export default function SignInPage() {
   return (
-    <div className="min-h-dvh flex items-center justify-center bg-surface-950 px-6">
+    <div className="min-h-dvh flex flex-col bg-surface-950">
+      <div className="flex-1 flex items-center justify-center px-6 py-16">
       <div className="bezel-card w-full max-w-md">
         <div className="bezel-inner p-10 text-center">
           {/* Logo */}
@@ -20,14 +22,14 @@ export default function SignInPage() {
             시작하기
           </h1>
           <p className="text-surface-400 text-sm mb-10">
-            Google 계정으로 로그인하면 라이선스 키가 자동 발급됩니다.
+            Google 계정으로 로그인 후 간단한 정보를 입력하시면 가입이 완료됩니다.
           </p>
 
           {/* Google Sign In */}
           <form
             action={async () => {
               "use server";
-              await signIn("google", { redirectTo: "/dashboard" });
+              await signIn("google", { redirectTo: "/onboarding" });
             }}
           >
             <button
@@ -57,15 +59,8 @@ export default function SignInPage() {
           </form>
 
           <p className="text-surface-600 text-xs mt-8">
-            로그인 시{" "}
-            <a href="#" className="text-surface-400 underline">
-              이용약관
-            </a>{" "}
-            및{" "}
-            <a href="#" className="text-surface-400 underline">
-              개인정보처리방침
-            </a>
-            에 동의합니다.
+            가입 완료 단계에서 이용약관·개인정보처리방침·환불 정책에 동의하시게 됩니다.
+            전체 내용은 페이지 하단에서도 확인할 수 있습니다.
           </p>
 
           <Link
@@ -76,6 +71,8 @@ export default function SignInPage() {
           </Link>
         </div>
       </div>
+      </div>
+      <Footer />
     </div>
   );
 }
