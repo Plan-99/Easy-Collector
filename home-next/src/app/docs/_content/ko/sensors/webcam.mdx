@@ -1,0 +1,45 @@
+---
+title: USB Webcam
+description: 일반 USB 웹캠(Logitech 등)을 등록하는 방법.
+section: sensors
+order: 3
+sourceRefs:
+  - frontend/src/pages/v2/SensorPage.vue
+  - modules/sensors/webcam_publisher/
+lastVerifiedVersion: 0.0.0
+---
+
+UVC를 지원하는 일반 USB 웹캠은 모두 사용할 수 있습니다.
+
+## 사전 조건
+
+- [모듈 추가](/docs/modules)에서 **Webcam Publisher** 모듈 설치
+- 웹캠 USB 연결 후 `ls /dev/video*`로 디바이스 인덱스 확인
+
+## 등록 절차
+
+<Steps>
+1. **Sensors 페이지에서 Add Sensor를 누릅니다.**
+
+2. **Sensor Type에서 webcam을 선택하고 Device Index를 입력합니다.**
+
+   `/dev/video0`이면 `0`, `/dev/video2`면 `2`입니다.
+
+   <DocsImage
+     src="/docs/sensors/webcam-01-form.png"
+     alt="SensorForm — Type=webcam, Device Index"
+     status="missing"
+   />
+
+3. **저장 후 토글을 켜고 라이브 프리뷰를 확인합니다.**
+
+   <DocsImage
+     src="/docs/sensors/webcam-02-preview.png"
+     alt="Webcam 라이브 프리뷰"
+     status="missing"
+   />
+</Steps>
+
+<Callout type="tip">
+같은 PC에 같은 모델의 웹캠 여러 대를 꽂으면 인덱스가 부팅마다 바뀔 수 있습니다. udev 규칙으로 고정 심볼릭 링크를 만들어 두는 것을 권장합니다.
+</Callout>

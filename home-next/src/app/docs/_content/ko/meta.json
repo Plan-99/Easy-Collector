@@ -1,0 +1,16 @@
+{
+  "title": "Easy Trainer 문서",
+  "items": [
+    "installation",
+    "quickstart",
+    "modules",
+    "sensors",
+    "robots",
+    "teleoperation",
+    "workspace",
+    "data-collection",
+    "datasets",
+    "training",
+    "inference"
+  ]
+}

@@ -16,6 +16,31 @@ from trajectory_msgs.msg import JointTrajectoryPoint
 
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 
+
+def _apply_ee_offset_override(ee_definitions, user_ee_offset):
+    """ee_definitions의 offset(3번째 항목)을 user override로 교체.
+
+    ee_definitions: [(name, parent, offset), ...] — offset은 None / np.ndarray / list
+    user_ee_offset: {ee_name: [x, y, z]}
+    같은 ee_name에 override가 있으면 np.array로 변환해 적용.
+    """
+    if not user_ee_offset:
+        return ee_definitions
+    result = []
+    for item in ee_definitions:
+        name = item[0]
+        parent = item[1]
+        offset = item[2] if len(item) > 2 else None
+        if name in user_ee_offset:
+            override = user_ee_offset[name]
+            if override is None:
+                offset = None
+            else:
+                offset = np.array(override).T
+        result.append((name, parent, offset))
+    return result
+
+
 class Agent:
     def __init__(self, node: Node, robot):
         self.node = node
@@ -46,6 +71,8 @@ class Agent:
 
         self.ik_solver = None
         self.ik_lock = threading.RLock()
+        # 사용자가 frontend에서 편집한 ee_offset 오버라이드. 형식: {ee_name: [x, y, z]}
+        user_ee_offset = (robot.get('settings', {}) or {}).get('ee_offset') or {}
         # ros2 전용 robot_configs에서 IK 설정 조회
         from ..configs.robot_configs import get_robot_config
         robot_config = get_robot_config(self.robot_type)
@@ -53,6 +80,9 @@ class Agent:
             urdf_path = robot_config['urdf_path']
             urdf_package_dir = robot_config.get('urdf_package_dir', '')
             ik_setting = dict(robot_config['ik_setting'])
+            ik_setting['ee_definitions'] = _apply_ee_offset_override(
+                ik_setting.get('ee_definitions', []), user_ee_offset
+            )
             self.ik_solver = Common_ArmIK(urdf_path=urdf_path, urdf_package_dir=urdf_package_dir, **ik_setting)
             self.ee_names = self.ik_solver.ee_names
         elif self.robot_type == 'custom':
@@ -70,6 +100,9 @@ class Agent:
                             offset = np.array(offset).T
                         converted.append((name, parent, offset))
                     ik_setting['ee_definitions'] = converted
+                ik_setting['ee_definitions'] = _apply_ee_offset_override(
+                    ik_setting['ee_definitions'], user_ee_offset
+                )
                 self.ik_solver = Common_ArmIK(urdf_path=urdf_path, urdf_package_dir=urdf_package_dir, **ik_setting)
                 self.ee_names = self.ik_solver.ee_names
 

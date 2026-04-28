@@ -122,6 +122,11 @@ const linksList = [
         title: 'Assemble',
         icon: 'build',
         link: '/robots/assemble'
+      },
+      {
+        title: 'Teleoperation',
+        icon: 'sports_esports',
+        link: '/robots/teleoperation'
       }
     ]
   },

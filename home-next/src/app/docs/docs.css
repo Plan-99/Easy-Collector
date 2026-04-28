@@ -1,0 +1,168 @@
+/* Documentation article styles. Scoped via .docs-article. */
+
+.docs-article {
+  color: var(--color-surface-200);
+  font-size: 1rem;
+  line-height: 1.75;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+.docs-article > h1:first-of-type {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(2rem, 4vw, 2.75rem);
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  color: #fff;
+  margin: 0 0 0.75rem;
+}
+
+.docs-article h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.6rem;
+  letter-spacing: -0.01em;
+  color: #fff;
+  margin: 3rem 0 1rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  scroll-margin-top: 5rem;
+}
+
+.docs-article h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.25rem;
+  color: #fff;
+  margin: 2rem 0 0.75rem;
+  scroll-margin-top: 5rem;
+}
+
+.docs-article p {
+  margin: 0 0 1rem;
+  color: var(--color-surface-300);
+}
+
+.docs-article a:not(.docs-anchor) {
+  color: #a5b4fc;
+  text-decoration: underline;
+  text-decoration-color: rgba(165, 180, 252, 0.3);
+  text-underline-offset: 3px;
+  transition: color 0.2s;
+}
+.docs-article a:not(.docs-anchor):hover {
+  color: #c7d2fe;
+  text-decoration-color: rgba(199, 210, 254, 0.6);
+}
+
+.docs-article .docs-anchor {
+  margin-left: 0.5rem;
+  color: var(--color-surface-600);
+  text-decoration: none;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.docs-article h2:hover .docs-anchor,
+.docs-article h3:hover .docs-anchor {
+  opacity: 1;
+}
+
+.docs-article ul,
+.docs-article ol {
+  margin: 0 0 1rem;
+  padding-left: 1.5rem;
+  color: var(--color-surface-300);
+}
+.docs-article ul { list-style: disc; }
+.docs-article ol { list-style: decimal; }
+.docs-article li { margin: 0.25rem 0; }
+.docs-article li > p { margin: 0; }
+
+.docs-article code {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 4px;
+  padding: 0.1em 0.4em;
+  font-size: 0.88em;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  color: #fde68a;
+}
+
+.docs-article pre {
+  background: rgba(9, 9, 11, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  padding: 1rem 1.2rem;
+  overflow-x: auto;
+  margin: 1rem 0 1.5rem;
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+.docs-article pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--color-surface-200);
+}
+
+.docs-article blockquote {
+  margin: 1.25rem 0;
+  padding: 0.5rem 1rem;
+  border-left: 3px solid rgba(99, 102, 241, 0.5);
+  background: rgba(99, 102, 241, 0.05);
+  color: var(--color-surface-300);
+  border-radius: 0 8px 8px 0;
+}
+
+.docs-article hr {
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  margin: 2.5rem 0;
+}
+
+.docs-article table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0 1.5rem;
+  font-size: 0.92rem;
+}
+.docs-article th,
+.docs-article td {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+.docs-article th {
+  background: rgba(255, 255, 255, 0.04);
+  font-weight: 600;
+  color: #fff;
+}
+
+/* Steps component */
+.docs-steps {
+  list-style: none;
+}
+.docs-steps > li {
+  position: relative;
+  margin-bottom: 1.5rem;
+  padding-left: 0;
+}
+.docs-steps > li::before {
+  counter-increment: step;
+  content: counter(step);
+  position: absolute;
+  left: -2.6rem;
+  top: -0.05rem;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.9), rgba(168, 85, 247, 0.9));
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 4px var(--color-surface-950);
+}

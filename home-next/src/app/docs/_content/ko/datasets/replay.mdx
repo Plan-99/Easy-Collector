@@ -1,0 +1,65 @@
+---
+title: 데이터 리플레이
+description: 수집된 에피소드를 다시 재생하고 다른 데이터셋으로 캡처.
+section: datasets
+order: 2
+sourceRefs:
+  - frontend/src/pages/v2/WorkspacePage.vue
+  - frontend/src/components/v2/MonitoringWindow.vue
+lastVerifiedVersion: 0.0.0
+---
+
+리플레이는 수집된 에피소드의 액션을 실제 로봇에 다시 흘려보내는 기능입니다. 결과를 보거나 새 데이터셋으로 다시 저장할 수 있습니다.
+
+<Steps>
+1. **data 탭에서 데이터셋을 펼치고 에피소드를 클릭합니다.**
+
+   <DocsImage
+     src="/docs/datasets/replay-01-select.png"
+     alt="에피소드 선택"
+     status="missing"
+   />
+
+2. **MonitoringWindow에 replay 헤더가 나타납니다.**
+
+   <DocsImage
+     src="/docs/datasets/replay-02-header.png"
+     alt="replay 헤더"
+     status="missing"
+   />
+
+3. **Replay Action Type을 고릅니다.**
+
+   - **qaction** — 저장된 관절 명령을 그대로 재생
+   - **ee_delta_action** — EE 델타로 변환해 재생 (워크스페이스의 IK 설정과 결합 가능성 검증에 유용)
+
+   <DocsImage
+     src="/docs/datasets/replay-03-action-type.png"
+     alt="qaction vs ee_delta_action 라디오"
+     status="missing"
+   />
+
+4. **(선택) Capture Episode 체크박스를 켜고 Target Dataset을 지정합니다.**
+
+   재생되는 동작이 새 데이터셋에 다시 저장됩니다. 모든 센서가 ON이어야 활성화됩니다.
+
+   <DocsImage
+     src="/docs/datasets/replay-04-capture.png"
+     alt="Capture Episode 체크박스 + Target Dataset"
+     status="missing"
+   />
+
+5. **Hz를 입력하고 Play를 누릅니다.**
+
+   캡처 모드일 때는 진행률 progress bar가 표시됩니다.
+
+   <DocsImage
+     src="/docs/datasets/replay-05-progress.png"
+     alt="Capturing X% progress"
+     status="missing"
+   />
+</Steps>
+
+<Callout type="warning">
+리플레이 중에는 로봇이 실제로 움직입니다. 주변에 사람이나 물체가 없는지 확인하고 시작하세요.
+</Callout>

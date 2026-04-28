@@ -1,0 +1,51 @@
+---
+title: 데이터셋 폴더 추가
+description: 워크스페이스에 새 데이터셋을 만들거나 기존 데이터셋을 연결.
+section: workspace
+order: 8
+sourceRefs:
+  - frontend/src/pages/v2/WorkspacePage.vue
+lastVerifiedVersion: 0.0.0
+---
+
+데이터셋은 워크스페이스의 **에피소드 저장소**입니다. 한 워크스페이스에 여러 데이터셋을 둘 수 있습니다 (예: train / eval / 다른 시점).
+
+<Steps>
+1. **data 탭을 엽니다.**
+
+2. **+ Add Dataset Folder를 누릅니다.**
+
+   <DocsImage
+     src="/docs/workspace/dataset-01-add.png"
+     alt="Add Dataset Folder 버튼"
+     status="missing"
+   />
+
+3. **이름을 입력하고 Create를 누릅니다.**
+
+   <DocsImage
+     src="/docs/workspace/dataset-02-form.png"
+     alt="Dataset 생성 폼"
+     status="missing"
+   />
+
+4. **데이터셋 폴더가 리스트에 나타납니다. 펼치면 에피소드 목록이 보입니다.**
+
+   <DocsImage
+     src="/docs/workspace/dataset-03-list.png"
+     alt="데이터셋 목록 expansion"
+     status="missing"
+   />
+</Steps>
+
+## 호환성 경고
+
+기존 데이터셋의 메타데이터(센서/로봇 구성)가 현재 워크스페이스와 다르면 노란 경고 아이콘이 표시됩니다.
+
+<DocsImage
+  src="/docs/workspace/dataset-04-incompatible.png"
+  alt="metadata remap 워닝"
+  status="missing"
+/>
+
+이 경우 데이터셋을 편집해서 sensor / robot 매핑을 다시 지정해야 합니다 ([데이터 편집](/docs/datasets/edit) 참고).

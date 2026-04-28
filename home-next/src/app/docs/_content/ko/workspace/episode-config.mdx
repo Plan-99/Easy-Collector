@@ -1,0 +1,35 @@
+---
+title: Episode 설정
+description: Episode 길이와 에피소드 간 대기 시간 설정.
+section: workspace
+order: 7
+sourceRefs:
+  - frontend/src/pages/v2/WorkspacePage.vue
+lastVerifiedVersion: 0.0.0
+---
+
+Episode 관련 설정은 **Task Setting expansion**에 있습니다.
+
+<Steps>
+1. **setting 탭 → Task Setting을 펼칩니다.**
+
+   <DocsImage
+     src="/docs/workspace/episode-01-task-setting.png"
+     alt="Task Setting — Episode Length"
+     status="missing"
+   />
+
+2. **Episode Length를 입력합니다.**
+
+   한 에피소드의 **최대 프레임 수**입니다. 데이터 수집 시 이 길이에 도달하면 자동으로 종료됩니다. 30 Hz 기준으로 다음과 같습니다.
+
+   | 작업 길이 | Episode Length (30 Hz 기준) |
+   |---------|---------------------------|
+   | ~3 초 | 90 |
+   | ~5 초 | 150 |
+   | ~10 초 | 300 |
+</Steps>
+
+<Callout type="info">
+Episode Length는 학습 시 chunk_size·prediction_horizon과 직접 관련이 있습니다. 너무 짧으면 짧은 동작만 학습되고, 너무 길면 메모리·시간이 폭발합니다.
+</Callout>

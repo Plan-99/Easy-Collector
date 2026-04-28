@@ -69,8 +69,8 @@ class Leader():
         self.ema = float(teleop_setting.get('ema', 0.0)) # EMA 필터 값
         # 한 스텝에 허용되는 최대 관절 변위(rad). threshold를 넘으면 clip.
         self.max_step_rad = float(teleop_setting.get('max_step_rad', 0.005))
-
-        self.time = time.time()
+        # 텔레옵 publish rate (Hz). 보간 노드가 200Hz로 직접 제어하므로 50~200 사이 권장.
+        self.publish_rate = float(teleop_setting.get('publish_rate', 50.0))
 
         self.thread_pool = ThreadPoolExecutor(max_workers=len(self.agents))
 
@@ -267,15 +267,7 @@ class Leader():
             return
 
         try:
-            is_joint_trajectory = False
-            for agent in self.agents:
-                if agent.write_topic_msg == 'trajectory_msgs/JointTrajectory':
-                    is_joint_trajectory = True
-                    break
-            if is_joint_trajectory:
-                rate = _SimpleRate(100)  # 100Hz
-            else:
-                rate = _SimpleRate(50)  # 50Hz
+            rate = _SimpleRate(self.publish_rate)
             while not task_control.get('stop', False) and not task_control.get('episode_stop', False):
 
                 group_by_agent = self.group_joints_by_agent()
@@ -339,18 +331,15 @@ class Leader():
                             print(f"[NOTICE] No gripper on {port}; torque released.", flush=True)
                             continue
                         all_closed = True
-                        dbg_parts = []
                         for gripper_dxl_id in dxl_controller.gripper_dxl_ids:
                             gj = self.get_joint_by_dxl_id(port, gripper_dxl_id)
                             if gj is None or 'dxl_position' not in gj:
                                 all_closed = False
-                                dbg_parts.append(f"id={gripper_dxl_id} NO_POS")
                                 break
                             gpos = gj['dxl_position']
                             grange = gj['gripper_dxl_range']
                             # 캘리브레이션 오차를 감안해 50% 지점을 threshold로 사용.
                             mid = (grange[0] + grange[1]) / 2.0
-                            dbg_parts.append(f"id={gripper_dxl_id} pos={gpos} range={grange} mid={mid}")
                             if grange[0] < grange[1]:
                                 if gpos < mid:
                                     all_closed = False
@@ -359,8 +348,6 @@ class Leader():
                                 if gpos > mid:
                                     all_closed = False
                                     break
-                        if not all_closed:
-                            print(f"[DEBUG] {port} gripper not closed yet: {dbg_parts}", flush=True)
                         if all_closed:
                             dxl_controller.remove_torque()
                             self._torque_release_pending_ports.discard(port)
@@ -402,10 +389,6 @@ class Leader():
                     dxl_contoller_index += 1
 
 
-                dt = time.time() - self.time
-                self.time = time.time()
-                if dt > 0:
-                    print(f"[Teleop] {1.0/dt:.1f} Hz", flush=True)
                 rate.sleep()
 
         except Exception as e:

@@ -1,0 +1,58 @@
+---
+title: Assembly 구성
+description: 여러 로봇을 좌/우 팔, 그리퍼 단위로 묶어 하나의 텔레오퍼레이션 단위로 관리.
+section: teleoperation
+order: 2
+sourceRefs:
+  - frontend/src/pages/v2/AssemblePage.vue
+  - frontend/src/components/v2/AssemblyForm.vue
+lastVerifiedVersion: 0.0.0
+---
+
+Assembly는 등록된 로봇들을 **left_arm / right_arm / left_tool / right_tool** 슬롯에 배치한 단위입니다.
+워크스페이스는 항상 한 Assembly에 묶이며, 텔레오퍼레이션도 Assembly 단위로 진행됩니다.
+
+## 구성하기
+
+<Steps>
+1. **Robots → Assemble로 이동하고 하단의 New 탭을 엽니다.**
+
+   <DocsImage
+     src="/docs/teleoperation/assembly-01-form-overview.png"
+     alt="AssemblyForm 좌/우 패널 전체"
+     status="missing"
+   />
+
+2. **우측 패널의 로봇 카드를 클릭하면 두 개의 버튼이 나타납니다.**
+
+   - 로봇 Role이 **single_arm**이면 **Left** / **Right** (어느 팔로 쓸지)
+   - Role이 **tool**이면 **Left** / **Right** (어느 팔의 그리퍼로 쓸지)
+
+   <DocsImage
+     src="/docs/teleoperation/assembly-02-singlearm-buttons.png"
+     alt="single_arm 역할 — Left/Right 버튼"
+     status="missing"
+   />
+
+   <DocsImage
+     src="/docs/teleoperation/assembly-03-tool-buttons.png"
+     alt="tool 역할 — Left/Right 버튼"
+     status="missing"
+   />
+
+3. **좌측 캔버스에 그려진 결과를 확인합니다.**
+
+   각 슬롯에 어떤 로봇이 들어갔는지 시각적으로 표시됩니다.
+
+   <DocsImage
+     src="/docs/teleoperation/assembly-04-canvas.png"
+     alt="AssemblyForm 좌측 Canvas"
+     status="missing"
+   />
+
+4. **이름을 입력하고 Save를 누릅니다.**
+</Steps>
+
+<Callout type="info">
+한 로봇을 여러 Assembly에 넣을 수 있습니다. 같은 하드웨어를 다른 작업 구성으로 자주 바꾸는 경우 유용합니다.
+</Callout>

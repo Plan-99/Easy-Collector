@@ -1,0 +1,35 @@
+---
+title: Home Pose 귀환 여부
+description: REC 시작 시 로봇이 Home Pose로 자동 이동할지 여부 토글.
+section: data-collection
+order: 3
+sourceRefs:
+  - frontend/src/components/v2/MonitoringWindow.vue
+lastVerifiedVersion: 0.0.0
+---
+
+REC 버튼 옆에는 작은 🏠 배지가 있습니다. 이 배지가 시작 시 Home Pose 귀환 여부를 토글합니다.
+
+## ON (파란색)
+
+매 에피소드 시작 시 로봇이 [워크스페이스에 저장된 Home Pose](/docs/workspace/home-pose)로 자동 이동한 뒤 수집이 시작됩니다.
+
+<DocsImage
+  src="/docs/data-collection/home-01-toggle-on.png"
+  alt="home 배지 ON — 파란색"
+  status="missing"
+/>
+
+## OFF (회색)
+
+귀환 없이 **현재 위치 그대로** 수집이 시작됩니다.
+
+<DocsImage
+  src="/docs/data-collection/home-02-toggle-off.png"
+  alt="home 배지 OFF — 회색"
+  status="missing"
+/>
+
+<Callout type="warning">
+OFF로 두면 매 에피소드의 시작 자세가 달라져 학습 분산이 커집니다. 일반적으로는 **ON**을 권장합니다. OFF는 연속 작업 (이전 에피소드 끝 자세에서 바로 이어 시연)이 필요할 때만 사용하세요.
+</Callout>

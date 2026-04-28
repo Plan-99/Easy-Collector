@@ -1,0 +1,47 @@
+---
+title: 센서 추가
+description: Realsense, Webcam, Custom 센서를 운영자 UI에 등록하는 방법.
+section: sensors
+order: 1
+sourceRefs:
+  - frontend/src/pages/v2/SensorPage.vue
+  - modules/sensors/
+related:
+  - /docs/modules
+  - /docs/workspace/sensors
+lastVerifiedVersion: 0.0.0
+---
+
+Easy Trainer는 RGB-D / 일반 USB 카메라 / ROS 2 토픽 기반 커스텀 센서를 모두 지원합니다.
+어떤 타입을 추가하더라도 **사이드바 → Sensors → Add Sensor → 토글 ON** 4단계로 끝납니다.
+
+## 어떤 센서를 쓸까
+
+| 상황 | 추천 |
+|------|------|
+| 깊이 정보가 필요하거나 빛 환경이 변하는 작업장 | **Realsense** (D400 시리즈) |
+| 일반 책상 작업, 단일 RGB로 충분 | **Webcam** (UVC 호환 USB 카메라) |
+| 자체 카메라 노드 또는 외부 시뮬레이터에서 토픽으로 받기 | **Custom Sensor** |
+
+상세 절차는 타입별 페이지를 참고하세요.
+
+- [Realsense](/docs/sensors/realsense)
+- [Webcam](/docs/sensors/webcam)
+- [Custom Sensor](/docs/sensors/custom)
+
+## 공통 절차
+
+<Steps>
+1. **사이드바에서 Sensors를 엽니다.**
+2. **Add Sensor 버튼을 누릅니다.**
+3. **Sensor Type을 선택하고 필수 필드를 채워 저장합니다.**
+4. **카드의 토글을 켜서 ONLINE 상태를 확인합니다.**
+</Steps>
+
+## 다음 단계
+
+센서가 ONLINE으로 잡혔다면 [워크스페이스에 추가](/docs/workspace/sensors)해서 학습 입력으로 사용하세요. 워크스페이스에서 crop / rotation 같은 전처리도 별도로 설정할 수 있습니다.
+
+<Callout type="info">
+새 센서 타입(예: 라이다, ToF 등)을 사용하려면 먼저 [모듈 추가](/docs/modules)에서 해당 드라이버 모듈을 설치해야 합니다. 등록된 모듈만 Sensor Type 셀렉트에 표시됩니다.
+</Callout>

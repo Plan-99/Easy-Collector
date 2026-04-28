@@ -1,0 +1,43 @@
+---
+title: End-Effector 세팅
+description: 그리퍼 오프셋(EE offset)을 측정해 IK 기준점을 보정.
+section: teleoperation
+order: 3
+sourceRefs:
+  - frontend/src/components/v2/TeleSettingDialog.vue
+lastVerifiedVersion: 0.0.0
+---
+
+엔드이펙터(EE)는 IK 계산의 **기준점**입니다. 그리퍼나 도구를 장착하면 마지막 링크에서 실제 작업점까지의 거리만큼 오프셋을 보정해야 합니다.
+
+## 세팅 절차
+
+<Steps>
+1. **Robots → Teleoperation에서 Assembly 카드의 ⚙️ 버튼을 누릅니다.**
+
+   TeleSettingDialog가 열립니다.
+
+2. **General 탭으로 이동합니다.**
+
+   <DocsImage
+     src="/docs/teleoperation/ee-01-general-tab.png"
+     alt="TeleSettingDialog General 탭"
+     status="missing"
+   />
+
+3. **각 로봇별로 EE 오프셋(x, y, z)을 입력합니다.**
+
+   - 단위: meter
+   - 기준: 마지막 관절 링크의 좌표계
+   - 모르겠으면 **Reset to default**로 모듈 기본값을 사용
+
+   <DocsImage
+     src="/docs/teleoperation/ee-02-offset-explained.png"
+     alt="EE offset x/y/z 입력"
+     status="missing"
+   />
+</Steps>
+
+<Callout type="tip">
+오프셋이 잘못되면 IK 명령으로 직선을 그어도 실제로는 곡선을 그립니다. 의심되면 키보드로 같은 축으로만 step을 여러 번 보내보고 EE가 정말 직선으로 움직이는지 눈으로 확인하세요.
+</Callout>

@@ -1,0 +1,22 @@
+---
+title: 추론
+description: 학습된 체크포인트로 실시간 추론 실행.
+section: inference
+order: 1
+sourceRefs:
+  - frontend/src/pages/v2/WorkspacePage.vue
+  - frontend/src/components/v2/MonitoringWindow.vue
+lastVerifiedVersion: 0.0.0
+---
+
+추론은 워크스페이스의 **inference 탭**에서 시작합니다.
+학습된 정책이 매 프레임 액션을 추론해 로봇에 흘려보냅니다.
+
+## 진행 순서
+
+1. [체크포인트 선택](/docs/inference/select-checkpoint)
+2. [추론 실행](/docs/inference/run) — Hz, home pose, 시작·중지
+
+<Callout type="warning">
+추론 중에는 정책이 자율적으로 로봇을 움직입니다. 항상 사람이 가까이서 감시하고 비상 정지 가능한 상태에서 시작하세요.
+</Callout>

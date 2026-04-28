@@ -1,0 +1,24 @@
+---
+title: 학습
+description: 데이터셋과 정책을 선택하고 학습 서버에 학습을 의뢰.
+section: training
+order: 1
+sourceRefs:
+  - frontend/src/pages/v2/TrainPage.vue
+  - training_server/
+lastVerifiedVersion: 0.0.0
+---
+
+Easy Trainer의 학습은 **Train 페이지의 3단계 stepper**로 진행됩니다.
+
+| Step | 내용 |
+|------|------|
+| 1 | [데이터셋 선택](/docs/training/dataset-select) |
+| 2 | [Policy 선택·생성](/docs/training/policy) |
+| 3 | [Training Server URL + 파라미터](/docs/training/parameters), [Start Training](/docs/training/start-and-queue) |
+
+학습은 **별도의 학습 서버**(5100 포트)에서 진행됩니다. 로컬 PC에서 학습하려면 [학습 서버 설치](/docs/training/server)를 먼저 완료하세요.
+
+<Callout type="info">
+학습 서버는 운영자 UI(5000 포트)와 분리되어 있어, 동일 PC에서 같이 돌리거나 GPU가 좋은 별도 서버에 띄울 수 있습니다.
+</Callout>

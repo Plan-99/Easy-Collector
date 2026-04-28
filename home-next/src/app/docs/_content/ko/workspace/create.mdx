@@ -1,0 +1,43 @@
+---
+title: 워크스페이스 생성·선택
+description: 새 워크스페이스 만들기, 기존 것 편집·삭제.
+section: workspace
+order: 2
+sourceRefs:
+  - frontend/src/pages/v2/WorkspacePage.vue
+lastVerifiedVersion: 0.0.0
+---
+
+<Steps>
+1. **사이드바에서 Workspace를 엽니다.** 상단의 셀렉트로 작업할 워크스페이스를 고릅니다.
+
+   <DocsImage
+     src="/docs/workspace/create-01-select.png"
+     alt="워크스페이스 select dropdown"
+     status="missing"
+   />
+
+2. **Create New Workspace +를 누르면 생성 폼이 열립니다.**
+
+   <DocsImage
+     src="/docs/workspace/create-02-form.png"
+     alt="워크스페이스 생성 폼"
+     status="missing"
+   />
+
+3. **이름을 입력하고 Create.**
+</Steps>
+
+## 편집·삭제
+
+기존 워크스페이스를 선택한 상태에서 셀렉트 옆 펜/X 아이콘으로 이름 변경이나 삭제가 가능합니다.
+
+<DocsImage
+  src="/docs/workspace/create-03-edit-delete.png"
+  alt="edit / delete 버튼"
+  status="missing"
+/>
+
+<Callout type="warning">
+워크스페이스를 삭제하면 그 안의 데이터셋 **레퍼런스**가 끊깁니다. 실제 에피소드 파일은 디스크에 남지만 운영자 UI에서 보이지 않게 됩니다.
+</Callout>

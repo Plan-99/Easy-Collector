@@ -1,0 +1,50 @@
+---
+title: 체크포인트 선택
+description: 학습 결과 체크포인트를 inference 탭에서 고르고 정보 확인·편집·삭제.
+section: inference
+order: 2
+sourceRefs:
+  - frontend/src/pages/v2/WorkspacePage.vue
+  - frontend/src/components/v2/CheckpointInfo.vue
+lastVerifiedVersion: 0.0.0
+---
+
+<Steps>
+1. **워크스페이스의 inference 탭을 엽니다.**
+
+   학습 완료된 체크포인트들이 카드 그리드로 보입니다.
+
+   <DocsImage
+     src="/docs/inference/select-01-grid.png"
+     alt="체크포인트 카드 그리드"
+     status="missing"
+   />
+
+2. **카드를 클릭하면 우측 MonitoringWindow에 inference 헤더가 열립니다.**
+
+3. **카드를 우클릭하면 컨텍스트 메뉴가 나타납니다.**
+
+   <DocsImage
+     src="/docs/inference/select-02-context.png"
+     alt="우클릭 메뉴"
+     status="missing"
+   />
+
+   - **Show Details** — 체크포인트 정보 다이얼로그 (정책/학습/데이터셋 정보, 최종 loss, best epoch)
+   - **Edit Checkpoint** — 이름 등 메타데이터 변경
+   - **Add OOD Features** — OOD 점수 계산용 추가 feature 추출
+   - **Export Checkpoint** — `.tar.gz`로 내보내기 (다른 PC로 옮길 때)
+   - **Delete Checkpoint** — 삭제 (복구 불가)
+</Steps>
+
+## Checkpoint Info
+
+Show Details에서 열리는 다이얼로그입니다.
+
+<DocsImage
+  src="/docs/inference/select-03-info-dialog.png"
+  alt="CheckpointInfo 다이얼로그"
+  status="missing"
+/>
+
+학습할 때 어떤 데이터셋을 썼고, 어떤 정책 파라미터로 돌렸는지를 확인할 수 있습니다.

@@ -1,0 +1,66 @@
+---
+title: Leader Robot 세팅
+description: 마스터-슬레이브 텔레오퍼레이션을 위한 리더 로봇(Dynamixel) 캘리브레이션.
+section: teleoperation
+order: 5
+sourceRefs:
+  - frontend/src/components/v2/TeleSettingDialog.vue
+lastVerifiedVersion: 0.0.0
+---
+
+Leader Robot 모드는 사람이 **리더 팔**을 직접 잡고 움직이면 **팔로워 팔**(실제 로봇)이 같은 자세를 따라 움직이는 방식입니다.
+Dynamixel 모터로 만든 저관성 팔을 리더로 사용합니다.
+
+## 세팅 절차
+
+<Steps>
+1. **Teleoperation 페이지 → 카드 ⚙️ → Leader Robot 탭으로 이동.**
+
+   <DocsImage
+     src="/docs/teleoperation/leader-01-tab.png"
+     alt="Leader Robot 탭 전체"
+     status="missing"
+   />
+
+2. **좌측의 Start Leader Robot을 누릅니다.**
+
+   리더 팔이 USB로 연결되어 있고 전원이 들어와야 합니다. ProcessConsole에 Dynamixel 모터가 발견되는 로그가 찍힙니다.
+
+   <DocsImage
+     src="/docs/teleoperation/leader-02-start-leader.png"
+     alt="Start Leader Robot 버튼 활성"
+     status="missing"
+   />
+
+3. **우측 Stepper의 Origin Setting 단계로 진입합니다.**
+
+   <DocsImage
+     src="/docs/teleoperation/leader-03-stepper-origin.png"
+     alt="Origin Setting 단계"
+     status="missing"
+   />
+
+4. **검출된 DXL 모터를 슬레이브 로봇의 조인트에 드래그하여 매핑합니다.**
+
+   각 슬롯에는 Robot 이름·Joint 이름·Origin 값·ttyUSB 포트가 표시됩니다.
+
+   <DocsImage
+     src="/docs/teleoperation/leader-04-drag-drop-joint.png"
+     alt="Drag-drop 영역 + DXL ID/port/origin"
+     status="missing"
+   />
+
+5. **그리퍼 모터는 Set as Gripper 버튼을 눌러 따로 표시합니다.**
+
+   <DocsImage
+     src="/docs/teleoperation/leader-05-set-gripper.png"
+     alt="Set as Gripper 버튼"
+     status="missing"
+   />
+
+6. **Stepper의 Next로 다음 단계(스케일 조정 등)를 진행하고 Finish.**
+</Steps>
+
+<Callout type="warning">
+ttyUSB 포트는 부팅 순서에 따라 바뀔 수 있습니다. 매핑 후 ttyUSB 버튼을 클릭해 다른 포트로 순환할 수 있으니, 매번 확인하거나 udev 규칙으로 고정하세요.
+</Callout>

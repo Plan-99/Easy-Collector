@@ -307,9 +307,9 @@ export default async function Home() {
                 무료로 시작하기
                 <span className="icon-circle bg-white/20">→</span>
               </Link>
-              <a href="#" className="btn-pill bg-white/5 border border-white/10 text-surface-300 hover:text-white hover:bg-white/10">
+              <Link href="/docs" className="btn-pill bg-white/5 border border-white/10 text-surface-300 hover:text-white hover:bg-white/10">
                 Documentation 보기
-              </a>
+              </Link>
             </div>
           </div>
         </div>

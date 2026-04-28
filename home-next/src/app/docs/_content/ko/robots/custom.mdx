@@ -1,0 +1,91 @@
+---
+title: Custom Robot
+description: ROS 2 토픽 / 서비스 / 액션으로 통신하는 임의의 로봇을 등록.
+section: robots
+order: 3
+sourceRefs:
+  - frontend/src/pages/v2/RobotPage.vue
+lastVerifiedVersion: 0.0.0
+---
+
+자체 개발한 로봇이거나 vendor가 ROS 2 인터페이스만 제공하는 경우, 별도 모듈 없이 **Custom Robot** 타입으로 등록할 수 있습니다.
+
+## 사전 조건
+
+- 외부 드라이버가 `sensor_msgs/JointState` 토픽으로 현재 관절 상태를 발행 중
+- 액추에이터를 받기 위한 토픽 / 서비스 / 액션 인터페이스 준비
+
+## 등록 절차
+
+<Steps>
+1. **Robots → Management → Add Robot.** Robot Type에서 **custom**을 선택합니다.
+
+2. **Role을 선택합니다.**
+
+   - **Single Arm** — 일반 로봇 팔
+   - **Dual Arm** — 양팔 로봇 한 몸체
+   - **Tool** — 그리퍼, 진공흡착 등 엔드이펙터
+
+   <DocsImage
+     src="/docs/robots/custom-01-role.png"
+     alt="RobotForm — Role select"
+     status="missing"
+   />
+
+3. **Joint Names를 입력합니다.**
+
+   `/joint_states` 토픽에 나오는 이름과 정확히 일치해야 합니다. **Tool Joint** 체크박스로 그리퍼 조인트를 따로 표시합니다.
+
+   <DocsImage
+     src="/docs/robots/custom-02-joints.png"
+     alt="Joint Names 그리드 + Tool Joint 체크박스"
+     status="missing"
+   />
+
+4. **각 조인트의 Lower / Upper Bound를 입력합니다.**
+
+   IK가 발산하지 않도록 안전한 범위를 입력합니다. 단위는 라디안.
+
+   <DocsImage
+     src="/docs/robots/custom-03-bounds.png"
+     alt="Joint Lower / Upper Bounds"
+     status="missing"
+   />
+
+5. **Read Topic / Write Type / Write Topic을 설정합니다.**
+
+   - **Read Topic** — 예: `/my_robot/joint_states`
+   - **Write Type** — `topic`, `service`, `action` 중 선택
+   - **Write Topic** — 액션 제어 토픽
+   - **Write Topic Message Type** — `sensor_msgs/JointState` 또는 `control_msgs/action/GripperCommand`
+
+   <DocsImage
+     src="/docs/robots/custom-04-topics.png"
+     alt="Read / Write 토픽 설정"
+     status="missing"
+   />
+
+6. **(선택) IK Settings (JSON)을 입력합니다.**
+
+   placeholder의 예시 JSON을 참고해 URDF 경로, base/end-effector link, IK solver 옵션 등을 채웁니다. 비워두면 IK가 비활성화됩니다.
+
+   <DocsImage
+     src="/docs/robots/custom-05-ik-json.png"
+     alt="IK Settings JSON textarea"
+     status="missing"
+   />
+
+7. **저장 후 상태를 확인합니다.**
+
+   custom 로봇은 ON/OFF 토글 대신 **TOPIC ON / TOPIC OFF**로 표시됩니다. 외부 드라이버가 토픽을 발행 중이면 자동으로 TOPIC ON이 됩니다.
+
+   <DocsImage
+     src="/docs/robots/custom-06-online.png"
+     alt="Custom 로봇 TOPIC ON"
+     status="missing"
+   />
+</Steps>
+
+<Callout type="warning">
+IK Settings JSON에 오타가 있으면 폼 하단에 빨간색 에러가 표시됩니다. 저장은 가능하지만 IK 컨트롤은 비활성화됩니다.
+</Callout>

@@ -227,6 +227,13 @@ def update_robot(id):
     if 'is_sim' in request.json:
         settings['is_sim'] = request.json.get('is_sim', False)
 
+    if 'ee_offset' in request.json:
+        ee_offset = request.json.get('ee_offset') or {}
+        if ee_offset:
+            settings['ee_offset'] = ee_offset
+        else:
+            settings.pop('ee_offset', None)
+
     robot.settings = settings
     robot.save()
     return {'status': 'success', 'message': 'Robot Updated'}, 200

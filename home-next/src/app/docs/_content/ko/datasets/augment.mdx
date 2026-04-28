@@ -1,0 +1,35 @@
+---
+title: 데이터 증강
+description: 색상·크롭·회전 변환으로 한 에피소드에서 여러 학습 샘플 생성.
+section: datasets
+order: 3
+sourceRefs:
+  - frontend/src/components/v2/DataAugmentationDialog.vue
+lastVerifiedVersion: 0.0.0
+---
+
+증강은 같은 에피소드를 여러 변형으로 늘려 학습의 일반화 성능을 높이는 기법입니다.
+
+<Steps>
+1. **data 탭에서 데이터셋을 우클릭하고 Augment Dataset을 누릅니다.**
+
+   <DocsImage
+     src="/docs/datasets/augment-01-context-menu.png"
+     alt="우클릭 메뉴 — Augment Dataset"
+     status="missing"
+   />
+
+2. **Data Augmentation 다이얼로그가 풀스크린으로 열립니다.**
+
+   변환 종류, 강도, 결과 데이터셋 이름 등을 설정합니다.
+
+   <DocsImage
+     src="/docs/datasets/augment-02-dialog.png"
+     alt="DataAugmentationDialog 전체"
+     status="missing"
+   />
+</Steps>
+
+<Callout type="info">
+증강은 새로운 에피소드 파일을 생성합니다. 원본은 그대로 유지되니 안심하고 실행하세요.
+</Callout>

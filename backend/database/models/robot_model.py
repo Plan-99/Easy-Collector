@@ -49,7 +49,10 @@ class Robot(SoftDeleteModel):
 
     name = CharField(null=True)
     type = CharField(null=True)
-    role = CharField(null=True)
+    # NOTE: SQL 컬럼명은 'role'이지만 클래스 어트리뷰트는 property/setter로 노출하기 위해
+    # 다른 이름(role_db)으로 둔다. 같은 이름의 property가 있으면 peewee가 INSERT 시
+    # getattr(cls, 'role')로 property를 집어 들어 'get_sort_key' 에러가 난다.
+    role_db = CharField(null=True, column_name='role')
     settings = TextField(null=True)
     homepose = TextField(null=True)
     hide = BooleanField(default=False)
@@ -241,12 +244,16 @@ class Robot(SoftDeleteModel):
     @property
     def role(self):
         # DB 값이 있으면 사용, 없으면 global_configs에서 가져옴
-        db_role = self.__data__.get('role', '')
+        db_role = self.role_db or ''
         if db_role:
             return db_role
         if self.type != 'custom':
             return self.get_robot_type_info().get('role', 'single_arm')
         return self._settings.get('role', '')
+
+    @role.setter
+    def role(self, value):
+        self.role_db = value
 
     @property
     def tool_inner(self):
@@ -286,4 +293,7 @@ class Robot(SoftDeleteModel):
         default_pose = next((p for p in poses if p.is_default), None)
         if default_pose:
             data['homepose'] = default_pose._get_pose()
+        # Default ee_definitions (frontend General teleop tab 표시용)
+        from ...configs.robot_ik_defaults import get_default_ee_definitions
+        data['default_ee_definitions'] = get_default_ee_definitions(self.type)
         return data

@@ -1,0 +1,56 @@
+---
+title: AgileX Piper
+description: AgileX Piper 6-DoF 팔을 등록하는 방법.
+section: robots
+order: 2
+sourceRefs:
+  - frontend/src/pages/v2/RobotPage.vue
+  - modules/robots/piper/
+lastVerifiedVersion: 0.0.0
+---
+
+Piper는 CAN 버스로 통신하는 6-DoF 협동 로봇입니다.
+
+## 사전 조건
+
+- [모듈 추가](/docs/modules)에서 **Piper** 모듈 설치
+- USB-CAN 어댑터가 PC에 연결되어 있고 `ip link show can0`로 인터페이스 확인 가능
+- Piper 본체에 전원이 들어오고 부팅 완료
+
+## 등록 절차
+
+<Steps>
+1. **Robots → Management → Add Robot.**
+
+2. **Robot Type에서 piper를 선택하고 CAN Port를 입력합니다.**
+
+   기본값 `can0`을 그대로 두면 대부분 OK입니다.
+
+   <DocsImage
+     src="/docs/robots/piper-01-form.png"
+     alt="RobotForm — Piper, CAN Port=can0"
+     status="missing"
+   />
+
+3. **저장 후 카드의 토글을 켭니다.**
+
+   상태가 **OFFLINE → LOADING → ONLINE** 순서로 바뀝니다.
+
+   <DocsImage
+     src="/docs/robots/piper-02-online.png"
+     alt="Piper 카드 ONLINE"
+     status="missing"
+   />
+
+4. **하단 RobotPendant에서 Joint와 IK 제어를 확인합니다.**
+
+   <DocsImage
+     src="/docs/robots/piper-03-pendant.png"
+     alt="Piper RobotPendant — Joint + IK"
+     status="missing"
+   />
+</Steps>
+
+<Callout type="warning">
+처음 토글을 켤 때 로봇이 작은 진동과 함께 토크를 ON합니다. 사람이 닿지 않는 위치에서 시작하세요.
+</Callout>
