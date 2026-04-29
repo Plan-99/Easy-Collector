@@ -95,16 +95,17 @@ def train(
     use_amp = train_settings.pop('use_amp', False)
     grad_accum_steps = train_settings.pop('grad_accum_steps', 1)
     # EMA + smoothed validation settings (pop before passing to policy config).
-    # IMPORTANT: openpi explicitly DISABLES EMA for LoRA presets (ema_decay=None in
-    # `gemma_2b_lora`/`gemma_300m_lora` configs) — only full-FT presets use 0.99/0.999.
-    # Reason: LoRA-B starts at zero, so EMA(0.99) systematically drags the trained
-    # delta back toward zero ("99% old, 1% new"), under-training the LoRA path.
-    # Default to 0 when use_peft is on, 0.99 otherwise (matches openpi behavior).
-    # User can still override via UI/train_settings.
-    _ema_default = 0.0 if train_settings.get('use_peft', False) else 0.99
-    ema_decay = float(train_settings.pop('ema_decay', _ema_default) or 0.0)
-    val_smooth_window = int(train_settings.pop('val_smooth_window', 5))
-    val_n_passes = int(train_settings.pop('val_n_passes', 3))
+    # All defaults are SAFE-OFF — preserve prior ACT/Diffusion behavior (no EMA,
+    # single val pass, raw best epoch). User opts in explicitly via UI:
+    #   - PI05 LoRA: keep ema_decay=0 (openpi LoRA preset matches; EMA on LoRA
+    #     systematically drags trained delta toward zero since LoRA-B starts at 0).
+    #   - PI05 full-FT (rare): set ema_decay=0.99 explicitly per openpi recipe.
+    #   - PI05 LoRA on small datasets: bump val_smooth_window=5 + val_n_passes=3
+    #     to fight episode-based-sampler val noise.
+    #   - ACT/Diffusion: defaults match prior code (no behavior change).
+    ema_decay = float(train_settings.pop('ema_decay', 0.0) or 0.0)
+    val_smooth_window = int(train_settings.pop('val_smooth_window', 1) or 1)
+    val_n_passes = int(train_settings.pop('val_n_passes', 1) or 1)
 
     
     def _log_gpu_mem(label):

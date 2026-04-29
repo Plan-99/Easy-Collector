@@ -200,12 +200,16 @@ export const TRAIN_CONFIGS = {
         'peft_alpha': { 'label': 'LoRA Alpha', 'value': 64, 'type': 'number', 'showIf': 'use_peft' },
         'use_amp': { 'label': 'Mixed Precision (bf16)', 'value': false, 'type': 'boolean' },
         'grad_accum_steps': { 'label': 'Gradient Accumulation Steps', 'value': 1, 'type': 'number' },
-        // EMA + smoothed validation. Defaults match openpi gemma_2b_lora preset.
-        // ema_decay=0 disables EMA. Increase val_n_passes to reduce per-epoch
-        // val_loss variance (1/sqrt(N)) at the cost of N× val time per epoch.
-        'ema_decay': { 'label': 'EMA Decay (0=off)', 'value': 0.99, 'type': 'number' },
-        'val_smooth_window': { 'label': 'Val Smooth Window (epochs)', 'value': 5, 'type': 'number' },
-        'val_n_passes': { 'label': 'Val Passes per Epoch', 'value': 3, 'type': 'number' },
+        // EMA + smoothed validation. All defaults are safe-off (preserve prior
+        // ACT/Diffusion behavior: no EMA, raw best, single val pass). Opt in for
+        // PI05 LoRA on small datasets:
+        //   - ema_decay=0 (recommended for LoRA — openpi LoRA preset matches)
+        //   - ema_decay=0.99 (recommended for full-FT only)
+        //   - val_smooth_window=5 + val_n_passes=3 (recommended for episode-based
+        //     small-val-set noise fighting; ckpt 96 hit a noise outlier at epoch 98)
+        'ema_decay': { 'label': 'EMA Decay (0=off, 0.99 for full-FT only)', 'value': 0, 'type': 'number' },
+        'val_smooth_window': { 'label': 'Val Smooth Window (epochs, 1=raw)', 'value': 1, 'type': 'number' },
+        'val_n_passes': { 'label': 'Val Passes per Epoch (1=fast)', 'value': 1, 'type': 'number' },
         // Wrist-mounted camera sensor IDs (comma-separated, e.g. "1" or "2,3").
         // openpi skips spatial aug (crop+rotate) on these — they encode end-effector
         // geometry and random crop destroys the gripper↔scene invariance critical
