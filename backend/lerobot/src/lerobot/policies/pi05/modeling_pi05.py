@@ -360,6 +360,10 @@ class PaliGemmaWithExpertModel(
         self.train_expert_only = train_expert_only
 
         vlm_config_hf = CONFIG_MAPPING["paligemma"]()
+        # Vocab = 257152 matches lerobot/pi05_base (PI's public pre-trained checkpoint,
+        # our preferred init source). PaliGemma-3B-pt-224 ships 257216 (64 extra tokens
+        # that PI05 does not use); the loader in train.py slices those extra rows off
+        # when falling back to PaliGemma. Keeping 257152 lets pi05_base load strictly.
         vlm_config_hf._vocab_size = 257152  # noqa: SLF001
         vlm_config_hf.image_token_index = 257152
         vlm_config_hf.text_config.hidden_size = vlm_config.width
@@ -393,11 +397,23 @@ class PaliGemmaWithExpertModel(
             adarms_cond_dim=action_expert_config.width if use_adarms[1] else None,
         )
 
-        print(f'[PaliGemma] Creating PaliGemma VLM...', flush=True)
-        self.paligemma = PaliGemmaForConditionalGenerationWithPiGemma(config=vlm_config_hf)
-        print(f'[PaliGemma] PaliGemma VLM created. Creating Gemma Expert...', flush=True)
-        self.gemma_expert = PiGemmaForCausalLM(config=action_expert_config_hf)
-        self.gemma_expert.model.embed_tokens = None
+        # Class hierarchy creates models 2–3× during __init__ (super().__init__ builds
+        # full parent model, then the custom subclass replaces parts). For gemma_2b in
+        # float32 this peaks at ~30–40 GB CPU RAM and OOMs on <32 GB systems.
+        # Force bfloat16 as the default dtype during creation so every intermediate
+        # allocation is half-precision; to_bfloat16_for_selected_params() then restores
+        # float32 on the vision path.
+        print(f'[PaliGemma] Creating PaliGemma VLM (default dtype={precision})...', flush=True)
+        _prev_default_dtype = torch.get_default_dtype()
+        if precision == "bfloat16":
+            torch.set_default_dtype(torch.bfloat16)
+        try:
+            self.paligemma = PaliGemmaForConditionalGenerationWithPiGemma(config=vlm_config_hf)
+            print(f'[PaliGemma] PaliGemma VLM created. Creating Gemma Expert...', flush=True)
+            self.gemma_expert = PiGemmaForCausalLM(config=action_expert_config_hf)
+            self.gemma_expert.model.embed_tokens = None
+        finally:
+            torch.set_default_dtype(_prev_default_dtype)
         print(f'[PaliGemma] Gemma Expert created. Converting to {precision}...', flush=True)
 
         self.to_bfloat16_for_selected_params(precision)
@@ -447,11 +463,16 @@ class PaliGemmaWithExpertModel(
 
     def embed_image(self, image: torch.Tensor):
         # Vision tower and multi_modal_projector are kept in float32 (params_to_keep_float32).
+        # NOTE: older transformers' PaliGemma forward divided image_features by
+        # sqrt(hidden_size) and lerobot's explicit `* sqrt(hidden_size)` cancelled
+        # the divide. Newer transformers dropped the divide, so keeping the multiply
+        # here produces image features ~45× too large compared to pi05_base's training
+        # distribution. Match pi05_base by emitting raw projector output.
         out_dtype = image.dtype
         if image.dtype != torch.float32:
             image = image.to(torch.float32)
         image_outputs = self.paligemma.model.get_image_features(image)
-        features = image_outputs.pooler_output * self.paligemma.config.text_config.hidden_size**0.5
+        features = image_outputs.pooler_output
         if features.dtype != out_dtype:
             features = features.to(out_dtype)
         return features
@@ -671,11 +692,14 @@ class PI05Pytorch(nn.Module):  # see openpi `PI0Pytorch`
             pad_masks.append(img_mask[:, None].expand(bsize, num_img_embs))
             att_masks += [0] * num_img_embs
 
-        # Process language tokens
+        # Process language tokens.
+        # NOTE: GemmaTextScaledWordEmbedding in current transformers already multiplies
+        # by sqrt(hidden_size) inside its forward(). Adding another sqrt(dim) here
+        # double-scales text embeddings by ~45x — pi05_base was trained on the single-
+        # scaled magnitude, so double-scaling pushes inputs far off the training
+        # distribution and the pretrained weights stop being useful.
         def lang_embed_func(tokens):
-            lang_emb = self.paligemma_with_expert.embed_language_tokens(tokens)
-            lang_emb_dim = lang_emb.shape[-1]
-            return lang_emb * math.sqrt(lang_emb_dim)
+            return self.paligemma_with_expert.embed_language_tokens(tokens)
 
         lang_emb = self._apply_checkpoint(lang_embed_func, tokens)
         embs.append(lang_emb)
@@ -1204,8 +1228,15 @@ class PI05Policy(PreTrainedPolicy):
             if img.shape[1:3] != self.config.image_resolution:
                 img = resize_with_pad_torch(img, *self.config.image_resolution)
 
-            # Normalize from [0,1] to [-1,1] as expected by siglip
-            img = img * 2.0 - 1.0
+            # NOTE: do NOT apply `img * 2.0 - 1.0` here. The image arriving at this
+            # function has already been scaled to [-1, 1] by `process_image(pixel_range='-11')`
+            # (utils.py) at both train and inference time — that bridge was added when
+            # pi05_base/SigLIP was found to require [-1, 1] inputs. Applying the conversion
+            # AGAIN here pushes pixels into [-3, 1], which is severely OOD for pi05_base's
+            # pretrained vision tower. This was the primary cause of LoRA loss saturation
+            # around 0.05 across ckpt 93-99 even after restructuring the LoRA targets.
+            # Empirically verified: PIL→ToTensor→process_image gives [-1, 0.91]; the old
+            # `*2-1` then produced [-3, 0.83] feeding SigLIP.
 
             # from openpi preprocess_observation_pytorch: Convert back to [B, C, H, W] format if it was originally channels-first
             if is_channels_first:

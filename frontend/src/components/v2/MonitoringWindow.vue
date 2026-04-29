@@ -789,6 +789,15 @@ const inferenceForm = ref([
         value: 0.01,
         show: (form) => form.find(f => f.key === 're_inference_steps')?.value === 1,
     },
+    {
+        // VLA (PI05) language prompt. Empty string → backend falls back to task.name.
+        key: 'language_instruction',
+        label: 'Language Prompt (VLA, e.g. PI0.5)',
+        type: 'text',
+        value: '',
+        placeholder: 'e.g. "pick up the red cup" (leave empty to use task name)',
+        show: () => checkpoint.value?.policy?.type === 'PI05',
+    },
 ]);
 
 function startInference() {
@@ -807,6 +816,8 @@ function onInferenceSubmit(formData) {
         hz: hz.value,
         re_inference_steps: formData.re_inference_steps,
         temporal_ensemble_coeff: formData.re_inference_steps === 1 ? formData.temporal_ensemble_coeff : null,
+        // PI0.5 / VLA prompt; backend uses task.name as fallback if empty
+        language_instruction: formData.language_instruction || '',
     }).catch((error) => {
         console.error('Error starting test:', error);
         Notify.create({

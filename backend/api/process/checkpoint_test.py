@@ -43,6 +43,7 @@ def checkpoint_test(
     re_inference_steps=1,
     temporal_ensemble_coeff=0.01,
     action_type=None,
+    language_instruction=None,  # optional VLA prompt; falls back to task['name']
     ):
 
     agents = sorted(agents, key=lambda a: a.id)
@@ -70,6 +71,13 @@ def checkpoint_test(
             _obs_keys = checkpoint.get('train_settings', {}).get('obs_state_keys')
         obs_state_keys = _obs_keys if _obs_keys is not None else ['qpos']
         use_relative_trajectory = checkpoint.get('train_settings', {}).get('use_relative_trajectory', False)
+        # PI05's use_relative_actions affects how the action chunk relates to state.
+        # When True, the model predicts deltas anchored to the state at chunk-inference
+        # time. The postprocessor's AbsoluteActionsProcessorStep adds state back. If we
+        # postprocess per single action while preprocessor caches a NEW state every step,
+        # the wrong (current-step) state is added → cumulative drift across the chunk.
+        # We need to drain the whole chunk and postprocess once with the inference-time state.
+        use_relative_actions = policy_obj.get('settings', {}).get('use_relative_actions', False)
         has_succeed = checkpoint.get('train_settings', {}).get('has_succeed', False)
 
         if policy_obj['type'] == 'ACT':
@@ -232,6 +240,10 @@ def checkpoint_test(
             if agent.role != 'tool' and agent.ik_solver is not None:
                 prev_qpos_dict[agent.id] = ts.observation['robot_states'][agent.id]['qpos']
         rel_action_queue = deque()  # relative_ee_pos용 delta action queue
+        # PI05+use_relative_actions: whole-chunk absolute actions cached after one
+        # inference. Subsequent loop iterations pop from here without re-inferring or
+        # re-postprocessing, so the state-add-back stays anchored to chunk-inference time.
+        pi05_chunk_queue = deque()
         start = time.time()
         while not task_control['stop']:
             if step_num % episode_len == 0 and step_num != 0 and move_homepose:
@@ -239,6 +251,7 @@ def checkpoint_test(
                 episode_reward = 0.0
                 policy.reset()
                 rel_action_queue.clear()
+                pi05_chunk_queue.clear()
                 if home_pose is not None:
                     for agent in env.agents:
                         agent.move_to(home_pose[str(agent.id)])
@@ -260,6 +273,11 @@ def checkpoint_test(
             # relative_ee_pos: queue에 남은 delta가 있으면 추론 없이 꺼내 씀
             if action_key == 'relative_ee_pos' and len(rel_action_queue) > 0:
                 state_t = rel_action_queue.popleft()
+            # PI05+use_relative_actions: 같은 chunk의 나머지 absolute action 사용
+            # (chunk-inference 시점의 state로 이미 더해진 상태). 재추론/재postprocess
+            # 없이 pop만 하면 state drift 없음.
+            elif policy_obj['type'] == 'PI05' and use_relative_actions and len(pi05_chunk_queue) > 0:
+                state_t = pi05_chunk_queue.popleft()
             else:
                 with torch.no_grad():
                     # UMI relative trajectory: 매 step마다 현재 EE pose 기준으로 재예측.
@@ -304,11 +322,19 @@ def checkpoint_test(
                         qpos_np = np.concatenate([qpos_np] + extra_obs)
                     qpos_t = torch.from_numpy(qpos_np).float().cuda().unsqueeze(0)
                     policy_input_t = {'observation.state': qpos_t}
-                    # PI05 needs tokenized language inputs
+                    # PI05 needs tokenized language inputs. Prefer user-provided
+                    # `language_instruction` (from UI); fall back to task.name if empty
+                    # or None so the behavior stays backward-compatible.
                     if policy_obj['type'] == 'PI05':
-                        policy_input_t['language_instruction'] = task.get('name', '')
-                        from ...policies.utils import prepare_pi05_language_tokens
-                        prepare_pi05_language_tokens(policy_input_t, policy.config)
+                        _lang = language_instruction if (language_instruction and str(language_instruction).strip()) else task.get('name', '')
+                        policy_input_t['language_instruction'] = _lang
+                        # NOTE: do NOT call prepare_pi05_language_tokens here. It writes
+                        # `observation.language.tokens` using a divergent (min-max + padded)
+                        # state representation that is then overwritten by the preprocessor's
+                        # Pi05PrepareStateTokenizerProcessorStep + TokenizerProcessorStep using
+                        # the correct quantile + native-dim representation. Removing this dead
+                        # call eliminates a foot-gun that would silently revert to bad behavior
+                        # if anyone ever short-circuited the preprocessor.
                     print(f"[INPUT] state: {qpos_t.shape} = {qpos_t[0].cpu().numpy()}")
                     for sensor in sensors:
                         image = obs_t['images'][f'sensor_{sensor["id"]}']
@@ -318,13 +344,39 @@ def checkpoint_test(
                             'cropped_area': task['sensor_cropped_area'][str(sensor_id)],
                             'rotate': task['sensor_rotate'][str(sensor_id)]
                         })
-                        image = process_image(image, vision_backbone, to_cuda=True)
+                        # BGR → RGB. ros_image_to_numpy() returns BGR (cv2/OpenCV convention),
+                        # but training data on disk is saved as RGB (lerobot_io.py applies
+                        # cv2.cvtColor(BGR2RGB) before mp4/png write). process_image() then
+                        # passes through PIL.Image.fromarray which interprets uint8 HxWx3 as RGB.
+                        # Without this flip, R and B channels are swapped at inference vs training
+                        # → red cube looks blue to SigLIP → robot goes to wrong location even though
+                        # joint motions look like training (state pathway is unaffected). The export
+                        # template (export_templates/ros_inference.py:269-272) already had this fix;
+                        # the live inference path (this file) was missing it.
+                        if hasattr(image, 'ndim') and image.ndim == 3 and image.shape[2] == 3:
+                            image = image[:, :, ::-1]
+                            import numpy as _np
+                            image = _np.ascontiguousarray(image)
+                        # PI05/PaliGemma pretrained weights expect [-1, 1]-ranged pixels.
+                        _pixel_range = '-11' if policy_obj['type'] == 'PI05' else '01'
+                        image = process_image(image, vision_backbone, to_cuda=True, pixel_range=_pixel_range)
                         policy_input_t[f'observation.images.sensor_{sensor["id"]}'] = image.unsqueeze(0)
 
                     # Normalize observation inputs (state, images) using train-time stats.
                     # Shapes are already batched + on CUDA, so AddBatchDim/DeviceProcessor
                     # are no-ops; only NormalizerProcessorStep does meaningful work.
                     if preprocessor is not None:
+                        # PI05 preprocessor pipeline expects complementary_data['task'].
+                        # Training bridged 'language_instruction' → 'task' inside forward_pass;
+                        # inference goes through preprocessor() directly, so mirror that
+                        # bridge here too. Must be a list (of length=batch) because
+                        # Pi05PrepareStateTokenizerProcessorStep iterates over it — if we
+                        # pass a bare string, iteration would go char-by-char and break.
+                        if policy_obj['type'] == 'PI05' and 'task' not in policy_input_t:
+                            _lang = policy_input_t.get('language_instruction') or task.get('name', '')
+                            if isinstance(_lang, str):
+                                _lang = [_lang]
+                            policy_input_t['task'] = _lang
                         policy_input_t = preprocessor(policy_input_t)
 
                     if action_key == 'relative_ee_pos':
@@ -351,6 +403,25 @@ def checkpoint_test(
                         state_t = deltas[0]
                         for i in range(1, len(deltas)):
                             rel_action_queue.append(deltas[i])
+                    elif policy_obj['type'] == 'PI05' and use_relative_actions:
+                        # Drain whole action chunk and postprocess it once with the
+                        # state cached during preprocessor (= state at chunk inference
+                        # time). Per-step postprocess would add stale state and accumulate
+                        # drift since model output deltas are anchored to chunk start.
+                        policy.reset()
+                        first = policy.select_action(policy_input_t).squeeze(0)
+                        chunk_list = [first]
+                        q = policy._action_queue if hasattr(policy, '_action_queue') else policy._queues.get('action')
+                        while q and len(q) > 0:
+                            chunk_list.append(q.popleft().squeeze(0))
+                        raw_actions = torch.stack(chunk_list)
+                        if postprocessor is not None:
+                            raw_actions = postprocessor(raw_actions)
+                        # Use first action immediately; queue the rest for subsequent
+                        # iterations (popped at the top of the loop without re-postprocessing).
+                        state_t = raw_actions[0].cpu().numpy()
+                        for i in range(1, len(raw_actions)):
+                            pi05_chunk_queue.append(raw_actions[i].cpu().numpy())
                     else:
                         # relative trajectory 모드: select_action이 반환하는 값은 chunk[0] = T_now→1 = 즉각 delta
                         raw_action = policy.select_action(policy_input_t)
@@ -494,7 +565,14 @@ def checkpoint_test(
                             'cropped_area': task['sensor_cropped_area'][sensor_id].get('cropped_area', None),
                             'rotate': task['sensor_rotate'][sensor_id]
                         })
-                        image = process_image(image, vision_backbone, to_cuda=True)
+                        # BGR → RGB (same fix as the main inference path above; ros_image_to_numpy
+                        # returns BGR but training data on disk is RGB).
+                        if hasattr(image, 'ndim') and image.ndim == 3 and image.shape[2] == 3:
+                            image = image[:, :, ::-1]
+                            image = np.ascontiguousarray(image)
+                        # PI05/PaliGemma pretrained weights expect [-1, 1]-ranged pixels.
+                        _pixel_range = '-11' if policy_obj['type'] == 'PI05' else '01'
+                        image = process_image(image, vision_backbone, to_cuda=True, pixel_range=_pixel_range)
                         policy_input_t1[f'observation.images.sensor_{sensor_id}'] = image.unsqueeze(0)
                     state_t1 = policy.select_action(policy_input_t1).squeeze(0).cpu().numpy()
                 

@@ -154,7 +154,12 @@
                                     <div class="col-6">
                                         <q-select dense outlined v-model="policyForm.type" :options="policyTypes" dark class="bg-secondary" label="Policy Type" :readonly="isTypeReadonly" @update:model-value="handlePolicyTypeChange" />
                                     </div>
-                                    <div v-for="(config, key) in policyForm.settings" :key="key" class="col-4">
+                                    <div
+                                        v-for="(config, key) in policyForm.settings"
+                                        :key="key"
+                                        class="col-4"
+                                        v-show="!config.showIf || (policyForm.settings[config.showIf] && policyForm.settings[config.showIf].value)"
+                                    >
                                         <q-select
                                             v-if="key === 'pretrained_backbone_weights'"
                                             dense
@@ -221,6 +226,47 @@
                                             toggle-text-color="dark"
                                             class="full-height"
                                         ></q-btn-toggle>
+                                        <q-input
+                                            v-else-if="config.type === 'password'"
+                                            dense
+                                            outlined
+                                            v-model="config.value"
+                                            :label="config.label"
+                                            :readonly="isSettingsReadonly"
+                                            :disable="isSettingsReadonly"
+                                            :type="passwordVisibility[key] ? 'text' : 'password'"
+                                            class="full-height bg-secondary"
+                                            dark
+                                            autocomplete="off"
+                                        >
+                                            <template v-slot:append>
+                                                <q-icon
+                                                    :name="passwordVisibility[key] ? 'visibility' : 'visibility_off'"
+                                                    class="cursor-pointer"
+                                                    @click="passwordVisibility[key] = !passwordVisibility[key]"
+                                                />
+                                            </template>
+                                        </q-input>
+                                        <q-input
+                                            v-else-if="config.type === 'array'"
+                                            dense
+                                            outlined
+                                            :model-value="Array.isArray(config.value) ? config.value.join(', ') : config.value"
+                                            :label="config.label + ' (comma-separated)'"
+                                            :readonly="isSettingsReadonly"
+                                            :disable="isSettingsReadonly"
+                                            type="text"
+                                            class="full-height bg-secondary"
+                                            dark
+                                            @update:model-value="(v) => {
+                                                const trimmed = String(v).trim()
+                                                if (!trimmed) { config.value = []; return }
+                                                config.value = trimmed.split(',').map(s => {
+                                                    const n = Number(s.trim())
+                                                    return isNaN(n) ? s.trim() : n
+                                                }).filter(x => x !== '')
+                                            }"
+                                        />
                                         <q-input
                                             dense
                                             outlined
@@ -412,6 +458,7 @@ const policies = ref([]);
 const selectedCheckpoint = ref(null);
 const selectedPolicy = ref(null);
 const policyForm = ref({});
+const passwordVisibility = ref({});
 const showSaveAsDialog = ref(false);
 const newPolicyName = ref('');
 const newCheckpointName = ref('');

@@ -24,6 +24,7 @@
                         bg-color="dark"
                         v-model="data.value"
                         type="text"
+                        :placeholder="data.placeholder || ''"
                         :autofocus="index === 0"
                         class="q-mb-md q-mt-xs"
                         v-if="data.type === 'text'"

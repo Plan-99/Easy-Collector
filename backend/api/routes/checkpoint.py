@@ -97,6 +97,9 @@ def start_test(id):
         re_inference_steps=data.get('re_inference_steps', 1),
         temporal_ensemble_coeff=data.get('temporal_ensemble_coeff', 0.01),
         action_type=data.get('action_type', None),
+        # Optional natural-language prompt for VLA policies (PI0.5). If omitted, falls
+        # back to task.name at the call site. Empty string is treated as "use task.name".
+        language_instruction=data.get('language_instruction', None),
     )
 
     return {'status': 'success', 'message': 'Checkpoint test started'}, 200

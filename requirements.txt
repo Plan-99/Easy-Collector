@@ -28,6 +28,8 @@ termcolor
 gymnasium
 diffusers
 transformers
+peft
+accelerate
 zarr
 scipy
 scikit-learn

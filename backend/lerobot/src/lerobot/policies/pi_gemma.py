@@ -196,9 +196,26 @@ class PiGemmaModel(GemmaModel):  # type: ignore[misc]
     """
 
     def __init__(self, config: GemmaConfig, **kwargs):
-        super().__init__(config, **kwargs)
-        # if not getattr(config, "use_adarms", False):
-        #     return
+        # Parent creates embed_tokens/layers/norm/rotary_emb on CPU. layers+norm are
+        # replaced below, so allocating them with real storage wastes peak RAM.
+        # Run parent init on meta device (zero storage), then materialize only what we keep.
+        with torch.device("meta"):
+            super().__init__(config, **kwargs)
+
+        # Materialize embed_tokens (kept) and rotary_emb (kept) with real weights.
+        from transformers.models.gemma.modeling_gemma import (
+            GemmaRotaryEmbedding,
+            GemmaTextScaledWordEmbedding,
+        )
+        self.embed_tokens = GemmaTextScaledWordEmbedding(
+            config.vocab_size,
+            config.hidden_size,
+            self.padding_idx,
+            embed_scale=self.config.hidden_size**0.5,
+        )
+        self.rotary_emb = GemmaRotaryEmbedding(config=config)
+
+        # Create PiGemma layers and norm with real weights (replaces meta versions).
         cond_dim = getattr(config, "adarms_cond_dim", None)
         pi_gemma_decoder_layer_base = _get_pi_gemma_decoder_layer_base()
         self.layers = nn.ModuleList(
@@ -327,7 +344,13 @@ class PiGemmaForCausalLM(GemmaForCausalLM):  # type: ignore[misc]
     """
 
     def __init__(self, config: GemmaConfig, **kwargs):
-        super().__init__(config, **kwargs)
+        # Parent creates self.model (GemmaModel) + lm_head. self.model is replaced
+        # below with PiGemmaModel, so do parent on meta to save the throwaway allocation.
+        with torch.device("meta"):
+            super().__init__(config, **kwargs)
+        # Materialize lm_head (kept) with real weights.
+        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        # Replace meta self.model with real PiGemmaModel.
         self.model = PiGemmaModel(config)
 
 
@@ -335,7 +358,19 @@ class PaliGemmaModelWithPiGemma(PaliGemmaModel):
     """PaliGemmaModel whose language_model is PiGemmaModel (custom decoder with PiGemmaRMSNorm and gated residuals)."""
 
     def __init__(self, config):
-        super().__init__(config)
+        # Parent creates vision_tower + multi_modal_projector + language_model on CPU.
+        # language_model is replaced below; doing parent on meta avoids a ~2B-param
+        # throwaway allocation.
+        with torch.device("meta"):
+            super().__init__(config)
+
+        # Materialize vision_tower and multi_modal_projector (kept) with real weights.
+        from transformers import AutoModel
+        from transformers.models.paligemma.modeling_paligemma import PaliGemmaMultiModalProjector
+        self.vision_tower = AutoModel.from_config(config=config.vision_config)
+        self.multi_modal_projector = PaliGemmaMultiModalProjector(config)
+
+        # Replace meta language_model with real PiGemmaModel.
         self.language_model = PiGemmaModel(config.text_config)
 
 
@@ -343,7 +378,13 @@ class PaliGemmaForConditionalGenerationWithPiGemma(PaliGemmaForConditionalGenera
     """PaliGemmaForConditionalGeneration using PiGemma decoder for the language model."""
 
     def __init__(self, config):
-        super().__init__(config)
+        # Parent creates self.model (full PaliGemmaModel, ~2.6B params) + lm_head.
+        # self.model is replaced below; do parent on meta to skip the throwaway.
+        with torch.device("meta"):
+            super().__init__(config)
+        # Materialize lm_head (kept) with real weights.
+        self.lm_head = nn.Linear(config.text_config.hidden_size, config.text_config.vocab_size, bias=False)
+        # Replace meta self.model with real PaliGemmaModelWithPiGemma.
         self.model = PaliGemmaModelWithPiGemma(config)
 
     # Make modules available through conditional class for BC

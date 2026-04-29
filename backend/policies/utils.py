@@ -86,7 +86,7 @@ e = IPython.embed
 
 
 class EpisodicDataset(torch.utils.data.Dataset):
-    def __init__(self, episode_ids, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone='resnet18', n_obs_steps=1, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None):
+    def __init__(self, episode_ids, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone='resnet18', n_obs_steps=1, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None, augment=False, wrist_sensor_ids=None):
         super(EpisodicDataset).__init__()
         self.episode_ids = episode_ids
         self.dataset_dir = dataset_dir
@@ -99,16 +99,45 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self.action_key = action_key
         self.use_relative_trajectory = use_relative_trajectory
         self.obs_state_keys = obs_state_keys if obs_state_keys is not None else ['qpos']
+        # Image augmentation: PI0.5 paper Appendix E recipe (RandomCrop 95% + Resize
+        # + Rotate ±5° + ColorJitter). Applied on PIL images before process_image
+        # so it interacts correctly with any downstream normalization. Train-only;
+        # val/eval datasets instantiate with augment=False.
+        # Wrist cameras: openpi skips spatial transforms on wrist views because
+        # crop/rotate breaks the gripper↔observation geometric coupling. Only
+        # ColorJitter is applied. wrist_sensor_ids defaults to empty (all sensors
+        # get the full aug pipeline — backward compatible). User must configure
+        # which sensor IDs are wrist-mounted to opt into the differentiated path.
+        self.augment = augment
+        self.wrist_sensor_ids = set(int(x) for x in (wrist_sensor_ids or []))
+        if augment:
+            self._image_augment_full = transforms.Compose([
+                transforms.RandomResizedCrop(size=(224, 224), scale=(0.9025, 1.0), ratio=(0.95, 1.05)),
+                transforms.RandomRotation(degrees=5),
+                transforms.ColorJitter(brightness=0.3, contrast=0.4, saturation=0.5),
+            ])
+            self._image_augment_color_only = transforms.ColorJitter(
+                brightness=0.3, contrast=0.4, saturation=0.5
+            )
+        else:
+            self._image_augment_full = None
+            self._image_augment_color_only = None
         self.info = None
 
         # Pre-load episode metadata (lengths) for efficient sampling
         self._ep_cache = {}
         self._dataset_info = get_dataset_info(dataset_dir)
 
-        # Pre-load tasks once (avoid re-reading jsonl every __getitem__)
-        from ..api.process.lerobot_io import _read_jsonl, TASKS_PATH
-        tasks = _read_jsonl(os.path.join(dataset_dir, TASKS_PATH))
-        self._task_map = {t.get("task_index"): t.get("task", "") for t in tasks}
+        # Pre-load episode → tasks mapping from episodes.jsonl (lerobot standard).
+        # Each line: {"episode_index": N, "length": L, "tasks": ["pick up the cup", ...]}
+        # PI05 uses the first entry of `tasks` per episode as its language instruction.
+        from ..api.process.lerobot_io import _read_jsonl, EPISODES_PATH
+        episodes_meta = _read_jsonl(os.path.join(dataset_dir, EPISODES_PATH))
+        self._episode_tasks = {
+            int(e.get("episode_index")): (e.get("tasks") or [""])
+            for e in episodes_meta
+            if e.get("episode_index") is not None
+        }
 
         self.__getitem__(0) # initialize self.info
 
@@ -131,9 +160,10 @@ class EpisodicDataset(torch.utils.data.Dataset):
         state_data = np.array(df["observation.state"].tolist(), dtype=np.float32)
         action_data = np.array(df["action"].tolist(), dtype=np.float32)
 
-        # Get language instruction from pre-loaded task map
-        task_index = int(df["task_index"].iloc[0])
-        language_instruction = self._task_map.get(task_index, "")
+        # Language instruction from episodes.jsonl (per-episode `tasks` list).
+        # Use the first entry; most datasets have a single task per episode.
+        ep_tasks = self._episode_tasks.get(int(episode_id), [""])
+        language_instruction = ep_tasks[0] if ep_tasks else ""
 
         # Get image data per sensor — from parquet (legacy), video files, or PNG dir.
         # CRITICAL: silent fallback to np.zeros((224,224,3)) was masking missing images
@@ -275,9 +305,21 @@ class EpisodicDataset(torch.utils.data.Dataset):
         item['language_instruction'] = language_instruction
         for sensor_id in self.sensor_ids:
             processed_images = []
+            # Pick aug based on whether this sensor is configured as wrist-mounted.
+            # Wrist cams: ColorJitter only (preserve spatial geometry).
+            # Other cams: full aug (crop+rotate+jitter).
+            if int(sensor_id) in getattr(self, 'wrist_sensor_ids', set()):
+                aug = getattr(self, '_image_augment_color_only', None)
+            else:
+                aug = getattr(self, '_image_augment_full', None)
             for image in image_dict[f"sensor_{sensor_id}"]:
                 image = Image.fromarray(np.array(image))
-                image = process_image(image)
+                if aug is not None:
+                    image = aug(image)
+                # PI05's SigLIP vision tower expects [-1, 1] (PaliGemma / openpi convention).
+                # ToTensor alone yields [0, 1] and breaks pretrained visual features.
+                _pixel_range = '-11' if self.policy_type == 'PI05' else '01'
+                image = process_image(image, self.vision_backbone, pixel_range=_pixel_range)
                 processed_images.append(image)
 
             # New lerobot expects [C, H, W] per sample (collate → [batch, C, H, W])
@@ -314,7 +356,17 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
 
 
-def process_image(image, vision_backbone='resnet18', to_cuda=False):
+def process_image(image, vision_backbone='resnet18', to_cuda=False, pixel_range='01'):
+    """Preprocess an image into a model-ready tensor.
+
+    pixel_range: '01' → standard torchvision ToTensor output in [0, 1].
+                 '-11' → scaled to [-1, 1] (mandatory for PI05 / PaliGemma / SigLIP —
+                         openpi preprocess_observation explicitly does `img / 255 * 2 - 1`).
+                         Feeding [0, 1] into pi05_base shifts the vision feature
+                         distribution and wrecks pretrained visual grounding; LoRA
+                         can't fully recover it, which matches the "moves but misses"
+                         symptom during inference.
+    """
     if not isinstance(image, Image.Image):
         image = Image.fromarray(np.array(image))
     if vision_backbone not in VISION_BACKBONE_MAP:
@@ -323,15 +375,28 @@ def process_image(image, vision_backbone='resnet18', to_cuda=False):
             transforms.ToTensor(),
         ])
         image = image_transform(image)
+        if pixel_range == '-11':
+            image = image * 2.0 - 1.0
     else:
         image_processor = AutoImageProcessor.from_pretrained(VISION_BACKBONE_MAP[vision_backbone])
-        image = image_processor(image)['pixel_values'][0]  # Assuming the image is a PIL Image or numpy array
+        image = image_processor(image)['pixel_values'][0]  # backbone's own normalization
 
-    return image.cuda() if to_cuda else image  # Add batch dimension
+    return image.cuda() if to_cuda else image
 
 
-def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None):
-    """Compute normalization stats from LeRobot dataset parquet files."""
+def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None, use_relative_actions=False, relative_joints_dim=None, relative_action_mask=None, absolute_action_dims=None, chunk_size=50):
+    """Compute normalization stats from LeRobot dataset parquet files.
+
+    When ``use_relative_actions=True`` the pipeline transforms action to
+    (action - state) for dimensions shared with state BEFORE normalization. Stats
+    must therefore be computed on those delta values, not raw absolute targets —
+    otherwise the normalizer divides tiny deltas by absolute-scale q99/q01 and the
+    training signal collapses (every normalized target ends up near a constant).
+
+    ``relative_joints_dim`` mirrors openpi's ``make_bool_mask(N, -1)`` — when set,
+    only the first N dims are converted to delta. For a 6-DOF arm + gripper + done
+    token, use relative_joints_dim=6 (gripper and done stay absolute).
+    """
     if obs_state_keys is None:
         obs_state_keys = ['qpos']
 
@@ -398,6 +463,55 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
         if action_key == 'relative_ee_pos' or (use_relative_trajectory and action_key == 'ee_delta_action'):
             action = delta_to_relative_trajectory(action)
 
+        # use_relative_actions: stats MUST match what RelativeActionsProcessorStep
+        # actually produces during training/inference, not naive per-timestep deltas.
+        # The pipeline does:
+        #     delta[t in chunk] = action[t] - state[chunk_start]   (single state, all T)
+        # NOT:
+        #     delta[t] = action[t] - state[t]                      (per-step, tiny)
+        # The chunk-wise delta accumulates over the chunk → magnitudes 10-50× larger
+        # than per-step deltas. Computing stats with per-step deltas underestimates
+        # q99-q01, normalization explodes target values to [-99, 99], gradients break,
+        # loss never decreases. THIS WAS THE "loss won't go down with delta mode" bug.
+        if use_relative_actions:
+            episode_len = action.shape[0]
+            state_dim = qpos.shape[1]
+            action_dim = action.shape[1]
+
+            # Build effective mask once. Truthy checks so default empty list / 0 falls through.
+            if relative_action_mask:
+                m = list(relative_action_mask)
+                m = m + [False] * (action_dim - len(m)) if len(m) < action_dim else m[:action_dim]
+                effective_mask = [bool(x) for x in m]
+            elif absolute_action_dims:
+                effective_mask = [True] * action_dim
+                for idx in absolute_action_dims:
+                    if 0 <= int(idx) < action_dim:
+                        effective_mask[int(idx)] = False
+            elif relative_joints_dim and relative_joints_dim > 0:
+                n = min(relative_joints_dim, action_dim)
+                effective_mask = [True] * n + [False] * (action_dim - n)
+            else:
+                shared = min(state_dim, action_dim)
+                effective_mask = [True] * shared + [False] * (action_dim - shared)
+
+            # Sample chunk-wise deltas: for every valid chunk start in the episode,
+            # compute (action[start:start+chunk_size] - state[start]) for delta dims.
+            # Concatenate all such chunks → matches the distribution the pipeline produces.
+            delta_chunks = []
+            cs = max(1, int(chunk_size))
+            for start in range(episode_len):
+                end = min(start + cs, episode_len)
+                chunk = action[start:end].copy()  # (T, action_dim)
+                state_at_start = qpos[start]      # (state_dim,)
+                for i, is_delta in enumerate(effective_mask):
+                    if is_delta and i < state_dim:
+                        chunk[:, i] = chunk[:, i] - state_at_start[i]
+                delta_chunks.append(chunk)
+            # Replace `action` with concatenated chunk-deltas so downstream stats
+            # (min/max/mean/std/q01/q99) are computed on the right distribution.
+            action = np.concatenate(delta_chunks, axis=0) if delta_chunks else action
+
         # Collect image keys from parquet columns
         for col in df.columns:
             if col.startswith("observation.images."):
@@ -428,12 +542,26 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
     action_mean = all_action_data.mean(dim=0)
     action_std = all_action_data.std(dim=0)
     action_std = torch.clip(action_std, 1e-2, np.inf)
+    # q01/q99 for QUANTILES normalization (Pi0.5). Using torch.quantile.
+    action_q01 = torch.quantile(all_action_data.float(), 0.01, dim=0).to(all_action_data.dtype)
+    action_q99 = torch.quantile(all_action_data.float(), 0.99, dim=0).to(all_action_data.dtype)
+    # Guard against near-constant columns (e.g. a rarely-triggered done flag whose
+    # q01 == q99 == 0). Without this the normalizer falls back to eps=1e-8 denominator
+    # and the single non-zero value becomes ~1e8 in normalized space — destroys training.
+    _range = action_q99 - action_q01
+    _min_range = torch.clamp(_range, min=1e-2)
+    action_q99 = action_q01 + _min_range
 
     qpos_min = all_qpos_data.min(dim=0)[0]
     qpos_max = all_qpos_data.max(dim=0)[0]
     qpos_mean = all_qpos_data.mean(dim=0)
     qpos_std = all_qpos_data.std(dim=0)
     qpos_std = torch.clip(qpos_std, 1e-2, np.inf)
+    qpos_q01 = torch.quantile(all_qpos_data.float(), 0.01, dim=0).to(all_qpos_data.dtype)
+    qpos_q99 = torch.quantile(all_qpos_data.float(), 0.99, dim=0).to(all_qpos_data.dtype)
+    _qrange = qpos_q99 - qpos_q01
+    _qmin_range = torch.clamp(_qrange, min=1e-2)
+    qpos_q99 = qpos_q01 + _qmin_range
 
     stats = {
         "action": {
@@ -441,6 +569,8 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
             "max": action_max.numpy(),
             "mean": action_mean.numpy().squeeze(),
             "std": action_std.numpy().squeeze(),
+            "q01": action_q01.numpy(),
+            "q99": action_q99.numpy(),
             "count": np.array([cnt]),
         },
         "observation.state": {
@@ -448,6 +578,8 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
             "max": qpos_max.numpy(),
             "mean": qpos_mean.numpy().squeeze(),
             "std": qpos_std.numpy().squeeze(),
+            "q01": qpos_q01.numpy(),
+            "q99": qpos_q99.numpy(),
             "count": np.array([cnt]),
         },
     }
@@ -556,9 +688,21 @@ class FullScanDataset(EpisodicDataset):
         item['language_instruction'] = language_instruction
         for sensor_id in self.sensor_ids:
             processed_images = []
+            # Pick aug based on whether this sensor is configured as wrist-mounted.
+            # Wrist cams: ColorJitter only (preserve spatial geometry).
+            # Other cams: full aug (crop+rotate+jitter).
+            if int(sensor_id) in getattr(self, 'wrist_sensor_ids', set()):
+                aug = getattr(self, '_image_augment_color_only', None)
+            else:
+                aug = getattr(self, '_image_augment_full', None)
             for image in image_dict[f"sensor_{sensor_id}"]:
                 image = Image.fromarray(np.array(image))
-                image = process_image(image)
+                if aug is not None:
+                    image = aug(image)
+                # PI05's SigLIP vision tower expects [-1, 1] (PaliGemma / openpi convention).
+                # ToTensor alone yields [0, 1] and breaks pretrained visual features.
+                _pixel_range = '-11' if self.policy_type == 'PI05' else '01'
+                image = process_image(image, self.vision_backbone, pixel_range=_pixel_range)
                 processed_images.append(image)
 
             # New lerobot expects [C, H, W] per sample (collate → [batch, C, H, W])
@@ -594,7 +738,7 @@ class FullScanDataset(EpisodicDataset):
         return item
 
 
-def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_train, batch_size_val, chunk_size, vision_backbone='resnet18', num_workers=1, n_obs_steps=1, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None):
+def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_train, batch_size_val, chunk_size, vision_backbone='resnet18', num_workers=1, n_obs_steps=1, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None, use_relative_actions=False, relative_joints_dim=None, relative_action_mask=None, absolute_action_dims=None, wrist_sensor_ids=None):
     if obs_state_keys is None:
         obs_state_keys = ['qpos']
     print(f'\nData from: {dataset_dir}\n')
@@ -607,7 +751,7 @@ def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_tra
     val_indices = shuffled_indices[split:] if split < num_episodes else shuffled_indices
 
     # obtain normalization stats for qpos and action
-    norm_stats, skipped_episodes = get_norm_stats(dataset_dir, num_episodes, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys)
+    norm_stats, skipped_episodes = get_norm_stats(dataset_dir, num_episodes, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys, use_relative_actions=use_relative_actions, relative_joints_dim=relative_joints_dim, relative_action_mask=relative_action_mask, absolute_action_dims=absolute_action_dims, chunk_size=chunk_size)
 
     # 호환 불가능한 에피소드 제외
     if skipped_episodes:
@@ -617,9 +761,18 @@ def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_tra
         train_indices = valid_indices[:split]
         val_indices = valid_indices[split:] if split < len(valid_indices) else valid_indices
 
-    # construct dataset and dataloader
-    train_dataset = EpisodicDataset(train_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys)
-    val_dataset = EpisodicDataset(val_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys)
+    # construct dataset and dataloader. Image augmentation (paper Appendix E:
+    # RandomCrop 95% + Rotate ±5° + ColorJitter) is applied only to PI05 training
+    # splits — ACT/Diffusion have their own expected input distributions and val
+    # needs deterministic data for honest loss comparison.
+    train_augment = (policy_type == 'PI05')
+    # wrist_sensor_ids: openpi skips spatial aug (crop+rotate) on wrist cams since
+    # they encode end-effector geometry — random crop destroys gripper↔scene spatial
+    # prior and breaks pretrained feature extraction. EasyTrainer's previous
+    # augmentation infrastructure (added in audit-doc bug #24) was never wired through
+    # load_data — that's now fixed by passing it from train.py via the train config.
+    train_dataset = EpisodicDataset(train_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys, augment=train_augment, wrist_sensor_ids=wrist_sensor_ids)
+    val_dataset = EpisodicDataset(val_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys, augment=False, wrist_sensor_ids=wrist_sensor_ids)
     # Keep workers alive across epochs so EpisodicDataset._ep_cache (and OS page
     # cache backing the mmap'd frame .npy files) survives between epochs.
     loader_kwargs = dict(
@@ -847,13 +1000,34 @@ def prepare_pi05_language_tokens(batch, config, norm_stats=None):
 
 def forward_pass(batch, policy, norm_stats=None, preprocessor=None):
     data = {k: (v.cuda() if isinstance(v, torch.Tensor) else v) for k, v in batch.items()}
-    # PI05 needs tokenized language inputs
-    if hasattr(policy, 'config') and hasattr(policy.config, 'tokenizer_max_length'):
-        data = prepare_pi05_language_tokens(data, policy.config, norm_stats=norm_stats)
+    # PI05 preprocessor pipeline expects complementary_data['task']. EasyTrainer
+    # datasets store the same field under 'language_instruction', so bridge the
+    # two so Pi05PrepareStateTokenizerProcessorStep can find the prompt.
+    if 'task' not in data:
+        if 'language_instruction' in data:
+            data['task'] = data['language_instruction']
+        elif hasattr(policy, 'config') and hasattr(policy.config, 'tokenizer_max_length'):
+            # Determine batch size to build a placeholder list of the right length.
+            bsz = None
+            for v in data.values():
+                if isinstance(v, torch.Tensor) and v.dim() >= 1:
+                    bsz = v.shape[0]
+                    break
+            data['task'] = [''] * (bsz or 1)
     # Apply input preprocessor (Normalize state/action/images per cfg.normalization_mapping)
     # so the model trains on normalized targets and the gradient is balanced across joints.
+    # The PI05 preprocessor pipeline includes Pi05PrepareStateTokenizerProcessorStep +
+    # TokenizerProcessorStep which write `observation.language.tokens` correctly using
+    # QUANTILE-normalized state and native state_dim (audit-doc bug #23 fix).
     if preprocessor is not None:
         data = preprocessor(data)
+    elif hasattr(policy, 'config') and hasattr(policy.config, 'tokenizer_max_length'):
+        # Fallback for the rare case where preprocessor failed to load (e.g. corrupted
+        # checkpoint json). Use the legacy `prepare_pi05_language_tokens` to produce
+        # *some* language tokens — the result is divergent from training (min-max norm,
+        # padded state) and the model will perform poorly, but at least it won't crash.
+        # Normal training/inference always has preprocessor and skips this branch.
+        data = prepare_pi05_language_tokens(data, policy.config, norm_stats=norm_stats)
     return policy.forward(data)
 
 
@@ -889,6 +1063,19 @@ def make_easytrainer_processors(policy_type, cfg, dataset_stats=None, pretrained
     )
 
     if pretrained_path is not None:
+        # Force-import the policy-specific processor modules before deserializing the
+        # saved pipeline JSON. ProcessorStepRegistry is populated by @register decorators
+        # at import time — without this, loading a PI05 checkpoint fails with
+        # "Processor step 'pi05_prepare_state_tokenizer_processor_step' not found in
+        # registry" and the code silently falls back to raw I/O (no normalization).
+        # That skipped normalization is what makes the robot behave erratically at
+        # inference even though training looked fine.
+        if policy_type == 'PI05':
+            import lerobot.policies.pi05.processor_pi05  # noqa: F401
+        elif policy_type == 'ACT':
+            import lerobot.policies.act.processor_act  # noqa: F401
+        elif policy_type == 'Diffusion':
+            import lerobot.policies.diffusion.processor_diffusion  # noqa: F401
         try:
             preprocessor = PolicyProcessorPipeline.from_pretrained(
                 pretrained_model_name_or_path=pretrained_path,
@@ -902,6 +1089,27 @@ def make_easytrainer_processors(policy_type, cfg, dataset_stats=None, pretrained
                 to_transition=policy_action_to_transition,
                 to_output=transition_to_policy_action,
             )
+            # Re-wire the relative↔absolute pair after deserialization. AbsoluteActionsProcessorStep's
+            # get_config only persists `enabled` (not relative_step, which is a live cross-pipeline
+            # reference), so a freshly loaded postprocessor has relative_step=None and would either
+            # crash (use_relative_actions=True) or silently skip delta→absolute conversion.
+            # Find the RelativeActionsProcessorStep inside the preprocessor and rebind it.
+            try:
+                from lerobot.processor.relative_action_processor import (
+                    RelativeActionsProcessorStep,
+                    AbsoluteActionsProcessorStep,
+                )
+                _rel_step = None
+                for s in getattr(preprocessor, 'steps', []):
+                    if isinstance(s, RelativeActionsProcessorStep):
+                        _rel_step = s
+                        break
+                if _rel_step is not None:
+                    for s in getattr(postprocessor, 'steps', []):
+                        if isinstance(s, AbsoluteActionsProcessorStep):
+                            s.relative_step = _rel_step
+            except Exception as _wire_err:
+                print(f'[WARN] Could not rewire AbsoluteActionsProcessorStep.relative_step: {_wire_err}')
             return preprocessor, postprocessor
         except Exception as e:
             print(f'[WARN] make_easytrainer_processors: failed to load processors from '

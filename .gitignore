@@ -8,3 +8,9 @@ src/backend/datasets/
 .cache/
 __pycache__/
 *.pyc
+
+# colcon artifacts (should only exist under ros2/ros2_ws/, not at repo root)
+/ros2_ws/
+ros2/ros2_ws/build/
+ros2/ros2_ws/install/
+ros2/ros2_ws/log/
