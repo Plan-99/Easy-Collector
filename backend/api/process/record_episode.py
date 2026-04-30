@@ -63,8 +63,17 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
 
             print(f"Recording Data: {dataset_name}")
 
-            max_timesteps = task['episode_len']
-            home_pose = task['home_pose']
+            # Validate task config before recording. Common UI gap: episode_len left
+            # blank (None) → range(None) raises the cryptic "'NoneType' object cannot
+            # be interpreted as an integer" error after sensor session start.
+            max_timesteps = task.get('episode_len')
+            if max_timesteps is None or max_timesteps <= 0:
+                raise ValueError(
+                    f"Task '{task.get('name', '?')}' (id={task.get('id', '?')}) has "
+                    f"episode_len={max_timesteps}. Set Episode Length > 0 in the task "
+                    f"settings (UI) before starting recording."
+                )
+            home_pose = task.get('home_pose')
 
             socketio_instance.emit('record_episode_progress', {
                 'progress': 0,

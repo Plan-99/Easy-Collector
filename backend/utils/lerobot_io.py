@@ -235,9 +235,25 @@ def build_features(agents, sensors, task, action_key="qaction"):
     for sensor in sensors:
         s = sensor if isinstance(sensor, dict) else sensor.__dict__
         s_id = str(s.get('id'))
-        # Get image resolution from task config
-        img_size = task.get('sensor_img_size', {}).get(s_id, [640, 480])
-        h, w = img_size[1], img_size[0]  # [width, height] -> (H, W)
+        # Get image resolution from task config. Falls back to a per-sensor default
+        # when the task config is missing or partially None — this avoids the
+        # "'NoneType' object is not subscriptable" crash when task.sensor_img_size
+        # is None at the dict level (e.g., new tasks where the user hasn't set it).
+        sensor_img_size = task.get('sensor_img_size') or {}
+        img_size = sensor_img_size.get(s_id) if isinstance(sensor_img_size, dict) else None
+        if not img_size:
+            # Try sensor's own settings (sensor.settings.resolution = [w, h])
+            sensor_settings = s.get('settings') or {}
+            if isinstance(sensor_settings, str):
+                try:
+                    import json as _json
+                    sensor_settings = _json.loads(sensor_settings)
+                except Exception:
+                    sensor_settings = {}
+            img_size = sensor_settings.get('resolution') if isinstance(sensor_settings, dict) else None
+        if not img_size:
+            img_size = [640, 480]  # final fallback
+        h, w = int(img_size[1]), int(img_size[0])  # [width, height] -> (H, W)
         features[f"observation.images.sensor_{s_id}"] = {
             "dtype": "video",
             "shape": (h, w, 3),
