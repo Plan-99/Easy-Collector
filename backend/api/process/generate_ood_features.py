@@ -5,16 +5,13 @@ import numpy as np
 
 from lerobot.policies.act.modeling_act import ACTPolicy
 from ...policies.utils import forward_pass, FullScanDataset, get_norm_stats
-from ...configs.global_configs import DATASET_DIR
+from ...configs.global_configs import DATASET_DIR, resolve_checkpoint_dir
 from torch.utils.data import DataLoader
-
-
-CHECKPOINT_DIR = '/root/src/backend/checkpoints'
 
 
 def generate_ood_features(checkpoint, policy_obj, task, task_control=None):
     """기존 체크포인트에서 모델을 로드하고, 학습 데이터를 순회하여 OOD reference feature를 생성."""
-    ckpt_dir = os.path.join(CHECKPOINT_DIR, str(checkpoint['id']))
+    ckpt_dir = resolve_checkpoint_dir(checkpoint['id'])
 
     # 모델 로드
     policy = ACTPolicy.from_pretrained(ckpt_dir)

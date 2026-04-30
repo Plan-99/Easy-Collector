@@ -1,12 +1,13 @@
 <template>
     <q-card class="text-white full-height column">
         <q-card-section class="row items-center bg-dark text-white">
-            <div class="text-h6">Augment Dataset</div>
+            <div class="text-h6">{{ $t('augmentDatasetTitle') }}</div>
             <q-space />
             <q-btn icon="close" flat round dense v-close-popup />
         </q-card-section>
         <q-separator></q-separator>
         <q-card-section class="bg-secondary q-px-xl q-py-lg col">
+            <TutorialHint class="q-mb-md" :text="$t('tutorialAugmentIntro')" />
             <div class="row q-col-gutter-lg">
                 <div class="col-md-4 col-sm-12">
                     <q-input
@@ -18,7 +19,7 @@
                         v-model="form.name"
                     />
 
-                    <q-list 
+                    <q-list
                         bordered
                         class="border-rounded q-mt-md"
                         separator
@@ -27,11 +28,12 @@
                         <q-expansion-item
                             expand-separator
                             icon="brightness_6"
-                            label="Lightness"
-                            caption="Adjust image brightness"
+                            :label="$t('augLightness')"
+                            :caption="$t('augLightnessCaption')"
                         >
                             <q-card class="bg-secondary" dark>
                                 <q-card-section class="q-pa-md">
+                                    <TutorialHint class="q-mb-md" :text="$t('tutorialAugmentLightness')" />
                                     <q-slider
                                         v-model="form.lightness"
                                         :min="-100"
@@ -47,18 +49,19 @@
                         <q-expansion-item
                             expand-separator
                             icon="palette"
-                            label="HSV Color Space"
-                            caption="Adjust hue, saturation, value"
+                            :label="$t('augHsv')"
+                            :caption="$t('augHsvCaption')"
                         >
                             <q-card class="bg-secondary" dark>
                                 <q-card-section>
+                                    <TutorialHint class="q-mb-md" :text="$t('tutorialAugmentHSV')" />
                                     <q-checkbox
                                         v-model="form.hsv.random"
-                                        label="Random HSV"
+                                        :label="$t('augHsvRandom')"
                                         @update:model-value="addConfig"
                                         class="q-mb-md"
                                     />
-                                    <div class="text-caption">Hue</div>
+                                    <div class="text-caption">{{ $t('augHsvHue') }}</div>
                                     <q-slider
                                         v-model="form.hsv.h"
                                         :min="0"
@@ -69,7 +72,7 @@
                                         :disable="form.hsv.random"
                                         @change="addConfig"
                                     />
-                                    <div class="text-caption">Saturation</div>
+                                    <div class="text-caption">{{ $t('augHsvSaturation') }}</div>
                                     <q-slider
                                         v-model="form.hsv.s"
                                         :min="0"
@@ -80,7 +83,7 @@
                                         :disable="form.hsv.random"
                                         @change="addConfig"
                                     />
-                                    <div class="text-caption">Value</div>
+                                    <div class="text-caption">{{ $t('augHsvValue') }}</div>
                                     <q-slider
                                         v-model="form.hsv.v"
                                         :min="0"
@@ -98,15 +101,16 @@
                         <q-expansion-item
                             expand-separator
                             icon="crop_square"
-                            label="Disturbances"
-                            caption="Add random disturbances"
+                            :label="$t('augDisturbances')"
+                            :caption="$t('augDisturbancesCaption')"
                         >
                             <q-card class="bg-secondary" dark>
                                 <q-card-section>
+                                    <TutorialHint class="q-mb-md" :text="$t('tutorialAugmentDisturbances')" />
                                     <q-input
                                         v-model.number="form.rectangles.count"
                                         type="number"
-                                        label="Number of Disturbances"
+                                        :label="$t('augDisturbancesCount')"
                                         outlined
                                         dense
                                         dark
@@ -115,14 +119,14 @@
                                     />
                                     <q-checkbox
                                         v-model="form.rectangles.randomColor"
-                                        label="Random Color"
+                                        :label="$t('augDisturbancesRandomColor')"
                                         class="q-mb-md"
                                         @update:model-value="addConfig"
                                         color="primary"
                                         dark
                                     />
-                                    <div class="text-caption q-mb-sm">Rectangle Color</div>
-                                    <q-color v-model="form.rectangles.color" :disable="form.rectangles.randomColor" 
+                                    <div class="text-caption q-mb-sm">{{ $t('augDisturbancesRectColor') }}</div>
+                                    <q-color v-model="form.rectangles.color" :disable="form.rectangles.randomColor"
                                         @change="addConfig"
                                     />
                                 </q-card-section>
@@ -132,11 +136,12 @@
                         <q-expansion-item
                             expand-separator
                             icon="grain"
-                            label="Salt and Pepper Noise"
-                            caption="Add salt and pepper noise"
+                            :label="$t('augSaltPepper')"
+                            :caption="$t('augSaltPepperCaption')"
                         >
                             <q-card class="bg-secondary" dark>
                                 <q-card-section>
+                                    <TutorialHint class="q-mb-md" :text="$t('tutorialAugmentSaltPepper')" />
                                     <q-slider
                                         v-model="form.saltAndPepper.amount"
                                         :min="0"
@@ -153,12 +158,13 @@
                         <q-expansion-item
                             expand-separator
                             icon="blur_on"
-                            label="Gaussian Noise"
-                            caption="Add Gaussian noise"
+                            :label="$t('augGaussian')"
+                            :caption="$t('augGaussianCaption')"
                         >
-                            <q-card class="bg-secondary" dark>  
+                            <q-card class="bg-secondary" dark>
                                 <q-card-section>
-                                    <div class="text-caption">Mean</div>
+                                    <TutorialHint class="q-mb-md" :text="$t('tutorialAugmentGaussian')" />
+                                    <div class="text-caption">{{ $t('augGaussianMean') }}</div>
                                     <q-slider
                                         v-model="form.gaussian.mean"
                                         :min="-255"
@@ -167,7 +173,7 @@
                                         label-always
                                         @change="addConfig"
                                     />
-                                    <div class="text-caption">Sigma</div>
+                                    <div class="text-caption">{{ $t('augGaussianSigma') }}</div>
                                     <q-slider
                                         v-model="form.gaussian.sigma"
                                         :min="0"
@@ -183,12 +189,13 @@
                         <q-expansion-item
                             expand-separator
                             icon="camera"
-                            label="Prospective Transform"
-                            caption="Change image perspective"
+                            :label="$t('augProspective')"
+                            :caption="$t('augProspectiveCaption')"
                         >
                             <q-card class="bg-secondary" dark>
                                 <q-card-section>
-                                    <div class="text-caption">Scale Factor</div>
+                                    <TutorialHint class="q-mb-md" :text="$t('tutorialAugmentPerspective')" />
+                                    <div class="text-caption">{{ $t('augProspectiveScaleFactor') }}</div>
                                     <q-slider
                                         v-model="form.prospective.scale_factor"
                                         :min="0"
@@ -197,7 +204,7 @@
                                         label-always
                                         @change="addConfig"
                                     />
-                                    <div class="text-caption">Degrees</div>
+                                    <div class="text-caption">{{ $t('augProspectiveDegrees') }}</div>
                                     <q-slider
                                         v-model="form.prospective.degrees"
                                         :min="-180"
@@ -206,7 +213,7 @@
                                         label-always
                                         @change="addConfig"
                                     />
-                                    <div class="text-caption">Shear</div>
+                                    <div class="text-caption">{{ $t('augProspectiveShear') }}</div>
                                     <q-slider
                                         v-model="form.prospective.shear"
                                         :min="-45"
@@ -215,7 +222,7 @@
                                         label-always
                                         @change="addConfig"
                                     />
-                                    <div class="text-caption">Perspective</div>
+                                    <div class="text-caption">{{ $t('augProspectivePerspective') }}</div>
                                     <q-slider
                                         v-model="form.prospective.perspective"
                                         :min="-100"
@@ -232,7 +239,7 @@
                 <div class="col-md-8 col-sm-12">
                     <q-card flat bordered dark class="bg-dark border-rounded border-white">
                         <q-card-section>
-                            <div class="text-subtitle1">Preview from {{ dataset ? dataset.name : '' }}</div>
+                            <div class="text-subtitle1">{{ $t('augPreviewTitle', { name: dataset ? dataset.name : '' }) }}</div>
                         </q-card-section>
                         <q-separator color="white" />
                         <q-card-section class="flex flex-center">
@@ -245,7 +252,7 @@
                             />
                         </q-card-section>
                         <div class="row justify-center q-ma-md q-gutter-sm">
-                            <q-btn label="Start Augmentation" outline color="primary" @click="augmentDataset" v-if="!processing && !progress" />
+                            <q-btn :label="$t('augStartButton')" outline color="primary" @click="augmentDataset" v-if="!processing && !progress" />
                             <q-linear-progress
                                 :value="progress"
                                 color="primary"
@@ -272,7 +279,10 @@ import { api } from 'src/boot/axios';
 import { Notify } from 'quasar';
 import Hdf5Viewer from 'src/components/v2/Hdf5Viewer.vue';
 import { useSocket } from 'src/composables/useSocket';
+import { useI18n } from 'vue-i18n';
+import TutorialHint from 'src/components/v2/TutorialHint.vue';
 
+const { t } = useI18n();
 const { socket } = useSocket()
 
 const props = defineProps({
@@ -320,7 +330,7 @@ function augmentDataset() {
     if (!props.dataset) {
         Notify.create({
             color: 'negative',
-            message: 'Please select a dataset to augment.'
+            message: t('augErrorNoDataset')
         });
         return;
     }
@@ -330,13 +340,13 @@ function augmentDataset() {
     api.post(`/dataset/${props.dataset.id}/augment`, form.value).then(() => {
         Notify.create({
             color: 'positive',
-            message: 'Dataset augmentation started.'
+            message: t('augStarted')
         });
     }).catch((error) => {
         console.error('Error starting dataset augmentation:', error);
         Notify.create({
             color: 'negative',
-            message: 'Failed to start dataset augmentation.'
+            message: t('augStartFailed')
         });
     });
 }

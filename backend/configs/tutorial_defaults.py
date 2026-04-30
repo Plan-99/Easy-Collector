@@ -26,6 +26,12 @@ TUTORIAL_ROBOT = {
     'homepose': [],
     'settings': {
         'is_tutorial': True,
+        # is_sim=True를 줘야 Agent.move_to가 단발 publish + 짧은 sleep으로 끝나는
+        # sim 분기로 떨어진다 (agent.py:906). 기본값(False)이면 step_size=0.0005로
+        # 매우 느린 step-by-step 이동이 되어 record_episode의 home pose 이동이
+        # 사실상 안 움직이는 것처럼 보이고, 그 사이 gRPC가 블록되어 stop 신호도
+        # 즉시 반영되지 않는다.
+        'is_sim': True,
         'role': 'single_arm',
         'read_topic': f'{TUTORIAL_TOPIC_PREFIX}/joint_states',
         'read_topic_msg': 'sensor_msgs/JointState',
@@ -38,6 +44,7 @@ TUTORIAL_ROBOT = {
         'tool_index': [6],
         'tool_inner': True,
         'interpolation': False,
+        'is_sim': True,
         # Task-space (IK) support: kinematics mirror assets/scene.xml.
         # End-effector frame = link6 + (0.045 + 0.05) along x = 0.095 from joint6.
         'urdf_path': '/root/ros2_ws/src/mujoco_world/urdf/tutorial_arm.urdf',
@@ -50,14 +57,31 @@ TUTORIAL_ROBOT = {
 }
 
 
-# Sensor row: overhead RGB camera looking at the table.
-TUTORIAL_SENSOR = {
-    'name': 'tutorial_camera',
-    'type': 'custom',
-    'settings': {
-        'is_tutorial': True,
-        'read_topic': f'{TUTORIAL_TOPIC_PREFIX}/camera/image_raw/compressed',
-        'read_topic_msg': 'sensor_msgs/CompressedImage',
-        'resolution': [640, 480],
+# Sensor rows: top-down (slightly diagonal) and front view RGB cameras.
+# 토픽 이름은 mujoco_world_node가 발행하는 것과 1:1 매칭되어야 한다.
+# 새 카메라를 추가하려면 (1) scene.xml에 카메라 정의 추가, (2) 노드의
+# DEFAULT_CAMERA_NAMES 갱신, (3) 아래 리스트에 row 정의 추가.
+TUTORIAL_SENSORS = [
+    {
+        'name': 'tutorial_top_cam',
+        'type': 'custom',
+        'settings': {
+            'is_tutorial': True,
+            'tutorial_camera_slug': 'top_cam',
+            'read_topic': f'{TUTORIAL_TOPIC_PREFIX}/top_cam/image_raw/compressed',
+            'read_topic_msg': 'sensor_msgs/CompressedImage',
+            'resolution': [640, 480],
+        },
     },
-}
+    {
+        'name': 'tutorial_front_cam',
+        'type': 'custom',
+        'settings': {
+            'is_tutorial': True,
+            'tutorial_camera_slug': 'front_cam',
+            'read_topic': f'{TUTORIAL_TOPIC_PREFIX}/front_cam/image_raw/compressed',
+            'read_topic_msg': 'sensor_msgs/CompressedImage',
+            'resolution': [640, 480],
+        },
+    },
+]

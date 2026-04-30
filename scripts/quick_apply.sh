@@ -213,9 +213,17 @@ copy_tree_to() {
 }
 copy_tree_to "training_server" "backend/training_server"
 # ros2/ros2_ws/src and ros2/robot_sdk are managed by the module installer — do not
-# sync them wholesale. Exception: mujoco_world is a bundled (non-module) ROS2
-# package shipped with the app for tutorial mode, so sync just that subtree.
-copy_tree_to "ros2/ros2_ws/src/mujoco_world" "ros2/ros2_ws/src/mujoco_world"
+# sync them wholesale. Exception: anything sitting in ros2/ros2_ws/src/ in the
+# source tree is a bundled (non-module) ROS2 package shipped with the app
+# (e.g. mujoco_world for sim tutorial). 자동 탐지하여 모두 동기화한다.
+if [ -d "$DEV_SRC/ros2/ros2_ws/src" ]; then
+  while IFS= read -r -d '' pkg_xml; do
+    pkg_dir=$(dirname "$pkg_xml")
+    pkg_name=$(basename "$pkg_dir")
+    rel="ros2/ros2_ws/src/$pkg_name"
+    copy_tree_to "$rel" "$rel"
+  done < <(find "$DEV_SRC/ros2/ros2_ws/src" -mindepth 2 -maxdepth 2 -name package.xml -print0)
+fi
 # modules/, home-next/ are not part of the runtime project
 
 copy_file "docker-compose.yml"

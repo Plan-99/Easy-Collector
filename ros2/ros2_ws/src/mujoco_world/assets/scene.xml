@@ -55,8 +55,11 @@
       <geom rgba="0.85 0.85 0.85 1" mass="0.0" contype="0" conaffinity="0"/>
     </default>
     <default class="gripper_finger">
-      <geom type="box" size="0.010 0.004 0.024" rgba="0.2 0.2 0.2 1" mass="0.03"
-            contype="4" conaffinity="3" friction="2.0 0.05 0.001" condim="6"/>
+      <!-- y두께 0.004 → 0.008로 키워 contact tolerance ↑ (정렬 살짝 어긋나도
+           cube 옆면과 안정적으로 닿도록). 마찰은 그대로 — combined 마찰 행렬에서
+           cube 쪽 값이 max로 적용되도록 cube friction을 별도 상향. -->
+      <geom type="box" size="0.010 0.008 0.024" rgba="0.2 0.2 0.2 1" mass="0.03"
+            contype="4" conaffinity="3" friction="2.0 0.10 0.005" condim="6"/>
     </default>
   </default>
 
@@ -66,6 +69,7 @@
     <material name="floor_mat" texture="floor_tex" texrepeat="2 2" reflectance="0.1"/>
     <material name="cube_mat" rgba="0.85 0.15 0.15 1"/>
     <material name="marker_mat" rgba="0.95 0.55 0.10 1"/>
+    <material name="plate_mat" rgba="0.95 0.95 0.95 1" reflectance="0.05"/>
   </asset>
 
   <worldbody>
@@ -142,12 +146,26 @@
     <!-- Manipulable cube on the floor, in front of the robot, within reach. -->
     <body name="cube" pos="0.30 0.08 0.02">
       <freejoint name="cube_free"/>
+      <!-- friction: tangential 1.0 (그대로) / torsional 0.005 → 0.05 (×10) /
+           rolling 0.001 → 0.005 (×5). 핀치 시 finger 사이에서 살짝 비틀려
+           빠지는 현상을 줄이고, 잡힌 후 손목 회전에도 cube가 따라오도록. -->
       <geom name="cube_geom" type="box" size="0.020 0.020 0.020" material="cube_mat"
-            contype="2" conaffinity="13" friction="1.0 0.005 0.001" condim="6" mass="0.05"/>
+            contype="2" conaffinity="13" friction="1.0 0.05 0.005" condim="6" mass="0.05"/>
     </body>
 
-    <!-- Overhead RGB camera looking down at the workspace -->
-    <camera name="tutorial_cam" pos="0.30 0 1.00" xyaxes="1 0 0 0 1 0" fovy="60"/>
+    <!-- Static white plate — push-T 스타일 평평한 타깃 마커. cube를 이쪽으로
+         밀어 옮기는 task. 두께 1mm로 작업면에 거의 붙어 있어 cube가 가장자리에
+         걸리지 않고 쉽게 올라온다. floor와 동일한 contype/conaffinity로 두어
+         cube/finger/arm 모두와 정상 충돌. -->
+    <geom name="plate" type="cylinder" size="0.055 0.0005" pos="0.30 -0.10 0.0005"
+          material="plate_mat"
+          contype="1" conaffinity="14" friction="1.0 0.005 0.001"/>
+
+    <!-- Cameras (mode="targetbody" → 카메라가 항상 cube를 바라보므로 작업공간 중앙 정렬) -->
+    <!-- Top view, slightly diagonal: 작업공간 위쪽에서 약간 비스듬히 내려다봄 -->
+    <camera name="top_cam" pos="-0.05 -0.20 0.85" mode="targetbody" target="cube" fovy="55"/>
+    <!-- Front view: 로봇 앞쪽 책상 높이에서 cube/그리퍼를 바라봄 -->
+    <camera name="front_cam" pos="0.85 0.00 0.18" mode="targetbody" target="cube" fovy="50"/>
   </worldbody>
 
   <!-- Mirror gripper joints so a single command drives both fingers symmetrically -->
@@ -163,17 +181,22 @@
     <position name="act_joint4" joint="joint4" kp="60"  kv="5"  ctrlrange="-3.14 3.14"/>
     <position name="act_joint5" joint="joint5" kp="50"  kv="4"  ctrlrange="-1.40 1.40"/>
     <position name="act_joint6" joint="joint6" kp="40"  kv="3"  ctrlrange="-3.14 3.14"/>
-    <position name="act_gripper" joint="gripper" kp="200" kv="15" ctrlrange="0 0.04"/>
+    <!-- kp 200 → 400 (×2): cube를 잡고 들어올릴 때 손가락이 더 강하게 압착해
+         마찰력을 충분히 빌드업한다. kv도 비례 상향(15 → 30)해 진동 방지. -->
+    <position name="act_gripper" joint="gripper" kp="400" kv="30" ctrlrange="0 0.04"/>
   </actuator>
 
   <!--
-    Home pose: arm reaches forward at ~30 cm and slightly down so the
-    end-effector is just above the cube (which sits on the floor).
+    Home pose: end-effector hovers around (x≈0.30, y≈0, z≈0.05) — 빨간 큐브
+    (y=+0.08, top z=0.04)와 흰 접시(y=-0.10) 사이 살짝 위. 그리퍼가 거의 수직
+    아래를 향해(α5≈-π/2) 작업면 가까이 위치하므로, 사용자가 EE를 +y 또는 -y로
+    조금만 내리면 그리퍼 끝(또는 닫힌 그리퍼 외측)으로 cube를 옆에서 밀어 흰
+    접시 위치로 옮길 수 있다 (push-T 스타일 task).
     qpos order: 6 arm joints + gripper(2) + cube(7=xyz+quat).
   -->
   <keyframe>
     <key name="home"
-         qpos="0 0.6 -1.0 0 -0.7 0   0 0   0.30 0.08 0.02 1 0 0 0"
-         ctrl="0 0.6 -1.0 0 -0.7 0   0"/>
+         qpos="0 1.21 -1.70 0 -1.08 0   0 0   0.30 0.08 0.02 1 0 0 0"
+         ctrl="0 1.21 -1.70 0 -1.08 0   0"/>
   </keyframe>
 </mujoco>

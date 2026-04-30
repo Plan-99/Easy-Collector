@@ -7,7 +7,7 @@
                 dark
                 outlined
                 bg-color="dark"
-                label="Assembly Name"
+                :label="$t('assemblyName')"
             ></q-input>
             <canvas ref="canvasRef" width="300" height="300"></canvas>
         </div>
@@ -37,7 +37,7 @@
                                         :text-color="assemblyForm.left_arm_id !== robot.id ? 'white' : 'black'"
                                         :flat="assemblyForm.left_arm_id !== robot.id"
                                         @click.stop="includeRobot(robot, 'left_arm')"
-                                    >Left</q-btn>
+                                    >{{ $t('assemblyLeftBtn') }}</q-btn>
                                     <q-btn
                                         dense
                                         class="col"
@@ -45,7 +45,7 @@
                                         :text-color="assemblyForm.right_arm_id !== robot.id ? 'white' : 'black'"
                                         :flat="assemblyForm.right_arm_id !== robot.id"
                                         @click.stop="includeRobot(robot, 'right_arm')"
-                                    >Right</q-btn>
+                                    >{{ $t('assemblyRightBtn') }}</q-btn>
                                 </div>
                                 <div
                                     class="row q-col-gutter-xs"
@@ -58,7 +58,7 @@
                                         :text-color="assemblyForm.left_tool_id !== robot.id ? 'white' : 'black'"
                                         :flat="assemblyForm.left_tool_id !== robot.id"
                                         @click.stop="includeRobot(robot, 'left_tool')"
-                                    >Left</q-btn>
+                                    >{{ $t('assemblyLeftBtn') }}</q-btn>
                                     <q-btn
                                         dense
                                         class="col"
@@ -66,7 +66,7 @@
                                         :text-color="assemblyForm.right_tool_id !== robot.id ? 'white' : 'black'"
                                         :flat="assemblyForm.right_tool_id !== robot.id"
                                         @click.stop="includeRobot(robot, 'right_tool')"
-                                    >Right</q-btn>
+                                    >{{ $t('assemblyRightBtn') }}</q-btn>
                                 </div>
                             </q-card-section>
                         </q-card>
@@ -80,7 +80,7 @@
                 color="primary"
                 text-color="black"
                 @click="saveAssembly"
-              >Save</q-btn>
+              >{{ $t('assemblySaveBtn') }}</q-btn>
             </div>
         </div>
     </div>
@@ -90,6 +90,9 @@
 import { computed, defineProps, onMounted, ref, watch, defineEmits } from 'vue';
 import { api } from 'src/boot/axios';
 import { Notify } from 'quasar';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 const canvasRef = ref(null);
 let ctx = null;
@@ -189,18 +192,18 @@ const activeParts = computed(() => {
 });
 
 function saveAssembly() {
-    if (!assemblyForm.value.left_arm_id && !assemblyForm.value.right_arm_id && 
+    if (!assemblyForm.value.left_arm_id && !assemblyForm.value.right_arm_id &&
         !assemblyForm.value.left_tool_id && !assemblyForm.value.right_tool_id) {
         Notify.create({
             type: 'negative',
-            message: 'Please include at least one part in the assembly.'
+            message: t('assemblyValidationNoPart')
         });
         return;
     }
     if (!assemblyForm.value.name) {
         Notify.create({
             type: 'negative',
-            message: 'Please provide a name for the assembly.'
+            message: t('assemblyValidationNoName')
         });
         return;
     }

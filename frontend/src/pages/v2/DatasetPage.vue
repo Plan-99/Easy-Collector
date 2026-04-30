@@ -24,7 +24,7 @@
                 </q-list>
 
                 <q-card-actions align="right">
-                    <q-btn flat label="Close" color="primary" v-close-popup />
+                    <q-btn flat :label="$t('datasetCloseBtn')" color="primary" v-close-popup />
                 </q-card-actions>
             </q-card>
         </q-dialog>

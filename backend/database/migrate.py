@@ -21,12 +21,13 @@ from backend.database.models.checkpoint_model import Checkpoint
 from backend.database.models.assembly_model import Assembly
 from backend.database.models.teleoperator_model import Teleoperator
 from backend.database.models.robot_pose_model import RobotPose
+from backend.database.models.planner_model import Planner
 
 
 ALL_MODELS = [
     Robot, Sensor, Policy, Gripper, LeaderRobotPreset,
     Task, Dataset, Checkpoint, Assembly, Teleoperator,
-    RobotPose,
+    RobotPose, Planner,
 ]
 
 
@@ -78,11 +79,32 @@ def _ensure_columns():
                 print(f"  Warning: {table_name}.{column_name}: {e}")
 
 
+def _migrate_checkpoint_status():
+    """One-time data migration for the training queue state machine.
+
+    이전 status 'training' (단일 슬롯 시절)을 'running'으로 정규화하고, 부팅 시점에
+    'running' 상태인 row가 있다면 — 이는 backend가 학습 도중 죽었다는 뜻이므로 —
+    'failed'로 회수한다 (스케줄러가 다음 'queued' picking을 막지 않도록).
+    """
+    try:
+        db.execute_sql(
+            "UPDATE checkpoints SET status='running' WHERE status='training'"
+        )
+        db.execute_sql(
+            "UPDATE checkpoints SET status='failed', "
+            "finished_at=COALESCE(finished_at, datetime('now')) "
+            "WHERE status='running' AND deleted_at IS NULL"
+        )
+    except Exception as e:
+        print(f"  Warning: checkpoint status migration: {e}")
+
+
 def migrate():
     """Create tables that don't already exist, then ensure all columns are present."""
     db.connect(reuse_if_open=True)
     db.create_tables(ALL_MODELS, safe=True)
     _ensure_columns()
+    _migrate_checkpoint_status()
     print(f"Migration complete. Ensured {len(ALL_MODELS)} tables exist with all columns.")
 
 

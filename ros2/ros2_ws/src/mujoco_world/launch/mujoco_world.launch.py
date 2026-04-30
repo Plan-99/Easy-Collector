@@ -25,7 +25,8 @@ def generate_launch_description():
             "realtime_factor", default_value="1.0"),
         DeclareLaunchArgument(
             "show_viewer", default_value="true",
-            description="Open the native MuJoCo viewer window (requires X/OpenGL)."),
+            description="Open the native MuJoCo viewer window on the host display. "
+                        "X11 auth 실패 시 SimRunner가 try/except로 잡아 headless로 폴백."),
 
         Node(
             package="mujoco_world",

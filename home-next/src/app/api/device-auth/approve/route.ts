@@ -59,29 +59,37 @@ export async function POST(req: NextRequest) {
     return Response.json({ ok: true, status: "REJECTED" });
   }
 
-  // Enforce: one active Device per user. The user must unbind any existing
-  // device from /dashboard before binding a new machine.
-  const existing = await prisma.device.findFirst({
-    where: { userId, active: true },
-    select: { id: true, machineId: true, hostname: true },
+  // Free plan = single active Device. Unlimited / Business plans skip the
+  // bind check entirely so the user can register multiple PCs at once.
+  const me = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { plan: true },
   });
+  const unlimited = me?.plan === "unlimited" || me?.plan === "business";
 
-  // Same machine re-binding to the same user is fine — re-issue the token.
-  // But a different machineId on top of an existing active Device is rejected.
-  if (existing && existing.machineId !== reqRow.machineId) {
-    await prisma.deviceAuthRequest.update({
-      where: { nonce },
-      data: { status: "REJECTED", userId, errorCode: "DEVICE_ALREADY_BOUND" },
+  if (!unlimited) {
+    const existing = await prisma.device.findFirst({
+      where: { userId, active: true },
+      select: { id: true, machineId: true, hostname: true },
     });
-    return Response.json(
-      {
-        ok: false,
-        status: "REJECTED",
-        errorCode: "DEVICE_ALREADY_BOUND",
-        existingDevice: { hostname: existing.hostname },
-      },
-      { status: 409 }
-    );
+
+    // Same machine re-binding to the same user is fine — re-issue the token.
+    // But a different machineId on top of an existing active Device is rejected.
+    if (existing && existing.machineId !== reqRow.machineId) {
+      await prisma.deviceAuthRequest.update({
+        where: { nonce },
+        data: { status: "REJECTED", userId, errorCode: "DEVICE_ALREADY_BOUND" },
+      });
+      return Response.json(
+        {
+          ok: false,
+          status: "REJECTED",
+          errorCode: "DEVICE_ALREADY_BOUND",
+          existingDevice: { hostname: existing.hostname },
+        },
+        { status: 409 }
+      );
+    }
   }
 
   // The same machineId might already be tied to a *different* user's Device.

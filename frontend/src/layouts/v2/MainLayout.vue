@@ -7,12 +7,12 @@
           dense
           round
           icon="menu"
-          aria-label="Menu"
+          :aria-label="$t('ariaMenu')"
           @click="toggleLeftDrawer"
         />
 
         <q-toolbar-title>
-          Easy Trainer
+          {{ $t('appTitle') }}
         </q-toolbar-title>
         <q-space></q-space>
 
@@ -24,15 +24,46 @@
           size="sm"
           class="q-mr-sm"
         >
-          Tutorial Mode
+          {{ $t('tutorialModeLabel') }}
         </q-chip>
+
+        <q-btn-dropdown
+          flat
+          dense
+          no-caps
+          icon="translate"
+          :label="currentLocaleLabel"
+          color="white"
+          class="q-mr-sm"
+          content-class="bg-dark text-white"
+          dropdown-icon="arrow_drop_down"
+        >
+          <q-list dark class="bg-dark text-white" style="min-width: 140px;">
+            <q-item
+              v-for="opt in localeOptions"
+              :key="opt.value"
+              clickable
+              v-close-popup
+              :active="opt.value === currentLocale"
+              active-class="bg-primary text-dark"
+              @click="onLocaleChange(opt.value)"
+            >
+              <q-item-section>
+                <q-item-label>{{ opt.label }}</q-item-label>
+              </q-item-section>
+              <q-item-section side v-if="opt.value === currentLocale">
+                <q-icon name="check" size="xs" :color="opt.value === currentLocale ? 'dark' : 'white'" />
+              </q-item-section>
+            </q-item>
+          </q-list>
+        </q-btn-dropdown>
       </q-toolbar>
     </q-header>
     <q-drawer
       v-model="leftDrawerOpen"
       show-if-above
       dark
-      class="q-pa-lg"
+      class="q-pa-md"
     >
       <div class="full-height bg-secondary border-rounded column">
         <q-list class="q-pa-md col">
@@ -65,11 +96,11 @@
               <q-icon name="school" :color="tutorial.running ? 'primary' : 'grey-5'" />
             </q-item-section>
             <q-item-section>
-              <q-item-label class="text-white">Tutorial Mode</q-item-label>
+              <q-item-label class="text-white">{{ $t('tutorialModeLabel') }}</q-item-label>
               <q-item-label caption>
-                <span v-if="tutorial.busy" class="text-orange">Switching…</span>
-                <span v-else-if="tutorial.running" class="text-primary">Sim running</span>
-                <span v-else class="text-grey-5">Off</span>
+                <span v-if="tutorial.busy" class="text-orange">{{ $t('tutorialSwitching') }}</span>
+                <span v-else-if="tutorial.running" class="text-primary">{{ $t('tutorialSimRunning') }}</span>
+                <span v-else class="text-grey-5">{{ $t('tutorialOff') }}</span>
               </q-item-label>
             </q-item-section>
             <q-item-section side>
@@ -97,50 +128,75 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { Notify } from 'quasar'
+import { useI18n } from 'vue-i18n'
 import EssentialLink from 'components/v2/EssentialLink.vue'
 import PipelineGuideDialog from 'components/v2/PipelineGuideDialog.vue'
 import { useTutorialStore } from 'src/stores/tutorialStore.js'
+import { setLocale } from 'src/boot/i18n'
 
-const linksList = [
+const { t, locale } = useI18n()
+
+const localeOptions = computed(() => [
+  { value: 'en-US', label: t('languageEnglish') },
+  { value: 'ko-KR', label: t('languageKorean') },
+])
+
+const currentLocale = computed(() => locale.value)
+const currentLocaleLabel = computed(() => {
+  const opt = localeOptions.value.find((o) => o.value === locale.value)
+  return opt ? opt.label : locale.value
+})
+
+function onLocaleChange (next) {
+  if (next === locale.value) return
+  setLocale(next)
+}
+
+const linksList = computed(() => [
   {
-    title: 'Sensors',
+    title: t('navSensors'),
     icon: 'camera',
     link: '/sensors'
   },
   {
-    title: 'Robots',
+    title: t('navRobots'),
     icon: 'adb',
     children: [
       {
-        title: 'Management',
+        title: t('navManagement'),
         icon: 'file_upload',
         link: '/robots/management'
       },
       {
-        title: 'Assemble',
+        title: t('navAssemble'),
         icon: 'build',
         link: '/robots/assemble'
       },
       {
-        title: 'Teleoperation',
+        title: t('navTeleoperation'),
         icon: 'sports_esports',
         link: '/robots/teleoperation'
       }
     ]
   },
   {
-    title: 'Workspace',
+    title: t('navWorkspace'),
     icon: 'cleaning_services',
     link: '/workspace'
   },
   {
-    title: 'Train',
+    title: t('navTrain'),
     icon: 'school',
     link: '/train'
+  },
+  {
+    title: 'Planner',
+    icon: 'event_note',
+    link: '/planner'
   }
-]
+])
 
 const leftDrawerOpen = ref(false)
 const showPipelineGuide = ref(false)
@@ -156,21 +212,21 @@ async function onTutorialToggle (next) {
       await tutorial.start()
       Notify.create({
         type: 'positive',
-        message: 'Tutorial world is starting up — robot/sensor topics will appear shortly.',
+        message: t('tutorialStartedNotify'),
         timeout: 4000,
       })
     } else {
       await tutorial.stop()
       Notify.create({
         type: 'info',
-        message: 'Tutorial world stopped.',
+        message: t('tutorialStoppedNotify'),
         timeout: 2500,
       })
     }
   } catch (e) {
     Notify.create({
       type: 'negative',
-      message: 'Tutorial mode toggle failed: ' + (e?.response?.data?.message || e.message || e),
+      message: t('tutorialToggleFailed', { error: e?.response?.data?.message || e.message || e }),
       timeout: 5000,
     })
   }

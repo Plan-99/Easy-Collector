@@ -22,10 +22,20 @@ from flask import Flask, request, jsonify, send_file
 from flask_socketio import SocketIO
 from flask_cors import CORS
 
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.environ.get('TRAINING_SERVER_DATA_DIR', '/data')
 DATASETS_DIR = os.path.join(DATA_DIR, 'datasets')
 CHECKPOINTS_DIR = os.path.join(DATA_DIR, 'checkpoints')
 UPLOADS_DIR = os.path.join(DATA_DIR, 'uploads')
+
+# 학습 자식 프로세스의 cwd / PYTHONPATH 베이스. 이 파일이 위치한 디렉터리를 기본
+# 으로 쓴다 — training_server가 자체 컨테이너(WORKDIR=/app) 안이든, backend
+# 컨테이너 안의 마운트 경로(/root/backend/training_server) 안이든 자동으로 잡힘.
+# 외부에서 강제하려면 TRAINING_SERVER_APP_DIR 환경변수로 override 가능.
+APP_DIR = os.environ.get(
+    'TRAINING_SERVER_APP_DIR',
+    os.path.dirname(os.path.abspath(__file__)),
+)
 
 for d in [DATASETS_DIR, CHECKPOINTS_DIR, UPLOADS_DIR]:
     os.makedirs(d, exist_ok=True)
@@ -385,7 +395,16 @@ def _run_training(job_id, job_dir, ckpt_out_dir, config):
         ]
 
         env = os.environ.copy()
-        env['PYTHONPATH'] = '/app:/app/lerobot/src'
+        # APP_DIR: training_server itself.
+        # APP_DIR/lerobot/src: vendored lerobot.
+        # parent of APP_DIR: in embedded mode (training_server inside backend container)
+        #   this is /root/backend, which exposes `utils`, `api`, etc. as packages.
+        parent_dir = os.path.dirname(APP_DIR)
+        env['PYTHONPATH'] = ':'.join([
+            APP_DIR,
+            os.path.join(APP_DIR, 'lerobot', 'src'),
+            parent_dir,
+        ])
 
         popen_args = {
             'stdout': subprocess.PIPE,
@@ -393,7 +412,7 @@ def _run_training(job_id, job_dir, ckpt_out_dir, config):
             'text': True,
             'bufsize': 1,
             'env': env,
-            'cwd': '/app',
+            'cwd': APP_DIR,
         }
         if os.name != 'nt':
             popen_args['preexec_fn'] = os.setsid

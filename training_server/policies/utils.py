@@ -1032,7 +1032,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self._dataset_info = get_dataset_info(dataset_dir)
 
         # Pre-load tasks once (avoid re-reading jsonl every __getitem__)
-        from utils.lerobot_io import _read_jsonl, TASKS_PATH
+        # _read_jsonl / TASKS_PATH는 본 파일 상단(line 31~)에 inline돼 있어 import 불필요.
         tasks = _read_jsonl(os.path.join(dataset_dir, TASKS_PATH))
         self._task_map = {t.get("task_index"): t.get("task", "") for t in tasks}
 
@@ -1092,7 +1092,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
                 if os.path.exists(npy_path):
                     image_data[sensor_name] = np.load(npy_path, mmap_mode="r")
                 elif os.path.exists(video_path):
-                    from utils.lerobot_io import _decode_video_frames
+                    # _decode_video_frames는 본 파일 line 932에 정의되어 있음.
                     image_data[sensor_name] = _decode_video_frames(video_path)
                 elif os.path.isdir(png_dir):
                     # Build a list of frame_XXXXXX.png paths in order. _parse_image_value

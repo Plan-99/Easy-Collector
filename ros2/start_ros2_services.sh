@@ -115,6 +115,13 @@ export LD_LIBRARY_PATH="/opt/openrobots/lib:${LD_LIBRARY_PATH}"
 export RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}
 export ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
 
+# MuJoCo: 컨테이너에는 X11 디스플레이가 보장되지 않으므로 GL 백엔드를
+# 명시한다. egl(NVIDIA GPU 헤드리스) 기본 → 실패 시 osmesa(소프트웨어
+# 렌더링)로 폴백 가능하도록 외부 override 허용.
+export MUJOCO_GL=${MUJOCO_GL:-egl}
+# PyOpenGL 백엔드도 같이 맞춰주면 일부 드라이버 조합에서 안정적
+export PYOPENGL_PLATFORM=${PYOPENGL_PLATFORM:-$MUJOCO_GL}
+
 # ROS Domain ID from config
 if [ -f /opt/easytrainer/config.json ]; then
     DOMAIN_ID=$(python3 -c "import json; print(json.load(open('/opt/easytrainer/config.json')).get('ros_domain_id', 0))" 2>/dev/null || echo "0")

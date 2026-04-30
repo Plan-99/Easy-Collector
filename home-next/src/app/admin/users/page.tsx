@@ -56,7 +56,9 @@ export default async function AdminUsersPage() {
                         className={`text-xs font-semibold px-2 py-0.5 rounded ${
                           u.plan === "business"
                             ? "bg-amber-500/20 text-amber-300"
-                            : "bg-surface-800 text-surface-300"
+                            : u.plan === "unlimited"
+                              ? "bg-indigo-500/20 text-indigo-200"
+                              : "bg-surface-800 text-surface-300"
                         }`}
                       >
                         {u.plan.toUpperCase()}

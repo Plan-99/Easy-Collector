@@ -23,9 +23,11 @@ def read_dataset(node, episode_path, socketio_instance, sid, task_control, move_
     global config
     config = {}
     capture_env = None
+    env = None
     if move_robot:
         from ...env.env import Env
-        env = Env(agents=agents, sensors=sensors)
+        tutorial = any((s.get('settings') or {}).get('is_tutorial') for s in (sensors or []))
+        env = Env(agents=agents, sensors=sensors, tutorial=tutorial)
         if capture_dataset_id is not None:
             capture_env = env
 
@@ -55,6 +57,10 @@ def read_dataset(node, episode_path, socketio_instance, sid, task_control, move_
         robot_names = sorted(states_by_robot.keys())
 
         if move_robot:
+            # 환경 초기화 (tutorial sim의 큐브 등 객체) — 첫 프레임 이동 전에 수행.
+            if env is not None:
+                env.initialize()
+
             # 홈포즈가 아니라 에피소드 첫 프레임의 qpos로 이동
             for robot_name in robot_names:
                 first_qpos = states_by_robot[robot_name][0].tolist()
@@ -64,7 +70,15 @@ def read_dataset(node, episode_path, socketio_instance, sid, task_control, move_
                         agent.move_to(first_qpos, duration=5.0)
                         break
 
-            time.sleep(10)
+            # is_moving 플래그로 도달 대기 (record_episode와 동일 패턴, 타임아웃 30초).
+            timeout = 30.0
+            start_wait = time.time()
+            while time.time() - start_wait < timeout:
+                if task_control['stop']:
+                    return
+                if not any(a.is_moving for a in agents):
+                    break
+                time.sleep(0.1)
 
         capture_timesteps = []
         if capture_env is not None:
@@ -150,7 +164,10 @@ def read_dataset(node, episode_path, socketio_instance, sid, task_control, move_
                 'language_instruction': language_instruction,
             }, to=sid)
 
-        for i in range(total_steps):
+        # i=0은 record_episode의 reset 프레임으로, qaction이 의미 없는 값(None/0)이라
+        # 그대로 재생하면 로봇이 영점으로 튄다. 실제 전이를 만든 action은
+        # i=1..N이므로 거기서부터 재생.
+        for i in range(1, total_steps):
             now = time.time()
             dt = now - last_tick_time
             last_tick_time = now
@@ -179,9 +196,11 @@ def read_dataset(node, episode_path, socketio_instance, sid, task_control, move_
             if capture_env is not None:
                 ts = capture_env.record_step()
                 capture_timesteps.append(ts)
-                socketio_instance.emit('replay_capture_progress', {
-                    'progress': (i + 1) / total_steps,
-                })
+
+            # 진행도는 capture 여부와 무관하게 항상 emit (UI progress bar용).
+            socketio_instance.emit('replay_progress', {
+                'progress': (i + 1) / total_steps,
+            })
 
             # --- 이미지 인코딩 + UI 전송은 백그라운드 스레드 ---
             cur_config_snapshot = dict(config)

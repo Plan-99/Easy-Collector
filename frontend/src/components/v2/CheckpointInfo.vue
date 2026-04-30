@@ -3,8 +3,8 @@
         <div class="col-4">
             <div style="border: 1px solid rgba(0,0,0,0.12);">
                 <div class="row q-pa-sm bg-grey-8 text-weight-bold">
-                    <div class="col-6">Policy Parameters</div>
-                    <div class="col-6">Value</div>
+                    <div class="col-6">{{ $t('checkpointPolicyParameters') }}</div>
+                    <div class="col-6">{{ $t('checkpointValueColumn') }}</div>
                 </div>
                 <q-scroll-area :style="`height: ${height}px;`" class="bg-dark">
                     <div v-for="(value, key) in { model: props.checkpoint.policy.type, ...props.checkpoint.policy.settings }" :key="key">
@@ -20,8 +20,8 @@
         <div class="col-4">
             <div class="rounded-borders" style="border: 1px solid rgba(0,0,0,0.12);">
                 <div class="row q-pa-sm bg-grey-8 text-weight-bold">
-                    <div class="col-6">Train Parameters</div>
-                    <div class="col-6">Value</div>
+                    <div class="col-6">{{ $t('checkpointTrainParameters') }}</div>
+                    <div class="col-6">{{ $t('checkpointValueColumn') }}</div>
                 </div>
                 <q-scroll-area :style="`height: ${height}px;`" class="bg-dark">
                     <div v-for="(value, key) in { finetuned_from: props.checkpoint.load_model?.name, ...props.checkpoint.train_settings }" :key="key">
@@ -37,7 +37,7 @@
         <div class="col-4 full-height">
             <div class="rounded-borders" style="border: 1px solid rgba(0,0,0,0.12);">
                 <div class="q-pa-sm bg-grey-8 text-weight-bold">
-                    Datasets
+                    {{ $t('checkpointDatasets') }}
                 </div>
                 <q-scroll-area :style="`height: ${height}px;`" class="bg-dark q-pa-md">
                     <div class="row q-gutter-x-md">

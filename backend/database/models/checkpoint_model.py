@@ -13,6 +13,17 @@ class Checkpoint(SoftDeleteModel):
         'train_settings': 'json',
     }
 
+    # ── 학습 큐 상태 머신 ──────────────────────────────────────────────────
+    # status 가 가질 수 있는 명시적 값들 (열거 전용; DB는 단순 CharField).
+    # 큐 라이프사이클: queued → running → finished | failed | canceled
+    # 'training' 은 legacy 별칭 — startup migration이 'running'으로 변환한다.
+    STATUS_QUEUED = 'queued'
+    STATUS_RUNNING = 'running'
+    STATUS_FINISHED = 'finished'
+    STATUS_FAILED = 'failed'
+    STATUS_CANCELED = 'canceled'
+    ACTIVE_STATUSES = (STATUS_QUEUED, STATUS_RUNNING)
+
     name = CharField(null=True)
     dir = CharField(null=True)
     file_name = CharField(null=True)
@@ -24,6 +35,11 @@ class Checkpoint(SoftDeleteModel):
     load_model_id = IntegerField(null=True)
     loss = FloatField(null=True)
     best_epoch = IntegerField(null=True)
+    # Lifecycle timestamps — TrainingScheduler가 전이마다 채운다.
+    # queued_at: 큐 진입, started_at: scheduler가 picking, finished_at: 종료(어떤 결과든).
+    queued_at = DateTimeField(null=True)
+    started_at = DateTimeField(null=True)
+    finished_at = DateTimeField(null=True)
     created_at = DateTimeField(default=datetime.datetime.now)
     updated_at = DateTimeField(default=datetime.datetime.now)
     deleted_at = DateTimeField(null=True)

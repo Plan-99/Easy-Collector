@@ -54,7 +54,7 @@ if [ "${EASYTRAINER_LOCAL_TRAINING:-0}" = "1" ]; then
         TS_LOG="$TS_LOG_DIR/training_server.log"
         echo "[backend] Starting local training_server on port ${TRAINING_SERVER_PORT:-5100} (logs: $TS_LOG)"
         TRAINING_SERVER_DATA_DIR="$TS_DATA_DIR" \
-        PYTHONPATH="/root/backend/training_server:/root/backend/lerobot/src" \
+        PYTHONPATH="/root/backend/training_server:/root/backend/lerobot/src:/root/backend" \
             python3 -u /root/backend/training_server/app.py >> "$TS_LOG" 2>&1 &
         TS_PID=$!
         echo "[backend] training_server PID=$TS_PID"

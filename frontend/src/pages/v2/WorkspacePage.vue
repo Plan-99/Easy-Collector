@@ -28,7 +28,7 @@
                         bg-color="dark"
                         v-model="selectedWorkspaceId"
                         :options="workspaces"
-                        label="Select Workspace"
+                        :label="$t('workspaceSelectLabel')"
                         style="width: 400px"
                         class="q-ml-lg"
                         map-options
@@ -64,7 +64,7 @@
         <TutorialHint class="q-mb-md" :text="$t('tutorialWorkspaceIntro')" />
 
         <div class="col q-mb-lg border-rounded border-grey text-grey flex-center flex text-h6" v-if="!selectedWorkspaceId">
-            Select Workspace First
+            {{ $t('selectWorkspaceFirst') }}
         </div>
         <div class="col row q-mb-lg" v-else>
             <div class="col-3 bg-secondary q-mr-lg border-rounded q-pa-sm" v-if="status === 'pending'">
@@ -75,9 +75,9 @@
                     class="text-white"
                     active-color="primary"
                 >
-                    <q-tab name="setting" label="setting"></q-tab>
-                    <q-tab name="data" label="data"></q-tab>
-                    <q-tab name="inference" label="inference"></q-tab>
+                    <q-tab name="setting" :label="$t('workspaceTabSetting')"></q-tab>
+                    <q-tab name="data" :label="$t('workspaceTabData')"></q-tab>
+                    <q-tab name="inference" :label="$t('workspaceTabInference')"></q-tab>
                 </q-tabs>
                 <div v-if="selectedTab === 'setting'" class="q-pt-md q-px-sm text-white">
                     <TutorialHint class="q-mb-sm" :text="$t('tutorialWorkspaceSetting')" />
@@ -104,8 +104,8 @@
                                             v-if="sensor.type !== 'custom'"
                                         ></q-toggle>
                                         <div v-else>
-                                            <div class="text-caption text-grey" v-if="sensor.status === 'off'">TOPIC OFF</div>
-                                            <div class="text-caption text-positive" v-else-if="sensor.status === 'on'">TOPIC ON</div>
+                                            <div class="text-caption text-grey" v-if="sensor.status === 'off'">{{ $t('topicOff') }}</div>
+                                            <div class="text-caption text-positive" v-else-if="sensor.status === 'on'">{{ $t('topicOn') }}</div>
                                         </div>
                                         <q-inner-loading :showing="sensor.status === 'loading'"></q-inner-loading>
                                     </div>
@@ -119,18 +119,16 @@
                                     <div class="row q-gutter-x-sm q-mt-md q-mb-sm">
                                         <q-input
                                             dense outlined dark bg-color="dark"
-                                            label="Common Width"
+                                            :label="$t('workspaceCommonWidth')"
                                             class="col"
                                             v-model.number="commonSensorResolution.width"
-                                            @update:model-value="updateAllSensorResolutions"
                                         ></q-input>
 
                                         <q-input
                                             dense outlined dark bg-color="dark"
-                                            label="Common Height"
+                                            :label="$t('workspaceCommonHeight')"
                                             class="col"
                                             v-model.number="commonSensorResolution.height"
-                                            @update:model-value="updateAllSensorResolutions"
                                         ></q-input>
                                     </div>
                                 </q-card-section>
@@ -149,7 +147,7 @@
                                     bg-color="dark"
                                     v-model="selectedWorkspace.assembly_id"
                                     :options="assemblies"
-                                    label="Robot Assembly"
+                                    :label="$t('workspaceRobotAssembly')"
                                     style="width: 100%"
                                     map-options
                                     emit-value
@@ -173,9 +171,9 @@
                                         v-if="robot.type !== 'custom'"
                                     ></q-toggle>
                                     <div v-else>
-                                        <div class="text-caption text-grey" v-if="robot.status === 'off'">TOPIC OFF</div>
-                                        <div class="text-caption text-positive" v-else-if="robot.status === 'on'">TOPIC ON</div>
-                                        <div class="text-caption text-negative" v-else-if="robot.status === 'error'">ERROR</div>
+                                        <div class="text-caption text-grey" v-if="robot.status === 'off'">{{ $t('topicOff') }}</div>
+                                        <div class="text-caption text-positive" v-else-if="robot.status === 'on'">{{ $t('topicOn') }}</div>
+                                        <div class="text-caption text-negative" v-else-if="robot.status === 'error'">{{ $t('statusError') }}</div>
                                     </div>
                                     <q-inner-loading :showing="robot.status === 'loading'"></q-inner-loading>
                                 </div>
@@ -194,7 +192,7 @@
                                             outlined
                                             dark
                                             bg-color="dark"
-                                            label="Episode Length"
+                                            :label="$t('workspaceEpisodeLength')"
                                             class="col"
                                             v-model.number="selectedWorkspace.episode_len"
                                             @change="updateWorkspace({ episode_len: selectedWorkspace.episode_len })"
@@ -213,7 +211,7 @@
                             v-if="focused.device_type === 'sensor'"
                         >
                             <div class="text-caption col-12">
-                                You can crop the streaming here!
+                                {{ $t('workspaceCropHint') }}
                                 <q-btn size="xs" outline color="pink-3" icon="sync" @click="resetCroppedArea()" class="q-ml-sm" />
                                 <!-- <q-btn size="xs" outline color="primary" icon="save" @click="saveCroppedArea" class="q-ml-sm" /> -->
                             </div>
@@ -244,9 +242,9 @@
                             </div>
                             <div>
                                 <div class="row justify-between">
-                                    <div class="text-caption">Cropped Area</div>
+                                    <div class="text-caption">{{ $t('workspaceCroppedAreaLabel') }}</div>
                                     <div>
-                                        {{ selectedWorkspace.sensor_cropped_area[focused.id] ? `${selectedWorkspace.sensor_cropped_area[focused.id][2] - selectedWorkspace.sensor_cropped_area[focused.id][0]} x ${selectedWorkspace.sensor_cropped_area[focused.id][3] - selectedWorkspace.sensor_cropped_area[focused.id][1]}` : 'Not Set' }}
+                                        {{ selectedWorkspace.sensor_cropped_area[focused.id] ? `${selectedWorkspace.sensor_cropped_area[focused.id][2] - selectedWorkspace.sensor_cropped_area[focused.id][0]} x ${selectedWorkspace.sensor_cropped_area[focused.id][3] - selectedWorkspace.sensor_cropped_area[focused.id][1]}` : $t('workspaceCroppedAreaNotSet') }}
                                     </div>
                                 </div>
                                 <div class="row q-gutter-x-sm">
@@ -269,7 +267,7 @@
                                 
                             </div>
                             <div class="q-mt-sm">
-                                <div class="text-caption q-mb-xs">Rotate</div>
+                                <div class="text-caption q-mb-xs">{{ $t('workspaceRotateLabel') }}</div>
                                 <q-select
                                     dense
                                     outlined
@@ -277,7 +275,7 @@
                                     bg-color="dark"
                                     v-model="selectedWorkspace.sensor_rotate[focused.id]"
                                     :options="[0, 90, 180, 270]"
-                                    label="Rotation (degrees)"
+                                    :label="$t('workspaceRotationDegrees')"
                                     @update:model-value="updateWorkspaceDeviceSetting({ 
                                         device_type: 'sensors',
                                         key: 'rotate',
@@ -291,7 +289,7 @@
                             v-else-if="focused.device_type === 'robot'"
                         >
                             <div class="text-caption q-mb-xs row q-gutter-x-sm">
-                                <div>Home Pose</div>
+                                <div>{{ $t('workspaceHomePoseLabel') }}</div>
                                 <q-space></q-space>
                                 <q-btn size="xs" outline color="pink-3" icon="sync" @click="selectedWorkspace.home_pose[focused.id] = [...focused.jointState]" />
                                 <q-btn size="xs" outline color="primary" icon="save" @click="updateWorkspaceDeviceSetting({
@@ -328,7 +326,7 @@
                         rounded
                         color="primary bg-dark"
                         icon="add"
-                        label="Add Dataset Folder"
+                        :label="$t('workspaceAddDatasetFolder')"
                         @click="openAddDatasetForm"
                     ></q-btn>
                     <q-scroll-area class="full-height">
@@ -353,26 +351,26 @@
                                          <q-menu context-menu>
                                             <q-list bordered separator>
                                                 <q-item clickable v-ripple v-close-popup @click="openEditDatasetForm(dataset)">
-                                                    <q-item-section>Edit Dataset</q-item-section>
+                                                    <q-item-section>{{ $t('workspaceDatasetEdit') }}</q-item-section>
                                                     <q-item-section side>
                                                         <q-icon name="edit" size="xs" />
                                                     </q-item-section>
                                                 </q-item>
-                                                <q-item clickable v-ripple v-close-popup 
+                                                <q-item clickable v-ripple v-close-popup
                                                     @click="openAugmentationForm(dataset)">
-                                                    <q-item-section>Augment Dataset</q-item-section>
+                                                    <q-item-section>{{ $t('workspaceDatasetAugment') }}</q-item-section>
                                                     <q-item-section side>
                                                         <q-icon name="edit" size="xs" />
                                                     </q-item-section>
                                                 </q-item>
                                                 <q-item clickable v-ripple v-close-popup @click="openMergeDatasetForm(dataset)">
-                                                    <q-item-section>Merge Dataset</q-item-section>
+                                                    <q-item-section>{{ $t('workspaceDatasetMerge') }}</q-item-section>
                                                     <q-item-section side>
                                                         <q-icon name="merge_type" size="xs" />
                                                     </q-item-section>
                                                 </q-item>
                                                 <q-item clickable v-ripple class="text-negative" @click="deleteDataset(dataset)">
-                                                    <q-item-section>Delete Dataset</q-item-section>
+                                                    <q-item-section>{{ $t('workspaceDatasetDelete') }}</q-item-section>
                                                     <q-item-section side>
                                                         <q-icon color="negative" name="delete" size="xs" />
                                                     </q-item-section>
@@ -430,31 +428,31 @@
                                             v-close-popup
                                             @click="openCheckpointInfoDialog(checkpoint)"
                                         >
-                                            <q-item-section>Show Details</q-item-section>
+                                            <q-item-section>{{ $t('workspaceCheckpointShow') }}</q-item-section>
                                             <q-item-section side>
                                                 <q-icon name="add" size="xs" />
                                             </q-item-section>
                                         </q-item>
                                         <q-item clickable v-ripple v-close-popup @click="openCheckpointForm(checkpoint)">
-                                            <q-item-section>Edit Checkpoint</q-item-section>
+                                            <q-item-section>{{ $t('workspaceCheckpointEdit') }}</q-item-section>
                                             <q-item-section side>
                                                 <q-icon name="edit" size="xs" />
                                             </q-item-section>
                                         </q-item>
                                         <q-item clickable v-ripple v-close-popup @click="generateOodFeatures(checkpoint)">
-                                            <q-item-section>Add OOD Features</q-item-section>
+                                            <q-item-section>{{ $t('workspaceCheckpointOod') }}</q-item-section>
                                             <q-item-section side>
                                                 <q-icon name="analytics" size="xs" />
                                             </q-item-section>
                                         </q-item>
                                         <q-item clickable v-ripple v-close-popup @click="exportCheckpoint(checkpoint)">
-                                            <q-item-section>Export Checkpoint</q-item-section>
+                                            <q-item-section>{{ $t('workspaceCheckpointExport') }}</q-item-section>
                                             <q-item-section side>
                                                 <q-icon name="download" size="xs" />
                                             </q-item-section>
                                         </q-item>
                                         <q-item clickable v-ripple class="text-negative" @click="deleteCheckpoint(checkpoint)">
-                                            <q-item-section>Delete Checkpoint</q-item-section>
+                                            <q-item-section>{{ $t('workspaceCheckpointDelete') }}</q-item-section>
                                             <q-item-section side>
                                                 <q-icon color="negative" name="delete" size="xs" />
                                             </q-item-section>
@@ -478,7 +476,6 @@
                 </div>
             </div>
             <div class="col column">
-                <TutorialHint class="q-mb-sm" :text="$t('tutorialWorkspaceMonitoring')" />
                 <monitoring-window
                     class="col"
                     :workspace="selectedWorkspace"
@@ -518,7 +515,7 @@
             :ok-button-label="$t(datasetForm.find(f => f.key === 'id') ? 'save' : 'add')"
         >
             <template v-slot:dataset_metadata>
-                <div style="color: red;">You have to remap the sensors and robots because this dataset was created with a different sensor/robot configuration.</div>
+                <div style="color: red;">{{ $t('workspaceDatasetIncompatible') }}</div>
                 <div v-for="robot in datasetForm.find(f => f.key === 'dataset_metadata').value.robots" :key="robot">
                     <div class="row q-my-md q-col-gutter-sm">
                         <div class="text-white">{{ robot }}</div>
@@ -529,7 +526,7 @@
                             bg-color="dark"
                             v-model="datasetForm.find(f => f.key === 'robot_mappings').value[robot]"
                             :options="robots"
-                            label="Select Robot"
+                            :label="$t('workspaceSelectRobot')"
                             style="width: 200px"
                             map-options
                             emit-value
@@ -548,7 +545,7 @@
                             bg-color="dark"
                             v-model="datasetForm.find(f => f.key === 'sensor_mappings').value[sensor]"
                             :options="selectedSensors"
-                            label="Select Sensor"
+                            :label="$t('workspaceSelectSensor')"
                             style="width: 200px"
                             map-options
                             emit-value
@@ -602,7 +599,7 @@
                     />
                 </q-card-section>
                 <q-card-section class="bg-secondary q-px-xl q-pt-none" align="right">
-                    <div>Loss: {{ selectedCheckpoint.loss.toFixed(4) }} / Best Epoch: {{ selectedCheckpoint.best_epoch }}</div>
+                    <div>{{ $t('checkpointLossEpoch', { loss: selectedCheckpoint.loss.toFixed(4), epoch: selectedCheckpoint.best_epoch }) }}</div>
                 </q-card-section>
             </q-card>
         </q-dialog>
@@ -637,7 +634,7 @@ const selectedWorkspaceId = ref(null);
 const showWorkspaceForm = ref(false);
 const workspaceForm = ref([
     { key: 'id', value: null },
-    { key: 'name', label: 'Workspace Name', type: 'text', value: '', default: '' },
+    { key: 'name', label: t('workspaceName'), type: 'text', value: '', default: '' },
 ]);
 
 function openCreateWorkspaceForm() {
@@ -674,7 +671,7 @@ function saveWorkspace (form) {
 function listWorkspaces() {
     return api.get('/tasks').then((response) => {
         workspaces.value = response.data.tasks;
-        workspaces.value.push({ id: 'new', name: 'Create New Workspace +' });
+        workspaces.value.push({ id: 'new', name: t('workspaceSelectCreateNew') });
     });
 }
 
@@ -694,9 +691,7 @@ const robots = computed(() => {
     return selectedWorkspace.value.assembly.robots.map((robot) => {
         const handler = useRobot(robot);
         robot.handler = handler;
-        if (robot.type === 'custom') {
-            robot.handler.checkRobotTopic();
-        }   
+        // Topic visibility는 topicStore가 push로 추적 — type별 분기 불필요.
         return robot;
     })
 });
@@ -710,9 +705,7 @@ const selectedSensors = computed(() => {
     return selectedWorkspace.value.sensors.map((sensor) => {
         const handler = useSensor(sensor);
         sensor.handler = handler;
-        if (sensor.type === 'custom') {
-            sensor.handler.checkSensorTopic();
-        }   
+        // Topic visibility는 topicStore가 push로 추적 — type별 분기 불필요.
         return sensor;
     });
 });
@@ -751,7 +744,7 @@ function toggleSensor(sensor) {
 const showSensorForm = ref(false);
 const sensorForm = ref([
     { key: 'id', value: null },
-    { key: 'sensor_ids', label: 'Sensors', type: 'multiselect_list', options: computed(() => sensors.value.map(s => ({ label: s.name, value: s.id }))), value: [] }
+    { key: 'sensor_ids', label: t('datasetSensorsLabel'), type: 'multiselect_list', options: computed(() => sensors.value.map(s => ({ label: s.name, value: s.id }))), value: [] }
 ])
 
 const sensorSettingsMap = ref({});
@@ -797,7 +790,8 @@ function updateAllSensorResolutions(width, height) {
 
 function openSensorForm() {
     if (selectedWorkspace.value) {
-        sensorForm.value.find(e => e.key === 'sensor_ids').value = Object.keys(selectedWorkspace.value.sensors || {}).map(id => parseInt(id, 10)).filter(id => id !== 0);
+        sensorForm.value.find(e => e.key === 'sensor_ids').value =
+            (selectedWorkspace.value.sensors || []).map(s => s.id).filter(id => id != null);
     }
     showSensorForm.value = true;
 }
@@ -881,18 +875,18 @@ function deselectEpisode() {
 
 function deleteDataset(dataset) {
     Notify.create({
-        message: `Are you sure you want to delete dataset "${dataset.name}"?`,
+        message: t('workspaceConfirmDeleteDataset', { name: dataset.name }),
         color: 'negative',
         actions: [
-            { label: 'Cancel', color: 'white', handler: () => { /* do nothing */ } },
-            { label: 'Delete', color: 'white', handler: () => {
+            { label: t('cancel'), color: 'white', handler: () => { /* do nothing */ } },
+            { label: t('delete'), color: 'white', handler: () => {
                 api.delete(`/dataset/${dataset.id}`).then(() => {
                     listDatasets();
                 }).catch((error) => {
                     console.error('Error deleting dataset:', error);
                     Notify.create({
                         color: 'negative',
-                        message: 'Error deleting dataset'
+                        message: t('workspaceErrorDeletingDataset')
                     });
                 });
             }}
@@ -904,9 +898,9 @@ const showDatasetForm = ref(false);
 const datasetForm = ref([
     { key: 'id', value: null },
     { key: 'name', label: t('datasetName'), type: 'text', value: '', default: '' },
-    { key: 'dataset_metadata', label: 'Dataset Metadata', type: 'custom', value: {}, default: {}, show: (form) => !checkDatasetCompatibility(form)},
-    { key: 'robot_mappings', label: 'Robot Mappings', type: 'custom', value: [], default: {}, show: () => false },
-    { key: 'sensor_mappings', label: 'Sensor Mappings', type: 'custom', value: {}, default: {}, show: () => false },
+    { key: 'dataset_metadata', label: t('datasetMetadataLabel'), type: 'custom', value: {}, default: {}, show: (form) => !checkDatasetCompatibility(form)},
+    { key: 'robot_mappings', label: t('datasetRobotMappingsLabel'), type: 'custom', value: [], default: {}, show: () => false },
+    { key: 'sensor_mappings', label: t('datasetSensorMappingsLabel'), type: 'custom', value: {}, default: {}, show: () => false },
 ])
 
 // const datasetMetadataForm = ref([
@@ -1039,7 +1033,7 @@ function openAugmentationForm(dataset) {
     if (!dataset.episodes.length) {
         Notify.create({
             color: 'negative',
-            message: 'Dataset must have at least one episode to augment.'
+            message: t('workspaceAugmentNeedsEpisodes')
         });
         return;
     }
@@ -1049,11 +1043,11 @@ function openAugmentationForm(dataset) {
 
 function deleteWorkspace(workspace) {
     Notify.create({
-        message: `Are you sure you want to delete dataset "${workspace.name}"?`,
+        message: t('workspaceConfirmDeleteWorkspace', { name: workspace.name }),
         color: 'negative',
         actions: [
-            { label: 'Cancel', color: 'white', handler: () => { /* do nothing */ } },
-            { label: 'Delete', color: 'white', handler: () => {
+            { label: t('cancel'), color: 'white', handler: () => { /* do nothing */ } },
+            { label: t('delete'), color: 'white', handler: () => {
                 return api.delete(`/task/${workspace.id}`).then(() => {
                     listWorkspaces();
                     if (selectedWorkspaceId.value === workspace.id) {
@@ -1102,7 +1096,7 @@ function listCheckpoints() {
 const showCheckpointForm = ref(false);
 const checkpointForm = ref([
     { key: 'id', value: null },
-    { key: 'name', label: 'Checkpoint Name', type: 'text', value: '', default: '' },
+    { key: 'name', label: t('trainCheckpointName'), type: 'text', value: '', default: '' },
 ]);
 function openCheckpointForm(checkpoint) {
     showCheckpointForm.value = true;
@@ -1112,14 +1106,14 @@ function openCheckpointForm(checkpoint) {
 }
 function generateOodFeatures(checkpoint) {
     api.post(`/checkpoint/${checkpoint.id}/:generate_ood_features`).then(() => {
-        Notify.create({ color: 'positive', message: 'OOD feature generation started.' });
+        Notify.create({ color: 'positive', message: t('workspaceOodStarted') });
     }).catch((err) => {
-        Notify.create({ color: 'negative', message: `Failed to start OOD feature generation: ${err}` });
+        Notify.create({ color: 'negative', message: t('workspaceOodFailed', { error: err }) });
     });
 }
 
 async function exportCheckpoint(checkpoint) {
-    Loading.show({ message: `Exporting checkpoint "${checkpoint.name}"...` });
+    Loading.show({ message: t('workspaceCheckpointExporting', { name: checkpoint.name }) });
     try {
         const res = await api.post(
             `/checkpoint/${checkpoint.id}/:export`,
@@ -1156,14 +1150,14 @@ async function exportCheckpoint(checkpoint) {
 
         Notify.create({
             color: 'positive',
-            message: `Exported ${filename}`,
+            message: t('workspaceCheckpointExported', { filename }),
             timeout: 4000,
         });
     } catch (err) {
         console.error('exportCheckpoint failed:', err);
         Notify.create({
             color: 'negative',
-            message: `Export failed: ${err.message || err}`,
+            message: t('workspaceCheckpointExportFailed', { error: err.message || err }),
             timeout: 6000,
         });
     } finally {
@@ -1173,11 +1167,11 @@ async function exportCheckpoint(checkpoint) {
 
 function deleteCheckpoint(checkpoint) {
     Notify.create({
-        message: `Are you sure you want to delete checkpoint "${checkpoint.name}"?`,
+        message: t('workspaceConfirmDeleteCheckpoint', { name: checkpoint.name }),
         color: 'negative',
         actions: [
-            { label: 'Cancel', color: 'white', handler: () => { /* do nothing */ } },
-            { label: 'Delete', color: 'white', handler: () => {
+            { label: t('cancel'), color: 'white', handler: () => { /* do nothing */ } },
+            { label: t('delete'), color: 'white', handler: () => {
                 api.delete(`/checkpoint/${checkpoint.id}`).then(() => {
                     listCheckpoints();
                     if (selectedCheckpointId.value === checkpoint.id) {
@@ -1343,8 +1337,8 @@ function resetCroppedArea() {
 
 const showMergeDatasetForm = ref(false);
 const mergeDatasetForm = ref([
-    { key: 'source_dataset_id', label: 'Source Dataset', type: 'select', options: computed(() => datasets.value.map(d => ({ label: d.name, value: d.id }))), value: null, default: null },
-    { key: 'target_dataset_ids', label: 'Target Dataset', type: 'multiselect_list', options: computed(() => datasets.value.map(d => ({ label: d.name, value: d.id }))), value: [], default: [] },
+    { key: 'source_dataset_id', label: t('mergeDatasetSourceLabel'), type: 'select', options: computed(() => datasets.value.map(d => ({ label: d.name, value: d.id }))), value: null, default: null },
+    { key: 'target_dataset_ids', label: t('mergeDatasetTargetsLabel'), type: 'multiselect_list', options: computed(() => datasets.value.map(d => ({ label: d.name, value: d.id }))), value: [], default: [] },
 ]);
 
 function openMergeDatasetForm(dataset) {

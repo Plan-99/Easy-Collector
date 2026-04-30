@@ -12,7 +12,7 @@
                 <q-list dense dark>
                     <q-item clickable v-close-popup @click="deletePose(pose)" class="text-negative">
                         <q-item-section avatar><q-icon name="delete" size="xs" /></q-item-section>
-                        <q-item-section>삭제</q-item-section>
+                        <q-item-section>{{ $t('robotPoseDelete') }}</q-item-section>
                     </q-item>
                 </q-list>
             </q-menu>
@@ -20,7 +20,7 @@
 
         <!-- Add Pose Button -->
         <q-btn outline color="white" @click="openAddPoseDialog">
-            ADD POSE
+            {{ $t('robotPoseAddBtn') }}
         </q-btn>
 
         <q-space></q-space>
@@ -29,7 +29,7 @@
             dense outlined dark bg-color="dark"
             v-model.number="robotStepSize"
             type="number"
-            label="Step Size"
+            :label="$t('robotPoseStepSize')"
             class="col-2"
         ></q-input>
     </div>
@@ -47,7 +47,7 @@
                     ></q-btn>
                     <div class="col text-center text-caption"> {{ j }} </div>
                     <div class="col text-center text-caption text-primary">
-                        {{ props.robot.joint_pos[i] ? props.robot.joint_pos[i].toFixed(4) : '0' }}
+                        {{ jointReading(i) }}
                     </div>
                     <q-btn
                         dense
@@ -62,7 +62,7 @@
         </div>
         <div class="col" v-if="props.robot.ik_available">
             <div v-for="(ee_name, i) in Object.keys(props.robot.eePos || {})" :key="i">
-                <div v-for="(p_label, j) in ['x', 'y', 'z', 'roll', 'pitch', 'yaw', ...(props.robot.tool_inner ? ['tool'] : [])]" :key="j" class="q-gutter-x-md text-white q-mb-sm">
+                <div v-for="(p_label, j) in ['x', 'y', 'z', 'ax', 'ay', 'az', ...(props.robot.tool_inner ? ['tool'] : [])]" :key="j" class="q-gutter-x-md text-white q-mb-sm">
                     <div class="border-white q-px-md q-py-xs text-center row flex flex-center">
                         <q-btn
                             dense flat icon="remove" size="xs" class="text-white col-1"
@@ -87,15 +87,15 @@
         <q-card style="min-width: 500px;" dark>
             <q-card-section>
                 <div class="row items-center">
-                    <div class="text-h6">포즈 추가</div>
+                    <div class="text-h6">{{ $t('robotPoseAddTitle') }}</div>
                     <q-space></q-space>
                     <q-btn flat dense icon="sync" color="pink-3" size="sm" @click="scanCurrentPose">
-                        <q-tooltip>현재 로봇 포즈 읽기</q-tooltip>
+                        <q-tooltip>{{ $t('robotPoseScanTooltip') }}</q-tooltip>
                     </q-btn>
                 </div>
             </q-card-section>
             <q-card-section>
-                <q-input v-model="newPoseName" dense outlined dark bg-color="dark" label="포즈 이름" class="q-mb-md" />
+                <q-input v-model="newPoseName" dense outlined dark bg-color="dark" :label="$t('robotPoseAddName')" class="q-mb-md" />
                 <div class="row q-col-gutter-sm">
                     <div class="col" v-for="(joint, i) in props.robot.joint_names" :key="joint">
                         <div class="text-caption">{{ joint }}</div>
@@ -104,8 +104,8 @@
                 </div>
             </q-card-section>
             <q-card-actions align="center">
-                <q-btn flat label="저장" color="primary" @click="addPose" />
-                <q-btn flat label="취소" color="grey-7" v-close-popup />
+                <q-btn flat :label="$t('robotPoseAddSave')" color="primary" @click="addPose" />
+                <q-btn flat :label="$t('robotPoseAddCancel')" color="grey-7" v-close-popup />
             </q-card-actions>
         </q-card>
     </q-dialog>
@@ -114,6 +114,9 @@
 import { ref, onMounted } from 'vue'
 import { api } from 'src/boot/axios'
 import { Notify } from 'quasar'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 const props = defineProps({
     robot: {
@@ -121,6 +124,12 @@ const props = defineProps({
         required: true
     }
 })
+
+function jointReading(i) {
+    const src = props.robot.joint_pos || props.robot.jointState
+    const v = src && src[i]
+    return typeof v === 'number' ? v.toFixed(4) : '0'
+}
 
 function moveOneJoint(index, delta) {
     if (props.robot.role === 'tool') {
@@ -179,7 +188,7 @@ function addPose() {
         pose: [...newPoseValues.value],
         is_default: poses.value.length === 0,
     }).then(() => {
-        Notify.create({ color: 'positive', message: 'Pose saved.' })
+        Notify.create({ color: 'positive', message: t('robotPoseSavedNotify') })
         showAddPoseDialog.value = false
         loadPoses()
     })

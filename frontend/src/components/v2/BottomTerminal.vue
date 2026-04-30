@@ -1,5 +1,5 @@
 <template>
-  <div class="absolute-bottom bg-dark q-pb-xl q-pr-lg">
+  <div class="absolute-bottom bg-dark q-pb-md q-pr-md">
     <div class="border-rounded bg-secondary q-pa-lg">
       <div class="row">
         <q-tabs

@@ -1,5 +1,6 @@
 from flask import Blueprint, request, current_app, send_file
 from ...database.models.checkpoint_model import Checkpoint as CheckpointModel
+from ...configs.global_configs import get_checkpoint_dir
 import os
 import shutil
 
@@ -7,11 +8,10 @@ from ..process.checkpoint_test import checkpoint_test
 from ..process.failure_detection import failure_detection
 from ..process.generate_ood_features import generate_ood_features
 from ..process.export_checkpoint import bundle_checkpoint_zip
+from ...configs.global_configs import resolve_checkpoint_dir
 
 
 checkpoint_bp = Blueprint('checkpoint_bp', __name__)
-
-CHECKPOINT_DIR = '/root/src/backend/checkpoints'
 
 @checkpoint_bp.route('/checkpoints', methods=['GET'])
 def get_checkpoints():
@@ -41,7 +41,7 @@ def get_checkpoints():
 
 @checkpoint_bp.route('/checkpoints/<folder_name>', methods=['GET'])
 def get_checkpoint_files(id):
-    folder_path = os.path.join(CHECKPOINT_DIR, id)
+    folder_path = resolve_checkpoint_dir(id)
     if not os.path.exists(folder_path) or not os.path.isdir(folder_path):
         return {'status': 'error', 'message': 'Folder not found'}, 404
 
@@ -63,13 +63,23 @@ def create_checkpoint():
     return {'status': 'success', 'message': 'Checkpoint Created', 'id': new_checkpoint.id}, 200
 
 
+@checkpoint_bp.route('/checkpoint/<id>', methods=['GET'])
+def get_checkpoint(id):
+    """Single checkpoint dict — TrainPage가 enqueue 직후 다이얼로그를 자동
+    열기 위해 사용."""
+    ckpt = CheckpointModel.find(id)
+    if ckpt is None:
+        return {'status': 'error', 'message': 'Checkpoint not found'}, 404
+    return {'status': 'success', 'checkpoint': ckpt.to_dict()}, 200
+
+
 @checkpoint_bp.route('/checkpoint/<id>/:check_create_successed', methods=['GET'])
 def check_create_successed(id):
     checkpoint = CheckpointModel.find(id)
     if not checkpoint:
         return {'check_create_successed': False, 'message': 'Checkpoint creation failed'}, 200
 
-    folder_path = os.path.join(CHECKPOINT_DIR, str(checkpoint.id))
+    folder_path = resolve_checkpoint_dir(checkpoint.id)
     if os.path.exists(folder_path) and os.path.isdir(folder_path):
         return {'check_create_successed': True, 'message': 'Checkpoint created successfully'}, 200
     else:
@@ -100,6 +110,8 @@ def start_test(id):
         # Optional natural-language prompt for VLA policies (PI0.5). If omitted, falls
         # back to task.name at the call site. Empty string is treated as "use task.name".
         language_instruction=data.get('language_instruction', None),
+        # Planner feature (origin/integration_2 추가): inference 시 episode_len 별도 지정.
+        inference_episode_len=data.get('inference_episode_len', None),
     )
 
     return {'status': 'success', 'message': 'Checkpoint test started'}, 200
@@ -211,7 +223,7 @@ def delete_checkpoint(id):
     if not checkpoint:
         return {'status': 'error', 'message': 'Checkpoint not found'}, 404
 
-    folder_path = os.path.join(CHECKPOINT_DIR, str(checkpoint.id))
+    folder_path = resolve_checkpoint_dir(checkpoint.id)
     if os.path.exists(folder_path) and os.path.isdir(folder_path):
         shutil.rmtree(folder_path)
 

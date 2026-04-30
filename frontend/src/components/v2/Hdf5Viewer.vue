@@ -1,7 +1,7 @@
 <template>
     <div>
         <div v-if="languageInstruction" class="text-white text-caption q-pb-sm">
-            Language: {{ languageInstruction }}
+            {{ $t('hdf5LanguagePrefix', { value: languageInstruction }) }}
         </div>
         <div class="row q-py-md q-gutter-md flex flex-center">
             <img :src="image" alt="" v-for="(image, name) in images" :key="name" class="col" style="max-width: 40%; height: auto;"

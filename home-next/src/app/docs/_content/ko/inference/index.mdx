@@ -6,6 +6,10 @@ order: 1
 sourceRefs:
   - frontend/src/pages/v2/WorkspacePage.vue
   - frontend/src/components/v2/MonitoringWindow.vue
+  - frontend/src/components/v2/CheckpointInfo.vue
+related:
+  - /docs/training
+  - /docs/data-collection
 lastVerifiedVersion: 0.0.0
 ---
 
@@ -14,9 +18,29 @@ lastVerifiedVersion: 0.0.0
 
 ## 진행 순서
 
-1. [체크포인트 선택](/docs/inference/select-checkpoint)
-2. [추론 실행](/docs/inference/run) — Hz, home pose, 시작·중지
+1. [체크포인트 선택](/docs/inference/select-checkpoint) — inference 탭에서 카드 클릭
+2. [추론 실행](/docs/inference/run) — Hz, Home Pose 토글, Start / Stop
 
-<Callout type="warning">
-추론 중에는 정책이 자율적으로 로봇을 움직입니다. 항상 사람이 가까이서 감시하고 비상 정지 가능한 상태에서 시작하세요.
+## 핵심 모니터링 지표
+
+추론 중 화면 상단에 두 배지가 표시됩니다.
+
+| 배지 | 임계값 | 의미 |
+|------|------|------|
+| **Succeed** | > 0.7 (녹색) | 학습된 성공 분포와의 유사도. 높을수록 익숙한 상황 |
+| **OOD** | > 1.0 (빨강) | 분포 이탈 정도. 높을수록 위험 |
+
+## 잘 안 되는 경우
+
+| 증상 | 가능한 원인 | 대처 |
+|------|---------|------|
+| 시작부터 OOD가 빨강 | Home Pose가 학습 데이터와 다름 | [Home Pose](/docs/workspace/home-pose)를 다시 sync |
+| 동작이 학습 시연과 비슷한데 마지막에 실패 | 데이터가 부족 | [더 많은 시연 수집](/docs/data-collection) 또는 [증강](/docs/datasets/augment) |
+| Succeed가 항상 낮음 | 정책 미수렴 | 학습 [에폭 늘리기](/docs/training/parameters), 검증 loss 확인 |
+| 동작이 떨림 | 추론 Hz가 학습 시 데이터 수집 Hz와 다름 | Hz 일치시키기 |
+
+## 안전
+
+<Callout type="danger">
+추론 중에는 정책이 자율적으로 로봇을 움직입니다. 항상 사람이 가까이서 감시하고 비상 정지 가능한 상태에서 시작하세요. OOD가 빨강이면 동작이 정상이라도 즉시 멈추는 게 안전합니다.
 </Callout>

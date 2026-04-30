@@ -92,6 +92,10 @@ services:
       - /dev:/dev
       - /dev/shm:/dev/shm
       - /tmp/.X11-unix:/tmp/.X11-unix
+      # Xauth cookie 파일을 동일 경로에 마운트 — 없으면 mujoco viewer GLFW 초기화가
+      # "Authorization required" 로 실패한다. 호스트에 XAUTHORITY가 비어있는
+      # 환경에서는 /tmp/.X11-unix로 폴백(무해).
+      - ${XAUTHORITY:-/tmp/.X11-unix}:${XAUTHORITY:-/tmp/.X11-unix}:ro
     restart: unless-stopped
 
 volumes:

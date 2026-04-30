@@ -6,19 +6,48 @@ order: 1
 sourceRefs:
   - frontend/src/pages/v2/TrainPage.vue
   - training_server/
+  - backend/policies/
+related:
+  - /docs/data-collection
+  - /docs/inference
 lastVerifiedVersion: 0.0.0
 ---
 
 Easy Trainer의 학습은 **Train 페이지의 3단계 stepper**로 진행됩니다.
+운영자 UI(5000 포트)에서 학습을 의뢰하면 별도의 [학습 서버](/docs/training/server)(5100 포트)가 실제 학습을 수행합니다.
 
-| Step | 내용 |
-|------|------|
-| 1 | [데이터셋 선택](/docs/training/dataset-select) |
-| 2 | [Policy 선택·생성](/docs/training/policy) |
-| 3 | [Training Server URL + 파라미터](/docs/training/parameters), [Start Training](/docs/training/start-and-queue) |
+## 3단계 stepper
 
-학습은 **별도의 학습 서버**(5100 포트)에서 진행됩니다. 로컬 PC에서 학습하려면 [학습 서버 설치](/docs/training/server)를 먼저 완료하세요.
+| Step | 내용 | 페이지 |
+|------|------|--------|
+| 1 | 데이터셋 선택 | [데이터셋 선택](/docs/training/dataset-select) |
+| 2 | Policy 선택·생성 | [Policy](/docs/training/policy) |
+| 3 | 학습 서버 URL + 하이퍼파라미터 | [파라미터](/docs/training/parameters), [시작](/docs/training/start-and-queue) |
+
+## 정책 비교
+
+| 정책 | 학습 속도 | 추론 속도 | 데이터 효율 | 추천 시나리오 |
+|------|---------|---------|-----------|------------|
+| **ACT** | 빠름 | 빠름 | 좋음 | **첫 시도 / 단순 동작** |
+| **Diffusion** | 느림 | 느림 | 보통 | 다양한 동작 분포 |
+| **PI0** | 매우 느림 | 느림 | 큰 데이터 필요 | 멀티모달 입력 (텍스트 + 이미지) |
+| **VLAsEn** | 보통 | 보통 | 중간 | VLA 베이스 fine-tune |
+
+처음 학습한다면 **ACT**로 시작하세요. 기본값으로도 결과가 나오는 데 가장 빠릅니다.
+
+## 학습 서버 위치
+
+설치 시 선택한 옵션에 따라 학습이 어디서 도는지 다릅니다.
+
+- **원격 모드 (기본값)** — Easy Trainer가 제공하는 원격 학습 서버에서 학습이 실행됩니다. 별도 설치·관리 없이 곧바로 학습할 수 있습니다.
+- **로컬 모드** — 이 PC의 5100 포트에서 학습 서버가 동작합니다. 런처의 🔥 버튼으로 켜고 끄며, 자체 GPU로 학습하고 외부와 통신하지 않습니다.
+
+로컬 모드를 사용한다면 [학습 서버 설치/관리](/docs/training/server)를 먼저 확인하세요.
+
+## 다음 단계
+
+학습이 끝나면 결과 체크포인트를 [추론](/docs/inference)에서 실시간으로 실행할 수 있습니다.
 
 <Callout type="info">
-학습 서버는 운영자 UI(5000 포트)와 분리되어 있어, 동일 PC에서 같이 돌리거나 GPU가 좋은 별도 서버에 띄울 수 있습니다.
+학습 서버는 운영자 UI와 별개의 Docker 서비스로 분리되어 있어, 학습 중에도 운영자 UI에서 다른 데이터를 수집하거나 다른 정책을 큐에 추가할 수 있습니다.
 </Callout>

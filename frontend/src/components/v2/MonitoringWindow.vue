@@ -1,6 +1,8 @@
 <template>
-    <div class="bg-secondary border-rounded border-white column q-px-sm" style="max-height: 700px;">
-        <div class="col-6 row flex felx-center q-col-gutter-x-sm" v-if="sensors.length > 0">
+    <div class="column full-height" style="max-height: 700px;">
+        <TutorialHint v-if="!monitorOnly" :text="$t(monitoringHintKey)" class="q-mb-sm" />
+        <div class="bg-secondary border-rounded border-white column q-px-sm col">
+        <div :class="[monitorOnly ? 'col' : 'col-6', 'row flex felx-center q-col-gutter-x-sm']" v-if="sensors.length > 0">
             <div v-for="sensor in sensors" :key="sensor.id" class="col q-py-sm relative-position">
                 <web-rtc-video
                     :process-id="`sensor_${sensor.id}`"
@@ -25,10 +27,10 @@
                 <q-chip color="blue-10" text-color="white" class="absolute-top-left" style="top: 20px; left: 15px">{{ sensor.name }} {{ $t('sensorSuffix') }}</q-chip>
             </div>
         </div>
-        <div v-else class="col-6 q-py-sm">
+        <div v-else :class="[monitorOnly ? 'col' : 'col-6', 'q-py-sm']">
             <div class="text-white border-rounded border-white bg-dark full-height flex flex-center">{{ $t('noSensorsMsg') }}</div>
         </div>
-        <div class="col-5 row q-gutter-x-sm" v-if="robots.length > 0">
+        <div :class="[monitorOnly ? 'col' : 'col-5', 'row q-gutter-x-sm']" v-if="robots.length > 0">
             <div v-for="robot in robots" :key="robot.id" class="col column q-pa-md relative-position border-rounded border-white text-white cursor-pointer"
                     :class="{
                         'border-primary': focused.id === robot.id && focused.device_type === 'robot',
@@ -54,9 +56,10 @@
                 <q-chip color="green-10" text-color="white" class="absolute-top-left" style="top: 20px; left: 15px">{{ robot.name }} {{ $t('robotSuffix') }}</q-chip>
             </div>
         </div>
-        <div v-else class="col-5 border-rounded border-white bg-dark flex flex-center">
+        <div v-else :class="[monitorOnly ? 'col' : 'col-5', 'border-rounded border-white bg-dark flex flex-center']">
             <div class="text-white">{{ $t('noRobotsMsg') }}</div>
         </div>
+        <template v-if="!monitorOnly">
         <div class="flex flex-center col" v-if="!isRobotSensorAllOn">
             <div class="text-yellow">{{ $t('startAllDevices') }}</div>
         </div>
@@ -78,7 +81,20 @@
                                 v-if="status === 'pending'"
                             ></q-btn>
                         </div>
-                        <q-space class="col"></q-space>
+                        <q-space class="col" v-if="status === 'pending'"></q-space>
+                        <div class="col q-px-md" v-else>
+                            <q-linear-progress
+                                :value="replayProgress"
+                                color="primary"
+                                track-color="black"
+                                size="30px"
+                                instant-feedback
+                            >
+                                <div class="absolute-full flex flex-center">
+                                    <q-badge color="white" text-color="dark" :label="$t('replayCapturingProgress', { percent: Number(replayProgress * 100).toFixed(0) })" />
+                                </div>
+                            </q-linear-progress>
+                        </div>
                         <div class="row items-center q-gutter-x-sm" v-if="status === 'pending'">
                             <span class="text-caption text-grey">{{ $t('replayActionType') }}:</span>
                             <q-radio
@@ -95,17 +111,17 @@
                             />
                             <q-checkbox
                                 v-model="replayCapture"
-                                label="Capture Episode"
+                                :label="$t('replayCaptureLabel')"
                                 dark dense
                                 :disable="!allSensorsOn"
                             >
-                                <q-tooltip v-if="!allSensorsOn">All cameras must be on to capture</q-tooltip>
+                                <q-tooltip v-if="!allSensorsOn">{{ $t('replayCaptureTooltip') }}</q-tooltip>
                             </q-checkbox>
                             <q-select
                                 v-if="replayCapture"
                                 v-model="replayCaptureDatasetId"
                                 dense outlined dark bg-color="dark"
-                                label="Target Dataset"
+                                :label="$t('replayTargetDataset')"
                                 style="min-width: 180px"
                                 :options="datasets"
                                 option-label="name"
@@ -115,7 +131,7 @@
                             <q-input
                                 v-model.number="replayHz"
                                 dense outlined dark bg-color="dark"
-                                label="Hz"
+                                :label="$t('replayHzLabel')"
                                 style="width: 80px"
                                 type="number"
                                 :min="1"
@@ -139,21 +155,6 @@
                                 v-else
                             ></q-btn>
                         </div>
-                    </div>
-                </div>
-                <div class="row q-mb-sm" v-if="replayCapture && status !== 'pending'">
-                    <div class="col">
-                        <q-linear-progress
-                            :value="replayProgress"
-                            color="primary"
-                            track-color="black"
-                            size="30px"
-                            instant-feedback
-                        >
-                            <div class="absolute-full flex flex-center">
-                                <q-badge color="white" text-color="dark" :label="`Capturing ${Number(replayProgress * 100).toFixed(0)}%`" />
-                            </div>
-                        </q-linear-progress>
                     </div>
                 </div>
             </div>
@@ -185,6 +186,19 @@
                         >
                         </q-input>
                     </div>
+                    <div v-if="moveHomposeInDataCollection">
+                        <q-input
+                            v-model.number="inferenceEpisodeLen"
+                            dense
+                            outlined
+                            dark
+                            bg-color="dark"
+                            type="number"
+                            :min="1"
+                            style="width: 110px"
+                            :label="$t('inferenceEpisodeLen')"
+                        />
+                    </div>
                     <div>
                         <q-btn
                             color="red"
@@ -194,8 +208,8 @@
                             @click="startInference"
                             v-if="status === 'pending'"
                         >
-                            <q-badge 
-                                @click.stop="moveHomposeInDataCollection = !moveHomposeInDataCollection" 
+                            <q-badge
+                                @click.stop="moveHomposeInDataCollection = !moveHomposeInDataCollection"
                                 :color="moveHomposeInDataCollection ? 'blue' : 'grey-5'"
                                 floating>
                                 <q-icon name="home" size="xs" class="cursor-pointer" />
@@ -204,14 +218,31 @@
                     </div>
                 </div>
                 <div
-                    class="col q-pa-sm bg-dark border-rounded text-white row flex flex-center"
+                    class="col bg-dark border-rounded text-white row flex flex-center"
                     v-else
                 >
-                    <q-space></q-space>
+                    <div
+                        class="col q-px-md"
+                        v-if="moveHomposeInDataCollection && inferenceProgress.episodeLen > 0"
+                    >
+                        <q-linear-progress
+                            instant-feedback
+                            :value="inferenceProgress.progress"
+                            size="30px"
+                            color="primary"
+                            track-color="black"
+                        >
+                            <div class="absolute-full flex flex-center">
+                                <q-badge color="white" text-color="dark"
+                                    :label="`${inferenceProgress.step}/${inferenceProgress.episodeLen}`" />
+                            </div>
+                        </q-linear-progress>
+                    </div>
+                    <q-space v-else></q-space>
                     <q-badge
                         v-if="succeedScore !== null"
                         :color="succeedScore > 0.7 ? 'green' : 'red'"
-                        :label="`Succeed: ${succeedScore.toFixed(2)}`"
+                        :label="$t('succeedLabel', { score: succeedScore.toFixed(2) })"
                         class="q-mr-sm q-pa-sm text-bold"
                         outline
                     />
@@ -221,12 +252,12 @@
                         class="q-mr-sm q-pa-sm text-bold"
                         outline
                     >
-                        OOD: {{ oodScoreDisplay }}
+                        {{ $t('oodLabel') }}: {{ oodScoreDisplay }}
                     </q-badge>
                     <q-btn
                         color="white"
                         text-color="red"
-                        label="Stop"
+                        :label="$t('stopBtn')"
                         icon="stop"
                         @click="stopInference"
                     ></q-btn>
@@ -251,25 +282,26 @@
                     <q-input
                         v-model="languageInstruction"
                         dense outlined dark bg-color="dark"
-                        label="Language Instruction"
+                        :label="$t('languageInstruction')"
                         style="min-width: 200px; max-width: 400px;"
                         class="q-ml-sm"
                         clearable
                     />
                     <q-space></q-space>
-                    <div class="row items-center q-mr-xl q-gutter-x-sm">
+                    <div class="row items-center q-mr-sm q-gutter-x-sm">
                         <q-select
                             dense outlined dark bg-color="dark"
                             v-model="teleType"
                             :options="teleTypeOptions"
                             map-options emit-value
                             style="min-width: 220px;"
-                            label="Teleoperation Type"
+                            :label="$t('teleoperationType')"
                         />
                         <q-input
+                            v-if="teleType !== 'keyboard'"
                             v-model.number="collectionHz"
                             dense outlined dark bg-color="dark"
-                            label="Hz"
+                            :label="$t('replayHzLabel')"
                             style="width: 80px"
                             type="number"
                             :min="1"
@@ -281,7 +313,7 @@
                             color="primary"
                             @click="showRos2ServiceDialog = true"
                         >
-                            <q-tooltip>Configure ROS2 Service</q-tooltip>
+                            <q-tooltip>{{ $t('configureRos2Service') }}</q-tooltip>
                         </q-btn>
                     </div>
                     <q-btn
@@ -329,11 +361,12 @@
                         outlined
                         dark
                         bg-color="dark"
-                        label="Step Size"
+                        :label="$t('collectionStepSize')"
                         type="number"
                         step="0.0001"
                         style="width: 140px"
                         class="q-mr-md"
+                        @keyup.enter="$event.target.blur()"
                     />
                     <div class="col q-pr-md">
                         <q-linear-progress
@@ -352,7 +385,7 @@
                     <q-btn
                         :color="succeedFlag ? 'yellow' : 'blue-grey'"
                         text-color="white"
-                        label="SUCCESS (C)"
+                        :label="$t('successBtn')"
                         icon="emoji_events"
                         @click="setSucceed"
                         :disable="succeedFlag"
@@ -451,28 +484,30 @@
         <q-dialog v-model="showRos2ServiceDialog">
             <q-card style="min-width: 550px;" class="bg-secondary text-white">
                 <q-card-section>
-                    <div class="text-h6">ROS2 Service (std_srvs/Trigger)</div>
+                    <div class="text-h6">{{ $t('ros2DialogTitle') }}</div>
                 </q-card-section>
                 <q-card-section>
                     <q-input
                         dense outlined dark bg-color="dark"
                         v-model="ros2Service"
-                        label="Service Name"
-                        placeholder="e.g. /pick_and_place"
-                        hint="Service name only (e.g. /pick_and_place), not the full ros2 command"
+                        :label="$t('ros2ServiceName')"
+                        :placeholder="$t('ros2ServiceNamePlaceholder')"
+                        :hint="$t('ros2ServiceNameHint')"
                     />
                 </q-card-section>
                 <q-card-actions align="right">
-                    <q-btn flat label="Cancel" color="grey" v-close-popup />
-                    <q-btn flat label="Save" color="primary" v-close-popup />
+                    <q-btn flat :label="$t('cancel')" color="grey" v-close-popup />
+                    <q-btn flat :label="$t('save')" color="primary" v-close-popup />
                 </q-card-actions>
             </q-card>
             </q-dialog>
+        </template>
+        </div>
         </div>
 </template>
 
 <script setup>
-import { defineProps, ref, computed, defineModel, onMounted, onUnmounted } from 'vue';
+import { defineProps, ref, computed, defineModel, onMounted, onUnmounted, watch } from 'vue';
 import { Notify } from 'quasar';
 import { useI18n } from 'vue-i18n';
 import { api } from 'src/boot/axios';
@@ -481,6 +516,8 @@ import { useSocket } from 'src/composables/useSocket.js';
 import WebRtcVideo from './WebRtcVideo.vue';
 import Hdf5Viewer from 'src/components/v2/Hdf5Viewer.vue';
 import FormDialog from './FormDialog.vue';
+import { DEFAULT_KEYBOARD_SETTINGS, AXIS_TO_EE_INDEX, normalizeEventKey } from 'src/configs/teleopDefaults';
+import TutorialHint from './TutorialHint.vue';
 
 
 const { socket } = useSocket();
@@ -510,6 +547,10 @@ const props = defineProps({
     datasets: {
         type: Array,
         required: true
+    },
+    monitorOnly: {
+        type: Boolean,
+        default: false,
     },
 });
 
@@ -566,6 +607,26 @@ const isRobotSensorAllOn = computed(() => {
     return allRobotsOn && allSensorsOn;
 });
 
+const monitoringHintKey = computed(() => {
+    if (!isRobotSensorAllOn.value) return 'tutorialMonOverview';
+    if (selectedEpisode.value?.name && selectedDatasetId.value) return 'tutorialMonReplay';
+    if (checkpoint.value) {
+        return props.status === 'pending' ? 'tutorialMonInferenceSelected' : 'tutorialMonInferenceRunning';
+    }
+    if (props.status === 'pending') return 'tutorialMonIdlePending';
+    if (viveInitializing.value) return 'tutorialMonViveInit';
+    if (movingHomepose.value) return 'tutorialMonMovingHome';
+    switch (teleType.value) {
+        case 'keyboard': return 'tutorialMonCollectingKeyboard';
+        case 'leader': return 'tutorialMonCollectingLeader';
+        case 'external': return 'tutorialMonCollectingExternal';
+        case 'vive_external': return 'tutorialMonCollectingViveExternal';
+        case 'vive_only': return 'tutorialMonCollectingViveOnly';
+        case 'motion_planning': return 'tutorialMonCollectingMotionPlanning';
+        default: return 'tutorialMonOverview';
+    }
+});
+
 function focusSensorRobot(device, type) {
     if (device.status !== 'on') {
         return;
@@ -586,6 +647,21 @@ const collectingProgress = ref(0);
 const showProcessConsole = ref(false);
 
 const moveHomposeInDataCollection = ref(false);
+
+// home 버튼이 켜진 추론에서만 의미 있는 1 에피소드 길이. 기본값은 task의
+// episode_len * 2이지만 watch로 동기화 — props.workspace가 늦게 도착해도 잡힘.
+const inferenceEpisodeLen = ref(null);
+watch(
+    () => props.workspace?.episode_len,
+    (newLen) => {
+        if (newLen && (inferenceEpisodeLen.value === null || inferenceEpisodeLen.value === undefined)) {
+            inferenceEpisodeLen.value = Number(newLen) * 2;
+        }
+    },
+    { immediate: true },
+);
+
+const inferenceProgress = ref({ progress: 0, step: 0, episodeLen: 0 });
 const movingHomepose = ref(false);
 const succeedFlag = ref(false);
 const inferenceSucceed = ref(false);
@@ -673,48 +749,102 @@ function cancelViveInit() {
 
 const eeStepSize = ref(0.0005);
 
+const assembly = computed(() => props.workspace?.assembly || {});
+
+const leftArm = computed(() => {
+    const ref_ = assembly.value.left_arm;
+    if (!ref_) return null;
+    return props.robots.find(r => r.id === ref_.id) || ref_;
+});
+
+const rightArm = computed(() => {
+    const ref_ = assembly.value.right_arm;
+    if (!ref_) return null;
+    return props.robots.find(r => r.id === ref_.id) || ref_;
+});
+
+const isDualArm = computed(() => !!(leftArm.value && rightArm.value));
+
+const keyboardSetting = computed(() => {
+    const s = assembly.value.teleoperators?.find(tt => tt.type === 'keyboard')?.settings;
+    return s && s.axis_map ? s : DEFAULT_KEYBOARD_SETTINGS;
+});
+
+// keyboard 설정의 step_size를 UI 인풋(eeStepSize)의 기본값으로 동기화.
+watch(() => keyboardSetting.value.step_size, (v) => {
+    if (typeof v === 'number') eeStepSize.value = v;
+}, { immediate: true });
+
+const activeArms = computed(() => [leftArm.value, rightArm.value].filter(Boolean));
+
+function robotForSide(side) {
+    if (isDualArm.value) {
+        return side === 'right' ? rightArm.value : leftArm.value;
+    }
+    if (side === 'right') return null;
+    return leftArm.value || rightArm.value;
+}
+
+function sendDelta(robot, eeDelta) {
+    if (!robot?.handler?.moveRobotEEDelta) return;
+    try {
+        robot.handler.moveRobotEEDelta({ ee: eeDelta });
+    } catch (e) {
+        console.error('moveRobotEEDelta error', e);
+    }
+}
+
 const keyboardHandler = (event) => {
-    if (focused.value?.device_type !== 'robot') return;
-
-    const currentRobot = props.robots.find(r => r.id === focused.value.id);
-    if (!currentRobot || !currentRobot.role === 'dual_arm') return;
-
-    if (currentRobot.role === 'single_arm') {
-        const eeDelta = Array(currentRobot.tool_inner ? 7 : 6).fill(0); // x, y, z, roll, pitch, yaw, tool
-
-        if (event.key === 'w') eeDelta[0] += eeStepSize.value;
-        else if (event.key === 's') eeDelta[0] -= eeStepSize.value;
-        else if (event.key === 'a') eeDelta[1] += eeStepSize.value;
-        else if (event.key === 'd') eeDelta[1] -= eeStepSize.value;
-        else if (event.key === 'e') eeDelta[2] += eeStepSize.value;
-        else if (event.key === 'z') eeDelta[2] -= eeStepSize.value;
-        else if (event.key === '.') eeDelta[3] += eeStepSize.value*20;
-        else if (event.key === '[') eeDelta[3] -= eeStepSize.value*20;
-        else if (event.key === 'p') eeDelta[4] += eeStepSize.value*20;
-        else if (event.key === ';') eeDelta[4] -= eeStepSize.value*20;
-        else if (event.key === 'l') eeDelta[5] += eeStepSize.value*20;
-        else if (event.key === "'") eeDelta[5] -= eeStepSize.value*20;
-        else if (event.key === 'b' && currentRobot.tool_inner) eeDelta[6] += eeStepSize.value*30;
-        else if (event.key === 'n' && currentRobot.tool_inner) eeDelta[6] -= eeStepSize.value*30;
-        else if (event.key === ' ' || event.key === 32) eeDelta.fill(0); // stop
-        else return;
-
-        // 백엔드로 전송
-        currentRobot.handler.moveRobotEEDelta({
-            ee: eeDelta
-        });
-    } else if (currentRobot.role === 'tool') {
-        console.log('tool teleop');
-        const toolDelta = Array(1).fill(0); // tool only
-
-        if (event.key === 'b') toolDelta[0] += 0.12;
-        else if (event.key === 'n') toolDelta[0] -= 0.12;
-        else return;
-        console.log('toolDelta', toolDelta);
-        // 백엔드로 전송
-        currentRobot.handler.moveRobotJointDelta(toolDelta);
+    // Step size 등 폼 입력란이 포커스된 상태에서, 숫자 편집 키는 입력에 양보하고
+    // 그 외 키(WASD 등 로봇 제어키)는 자동으로 input을 blur 후 그대로 로봇 제어로 처리.
+    const ae = document.activeElement;
+    if (ae) {
+        const tag = ae.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || ae.isContentEditable) {
+            const isEditingKey = (
+                /^[0-9]$/.test(event.key) ||
+                event.key === '.' || event.key === 'e' || event.key === 'E' ||
+                event.key === '+' || event.key === '-' ||
+                event.key === 'Backspace' || event.key === 'Delete' ||
+                event.key === 'Tab' || event.key === 'Enter' ||
+                event.key === 'Home' || event.key === 'End' ||
+                event.key.startsWith('Arrow')
+            );
+            if (isEditingKey) return;
+            ae.blur();
+        }
     }
 
+    const map = keyboardSetting.value.axis_map || {};
+    // UI step size override; fall back to assembly setting; finally default.
+    const stepSize = Number(eeStepSize.value) || Number(keyboardSetting.value.step_size) || 0.003;
+
+    if (event.key === ' ' || event.key === 'Space') {
+        activeArms.value.forEach((robot) => {
+            const len = robot.tool_inner ? 7 : 6;
+            sendDelta(robot, Array(len).fill(0));
+        });
+        event.preventDefault();
+        return;
+    }
+
+    const normKey = normalizeEventKey(event);
+    const entry = map[normKey];
+    if (!entry) return;
+
+    const robot = robotForSide(entry.side || 'left');
+    if (!robot) return;
+
+    const idx = AXIS_TO_EE_INDEX[entry.axis];
+    if (idx === undefined) return;
+    if (entry.axis === 'tool' && !robot.tool_inner) return;
+
+    const len = robot.tool_inner ? 7 : 6;
+    if (idx >= len) return;
+    const eeDelta = Array(len).fill(0);
+    eeDelta[idx] = stepSize * (Number(entry.scale) || 1) * (Number(entry.sign) || 1);
+    sendDelta(robot, eeDelta);
+    event.preventDefault();
 };
 
 function addKeyboardListener() {
@@ -746,7 +876,7 @@ function setSucceed() {
 }
 
 const succeedKeyHandler = (event) => {
-    if (event.key === 'c' || event.key === 'C') {
+    if (event.key === 'f' || event.key === 'F') {
         setSucceed();
     }
 };
@@ -768,6 +898,11 @@ function stopDataCollection() {
     succeedFlag.value = false;
     viveInitializing.value = false;
     movingHomepose.value = false;
+    // 백엔드 워커가 실제로 멈출 때까지 시간이 걸릴 수 있으므로 progress UI는
+    // 즉시 정리해서 사용자에게 멈춘 인상을 즉각 준다. backend가 이후에 보낼
+    // 수도 있는 'moving_homepose: true' 등 잔여 이벤트는 onUnmounted/socket.off
+    // 또는 아래 stop_process listener가 정리.
+    collectingProgress.value = 0;
     api.post(`/dataset/${selectedDatasetId.value}/:stop_collection`).then(() => {
         collectingProgress.value = 0;
     })
@@ -806,6 +941,7 @@ function startInference() {
 
 function onInferenceSubmit(formData) {
     showProcessConsole.value = true;
+    inferenceProgress.value = { progress: 0, step: 0, episodeLen: 0 };
     api.post(`/checkpoint/${selectedCheckpointId.value}/:start_test`, {
         task: props.workspace,
         policy: checkpoint.value.policy,
@@ -818,6 +954,8 @@ function onInferenceSubmit(formData) {
         temporal_ensemble_coeff: formData.re_inference_steps === 1 ? formData.temporal_ensemble_coeff : null,
         // PI0.5 / VLA prompt; backend uses task.name as fallback if empty
         language_instruction: formData.language_instruction || '',
+        // Planner feature: inference 시 episode_len 지정
+        inference_episode_len: moveHomposeInDataCollection.value ? inferenceEpisodeLen.value : null,
     }).catch((error) => {
         console.error('Error starting test:', error);
         Notify.create({
@@ -894,6 +1032,7 @@ onMounted(() => {
             inferenceSucceed.value = false;
             succeedScore.value = null;
             oodScore.value = null;
+            inferenceProgress.value = { progress: 0, step: 0, episodeLen: 0 };
             Notify.create({
                 color: 'positive',
                 message: t('inferenceStopped')
@@ -903,6 +1042,14 @@ onMounted(() => {
 
     socket.on('record_episode_progress', (data) => {
         collectingProgress.value = data.progress;
+    });
+
+    socket.on('inference_progress', (data) => {
+        inferenceProgress.value = {
+            progress: Number(data.progress) || 0,
+            step: Number(data.step) || 0,
+            episodeLen: Number(data.episode_len) || 0,
+        };
     });
 
     socket.on('moving_homepose', (data) => {
@@ -934,7 +1081,7 @@ onMounted(() => {
         });
     });
 
-    socket.on('replay_capture_progress', (data) => {
+    socket.on('replay_progress', (data) => {
         replayProgress.value = data.progress;
     });
 });
@@ -944,6 +1091,7 @@ onUnmounted(() => {
     socket.off('vive_node_error');
     socket.off('inference_succeed');
     socket.off('ood_score');
+    socket.off('inference_progress');
     removeSucceedKeyListener();
 });
 </script>
