@@ -215,25 +215,27 @@
                     </div>
                 </div>
                 <div
-                    class="col q-pa-sm bg-dark border-rounded text-white row flex flex-center"
+                    class="col bg-dark border-rounded text-white row flex flex-center"
                     v-else
                 >
-                    <q-linear-progress
+                    <div
+                        class="col q-px-md"
                         v-if="moveHomposeInDataCollection && inferenceProgress.episodeLen > 0"
-                        instant-feedback
-                        :value="inferenceProgress.progress"
-                        size="20px"
-                        color="primary"
-                        track-color="black"
-                        class="q-mr-md"
-                        style="min-width: 200px; flex: 1;"
                     >
-                        <div class="absolute-full flex flex-center">
-                            <q-badge color="white" text-color="dark"
-                                :label="`${inferenceProgress.step}/${inferenceProgress.episodeLen}`" />
-                        </div>
-                    </q-linear-progress>
-                    <q-space></q-space>
+                        <q-linear-progress
+                            instant-feedback
+                            :value="inferenceProgress.progress"
+                            size="30px"
+                            color="primary"
+                            track-color="black"
+                        >
+                            <div class="absolute-full flex flex-center">
+                                <q-badge color="white" text-color="dark"
+                                    :label="`${inferenceProgress.step}/${inferenceProgress.episodeLen}`" />
+                            </div>
+                        </q-linear-progress>
+                    </div>
+                    <q-space v-else></q-space>
                     <q-badge
                         v-if="succeedScore !== null"
                         :color="succeedScore > 0.7 ? 'green' : 'red'"
@@ -283,7 +285,7 @@
                         clearable
                     />
                     <q-space></q-space>
-                    <div class="row items-center q-mr-xl q-gutter-x-sm">
+                    <div class="row items-center q-mr-sm q-gutter-x-sm">
                         <q-select
                             dense outlined dark bg-color="dark"
                             v-model="teleType"

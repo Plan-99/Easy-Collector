@@ -165,10 +165,18 @@ Assembly는 **여러 로봇을 하나의 Agent 단위(좌/우 팔, 그리퍼 등
      status="missing"
    />
 
-4. **이름을 입력하고 Save를 누르면 그리드에 새 카드가 생성됩니다.**
+4. **Assembly 이름을 입력합니다.**
 
    <DocsImage
-     src="/docs/quickstart/14-assemble-card.png"
+     src="/docs/quickstart/14-assemble-name.png"
+     alt="Assembly 이름 입력 (Save 직전)"
+     status="missing"
+   />
+
+5. **Save를 누르면 그리드에 새 카드가 생성됩니다.**
+
+   <DocsImage
+     src="/docs/quickstart/15-assemble-card.png"
      alt="새로 만들어진 Assembly 카드"
      status="missing"
    />
@@ -182,7 +190,7 @@ Assembly는 **여러 로봇을 하나의 Agent 단위(좌/우 팔, 그리퍼 등
    카드 우측 하단의 키보드 아이콘은 항상 사용 가능, 게임패드 아이콘은 Leader Robot이 설정되어야 활성화됩니다. 지금은 키보드만 테스트합니다.
 
    <DocsImage
-     src="/docs/quickstart/15-teleop-overview.png"
+     src="/docs/quickstart/16-teleop-overview.png"
      alt="TeleoperationPage 카드 mode indicator"
      status="missing"
    />
@@ -190,7 +198,7 @@ Assembly는 **여러 로봇을 하나의 Agent 단위(좌/우 팔, 그리퍼 등
 2. **카드 우상단의 ⚙️ 버튼을 눌러 Teleoperation Setting을 엽니다.**
 
    <DocsImage
-     src="/docs/quickstart/16-teleop-setting-open.png"
+     src="/docs/quickstart/17-teleop-setting-open.png"
      alt="TeleSettingDialog 열린 상태"
      status="missing"
    />
@@ -200,7 +208,7 @@ Assembly는 **여러 로봇을 하나의 Agent 단위(좌/우 팔, 그리퍼 등
    왼팔/오른팔별로 어떤 키가 어떤 축에 매핑되는지 표로 정리되어 있습니다. **Step size**로 한 번에 움직이는 양을 조절합니다.
 
    <DocsImage
-     src="/docs/quickstart/18-teleop-keyboard.png"
+     src="/docs/quickstart/19-teleop-keyboard.png"
      alt="TeleSettingDialog Keyboard 탭"
      status="missing"
    />
@@ -210,7 +218,7 @@ Assembly는 **여러 로봇을 하나의 Agent 단위(좌/우 팔, 그리퍼 등
    포커스가 콘솔에 있는 상태에서 매핑된 키를 누르면 로그에 키 이벤트가 찍히고 시뮬 로봇이 움직입니다.
 
    <DocsImage
-     src="/docs/quickstart/19-teleop-running.png"
+     src="/docs/quickstart/20-teleop-running.png"
      alt="TeleopConsole — Start Keyboard Teleop 활성"
      status="missing"
    />
@@ -228,7 +236,7 @@ Assembly는 **여러 로봇을 하나의 Agent 단위(좌/우 팔, 그리퍼 등
 1. **사이드바의 Workspace로 이동하고 셀렉트에서 Create New Workspace +를 선택합니다.**
 
    <DocsImage
-     src="/docs/quickstart/20-workspace-create.png"
+     src="/docs/quickstart/21-workspace-create.png"
      alt="Workspace 셀렉트 dropdown — Create New Workspace +"
      status="missing"
    />
@@ -236,7 +244,7 @@ Assembly는 **여러 로봇을 하나의 Agent 단위(좌/우 팔, 그리퍼 등
 2. **이름을 입력하고 Create를 누릅니다.**
 
    <DocsImage
-     src="/docs/quickstart/21-workspace-form.png"
+     src="/docs/quickstart/22-workspace-form.png"
      alt="Workspace 생성 폼"
      status="missing"
    />
@@ -244,7 +252,7 @@ Assembly는 **여러 로봇을 하나의 Agent 단위(좌/우 팔, 그리퍼 등
 3. **setting 탭에서 Sensor Setting을 펼치고 + Add Sensor로 시뮬 카메라를 추가합니다.**
 
    <DocsImage
-     src="/docs/quickstart/22-workspace-sensor.png"
+     src="/docs/quickstart/23-workspace-sensor.png"
      alt="Sensor Setting expansion — 센서 추가 직후"
      status="missing"
    />
@@ -254,7 +262,7 @@ Assembly는 **여러 로봇을 하나의 Agent 단위(좌/우 팔, 그리퍼 등
    드래그로 crop 영역을 설정하거나, **Cropped Area**의 x1/y1/x2/y2를 직접 입력할 수 있습니다. **Rotation**으로 90/180/270도 회전도 가능합니다.
 
    <DocsImage
-     src="/docs/quickstart/23-workspace-sensor-crop.png"
+     src="/docs/quickstart/24-workspace-sensor-crop.png"
      alt="센서 config 패널 — crop 캔버스"
      status="missing"
    />
@@ -262,7 +270,7 @@ Assembly는 **여러 로봇을 하나의 Agent 단위(좌/우 팔, 그리퍼 등
 5. **Robot Setting을 펼치고 4단계에서 만든 Assembly를 선택합니다.**
 
    <DocsImage
-     src="/docs/quickstart/24-workspace-robot.png"
+     src="/docs/quickstart/25-workspace-robot.png"
      alt="Robot Setting expansion — Assembly 선택"
      status="missing"
    />
@@ -272,7 +280,7 @@ Assembly는 **여러 로봇을 하나의 Agent 단위(좌/우 팔, 그리퍼 등
    먼저 RobotPendant 등으로 원하는 자세를 만든 뒤, Home Pose 섹션의 **sync** 버튼으로 현재 자세를 가져오고 **save**로 저장합니다. 데이터 수집 시작 시 로봇이 항상 이 자세로 먼저 돌아갑니다.
 
    <DocsImage
-     src="/docs/quickstart/25-workspace-homepose.png"
+     src="/docs/quickstart/26-workspace-homepose.png"
      alt="Home Pose 입력 + sync/save 버튼"
      status="missing"
    />
@@ -282,7 +290,7 @@ Assembly는 **여러 로봇을 하나의 Agent 단위(좌/우 팔, 그리퍼 등
    한 에피소드의 최대 프레임 수입니다. 기본값(예: 100)으로 시작해도 됩니다.
 
    <DocsImage
-     src="/docs/quickstart/26-workspace-task.png"
+     src="/docs/quickstart/27-workspace-task.png"
      alt="Task Setting — Episode Length"
      status="missing"
    />
@@ -290,7 +298,7 @@ Assembly는 **여러 로봇을 하나의 Agent 단위(좌/우 팔, 그리퍼 등
 8. **data 탭으로 가서 + Add Dataset Folder로 데이터셋을 만듭니다.**
 
    <DocsImage
-     src="/docs/quickstart/27-workspace-dataset-add.png"
+     src="/docs/quickstart/28-workspace-dataset-add.png"
      alt="Add Dataset Folder 폼"
      status="missing"
    />
@@ -304,7 +312,7 @@ Assembly는 **여러 로봇을 하나의 Agent 단위(좌/우 팔, 그리퍼 등
    상단에 카메라 뷰, 그 아래에 각 관절의 현재값/목표값이 화살표로 표시됩니다.
 
    <DocsImage
-     src="/docs/quickstart/28-monitoring-overview.png"
+     src="/docs/quickstart/29-monitoring-overview.png"
      alt="MonitoringWindow — 센서 피드 + 로봇 상태"
      status="missing"
    />
@@ -317,7 +325,7 @@ Assembly는 **여러 로봇을 하나의 Agent 단위(좌/우 팔, 그리퍼 등
    - **🏠 뱃지**: 파란색(ON)으로 켭니다. 회색(OFF)이면 클릭해서 활성화. ON이면 매 에피소드 시작 시 워크스페이스의 [Home Pose](/docs/workspace/home-pose)로 자동 이동합니다.
 
    <DocsImage
-     src="/docs/quickstart/29-record-setup.png"
+     src="/docs/quickstart/30-record-setup.png"
      alt="MonitoringWindow 수집 setup row"
      status="missing"
    />
@@ -327,7 +335,7 @@ Assembly는 **여러 로봇을 하나의 Agent 단위(좌/우 팔, 그리퍼 등
    "Moving to Home Pose" 스피너가 떠 있는 동안에는 키 입력이 무시됩니다.
 
    <DocsImage
-     src="/docs/quickstart/30-moving-home.png"
+     src="/docs/quickstart/31-moving-home.png"
      alt="Moving to Home Pose 스피너"
      status="missing"
    />
@@ -338,17 +346,9 @@ Assembly는 **여러 로봇을 하나의 Agent 단위(좌/우 팔, 그리퍼 등
    - **DONE** — 한 에피소드를 완료하고 데이터셋에 저장합니다.
    - **STOP** — 에피소드를 버림. 데이터셋에 저장되지 않습니다.
 
-   설정한 [Episode Length](/docs/workspace/episode-config)만큼 시간이 지나거나 **DONE**을 클릭하면 그 에피소드가 데이터셋에 저장됩니다.
+   설정한 [Episode Length](/docs/workspace/episode-config)만큼 시간이 지나거나 **DONE**을 클릭하면 그 에피소드가 데이터셋에 저장됩니다. 에피소드 종료 후에는 다음 에피소드가 자동으로 시작되니 **같은 동작을 10번 반복**합니다.
 
-4. **에피소드가 종료되면 다음 에피소드가 자동으로 시작됩니다. 같은 동작을 10번 반복합니다.**
-
-   <DocsImage
-     src="/docs/quickstart/32-episode-done.png"
-     alt="에피소드 종료 후 다음 에피소드 자동 시작"
-     status="missing"
-   />
-
-5. **data 탭에서 데이터셋을 펼쳐 10개 에피소드가 쌓였는지 확인합니다.**
+4. **data 탭에서 데이터셋을 펼쳐 10개 에피소드가 쌓였는지 확인합니다.**
 
    <DocsImage
      src="/docs/quickstart/33-dataset-10-episodes.png"
@@ -369,7 +369,7 @@ Assembly는 **여러 로봇을 하나의 Agent 단위(좌/우 팔, 그리퍼 등
    상단에서 같은 워크스페이스를 선택하면 stepper가 나타납니다. **Step 1: Select Datasets**가 활성화됩니다.
 
    <DocsImage
-     src="/docs/quickstart/34-train-step1.png"
+     src="/docs/quickstart/35-train-step1.png"
      alt="TrainPage stepper Step 1"
      status="missing"
    />
@@ -379,7 +379,7 @@ Assembly는 **여러 로봇을 하나의 Agent 단위(좌/우 팔, 그리퍼 등
    카드 우상단의 체크박스가 켜지고 테두리가 파란색으로 바뀝니다.
 
    <DocsImage
-     src="/docs/quickstart/35-train-dataset-select.png"
+     src="/docs/quickstart/36-train-dataset-select.png"
      alt="Step 1 — 데이터셋 선택"
      status="missing"
    />
@@ -387,7 +387,7 @@ Assembly는 **여러 로봇을 하나의 Agent 단위(좌/우 팔, 그리퍼 등
 3. **Step 2에서 Policy 셀렉트의 Create New Policy +를 누릅니다.**
 
    <DocsImage
-     src="/docs/quickstart/36-train-step2-newpolicy.png"
+     src="/docs/quickstart/37-train-step2-newpolicy.png"
      alt="Step 2 — Create New Policy"
      status="missing"
    />
@@ -397,7 +397,7 @@ Assembly는 **여러 로봇을 하나의 Agent 단위(좌/우 팔, 그리퍼 등
    기본값을 그대로 두고 이름만 입력해 **Save** 후 **Continue**.
 
    <DocsImage
-     src="/docs/quickstart/37-train-act-form.png"
+     src="/docs/quickstart/38-train-act-form.png"
      alt="ACT 파라미터 폼"
      status="missing"
    />
@@ -407,7 +407,7 @@ Assembly는 **여러 로봇을 하나의 Agent 단위(좌/우 팔, 그리퍼 등
    런처에서 로컬 학습 서버를 켰다면 `http://localhost:5100`. 우측에 **GPU Available** 배지가 보이면 정상입니다.
 
    <DocsImage
-     src="/docs/quickstart/39-train-server-ok.png"
+     src="/docs/quickstart/40-train-server-ok.png"
      alt="Step 3 — Training Server URL 헬스체크 OK + GPU Available"
      status="missing"
    />
@@ -417,7 +417,7 @@ Assembly는 **여러 로봇을 하나의 Agent 단위(좌/우 팔, 그리퍼 등
    TrainingDialog가 열리고 **progress bar + Train/Validate Loss 차트 + 콘솔**이 표시됩니다.
 
    <DocsImage
-     src="/docs/quickstart/40-training-running.png"
+     src="/docs/quickstart/41-training-running.png"
      alt="TrainingDialog 학습 중"
      status="missing"
    />
@@ -427,7 +427,7 @@ Assembly는 **여러 로봇을 하나의 Agent 단위(좌/우 팔, 그리퍼 등
    클릭하면 다이얼로그를 다시 열어 최종 loss와 best epoch을 확인할 수 있습니다.
 
    <DocsImage
-     src="/docs/quickstart/41-train-done.png"
+     src="/docs/quickstart/42-train-done.png"
      alt="학습 완료 — 우하단 floating 버튼"
      status="missing"
    />
@@ -445,7 +445,7 @@ ACT 기본 파라미터로 10 에피소드 학습은 보통 **수 분~10여 분*
    방금 만든 체크포인트가 카드로 보입니다.
 
    <DocsImage
-     src="/docs/quickstart/42-inference-list.png"
+     src="/docs/quickstart/43-inference-list.png"
      alt="Workspace inference 탭 — 체크포인트 카드"
      status="missing"
    />
@@ -456,7 +456,7 @@ ACT 기본 파라미터로 10 에피소드 학습은 보통 **수 분~10여 분*
    - **🏠 배지**: 추론 시작 시 Home Pose로 먼저 이동할지 (파란색=ON, 회색=OFF)
 
    <DocsImage
-     src="/docs/quickstart/43-inference-setup.png"
+     src="/docs/quickstart/44-inference-setup.png"
      alt="MonitoringWindow inference 헤더"
      status="missing"
    />
@@ -471,7 +471,7 @@ ACT 기본 파라미터로 10 에피소드 학습은 보통 **수 분~10여 분*
    동작이 마음에 들지 않거나 위험해 보이면 **Stop**을 눌러 즉시 멈춥니다.
 
    <DocsImage
-     src="/docs/quickstart/44-inference-running.png"
+     src="/docs/quickstart/45-inference-running.png"
      alt="추론 중 — Succeed / OOD 배지"
      status="missing"
    />
