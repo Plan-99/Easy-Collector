@@ -1,12 +1,9 @@
-from .policies import ACTPolicy, CNNMLPPolicy
 from einops import rearrange
 import cv2
 import numpy as np
 import torch
 import os
 from torch.utils.data import TensorDataset, DataLoader
-import IPython
-import numpy as np
 import json
 from types import SimpleNamespace
 from lerobot.configs.types import PolicyFeature, FeatureType
@@ -15,7 +12,7 @@ from transformers import AutoImageProcessor
 from PIL import Image
 from scipy.spatial.transform import Rotation
 import pyarrow.parquet as pq
-from ..api.process.lerobot_io import (
+from ..utils.lerobot_io import (
     read_episode, list_episodes, get_dataset_info, get_norm_stats_from_dataset,
     _parse_image_value,
     PARQUET_PATH_TEMPLATE, IMAGE_PATH_TEMPLATE, DEFAULT_CHUNK_SIZE,
@@ -82,9 +79,6 @@ def relative_trajectory_to_delta(waypoints: np.ndarray) -> np.ndarray:
 
 
 
-e = IPython.embed
-
-
 class EpisodicDataset(torch.utils.data.Dataset):
     def __init__(self, episode_ids, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone='resnet18', n_obs_steps=1, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None, augment=False, wrist_sensor_ids=None):
         super(EpisodicDataset).__init__()
@@ -131,7 +125,11 @@ class EpisodicDataset(torch.utils.data.Dataset):
         # Pre-load episode → tasks mapping from episodes.jsonl (lerobot standard).
         # Each line: {"episode_index": N, "length": L, "tasks": ["pick up the cup", ...]}
         # PI05 uses the first entry of `tasks` per episode as its language instruction.
-        from ..api.process.lerobot_io import _read_jsonl, EPISODES_PATH
+        # NOTE: origin/integration_2 moved lerobot_io.py from `..api.process.` to `..utils.`,
+        # so we adopt the new import path. We keep our `_episode_tasks` lookup (per-episode
+        # list) instead of origin's `_task_map` (task_index→task) because downstream
+        # `_load_episode_parquet` uses _episode_tasks for PI05 language conditioning.
+        from ..utils.lerobot_io import _read_jsonl, EPISODES_PATH
         episodes_meta = _read_jsonl(os.path.join(dataset_dir, EPISODES_PATH))
         self._episode_tasks = {
             int(e.get("episode_index")): (e.get("tasks") or [""])
@@ -196,7 +194,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
                 if os.path.exists(npy_path):
                     image_data[sensor_name] = np.load(npy_path, mmap_mode="r")
                 elif os.path.exists(video_path):
-                    from ..api.process.lerobot_io import _decode_video_frames
+                    from ..utils.lerobot_io import _decode_video_frames
                     image_data[sensor_name] = _decode_video_frames(video_path)
                 elif os.path.isdir(png_dir):
                     # Build a list of frame_XXXXXX.png paths in order. _parse_image_value
@@ -897,39 +895,6 @@ def ros_image_to_numpy(image_msg):
 def rescale_val(val, origin_rng, rescaled_rng):
     return rescaled_rng[0] + (rescaled_rng[1] - rescaled_rng[0]) * ((val - origin_rng[0]) / (origin_rng[1] - origin_rng[0]))
 
-
-def make_policy(ckpt_path, seed, learning_rate, lr_backbone, policy_obj, task, robot, sensors, gripper=None):
-    args_override = policy_obj['settings']
-    if policy_obj['type'] == 'ACT':
-        args_override['ckpt_dir'] = ckpt_path
-        args_override['policy_class'] = policy_obj['type']
-        args_override['task_name'] = task['name']
-        args_override['seed'] = seed
-        args_override['state_dim'] = robot['joint_dim']
-        if gripper is not None:
-            args_override['state_dim'] += 1 # gripper state dim
-        args_override['num_queries'] = int(policy_obj['settings']['chunk_size'])
-        
-        args_override['learning_rate'] = learning_rate
-        args_override['lr_backbone'] = lr_backbone
-        # args_override[''] = int(policy_obj['settings']['lr_backbone'])
-        
-        
-        sensor_names = [sensor['name'] for sensor in sensors]
-        args_override['camera_names'] = sensor_names
-        
-        policy = ACTPolicy(args_override)
-    else:
-        raise NotImplementedError
-    return policy
-
-
-def make_optimizer(policy_class, policy):
-    if policy_class == 'ACT':
-        optimizer = policy.configure_optimizers()
-    else:
-        raise NotImplementedError
-    return optimizer
 
 _pi05_tokenizer = None
 

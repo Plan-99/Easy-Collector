@@ -1,0 +1,37 @@
+---
+title: 데이터셋 선택 (Step 1)
+description: 학습에 사용할 데이터셋을 선택.
+section: training
+order: 3
+sourceRefs:
+  - frontend/src/pages/v2/TrainPage.vue
+lastVerifiedVersion: 0.0.0
+---
+
+Step 1에서는 학습에 들어갈 데이터셋들을 고릅니다. 여러 데이터셋을 동시에 선택해 한 번에 학습할 수 있습니다.
+
+<Steps>
+1. **현재 워크스페이스의 데이터셋들이 카드 그리드로 표시됩니다.**
+
+   각 카드에는 폴더 아이콘과 에피소드 수가 표시됩니다.
+
+   <DocsImage
+     src="/docs/training/dataset-01-grid.png"
+     alt="데이터셋 카드 그리드"
+     status="missing"
+   />
+
+2. **카드를 클릭하면 우상단 체크박스가 켜지고 테두리가 파란색이 됩니다.**
+
+   <DocsImage
+     src="/docs/training/dataset-02-selected.png"
+     alt="선택된 카드"
+     status="missing"
+   />
+
+3. **Continue를 눌러 Step 2로 진입합니다.**
+</Steps>
+
+<Callout type="tip">
+같은 작업의 여러 버전을 한 번에 학습하면 일반화에 도움이 됩니다. 예: `pick_v1`(20 ep) + `pick_v2`(15 ep)를 함께 선택.
+</Callout>

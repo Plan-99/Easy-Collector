@@ -1,0 +1,62 @@
+---
+title: 키보드 텔레오퍼레이션
+description: 키 매핑과 step size를 설정해 키보드로 EE를 제어.
+section: teleoperation
+order: 4
+sourceRefs:
+  - frontend/src/components/v2/TeleSettingDialog.vue
+lastVerifiedVersion: 0.0.0
+---
+
+키보드 모드는 한 번에 한 축씩 정해진 양만큼 EE를 움직입니다. 정밀하지만 느립니다.
+
+## 매핑 원리
+
+EE의 한 스텝은 다음 공식으로 계산됩니다.
+
+```text
+delta = step_size × scale × sign × axis_unit_vector
+```
+
+- **step_size** — 한 번에 움직일 양 (m)
+- **scale** — 키별로 다른 스케일 (예: shift 조합으로 큰 스텝)
+- **sign** — `+` 또는 `−`
+- **axis** — `x` / `y` / `z` / `roll` / `pitch` / `yaw`
+
+## 설정 절차
+
+<Steps>
+1. **Teleoperation 페이지에서 Assembly 카드의 ⚙️ → Keyboard 탭으로 이동.**
+
+   <DocsImage
+     src="/docs/teleoperation/keyboard-01-tab.png"
+     alt="Keyboard 탭 전체"
+     status="missing"
+   />
+
+2. **Step size를 입력합니다.**
+
+   기본값은 `0.005` (5 mm). 세밀한 조작이 필요하면 더 작게.
+
+   <DocsImage
+     src="/docs/teleoperation/keyboard-03-step-size.png"
+     alt="Step size 입력"
+     status="missing"
+   />
+
+3. **Left arm / Right arm 표에서 키 매핑을 확인합니다.**
+
+   각 행은 `Key | Axis | Sign | Scale` 4열. **Scale** 열만 입력 가능합니다.
+
+   <DocsImage
+     src="/docs/teleoperation/keyboard-02-mapping-table.png"
+     alt="키 매핑 표 (Left/Right arm)"
+     status="missing"
+   />
+
+4. **(선택) Reset to defaults로 출고 매핑으로 되돌립니다.**
+</Steps>
+
+<Callout type="warning">
+Step size가 너무 크면 IK가 발산해 로봇이 갑자기 큰 동작을 시작할 수 있습니다. 처음에는 보수적으로 시작하세요.
+</Callout>

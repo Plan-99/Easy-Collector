@@ -1,22 +1,16 @@
 #!/bin/bash
-# Copy shared dependencies from Easy-Collector into training_server for Docker build.
-# Run this before `docker compose build`.
+# Copy vendored lerobot library from backend into training_server for Docker build.
+# training_server is self-contained otherwise — its policies/ and utils/ directories
+# are maintained independently and should NOT be overwritten from backend.
+set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+BACKEND="$PROJECT_ROOT/backend"
 
-echo "Copying shared dependencies..."
+echo "Copying vendored lerobot from $BACKEND/lerobot..."
 
-# Copy policies/utils.py
-mkdir -p "$SCRIPT_DIR/policies"
-cp "$PROJECT_ROOT/src/backend/policies/utils.py" "$SCRIPT_DIR/policies/utils.py"
-cp "$PROJECT_ROOT/src/backend/policies/__init__.py" "$SCRIPT_DIR/policies/__init__.py" 2>/dev/null || touch "$SCRIPT_DIR/policies/__init__.py"
-
-# Copy lerobot (vendored library)
 rm -rf "$SCRIPT_DIR/lerobot"
-cp -r "$PROJECT_ROOT/src/backend/lerobot" "$SCRIPT_DIR/lerobot"
+cp -r "$BACKEND/lerobot" "$SCRIPT_DIR/lerobot"
 
-# Copy lerobot_io utilities
-cp "$PROJECT_ROOT/src/backend/api/process/lerobot_io.py" "$SCRIPT_DIR/lerobot_io.py"
-
-echo "Done. You can now run: docker compose build"
+echo "Done."

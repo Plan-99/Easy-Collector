@@ -1,1 +1,0 @@
-orator migrate:reset --config config/database.py

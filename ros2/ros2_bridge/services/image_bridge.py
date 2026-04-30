@@ -47,6 +47,21 @@ class ImageBridgeWriter:
             f.write(header + data)
             f.flush()
 
+    def remove(self, sensor_key: str):
+        """Remove a single sensor's shm file."""
+        with self._lock:
+            f = self._files.pop(sensor_key, None)
+            if f is not None:
+                try:
+                    f.close()
+                except Exception:
+                    pass
+        path = os.path.join(SHM_BASE, sensor_key)
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+
     def cleanup(self):
         with self._lock:
             for f in self._files.values():

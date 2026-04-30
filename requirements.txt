@@ -59,6 +59,9 @@ av
 grpcio
 protobuf
 
+# --- [Simulation] ---
+pybullet
+
 # --- [Remote Training Server Client] ---
 requests
 websocket-client

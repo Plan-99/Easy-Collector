@@ -1,0 +1,23 @@
+{
+  "id": "robot_unitree",
+  "name": "Unitree",
+  "version": "1.0.2",
+  "category": "robot",
+  "description": "Unitree 로봇 드라이버",
+  "install": {
+    "ros2": {
+      "target": "ros2/ros2_ws/src",
+      "build": "colcon"
+    },
+    "sdk": {
+      "target": "ros2/robot_sdk/unitree"
+    }
+  },
+  "dependencies": {
+    "apt": [],
+    "pip": []
+  },
+  "check": {
+    "type": "path"
+  }
+}

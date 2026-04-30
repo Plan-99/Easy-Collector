@@ -1,0 +1,53 @@
+---
+title: 수집 흐름
+description: REC 클릭부터 한 에피소드 종료까지의 4단계.
+section: data-collection
+order: 4
+sourceRefs:
+  - frontend/src/components/v2/MonitoringWindow.vue
+lastVerifiedVersion: 0.0.0
+---
+
+데이터 수집은 다음 4단계로 진행됩니다.
+
+<Steps>
+1. **REC 버튼을 누릅니다.**
+
+   <DocsImage
+     src="/docs/data-collection/record-01-rec.png"
+     alt="REC 버튼 hover"
+     status="missing"
+   />
+
+2. **(Home Pose ON일 때) 로봇이 Home Pose로 이동합니다.**
+
+   "Moving to Home Pose" 스피너가 표시되는 동안에는 키보드/리더 입력이 무시됩니다.
+
+   <DocsImage
+     src="/docs/data-collection/record-02-moving.png"
+     alt="Moving to Home Pose 스피너"
+     status="missing"
+   />
+
+3. **수집이 시작되면 progress bar와 SUCCESS / DONE / STOP 버튼이 나타납니다.**
+
+   사람이 텔레오퍼레이션으로 작업을 시연합니다. 매 프레임이 자동으로 저장됩니다.
+
+   <DocsImage
+     src="/docs/data-collection/record-03-recording.png"
+     alt="수집 중 progress bar"
+     status="missing"
+   />
+
+4. **Episode Length 도달 또는 DONE 버튼으로 한 에피소드를 마무리합니다.**
+
+   <DocsImage
+     src="/docs/data-collection/record-04-progress.png"
+     alt="progress 100% 직전"
+     status="missing"
+   />
+</Steps>
+
+DONE 후 **Home Pose ON**이면 다시 2단계로 돌아가 다음 에피소드가 자동 시작됩니다. OFF면 곧바로 3단계로 진입합니다.
+
+[Stop / Done / Success 버튼의 차이](/docs/data-collection/buttons) 페이지에서 각 버튼을 어떤 상황에 사용해야 하는지 확인하세요.

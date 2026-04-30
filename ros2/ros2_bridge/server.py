@@ -16,10 +16,11 @@ from rclpy.node import Node
 from .generated import robot_bridge_pb2_grpc as pb_grpc
 from .services.agent_service import AgentServiceServicer
 from .services.driver_service import DriverServiceServicer
-from .services.env_service import EnvServiceServicer
 from .services.ros_proxy_service import ROSProxyServicer
 from .services.vive_service import ViveServiceServicer
 from .services.uncertainty_service import UncertaintyServiceServicer
+from .services.streaming_service import StreamingServiceServicer
+from .services.obs_service import ObsServiceServicer
 
 GRPC_PORT = 50051
 
@@ -39,10 +40,11 @@ def serve():
     # gRPC 서비스 인스턴스 생성
     agent_servicer = AgentServiceServicer(node)
     driver_servicer = DriverServiceServicer(node)
-    env_servicer = EnvServiceServicer(node, agent_servicer)
     ros_proxy_servicer = ROSProxyServicer(node)
     vive_servicer = ViveServiceServicer(node, agent_servicer)
     uncertainty_servicer = UncertaintyServiceServicer(node)
+    streaming_servicer = StreamingServiceServicer(node)
+    obs_servicer = ObsServiceServicer(ros_executor)
 
     # gRPC 서버 설정
     server = grpc.server(
@@ -54,10 +56,11 @@ def serve():
     )
     pb_grpc.add_AgentServiceServicer_to_server(agent_servicer, server)
     pb_grpc.add_DriverServiceServicer_to_server(driver_servicer, server)
-    pb_grpc.add_EnvServiceServicer_to_server(env_servicer, server)
     pb_grpc.add_ROSProxyServicer_to_server(ros_proxy_servicer, server)
     pb_grpc.add_ViveServiceServicer_to_server(vive_servicer, server)
     pb_grpc.add_UncertaintyServiceServicer_to_server(uncertainty_servicer, server)
+    pb_grpc.add_StreamingServiceServicer_to_server(streaming_servicer, server)
+    pb_grpc.add_ObsServiceServicer_to_server(obs_servicer, server)
 
     server.add_insecure_port(f'[::]:{GRPC_PORT}')
     server.start()
@@ -81,7 +84,7 @@ def serve():
     vive_servicer.destroy()
     uncertainty_servicer.destroy()
     agent_servicer.destroy_all()
-    env_servicer.destroy_all()
+    obs_servicer.destroy_all()
 
     server.stop(grace=5)
     ros_executor.shutdown()

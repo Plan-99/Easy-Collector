@@ -1,0 +1,25 @@
+{
+  "id": "gripper_onrobot",
+  "name": "OnRobot Gripper",
+  "version": "1.0.2",
+  "category": "robot",
+  "description": "OnRobot 그리퍼 드라이버",
+  "install": {
+    "ros2": {
+      "target": "ros2/ros2_ws/src",
+      "build": "colcon"
+    },
+    "sdk": {
+      "target": "ros2/robot_sdk/onrobot"
+    }
+  },
+  "dependencies": {
+    "apt": [],
+    "pip": [
+      "pymodbus"
+    ]
+  },
+  "check": {
+    "type": "path"
+  }
+}

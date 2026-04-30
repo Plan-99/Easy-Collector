@@ -77,10 +77,6 @@ const props = defineProps({
   isTraining: {
     type: Boolean,
     default: false
-  },
-  useRemoteTraining: {
-    type: Boolean,
-    default: false
   }
 });
 
@@ -164,11 +160,7 @@ const onLogTrainTask = (logData) => {
 async function stopTraining() {
     if (!props.isTraining) return;
     try {
-        if (props.useRemoteTraining) {
-            await api.post('/remote-train/stop', { checkpoint_id: props.checkpoint.id });
-        } else {
-            await api.post('/task:stop_training');
-        }
+        await api.post('/remote-train/stop', { checkpoint_id: props.checkpoint.id });
     } catch (error) {
         Notify.create({ color: 'negative', message: `${error}: Failed to stop training.` });
     }
@@ -176,7 +168,7 @@ async function stopTraining() {
 
 function cancelTraing() {
     if (props.isTraining) return;
-    api.post('/task:cancel_training', {
+    api.post('/remote-train/cancel', {
         checkpoint_id: props.checkpoint.id
     }).then(() => {
         emit('update:modelValue', false);

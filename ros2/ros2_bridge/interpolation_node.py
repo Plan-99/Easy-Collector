@@ -19,6 +19,7 @@ Usage (as subprocess):
 import time
 import numpy as np
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 
@@ -134,7 +135,8 @@ class JointInterpolationNode(Node):
         if self._cmd_time is not None:
             interval = now - self._cmd_time
             if interval > 0.001:
-                self._cmd_interval = interval
+                # 단발 명령 시 너무 느리게 보간되지 않도록 상한 설정
+                self._cmd_interval = min(interval, 0.2)
         self._cmd_time = now
 
         if self._current_pos is None:
@@ -239,15 +241,19 @@ def main(args=None):
     try:
         node = JointInterpolationNode()
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     except RuntimeError as e:
         print(f"[interpolation_node] Fatal: {e}", flush=True)
     finally:
         if node is not None:
-            node.destroy_node()
+            try:
+                node.destroy_node()
+            except Exception:
+                pass
         try:
-            rclpy.shutdown()
+            if rclpy.ok():
+                rclpy.shutdown()
         except Exception:
             pass
 

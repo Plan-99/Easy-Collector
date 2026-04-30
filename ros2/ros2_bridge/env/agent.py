@@ -11,11 +11,35 @@ import time
 from ..ik_solver.pinocchio_solver.common_arm_ik import Common_ArmIK
 import numpy as np
 
-from ..configs.global_configs import get_robot_by_name
 
 from trajectory_msgs.msg import JointTrajectoryPoint
 
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+
+
+def _apply_ee_offset_override(ee_definitions, user_ee_offset):
+    """ee_definitions의 offset(3번째 항목)을 user override로 교체.
+
+    ee_definitions: [(name, parent, offset), ...] — offset은 None / np.ndarray / list
+    user_ee_offset: {ee_name: [x, y, z]}
+    같은 ee_name에 override가 있으면 np.array로 변환해 적용.
+    """
+    if not user_ee_offset:
+        return ee_definitions
+    result = []
+    for item in ee_definitions:
+        name = item[0]
+        parent = item[1]
+        offset = item[2] if len(item) > 2 else None
+        if name in user_ee_offset:
+            override = user_ee_offset[name]
+            if override is None:
+                offset = None
+            else:
+                offset = np.array(override).T
+        result.append((name, parent, offset))
+    return result
+
 
 class Agent:
     def __init__(self, node: Node, robot):
@@ -42,16 +66,23 @@ class Agent:
         self.write_topic_msg = robot.get('write_topic_msg', '')
         self.sdk_control = robot.get('sdk_control', False)
 
-        self.role = robot.get('role', 'single_arm')
+        self.role = robot.get('role') or 'single_arm'
         self.tool_inner = robot.get('tool_inner', False)
 
         self.ik_solver = None
         self.ik_lock = threading.RLock()
-        robot_info = get_robot_by_name(self.robot_type)
-        if robot_info is not None and 'ik_setting' in robot_info:
-            urdf_path = robot_info['urdf_path']
-            urdf_package_dir = robot_info['urdf_package_dir']
-            ik_setting = dict(robot_info['ik_setting'])
+        # 사용자가 frontend에서 편집한 ee_offset 오버라이드. 형식: {ee_name: [x, y, z]}
+        user_ee_offset = (robot.get('settings', {}) or {}).get('ee_offset') or {}
+        # ros2 전용 robot_configs에서 IK 설정 조회
+        from ..configs.robot_configs import get_robot_config
+        robot_config = get_robot_config(self.robot_type)
+        if robot_config and 'ik_setting' in robot_config:
+            urdf_path = robot_config['urdf_path']
+            urdf_package_dir = robot_config.get('urdf_package_dir', '')
+            ik_setting = dict(robot_config['ik_setting'])
+            ik_setting['ee_definitions'] = _apply_ee_offset_override(
+                ik_setting.get('ee_definitions', []), user_ee_offset
+            )
             self.ik_solver = Common_ArmIK(urdf_path=urdf_path, urdf_package_dir=urdf_package_dir, **ik_setting)
             self.ee_names = self.ik_solver.ee_names
         elif self.robot_type == 'custom':
@@ -69,6 +100,9 @@ class Agent:
                             offset = np.array(offset).T
                         converted.append((name, parent, offset))
                     ik_setting['ee_definitions'] = converted
+                ik_setting['ee_definitions'] = _apply_ee_offset_override(
+                    ik_setting['ee_definitions'], user_ee_offset
+                )
                 self.ik_solver = Common_ArmIK(urdf_path=urdf_path, urdf_package_dir=urdf_package_dir, **ik_setting)
                 self.ee_names = self.ik_solver.ee_names
 
@@ -89,6 +123,7 @@ class Agent:
             # 보간 노드가 SDK로 제어+상태읽기. Agent는 ec_joint_cmd로 명령, state 토픽 구독.
             from sensor_msgs.msg import JointState as JointStateMsg
             state_topic = f'{ns}/interpolated_joint_cmd'
+            self.read_topic_msg = 'sensor_msgs/JointState'
             self.read_topic_msg_cls = JointStateMsg
             self.read_topic_sub = node.create_subscription(
                 JointStateMsg, state_topic, self.joint_state_cb, 10)

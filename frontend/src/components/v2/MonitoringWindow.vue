@@ -467,8 +467,8 @@
                     <q-btn flat label="Save" color="primary" v-close-popup />
                 </q-card-actions>
             </q-card>
-        </q-dialog>
-    </div>
+            </q-dialog>
+        </div>
 </template>
 
 <script setup>

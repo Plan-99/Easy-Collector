@@ -147,10 +147,10 @@ echo "[deb] Embedding project payload for HOME deployment..."
 # Exclude large/ephemeral build artifacts to speed up packaging
 RSYNC_EXCLUDES=(
   '.git'
+  '.github'
   'release'
   '.vscode'
   '.idea'
-  # Skip only the top-level datasets payload (user-provided data), keep code packages named datasets
   '/datasets'
   '/datasets/**'
   'node_modules'
@@ -161,17 +161,28 @@ RSYNC_EXCLUDES=(
   'build'
   'dist'
   'install'
+  # ros2: 모듈은 런처에서 설치, 빌드 산출물 제외
   'ros2/ros2_ws/src'
   'ros2/ros2_ws/build'
-  'backend/modules'
   'ros2/ros2_ws/install'
   'ros2/ros2_ws/log'
   'ros2/ros2_ws/logs'
+  'ros2/robot_sdk'
+  'backend/modules'
+  # training_server is downloaded on-demand by the launcher when the user opts
+  # into local training (CI publishes it as a separate Easy-Trainer-Modules tar.gz).
+  'training_server'
+  # 런타임 프로젝트에 불필요한 폴더
+  'home-next'
+  'modules'
+  # isaaclab은 모듈로 별도 다운로드 (CI가 tar.gz로 패키징)
+  'isaaclab'
+  'python_pkgs'
+  'cmake_pkgs'
+  'scripts'
+  'CLAUDE.md'
   '**/__pycache__'
   '*.pyc'
-  'python_pkgs/**/build'
-  'python_pkgs/**/dist'
-  'python_pkgs/**/*.egg-info'
 )
 RSYNC_EXCLUDE_ARGS=()
 for pat in "${RSYNC_EXCLUDES[@]}"; do
@@ -370,6 +381,10 @@ SRC="/usr/share/easytrainer-project"
 # Ensure destination exists with correct ownership/permissions
 install -d -m 775 -o "$TARGET_USER" -g "$TARGET_GROUP" /opt/easytrainer
 install -d -m 775 -o "$TARGET_USER" -g "$TARGET_GROUP" "$DEST"
+# Pre-create training_server data dir (used when EASYTRAINER_LOCAL_TRAINING=1
+# spawns training_server inside the backend container).
+install -d -m 775 -o "$TARGET_USER" -g "$TARGET_GROUP" /opt/easytrainer/training_data
+install -d -m 775 -o "$TARGET_USER" -g "$TARGET_GROUP" /opt/easytrainer/logs
 # Logs live in /tmp for runtime; keep this dir for legacy safety only
 install -d -m 775 -o "$TARGET_USER" -g "$TARGET_GROUP" /opt/easytrainer/logs
 touch /opt/easytrainer/logs/.keep >/dev/null 2>&1 || true
@@ -394,11 +409,14 @@ if [ -d "$SRC" ]; then
   # Clean old project files (preserve user data: modules, databases)
   if [ -d "$DEST" ]; then
     find "$DEST" -maxdepth 1 -type f -delete 2>/dev/null || true
-    for d in backend frontend ros2 release scripts cmake_pkgs python_pkgs training_server; do
+    for d in backend frontend ros2 release scripts cmake_pkgs python_pkgs; do
       rm -rf "$DEST/$d" 2>/dev/null || true
     done
   fi
   cp -a "$SRC"/. "$DEST"/ || true
+  # Pre-create runtime directories excluded from the deb payload
+  install -d -m 775 -o "$TARGET_USER" -g "$TARGET_GROUP" "$DEST/ros2/robot_sdk" 2>/dev/null || true
+  install -d -m 775 -o "$TARGET_USER" -g "$TARGET_GROUP" "$DEST/modules" 2>/dev/null || true
   chown -R "$TARGET_USER":"$TARGET_GROUP" "$DEST" || true
   chmod -R u+rwX "$DEST" || true
   echo "Project placed at $DEST (owner: $TARGET_USER)"

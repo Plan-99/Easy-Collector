@@ -1,0 +1,520 @@
+---
+title: 빠른 시작
+description: 튜토리얼 모드로 센서·로봇 확인부터 학습·추론까지 한 번에 따라가는 가이드.
+section: quickstart
+order: 1
+sourceRefs:
+  - frontend/src/layouts/v2/MainLayout.vue
+  - frontend/src/pages/v2/SensorPage.vue
+  - frontend/src/pages/v2/RobotPage.vue
+  - frontend/src/pages/v2/AssemblePage.vue
+  - frontend/src/pages/v2/TeleoperationPage.vue
+  - frontend/src/pages/v2/WorkspacePage.vue
+  - frontend/src/pages/v2/TrainPage.vue
+  - frontend/src/components/v2/PipelineGuideDialog.vue
+  - frontend/src/components/v2/MonitoringWindow.vue
+  - frontend/src/components/v2/TeleSettingDialog.vue
+  - frontend/src/components/v2/AssemblyForm.vue
+  - frontend/src/components/v2/RobotPendant.vue
+  - frontend/src/components/v2/TeleopConsole.vue
+  - frontend/src/components/v2/TrainingDialog.vue
+related:
+  - /docs/installation
+  - /docs/workspace/create
+  - /docs/training/policy
+lastVerifiedVersion: 0.0.0
+---
+
+이 가이드는 Easy Trainer의 **9단계 워크플로우**를 처음부터 끝까지 한 번 경험하는 워크스루입니다.
+**Tutorial Mode**(시뮬레이터 기반)로 진행되므로 실제 로봇 없이도 모든 단계를 그대로 따라할 수 있습니다.
+
+<Callout type="tip">
+완주에 약 30–60분 정도 걸립니다 (학습 시간 포함). GPU가 있으면 더 짧습니다.
+</Callout>
+
+## 1. 튜토리얼 모드 켜기
+
+먼저 시뮬레이터를 부팅하고 화면 가이드를 켭니다.
+
+<Steps>
+1. **사이드바 하단의 Tutorial Mode 토글을 켭니다.**
+
+   토글 옆에 "Switching…" → "Sim running" 순서로 상태가 바뀝니다.
+
+   <DocsImage
+     src="/docs/quickstart/01-tutorial-toggle.png"
+     alt="MainLayout 사이드바의 Tutorial Mode 토글"
+     status="missing"
+   />
+
+2. **헤더에 "Tutorial Mode" 칩이 나타나는지 확인합니다.**
+
+   파란색 학교 아이콘 칩이 헤더 우측에 표시되면 시뮬이 정상적으로 떠 있는 상태입니다.
+
+   <DocsImage
+     src="/docs/quickstart/02-tutorial-running.png"
+     alt="헤더의 Tutorial Mode 칩과 Sim running 상태"
+     status="missing"
+   />
+
+3. **(선택) Pipeline Guide로 전체 흐름을 미리 봅니다.**
+
+   사이드바의 **Pipeline Guide** 버튼을 누르면 Sensors → Robots → Assembly → Workspace → Training → Inference 6단계 설명을 볼 수 있습니다.
+
+   <DocsImage
+     src="/docs/quickstart/03-pipeline-guide.png"
+     alt="PipelineGuideDialog 6단계 stepper"
+     status="missing"
+   />
+</Steps>
+
+## 2. 센서 확인하기
+
+튜토리얼 모드에서는 시뮬레이션 카메라가 자동으로 등록되어 있습니다. 라이브 프리뷰가 잘 나오는지 확인합니다.
+
+<Steps>
+1. **사이드바에서 Sensors를 엽니다.**
+
+   <DocsImage
+     src="/docs/quickstart/04-sensors-overview.png"
+     alt="SensorPage 전체 — 시뮬 카메라 카드들"
+     status="missing"
+   />
+
+2. **센서 카드의 토글을 켭니다.**
+
+   상태 배지가 **OFFLINE → LOADING → ONLINE** 순서로 바뀝니다. ONLINE(파란색)이 되면 정상입니다.
+
+   <DocsImage
+     src="/docs/quickstart/05-sensor-card.png"
+     alt="ONLINE 상태의 센서 카드"
+     status="missing"
+   />
+
+3. **카드 이미지를 클릭하면 하단에 라이브 프리뷰가 표시됩니다.**
+
+   WebRTC 스트림이 끊김 없이 흐르면 OK입니다.
+
+   <DocsImage
+     src="/docs/quickstart/06-sensor-preview.png"
+     alt="하단 WebRTC 라이브 프리뷰"
+     status="missing"
+   />
+</Steps>
+
+## 3. 로봇 움직임 확인
+
+<Steps>
+1. **Robots → Management로 이동합니다.**
+
+   <DocsImage
+     src="/docs/quickstart/07-robots-overview.png"
+     alt="RobotPage 전체"
+     status="missing"
+   />
+
+2. **로봇 카드의 토글을 켭니다.**
+
+   상태가 **ONLINE**이 되면 하단에 RobotPendant가 활성화됩니다.
+
+   <DocsImage
+     src="/docs/quickstart/08-robot-online.png"
+     alt="ONLINE 상태의 로봇 카드"
+     status="missing"
+   />
+
+3. **RobotPendant에서 각 관절을 직접 움직입니다.**
+
+   조인트별 **−** / **+** 버튼으로 현재 자세를 조정할 수 있습니다. **Step size** 입력으로 한 번에 움직이는 양을 조절합니다.
+
+   <DocsImage
+     src="/docs/quickstart/09-robot-pendant-joint.png"
+     alt="RobotPendant의 Joint 제어 영역"
+     status="missing"
+   />
+
+4. **IK 제어로 엔드이펙터를 직교 좌표로 움직여 봅니다.**
+
+   x / y / z (위치) + roll / pitch / yaw (자세)를 ±값으로 조정합니다. IK 옵션이 활성화된 로봇에만 표시됩니다.
+
+   <DocsImage
+     src="/docs/quickstart/10-robot-pendant-ik.png"
+     alt="RobotPendant IK 제어 — xyz/rpy"
+     status="missing"
+   />
+</Steps>
+
+## 4. Assemble 추가하기
+
+Assembly는 **여러 로봇을 하나의 논리 단위(좌/우 팔, 그리퍼 등)로 묶는** 개념입니다.
+
+<Steps>
+1. **Robots → Assemble로 이동하고 하단의 New 탭을 엽니다.**
+
+   <DocsImage
+     src="/docs/quickstart/11-assemble-new-tab.png"
+     alt="AssemblePage New 탭 진입 직후"
+     status="missing"
+   />
+
+2. **우측 패널에서 로봇 카드를 클릭하면 Left / Right 버튼이 나타납니다.**
+
+   원하는 위치에 배치합니다. `single_arm` 역할은 좌/우 팔, `tool` 역할은 좌/우 그리퍼로 들어갑니다.
+
+   <DocsImage
+     src="/docs/quickstart/12-assemble-form.png"
+     alt="AssemblyForm 우측 — 로봇 선택 + Left/Right 버튼"
+     status="missing"
+   />
+
+3. **좌측 캔버스에 조립 결과가 그려지는지 확인합니다.**
+
+   <DocsImage
+     src="/docs/quickstart/13-assemble-canvas.png"
+     alt="AssemblyForm 좌측 Canvas"
+     status="missing"
+   />
+
+4. **이름을 입력하고 Save를 누르면 그리드에 새 카드가 생성됩니다.**
+
+   <DocsImage
+     src="/docs/quickstart/14-assemble-card.png"
+     alt="새로 만들어진 Assembly 카드"
+     status="missing"
+   />
+</Steps>
+
+## 5. 키보드 텔레오퍼레이션 테스트
+
+<Steps>
+1. **Robots → Teleoperation으로 이동합니다.**
+
+   카드 우측 하단의 키보드 아이콘은 항상 사용 가능, 게임패드 아이콘은 Leader Robot이 설정되어야 활성화됩니다. 지금은 키보드만 테스트합니다.
+
+   <DocsImage
+     src="/docs/quickstart/15-teleop-overview.png"
+     alt="TeleoperationPage 카드 mode indicator"
+     status="missing"
+   />
+
+2. **카드 우상단의 ⚙️ 버튼을 눌러 Teleoperation Setting을 엽니다.**
+
+   <DocsImage
+     src="/docs/quickstart/16-teleop-setting-open.png"
+     alt="TeleSettingDialog 열린 상태"
+     status="missing"
+   />
+
+3. **General 탭에서 엔드이펙터의 오프셋(x, y, z)을 확인합니다.**
+
+   기본값을 그대로 사용해도 됩니다. **Reset to default** 버튼으로 언제든 되돌릴 수 있습니다.
+
+   <DocsImage
+     src="/docs/quickstart/17-teleop-general.png"
+     alt="TeleSettingDialog General 탭 — EE offset"
+     status="missing"
+   />
+
+4. **Keyboard 탭에서 키 매핑을 확인합니다.**
+
+   왼팔/오른팔별로 어떤 키가 어떤 축에 매핑되는지 표로 정리되어 있습니다. **Step size**로 한 번에 움직이는 양을 조절합니다.
+
+   <DocsImage
+     src="/docs/quickstart/18-teleop-keyboard.png"
+     alt="TeleSettingDialog Keyboard 탭"
+     status="missing"
+   />
+
+5. **다이얼로그를 닫고 하단 콘솔에서 Start Keyboard Teleop을 누릅니다.**
+
+   포커스가 콘솔에 있는 상태에서 매핑된 키를 누르면 로그에 키 이벤트가 찍히고 시뮬 로봇이 움직입니다.
+
+   <DocsImage
+     src="/docs/quickstart/19-teleop-running.png"
+     alt="TeleopConsole — Start Keyboard Teleop 활성"
+     status="missing"
+   />
+</Steps>
+
+<Callout type="warning">
+포커스가 다른 입력창에 있으면 키 이벤트가 전달되지 않습니다. 콘솔이나 본문 영역을 한 번 클릭한 뒤 키를 누르세요.
+</Callout>
+
+## 6. 워크스페이스 만들기
+
+워크스페이스는 **한 작업(task) 단위로 센서/로봇/데이터셋을 묶어둔 컨테이너**입니다.
+
+<Steps>
+1. **사이드바의 Workspace로 이동하고 셀렉트에서 Create New Workspace +를 선택합니다.**
+
+   <DocsImage
+     src="/docs/quickstart/20-workspace-create.png"
+     alt="Workspace 셀렉트 dropdown — Create New Workspace +"
+     status="missing"
+   />
+
+2. **이름을 입력하고 Create를 누릅니다.**
+
+   <DocsImage
+     src="/docs/quickstart/21-workspace-form.png"
+     alt="Workspace 생성 폼"
+     status="missing"
+   />
+
+3. **setting 탭에서 Sensor Setting을 펼치고 + Add Sensor로 시뮬 카메라를 추가합니다.**
+
+   <DocsImage
+     src="/docs/quickstart/22-workspace-sensor.png"
+     alt="Sensor Setting expansion — 센서 추가 직후"
+     status="missing"
+   />
+
+4. **추가한 센서를 클릭하면 우측 본문에 crop / rotation 패널이 열립니다.**
+
+   드래그로 crop 영역을 설정하거나, **Cropped Area**의 x1/y1/x2/y2를 직접 입력할 수 있습니다. **Rotation**으로 90/180/270도 회전도 가능합니다.
+
+   <DocsImage
+     src="/docs/quickstart/23-workspace-sensor-crop.png"
+     alt="센서 config 패널 — crop 캔버스"
+     status="missing"
+   />
+
+5. **Robot Setting을 펼치고 4단계에서 만든 Assembly를 선택합니다.**
+
+   <DocsImage
+     src="/docs/quickstart/24-workspace-robot.png"
+     alt="Robot Setting expansion — Assembly 선택"
+     status="missing"
+   />
+
+6. **로봇을 선택하면 Home Pose 패널이 열립니다.**
+
+   먼저 RobotPendant 등으로 원하는 자세를 만든 뒤, Home Pose 섹션의 **sync** 버튼으로 현재 자세를 가져오고 **save**로 저장합니다. 데이터 수집 시작 시 로봇이 항상 이 자세로 먼저 돌아갑니다.
+
+   <DocsImage
+     src="/docs/quickstart/25-workspace-homepose.png"
+     alt="Home Pose 입력 + sync/save 버튼"
+     status="missing"
+   />
+
+7. **Task Setting을 펼치고 Episode Length를 설정합니다.**
+
+   한 에피소드의 최대 프레임 수입니다. 기본값(예: 100)으로 시작해도 됩니다.
+
+   <DocsImage
+     src="/docs/quickstart/26-workspace-task.png"
+     alt="Task Setting — Episode Length"
+     status="missing"
+   />
+
+8. **data 탭으로 가서 + Add Dataset Folder로 데이터셋을 만듭니다.**
+
+   <DocsImage
+     src="/docs/quickstart/27-workspace-dataset-add.png"
+     alt="Add Dataset Folder 폼"
+     status="missing"
+   />
+</Steps>
+
+## 7. 데이터 수집 (10 에피소드)
+
+<Steps>
+1. **우측 MonitoringWindow에 센서 피드와 로봇 상태가 모두 보이는지 확인합니다.**
+
+   상단에 카메라 뷰, 그 아래에 각 관절의 현재값/목표값이 화살표로 표시됩니다.
+
+   <DocsImage
+     src="/docs/quickstart/28-monitoring-overview.png"
+     alt="MonitoringWindow — 센서 피드 + 로봇 상태"
+     status="missing"
+   />
+
+2. **하단 셋업 행에서 데이터셋, Language Instruction, Teleop Type, Hz를 설정합니다.**
+
+   - **Dataset**: 6단계에서 만든 데이터셋 선택
+   - **Language Instruction**: 작업 지시 (예: "그릇을 집어서 옮긴다")
+   - **Teleop Type**: `keyboard`
+   - **Hz**: 30 정도 권장
+
+   <DocsImage
+     src="/docs/quickstart/29-record-setup.png"
+     alt="MonitoringWindow 수집 setup row"
+     status="missing"
+   />
+
+3. **REC 버튼을 누르면 로봇이 먼저 Home Pose로 이동합니다.**
+
+   "Moving to Home Pose" 스피너가 떠 있는 동안에는 키 입력이 무시됩니다.
+
+   <DocsImage
+     src="/docs/quickstart/30-moving-home.png"
+     alt="Moving to Home Pose 스피너"
+     status="missing"
+   />
+
+4. **수집이 시작되면 progress bar와 SUCCESS / DONE / STOP 버튼이 나타납니다.**
+
+   - **SUCCESS (C)** — 동작이 잘 됐을 때 누름. 성공 라벨로 저장됩니다.
+   - **DONE** — 한 에피소드를 완료. 자동으로 다음 에피소드가 시작됩니다.
+   - **STOP** — 에피소드를 버림. 데이터셋에 저장되지 않습니다.
+
+   <DocsImage
+     src="/docs/quickstart/31-recording.png"
+     alt="수집 중 — progress bar + SUCCESS/DONE/STOP"
+     status="missing"
+   />
+
+5. **DONE을 누르면 다음 에피소드가 자동으로 시작됩니다. 같은 동작을 10번 반복합니다.**
+
+   <DocsImage
+     src="/docs/quickstart/32-episode-done.png"
+     alt="DONE 후 다음 에피소드 자동 시작"
+     status="missing"
+   />
+
+6. **data 탭에서 데이터셋을 펼쳐 10개 에피소드가 쌓였는지 확인합니다.**
+
+   <DocsImage
+     src="/docs/quickstart/33-dataset-10-episodes.png"
+     alt="data 탭 expansion — 10 에피소드"
+     status="missing"
+   />
+</Steps>
+
+<Callout type="tip">
+같은 작업이라도 **시작 위치/속도/각도**가 약간씩 달라야 학습이 잘 됩니다. 같은 패턴 10번보다 다양한 패턴 10번이 훨씬 좋습니다.
+</Callout>
+
+## 8. ACT로 학습하기
+
+<Steps>
+1. **사이드바에서 Train으로 이동합니다.**
+
+   상단에서 같은 워크스페이스를 선택하면 stepper가 나타납니다. **Step 1: Select Datasets**가 활성화됩니다.
+
+   <DocsImage
+     src="/docs/quickstart/34-train-step1.png"
+     alt="TrainPage stepper Step 1"
+     status="missing"
+   />
+
+2. **방금 만든 데이터셋 카드를 선택하고 Continue를 누릅니다.**
+
+   카드 우상단의 체크박스가 켜지고 테두리가 파란색으로 바뀝니다.
+
+   <DocsImage
+     src="/docs/quickstart/35-train-dataset-select.png"
+     alt="Step 1 — 데이터셋 선택"
+     status="missing"
+   />
+
+3. **Step 2에서 Policy 셀렉트의 Create New Policy +를 누릅니다.**
+
+   <DocsImage
+     src="/docs/quickstart/36-train-step2-newpolicy.png"
+     alt="Step 2 — Create New Policy"
+     status="missing"
+   />
+
+4. **Policy Type을 ACT로 선택하면 ACT 파라미터 폼이 표시됩니다.**
+
+   기본값을 그대로 두고 이름만 입력해 **Save** 후 **Continue**.
+
+   <DocsImage
+     src="/docs/quickstart/37-train-act-form.png"
+     alt="ACT 파라미터 폼"
+     status="missing"
+   />
+
+5. **Step 3 — Train Model로 넘어왔습니다.**
+
+   <DocsImage
+     src="/docs/quickstart/38-train-step3.png"
+     alt="Step 3 진입"
+     status="missing"
+   />
+
+6. **Training Server URL을 입력하고 옆 버튼으로 헬스체크합니다.**
+
+   런처에서 로컬 학습 서버를 켰다면 `http://localhost:5100`. 우측에 **GPU Available** 배지가 보이면 정상입니다.
+
+   <DocsImage
+     src="/docs/quickstart/39-train-server-ok.png"
+     alt="Training Server URL 헬스체크 OK + GPU Available"
+     status="missing"
+   />
+
+7. **Checkpoint Name을 입력하고 Start Training을 누릅니다.**
+
+   TrainingDialog가 열리고 **progress bar + Train/Validate Loss 차트 + 콘솔**이 표시됩니다.
+
+   <DocsImage
+     src="/docs/quickstart/40-training-running.png"
+     alt="TrainingDialog 학습 중"
+     status="missing"
+   />
+
+8. **학습이 끝나면 우하단 floating 버튼이 회색(완료)으로 바뀝니다.**
+
+   클릭하면 다이얼로그를 다시 열어 최종 loss와 best epoch을 확인할 수 있습니다.
+
+   <DocsImage
+     src="/docs/quickstart/41-train-done.png"
+     alt="학습 완료 — 우하단 floating 버튼"
+     status="missing"
+   />
+</Steps>
+
+<Callout type="info">
+ACT 기본 파라미터로 10 에피소드 학습은 GPU 환경에서 보통 **수 분~10여 분**, CPU 환경에서는 훨씬 더 오래 걸릴 수 있습니다.
+</Callout>
+
+## 9. 추론 실행
+
+<Steps>
+1. **Workspace로 돌아가 inference 탭을 엽니다.**
+
+   방금 만든 체크포인트가 카드로 보입니다.
+
+   <DocsImage
+     src="/docs/quickstart/42-inference-list.png"
+     alt="Workspace inference 탭 — 체크포인트 카드"
+     status="missing"
+   />
+
+2. **체크포인트 카드를 클릭하면 우측 MonitoringWindow에 inference 헤더가 나타납니다.**
+
+   - **Hz**: 추론 주기 (예: 30)
+   - **🏠 배지**: 추론 시작 시 Home Pose로 먼저 이동할지 (파란색=ON, 회색=OFF)
+
+   <DocsImage
+     src="/docs/quickstart/43-inference-setup.png"
+     alt="MonitoringWindow inference 헤더"
+     status="missing"
+   />
+
+3. **Start Inference를 누르면 정책이 실시간으로 액션을 추론하기 시작합니다.**
+
+   화면 상단에 두 배지가 표시됩니다.
+
+   - **Succeed** (녹색이면 > 0.7) — 학습된 성공 분포와의 유사도
+   - **OOD** (주황 > 1.0이면 빨강) — 분포 이탈 정도
+
+   동작이 마음에 들지 않거나 위험해 보이면 **Stop**을 눌러 즉시 멈춥니다.
+
+   <DocsImage
+     src="/docs/quickstart/44-inference-running.png"
+     alt="추론 중 — Succeed / OOD 배지"
+     status="missing"
+   />
+</Steps>
+
+---
+
+여기까지 완료하면 **데이터 수집 → 학습 → 추론**이라는 imitation learning의 한 사이클을 모두 경험한 것입니다.
+
+다음으로 가볼 곳:
+
+- 데이터가 부족하다고 느꼈다면 → [데이터 증강](/docs/datasets/augment)
+- 자기 로봇을 추가하고 싶다면 → [Custom Robot](/docs/robots/custom)
+- 실제 마스터-슬레이브 텔레오퍼레이션이 궁금하다면 → [Leader Robot 세팅](/docs/teleoperation/leader-robot)

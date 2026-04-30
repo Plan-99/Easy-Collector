@@ -1,5 +1,0 @@
-# Response 
-
-## Response
-
-## ResponseCollector

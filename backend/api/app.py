@@ -22,6 +22,10 @@ from .routes.checkpoint import checkpoint_bp
 from .routes.vla import vla_bp
 from .routes.teleoperator import teleoperator_bp
 from .routes.assembly import assembly_bp
+from .routes.sim import sim_bp
+from .routes.robot_pose import robot_pose_bp
+from .routes.remote_train import remote_train_bp
+from .routes.tutorial import tutorial_bp
 
 from ..bridge.client import get_bridge_client
 from ..bridge.remote_agent import RemoteAgent
@@ -54,13 +58,10 @@ logging.getLogger('werkzeug').addFilter(_HealthzFilter())
 app = Flask(__name__)
 CORS(app)
 app.config['SECRET_KEY'] = 'mysecretkey!' # 실제 운영 환경에서는 더 복잡한 키 사용
-# Use threading mode to avoid eventlet/ROS compatibility issues
 socketio = SocketIO(
     app,
     cors_allowed_origins="*",
     async_mode='threading',
-    allow_upgrades=False,
-    transports=["polling"],
 )
 
 pm = ProcessManager(socketio, debug=debug)  # 프로세스 관리 객체 생성
@@ -78,6 +79,10 @@ app.register_blueprint(checkpoint_bp, url_prefix='/api')
 app.register_blueprint(vla_bp, url_prefix='/api')
 app.register_blueprint(teleoperator_bp, url_prefix='/api')
 app.register_blueprint(assembly_bp, url_prefix='/api')
+app.register_blueprint(sim_bp, url_prefix='/api')
+app.register_blueprint(robot_pose_bp, url_prefix='/api')
+app.register_blueprint(remote_train_bp, url_prefix='/api')
+app.register_blueprint(tutorial_bp, url_prefix='/api')
 
 socketio.on_namespace(SensorNamespace('/sensor', pm))
 socketio.on_namespace(RobotNamespace('/robot', pm))
@@ -269,6 +274,10 @@ def handle_move_robot_ee_delta_event(data):
 
 
 def main():
+    # Peewee: 테이블이 없으면 자동 생성
+    from ..database.migrate import migrate
+    migrate()
+
     app.node = node  # 호환성 유지 (None)
     app.bridge_client = bridge_client  # gRPC bridge 클라이언트
     app.pm = pm  # Flask 앱에 프로세스 관리 객체 할당
@@ -282,6 +291,16 @@ def main():
         # ROS2 컨테이너 로그 스트리밍 시작
         ros2_log_streamer = ROS2LogStreamer(socketio)
         ros2_log_streamer.start()
+
+        # WebRTC streaming 서버 시작 (port 5002, 별도 스레드)
+        from .streaming import start_streaming_server
+        streaming_thread = threading.Thread(
+            target=start_streaming_server,
+            kwargs={'grpc_streaming_stub': bridge_client.streaming},
+            daemon=True,
+        )
+        streaming_thread.start()
+        print("WebRTC streaming server started on port 5002")
 
         print("Starting Flask-SocketIO server...")
         socketio.run(

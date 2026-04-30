@@ -27,6 +27,7 @@ services:
       dockerfile: backend/Dockerfile
     container_name: easytrainer_backend
     network_mode: host
+    privileged: true
     # No GPU deploy block
     environment:
       - PYTHONPATH=/root:/root/backend/lerobot/src
@@ -43,6 +44,8 @@ services:
       - ./python_pkgs:/root/python_pkgs
       - ./requirements.txt:/root/requirements.txt
       - /opt/easytrainer:/opt/easytrainer
+      - /dev:/dev
+      - /dev/shm:/dev/shm
     working_dir: /root
     restart: unless-stopped
 

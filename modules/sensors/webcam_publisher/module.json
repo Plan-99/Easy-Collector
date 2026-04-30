@@ -1,19 +1,23 @@
 {
   "id": "sensor_webcam",
   "name": "Webcam",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "category": "sensor",
-  "target": "ros2",
-  "install_path": "ros2_ws/src",
-  "build": "colcon",
   "description": "USB 웹캠 (Logitech 등)",
+  "install": {
+    "ros2": {
+      "target": "ros2/ros2_ws/src",
+      "build": "colcon"
+    }
+  },
   "dependencies": {
     "apt": [
       "ros-humble-usb-cam",
       "ros-humble-image-transport-plugins"
     ],
-    "pip": [],
-    "modules": []
+    "pip": []
   },
-  "install_script": "install.sh"
+  "check": {
+    "type": "path"
+  }
 }

@@ -1,4 +1,3 @@
-version: "3.9"
 name: easytrainer
 
 services:
@@ -27,11 +26,14 @@ services:
       dockerfile: backend/Dockerfile
     container_name: easytrainer_backend
     network_mode: host
+    privileged: true
     runtime: nvidia
     environment:
       - PYTHONPATH=/root:/root/backend/lerobot/src
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+      # 호스트 드라이버 우선 사용 (compat 레이어 우회)
+      - LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/local/cuda/lib64:/usr/local/nvidia/lib:/usr/local/nvidia/lib64
       - EC_DEBUG=${EC_DEBUG:-1}
       - EC_BACKEND_AUTORELOAD=${EC_BACKEND_AUTORELOAD:-1}
       - EC_MINIMAL_API=${EC_MINIMAL_API:-0}
@@ -39,12 +41,25 @@ services:
       - EASYTRAINER_LOG_DIR=${EASYTRAINER_LOG_DIR:-/tmp/easytrainer/logs}
       - EASYTRAINER_CONFIG_PATH=${EASYTRAINER_CONFIG_PATH:-/opt/easytrainer/config.json}
       - PIP_NO_CACHE_DIR=${PIP_NO_CACHE_DIR:-0}
-      - PIP_CACHE_DIR=${PIP_CACHE_DIR:-/root/python_pkgs/.cache/pip}
+      # Local training: backend entrypoint spawns training_server alongside the API.
+      - EASYTRAINER_LOCAL_TRAINING=${EASYTRAINER_LOCAL_TRAINING:-1}
+      - TRAINING_SERVER_PORT=${TRAINING_SERVER_PORT:-5100}
+      - TRAINING_SERVER_DATA_DIR=${TRAINING_SERVER_DATA_DIR:-/opt/easytrainer/training_data}
     volumes:
       - ./backend:/root/backend
-      - ./python_pkgs:/root/python_pkgs
       - ./requirements.txt:/root/requirements.txt
+      # Bind-mount entrypoint so changes apply on container recreate (no rebuild).
+      - ./backend/entrypoint.sh:/usr/local/bin/entrypoint.sh
+      # training_server is downloaded/synced into <project>/backend/training_server/
+      # at install time. This bind mount resolves correctly whether the compose
+      # is run from the install dir (/opt/easytrainer/project) or from a dev
+      # checkout that has been quick-applied.
+      - ./backend/training_server:/root/backend/training_server
       - /opt/easytrainer:/opt/easytrainer
+      - /dev:/dev
+      - /dev/shm:/dev/shm
+      # Host machine-id so backend's fingerprint matches the launcher's license check.
+      - /etc/machine-id:/etc/machine-id:ro
     working_dir: /root
     restart: unless-stopped
 
@@ -56,6 +71,7 @@ services:
     container_name: easytrainer_ros2
     network_mode: host
     privileged: true
+    runtime: nvidia
     environment:
       - DISPLAY=${DISPLAY}
       - XAUTHORITY=${XAUTHORITY}
@@ -63,9 +79,15 @@ services:
       - RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}
       - EASYTRAINER_DATA_DIR=${EASYTRAINER_DATA_DIR:-/opt/easytrainer}
       - EASYTRAINER_CONFIG_PATH=${EASYTRAINER_CONFIG_PATH:-/opt/easytrainer/config.json}
+      # NVIDIA OpenGL/EGL을 컨테이너에서도 쓸 수 있게 — mujoco viewer 등 GUI용
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,graphics,utility,display
     volumes:
       - ./ros2/ros2_ws:/root/ros2_ws
+      - ./ros2/robot_sdk:/root/robot_sdk
       - ./ros2/ros2_bridge:/root/ros2/ros2_bridge
+      - ./ros2/start_ros2_services.sh:/usr/local/bin/start_ros2_services.sh
+      - ./modules:/opt/easytrainer/project/modules:ro
       - /opt/easytrainer:/opt/easytrainer
       - /dev:/dev
       - /dev/shm:/dev/shm

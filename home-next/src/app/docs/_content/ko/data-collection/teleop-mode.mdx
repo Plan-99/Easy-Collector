@@ -1,0 +1,61 @@
+---
+title: 텔레오퍼레이션 모드 선택
+description: 데이터 수집 시 사용할 텔레오퍼레이션 입력 방식 선택.
+section: data-collection
+order: 2
+sourceRefs:
+  - frontend/src/components/v2/MonitoringWindow.vue
+lastVerifiedVersion: 0.0.0
+---
+
+MonitoringWindow의 셋업 행에서 **Teleoperation Type**을 고를 수 있습니다.
+
+<Steps>
+1. **Teleop Type 셀렉트를 펼칩니다.**
+
+   <DocsImage
+     src="/docs/data-collection/mode-01-select.png"
+     alt="Teleop Type select 펼침"
+     status="missing"
+   />
+
+2. **상황에 맞는 모드를 선택합니다.**
+
+   | 모드 | 입력 | 추가 입력 필드 |
+   |------|------|--------------|
+   | `keyboard` | 키보드 | Step Size |
+   | `leader_robot` | Dynamixel 리더 팔 | — |
+   | `vive` | VIVE 컨트롤러 | — |
+   | `vive_external` | 외부 VIVE 노드 | — |
+   | `motion_planning` | 자동 경로 생성 | ROS2 Service 설정 (⚙️) |
+</Steps>
+
+## 모드별 추가 입력
+
+### keyboard
+
+Step Size 입력칸이 나타납니다. 기본값 `0.005`m.
+
+<DocsImage
+  src="/docs/data-collection/mode-02-keyboard.png"
+  alt="keyboard 모드 — Step Size"
+  status="missing"
+/>
+
+### leader_robot
+
+별도 입력 없이 [Leader Robot 세팅](/docs/teleoperation/leader-robot)에서 한 캘리브레이션이 사용됩니다.
+
+<DocsImage
+  src="/docs/data-collection/mode-03-leader.png"
+  alt="leader_robot 모드"
+  status="missing"
+/>
+
+### motion_planning
+
+⚙️ 버튼이 나타나 ROS2 Service 다이얼로그를 열 수 있습니다. 거기서 사용할 ROS 2 서비스 이름과 입력값을 지정합니다.
+
+<Callout type="info">
+새 모드를 사용하려면 [Teleoperation 테스트](/docs/teleoperation/testing)에서 먼저 동작을 확인하는 것이 좋습니다.
+</Callout>

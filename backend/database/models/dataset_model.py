@@ -4,7 +4,7 @@ import json
 import os
 import datetime
 from ...configs.global_configs import DATASET_DIR
-from ...api.process.lerobot_io import get_episodes_as_file_list, get_dataset_metadata
+from ...utils.lerobot_io import get_episodes_as_file_list, get_dataset_metadata
 
 
 class Dataset(SoftDeleteModel):

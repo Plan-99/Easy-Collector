@@ -1,0 +1,118 @@
+---
+title: 모듈 추가
+description: 런처에서 로봇 / 센서 / 확장 모듈을 설치하고 제거하는 방법.
+section: modules
+order: 1
+sourceRefs:
+  - release/ui/launcher.py
+  - release/ui/modules.py
+  - modules/robots/
+  - modules/sensors/
+  - modules/extensions/
+lastVerifiedVersion: 0.0.0
+---
+
+Easy Trainer의 로봇·센서 드라이버는 **모듈** 단위로 분리되어 있습니다.
+필요한 것만 런처에서 골라 설치하면 운영자 UI에 바로 반영됩니다.
+
+모듈은 세 카테고리로 분류됩니다.
+
+- **로봇** — Piper, Dynamixel, Unitree, Jaka, Fairino, RBPodo, Kinova, Techman 등
+- **센서** — Webcam, Intel RealSense 등
+- **확장 기능** — VR Teleop, Test Arm, Isaac Lab Simulation 등
+
+## 모듈 설치
+
+<Steps>
+1. **런처의 floating bar에서 🧩 모듈 관리를 누릅니다.**
+
+   <DocsImage
+     src="/docs/modules/01-launcher-modules-button.png"
+     alt="런처 pill bar의 모듈 관리 버튼"
+     status="missing"
+   />
+
+2. **모듈 관리 다이얼로그가 열립니다.**
+
+   3개 카테고리가 컬럼으로 분리되어 있고 각 카테고리마다 검색창이 있습니다.
+
+   <DocsImage
+     src="/docs/modules/02-modules-dialog.png"
+     alt="모듈 관리 다이얼로그 — 3 카테고리 분리"
+     status="missing"
+   />
+
+3. **원하는 모듈의 설치 버튼을 누릅니다.**
+
+   백그라운드에서 다운로드가 시작되고 버튼이 ⏳로 바뀝니다.
+
+   <DocsImage
+     src="/docs/modules/03-module-installing.png"
+     alt="설치 진행 중 ⏳"
+     status="missing"
+   />
+
+4. **설치가 끝나면 버전이 초록색으로 표시되고 버튼이 제거로 바뀝니다.**
+
+   <DocsImage
+     src="/docs/modules/04-module-installed.png"
+     alt="설치 완료 — 버전 + 제거 버튼"
+     status="missing"
+   />
+</Steps>
+
+<Callout type="tip">
+설치된 모듈은 즉시 운영자 UI에 반영됩니다. 새 로봇/센서를 등록하면 SensorPage / RobotPage에 그 타입이 셀렉트 옵션으로 추가됩니다.
+</Callout>
+
+## 유료 모듈 결제
+
+일부 모듈은 단건 결제 후 영구 보유 형태입니다.
+
+<Steps>
+1. **결제 ₩XX,XXX 버튼을 누르면 브라우저로 결제 페이지가 열립니다.**
+
+   <DocsImage
+     src="/docs/modules/05-module-paid.png"
+     alt="유료 모듈 — 결제 버튼 + 가격"
+     status="missing"
+   />
+
+2. **결제 진행 다이얼로그가 런처에 뜹니다.**
+
+   브라우저 창이 열리지 않았다면 URL을 복사해 직접 여세요.
+
+   <DocsImage
+     src="/docs/modules/06-module-checkout.png"
+     alt="결제 진행 다이얼로그"
+     status="missing"
+   />
+
+3. **결제가 완료되면 자동으로 설치가 시작됩니다.**
+
+   런처가 3초 간격으로 entitlement를 폴링해서 감지합니다. 10분 안에 결제하지 않으면 타임아웃됩니다.
+
+   <DocsImage
+     src="/docs/modules/07-module-after-pay.png"
+     alt="결제 완료 후 자동 설치"
+     status="missing"
+   />
+</Steps>
+
+## 모듈 제거
+
+<Steps>
+1. **제거 버튼을 누르면 즉시 제거됩니다 (확인 다이얼로그 없음).**
+
+   해당 모듈을 사용하던 로봇/센서가 등록되어 있다면 운영자 UI에서 OFFLINE 상태로 빠집니다.
+
+   <DocsImage
+     src="/docs/modules/08-module-removed.png"
+     alt="제거 후 미설치 상태"
+     status="missing"
+   />
+</Steps>
+
+<Callout type="warning">
+유료 모듈을 제거해도 보유(entitlement)는 유지됩니다. 다시 설치 버튼을 누르면 결제 없이 재설치됩니다.
+</Callout>

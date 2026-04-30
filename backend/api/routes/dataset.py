@@ -8,7 +8,7 @@ from ..process.record_episode import record_episode
 from ..process.augment_dataset import augment_dataset
 from ..process.merge_dataset import merge_dataset
 from ..process.downsample_dataset import downsample_dataset
-from ..process.lerobot_io import (
+from ...utils.lerobot_io import (
     get_episodes_as_file_list, get_dataset_metadata, get_dataset_info,
     delete_episode as lerobot_delete_episode, list_episodes,
 )
@@ -121,7 +121,7 @@ def get_datasets_metadata(id):
 @dataset_bp.route('/dataset/<id>/:edit_datasets_metadata', methods=['POST'])
 def edit_datasets_metadata(id):
     """Remap sensor/robot names in a LeRobot dataset."""
-    from ..process.lerobot_io import (
+    from ...utils.lerobot_io import (
         _read_json, _write_json, _read_jsonl, _write_jsonl,
         PARQUET_PATH_TEMPLATE, INFO_PATH, EPISODES_PATH, EPISODES_STATS_PATH,
         DEFAULT_CHUNK_SIZE,

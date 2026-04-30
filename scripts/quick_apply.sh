@@ -64,7 +64,7 @@ copy_tree() {
       --exclude='database/*.db' \
       --exclude='/datasets/' \
       --exclude='.git/' \
-      "$src/" "$dst/"
+      "$src/" "$dst/" || true
   else
     # Portable fallback using tar over a pipe.
     (
@@ -186,22 +186,48 @@ copy_file() {
   echo "[quick-apply] 파일 복사 완료: $rel"
 }
 
-copy_tree "backend" --exclude "modules"
+copy_tree "backend"
 copy_tree "frontend"
-# ros2/ros2_ws/src and backend/modules are managed by module installer — do not sync
+copy_tree "ros2/ros2_bridge"
+# In the repo `training_server/` lives at the root (so it can ship as its own
+# CI tar.gz), but at runtime it must appear under <project>/backend/training_server/
+# (matching where the launcher's installer downloads to).
+copy_tree_to() {
+  local rel_src="$1" rel_dst="$2"
+  local src="$DEV_SRC/$rel_src"
+  local dst="$PROJECT_ROOT/$rel_dst"
+  if [ ! -d "$src" ]; then
+    echo "[quick-apply] 경고: 디렉터리가 없어 건너뜀: $src" >&2
+    return 0
+  fi
+  mkdir -p "$dst"
+  if [ -n "$RSYNC_BIN" ]; then
+    "$RSYNC_BIN" -a \
+      --exclude='__pycache__/' \
+      --exclude='.git/' \
+      "$src/" "$dst/" || true
+  else
+    ( cd "$src" && tar -cf - . ) | ( cd "$dst" && tar -xf - )
+  fi
+  echo "[quick-apply] 디렉터리 동기화 완료: $rel_src → $rel_dst"
+}
+copy_tree_to "training_server" "backend/training_server"
+# ros2/ros2_ws/src and ros2/robot_sdk are managed by the module installer — do not
+# sync them wholesale. Exception: mujoco_world is a bundled (non-module) ROS2
+# package shipped with the app for tutorial mode, so sync just that subtree.
+copy_tree_to "ros2/ros2_ws/src/mujoco_world" "ros2/ros2_ws/src/mujoco_world"
+# modules/, home-next/ are not part of the runtime project
 
 copy_file "docker-compose.yml"
-copy_file "docker-compose.dev.yml"
 copy_file "docker-compose.cpu.yml"
-copy_file "docker-compose.gpu.yml"
-copy_file "start_services.sh" 755
-copy_file "src/kill.sh" 755
-copy_file "Dockerfile"
-copy_file ".dockerignore"
 copy_file "requirements.txt"
-copy_file "requirements.min.txt"
+# modules/ is NOT synced — project/modules/ only holds installed module manifests (*.json)
+# Source module definitions (robots/, sensors/, extensions/) are read-only and mounted separately
+copy_file "backend/entrypoint.sh" 755
+copy_file "ros2/start_ros2_services.sh" 755
+copy_file "ros2/entrypoint.sh" 755
 copy_file "scripts/quick_apply.sh" 755
-copy_file "scripts/install_nvidia_runtime.sh" 755
+copy_file "scripts/clean_easytrainer.sh" 755
 
 sync_deb_ui
 sync_deb_scripts

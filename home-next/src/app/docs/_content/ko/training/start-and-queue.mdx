@@ -1,0 +1,72 @@
+---
+title: 학습 시작 · Train Queue
+description: Start Training 버튼과 우하단의 floating Train Queue 버튼들.
+section: training
+order: 6
+sourceRefs:
+  - frontend/src/pages/v2/TrainPage.vue
+  - frontend/src/components/v2/TrainingDialog.vue
+lastVerifiedVersion: 0.0.0
+---
+
+## 학습 시작
+
+<Steps>
+1. **Step 3 우측의 Start Training을 누릅니다.**
+
+   <DocsImage
+     src="/docs/training/queue-01-start.png"
+     alt="Start Training 버튼"
+     status="missing"
+   />
+
+2. **TrainingDialog가 열립니다.**
+
+   - **상단**: progress bar (예: "37% (00:12:34 / 00:33:00)")
+   - **좌측**: ProcessConsole (학습 로그)
+   - **우측**: Train Loss / Validate Loss 차트
+
+   <DocsImage
+     src="/docs/training/queue-03-dialog.png"
+     alt="TrainingDialog 열린 모습"
+     status="missing"
+   />
+
+3. **다이얼로그를 닫아도 학습은 백그라운드에서 계속됩니다.**
+
+   화면 우하단에 floating 버튼이 추가됩니다.
+</Steps>
+
+## Train Queue (우하단 floating 버튼)
+
+여러 학습을 동시에 큐에 쌓을 수 있습니다.
+
+<DocsImage
+  src="/docs/training/queue-02-buttons.png"
+  alt="우하단 Train Queue floating 버튼들"
+  status="missing"
+/>
+
+각 버튼의 색이 상태를 나타냅니다.
+
+| 색 | 상태 |
+|----|------|
+| 주황 (deep-orange) | 현재 학습 중 |
+| 회색 (grey-5) | 대기 중 또는 완료 |
+
+버튼을 클릭하면 해당 체크포인트의 TrainingDialog가 다시 열립니다.
+
+## Loss Chart 확인
+
+<DocsImage
+  src="/docs/training/queue-04-loss-chart.png"
+  alt="loss chart zoom"
+  status="missing"
+/>
+
+- **보라색 (Train Loss)** — 학습 셋 손실. 빠르게 떨어져야 정상
+- **노란색 (Validate Loss)** — 검증 셋 손실. 어느 시점부터 다시 올라가면 과적합
+
+<Callout type="warning">
+Validate Loss가 더 이상 떨어지지 않으면 학습을 중단하고 Best Epoch의 체크포인트로 [추론](/docs/inference)을 시도하세요.
+</Callout>

@@ -26,6 +26,9 @@
                 <div class="text-body text-white">{{ $t('trainIntroBody2') }}</div>
             </div>
         </div>
+
+        <TutorialHint class="q-mb-md" :text="$t('tutorialTrainIntro')" />
+
         <div class="col q-mb-lg border-rounded border-grey text-grey flex-center flex text-h6" v-if="!selectedWorkspaceId">
             Select Workspace First
         </div>
@@ -38,6 +41,7 @@
                 class="border-white border-rounded q-mt-lg bg-secondary col"
             >
                 <div class="text-h6 q-mb-md">Select datasets for training</div>
+                <TutorialHint step="1" class="q-mb-md" :text="$t('tutorialTrainStep1')" />
                 <q-scroll-area style="height: 420px">                
                     <div class="row q-col-gutter-md">
                         <div class="col-6 col-sm-4 col-md-3 col-lg-2" v-for="dataset in availableDatasets" :key="dataset.id">
@@ -82,6 +86,7 @@
                 class="border-white border-rounded q-mt-lg bg-secondary col"
             >
                 <div class="text-h6 q-mb-md">Configure Policy</div>
+                <TutorialHint step="2" class="q-mb-md" :text="$t('tutorialTrainStep2')" />
                 <div class="row">
                     <q-scroll-area class="col-12" style="height: 420px">                
                         <div class="row q-col-gutter-md">
@@ -301,19 +306,13 @@
 
             >
                 <div class="text-h6 q-mb-md">Training Configuration</div>
+                <TutorialHint step="3" class="q-mb-md" :text="$t('tutorialTrainStep3')" />
                 <q-scroll-area class="col-12" style="height: 420px">
                     <div class="q-gutter-y-md">
-                        <!-- Remote Training Server -->
+                        <!-- Training Server -->
                         <q-card class="bg-dark q-pa-md q-mb-md border-rounded">
                             <div class="row items-center q-gutter-x-md">
-                                <q-toggle
-                                    v-model="useRemoteTraining"
-                                    label="Use Remote Training Server"
-                                    dark
-                                    color="accent"
-                                />
                                 <q-input
-                                    v-if="useRemoteTraining"
                                     dense
                                     outlined
                                     v-model="remoteServerUrl"
@@ -333,7 +332,7 @@
                                         />
                                     </template>
                                 </q-input>
-                                <q-badge v-if="useRemoteTraining && serverGpuAvailable" color="positive" label="GPU Available" class="q-ml-sm" />
+                                <q-badge v-if="serverGpuAvailable" color="positive" label="GPU Available" class="q-ml-sm" />
                             </div>
                         </q-card>
 
@@ -428,7 +427,7 @@
                 </q-card-actions>
             </q-card>
         </q-dialog>
-        <TrainingDialog v-model="showTrainingDialog" :checkpoint="watchingCheckpoint" :isTraining="watchingIsTraining" :useRemoteTraining="useRemoteTraining" @hide="unwatchCheckpoint" @cpRemoved="getUnfinishedCheckpoint" />
+        <TrainingDialog v-model="showTrainingDialog" :checkpoint="watchingCheckpoint" :isTraining="watchingIsTraining" @hide="unwatchCheckpoint" @cpRemoved="getUnfinishedCheckpoint" />
     </q-page>
 </template>
 
@@ -439,6 +438,7 @@ import { api } from 'src/boot/axios';
 import { POLICY_CONFIGS, TRAIN_CONFIGS } from 'src/configs/modelConfigs';
 // import { useTraining } from 'src/composables/useTraining';
 import TrainingDialog from 'src/components/v2/TrainingDialog.vue';
+import TutorialHint from 'src/components/v2/TutorialHint.vue';
 import { useSocket } from 'src/composables/useSocket';
 import { useProcessStore } from 'src/stores/processStore';
 
@@ -466,8 +466,7 @@ const newCheckpointName = ref('');
 // Step 3: Training
 const trainingForm = ref({});
 
-// Remote Training
-const useRemoteTraining = ref(false);
+// Remote Training Server
 const remoteServerUrl = ref(localStorage.getItem('remoteTrainingServerUrl') || '');
 const serverStatus = ref('unknown'); // 'unknown', 'checking', 'connected', 'error'
 const serverGpuAvailable = ref(false);
@@ -890,7 +889,7 @@ function getTrainingPayload() {
 const showTrainingDialog = ref(false);
 const watchingCheckpoint = ref(null);
 function createCheckpoint() {
-    if (useRemoteTraining.value && serverStatus.value !== 'connected') {
+    if (serverStatus.value !== 'connected') {
         Notify.create({ color: 'negative', message: 'Please connect to the training server first.' });
         return;
     }
@@ -907,23 +906,13 @@ function createCheckpoint() {
         const checkpointId = res.data.id;
         getUnfinishedCheckpoint().then(() => {
             watchCheckpoint(unfinishedCheckpoints.value.find(cp => cp.id === checkpointId));
-            if (useRemoteTraining.value) {
-                startRemoteTraining(watchingCheckpoint.value.id);
-            } else {
-                startTraining(watchingCheckpoint.value.id);
-            }
+            startRemoteTraining(watchingCheckpoint.value.id);
         });
     }).catch(error => {
         Notify.create({ color: 'negative', message: `${error}: Failed to start training: ` });
     }).finally(() => {
         listCheckpoints();
     });
-}
-
-function startTraining(checkpoint_id) {
-    api.post('/task:start_training', { checkpoint_id }).catch(error => {
-        Notify.create({ color: 'negative', message: `Error starting training: ${error}` });
-    })
 }
 
 function startRemoteTraining(checkpoint_id) {

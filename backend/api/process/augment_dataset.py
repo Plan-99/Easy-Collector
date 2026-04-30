@@ -4,7 +4,7 @@ import cv2
 import random
 import numpy as np
 import shutil
-from .lerobot_io import (
+from ...utils.lerobot_io import (
     read_episode, list_episodes, get_dataset_info, create_dataset,
     append_episode as lerobot_append_episode, _read_json, _write_json,
     _append_jsonl, _write_jsonl, _read_jsonl,

@@ -1,0 +1,6 @@
+source;share/isaac_control_core/hook/pythonpath.ps1
+source;share/isaac_control_core/hook/pythonpath.dsv
+source;share/isaac_control_core/hook/pythonpath.sh
+source;share/isaac_control_core/hook/ament_prefix_path.ps1
+source;share/isaac_control_core/hook/ament_prefix_path.dsv
+source;share/isaac_control_core/hook/ament_prefix_path.sh

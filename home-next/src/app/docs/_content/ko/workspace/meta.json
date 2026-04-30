@@ -1,0 +1,13 @@
+{
+  "title": "워크스페이스",
+  "order": 7,
+  "items": [
+    "create",
+    "sensors",
+    "sensor-config",
+    "robots",
+    "home-pose",
+    "episode-config",
+    "dataset-folder"
+  ]
+}

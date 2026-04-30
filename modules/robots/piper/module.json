@@ -1,0 +1,30 @@
+{
+  "id": "robot_piper",
+  "name": "Piper",
+  "version": "1.0.3",
+  "category": "robot",
+  "description": "Agilex Piper 로봇 (SDK 제어)",
+  "install": {
+    "ros2": {
+      "target": "ros2/ros2_ws/src",
+      "build": "none"
+    },
+    "sdk": {
+      "target": "ros2/robot_sdk/piper",
+      "install_cmd": "pip3 install -e ."
+    }
+  },
+  "dependencies": {
+    "apt": [
+      "can-utils",
+      "ethtool"
+    ],
+    "pip": [
+      "python-can>=4.3.1",
+      "scipy"
+    ]
+  },
+  "check": {
+    "type": "path"
+  }
+}

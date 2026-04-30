@@ -1,0 +1,46 @@
+---
+title: 로봇 추가
+description: Piper, Custom 로봇 등을 운영자 UI에 등록하고 RobotPendant로 검증.
+section: robots
+order: 1
+sourceRefs:
+  - frontend/src/pages/v2/RobotPage.vue
+  - frontend/src/components/v2/RobotPendant.vue
+  - modules/robots/
+related:
+  - /docs/modules
+  - /docs/teleoperation/assembly
+lastVerifiedVersion: 0.0.0
+---
+
+Easy Trainer는 [모듈 추가](/docs/modules)에서 설치한 로봇 드라이버를 운영자 UI에서 인스턴스 단위로 등록해 사용합니다.
+같은 모델 로봇이 여러 대 있다면 **각각 별도로 등록**합니다 (예: `piper_left`, `piper_right`).
+
+## 두 가지 등록 방식
+
+| 방식 | 언제 |
+|------|------|
+| **모듈로 추가** | 등록된 vendor가 모듈로 제공되는 경우 (Piper, Dynamixel, Unitree, Jaka, Fairino, RBPodo, Kinova, Techman 등) |
+| **Custom Robot** | 자체 개발 로봇이거나 vendor가 ROS 2 인터페이스만 제공 |
+
+상세 절차:
+
+- [Piper](/docs/robots/piper) — CAN 기반 6-DoF
+- [Custom Robot](/docs/robots/custom) — ROS 2 토픽 / 서비스 / 액션 기반
+
+## 공통 절차
+
+<Steps>
+1. **Robots → Management에서 Add Robot.**
+2. **Robot Type을 선택하고 연결 정보(CAN/IP/Serial 등)를 입력.**
+3. **저장 후 카드의 토글을 켜서 ONLINE 상태를 확인.**
+4. **하단 RobotPendant에서 Joint와 IK 제어로 움직임을 검증.**
+</Steps>
+
+## 다음 단계
+
+로봇이 등록되면 [Assembly](/docs/teleoperation/assembly)로 좌/우 팔, 그리퍼를 묶어 텔레오퍼레이션 단위를 만드세요. Assembly가 있어야 워크스페이스를 생성할 수 있습니다.
+
+<Callout type="warning">
+로봇 토글을 처음 켤 때 vendor에 따라 작은 진동과 함께 토크가 ON됩니다. 사람이나 물체가 닿지 않는 위치에서 시작하세요.
+</Callout>

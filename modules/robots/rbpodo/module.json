@@ -1,0 +1,27 @@
+{
+  "id": "robot_rbpodo",
+  "name": "RBPodo",
+  "version": "1.0.2",
+  "category": "robot",
+  "description": "Rainbow Robotics RBPodo 로봇 드라이버",
+  "install": {
+    "ros2": {
+      "target": "ros2/ros2_ws/src",
+      "build": "colcon"
+    },
+    "sdk": {
+      "target": "ros2/robot_sdk/rbpodo"
+    }
+  },
+  "dependencies": {
+    "apt": [
+      "ros-humble-moveit",
+      "cmake",
+      "build-essential"
+    ],
+    "pip": []
+  },
+  "check": {
+    "type": "path"
+  }
+}

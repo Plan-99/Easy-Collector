@@ -20,10 +20,10 @@ export default function Navbar({ isLoggedIn = false, isAdmin = false }: { isLogg
 
         {/* Desktop */}
         <div className="hidden md:flex items-center gap-8">
-          <a href="#problem" className="text-sm text-surface-400 hover:text-white spring-transition">기능</a>
-          <a href="#services" className="text-sm text-surface-400 hover:text-white spring-transition">데모</a>
-          <a href="#pricing" className="text-sm text-surface-400 hover:text-white spring-transition">요금제</a>
-          <a href="#" className="text-sm text-surface-400 hover:text-white spring-transition">문서</a>
+          <Link href="/#problem" className="text-sm text-surface-400 hover:text-white spring-transition">기능</Link>
+          <Link href="/#services" className="text-sm text-surface-400 hover:text-white spring-transition">데모</Link>
+          <Link href="/#pricing" className="text-sm text-surface-400 hover:text-white spring-transition">요금제</Link>
+          <Link href="/docs" className="text-sm text-surface-400 hover:text-white spring-transition">문서</Link>
           <Link
             href={isLoggedIn ? "/dashboard" : "/auth/signin"}
             className="text-sm font-semibold px-5 py-2 rounded-full bg-white/10 hover:bg-white/15 border border-white/10 spring-transition"
@@ -67,10 +67,10 @@ export default function Navbar({ isLoggedIn = false, isAdmin = false }: { isLogg
         style={{ maxHeight: menuOpen ? 300 : 0 }}
       >
         <div className="px-6 pb-6 pt-2 flex flex-col gap-4 border-t border-white/5">
-          <a href="#problem" className="mobile-link text-surface-300 hover:text-white py-1" onClick={() => setMenuOpen(false)}>기능</a>
-          <a href="#services" className="mobile-link text-surface-300 hover:text-white py-1" onClick={() => setMenuOpen(false)}>데모</a>
-          <a href="#pricing" className="mobile-link text-surface-300 hover:text-white py-1" onClick={() => setMenuOpen(false)}>요금제</a>
-          <a href="#" className="mobile-link text-surface-300 hover:text-white py-1" onClick={() => setMenuOpen(false)}>문서</a>
+          <Link href="/#problem" className="mobile-link text-surface-300 hover:text-white py-1" onClick={() => setMenuOpen(false)}>기능</Link>
+          <Link href="/#services" className="mobile-link text-surface-300 hover:text-white py-1" onClick={() => setMenuOpen(false)}>데모</Link>
+          <Link href="/#pricing" className="mobile-link text-surface-300 hover:text-white py-1" onClick={() => setMenuOpen(false)}>요금제</Link>
+          <Link href="/docs" className="mobile-link text-surface-300 hover:text-white py-1" onClick={() => setMenuOpen(false)}>문서</Link>
           <Link href={isLoggedIn ? "/dashboard" : "/auth/signin"} className="mobile-link text-sm font-semibold px-5 py-2.5 rounded-full bg-white/10 border border-white/10 text-center mt-1">
             {isLoggedIn ? "내 정보" : "시작하기"}
           </Link>

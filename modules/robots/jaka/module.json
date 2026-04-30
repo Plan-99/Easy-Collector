@@ -1,0 +1,27 @@
+{
+  "id": "robot_jaka",
+  "name": "Jaka",
+  "version": "1.0.2",
+  "category": "robot",
+  "description": "Jaka 협동로봇 드라이버",
+  "install": {
+    "ros2": {
+      "target": "ros2/ros2_ws/src",
+      "build": "colcon"
+    },
+    "sdk": {
+      "target": "ros2/robot_sdk/jaka"
+    }
+  },
+  "dependencies": {
+    "apt": [
+      "ros-humble-moveit",
+      "ros-humble-moveit-visual-tools",
+      "ros-humble-srdfdom"
+    ],
+    "pip": []
+  },
+  "check": {
+    "type": "path"
+  }
+}

@@ -1,0 +1,76 @@
+---
+title: Policy 선택·생성 (Step 2)
+description: ACT, Diffusion, PI0 등 정책을 새로 만들거나 기존 체크포인트를 fine-tune.
+section: training
+order: 4
+sourceRefs:
+  - frontend/src/pages/v2/TrainPage.vue
+  - backend/policies/
+lastVerifiedVersion: 0.0.0
+---
+
+Step 2에서는 어떤 **정책 (policy)**을 학습할지 결정합니다.
+
+## 새 정책 만들기
+
+<Steps>
+1. **Select Policy 셀렉트를 펼칩니다.**
+
+   기존 정책 목록 + **Create New Policy +** 옵션이 보입니다.
+
+   <DocsImage
+     src="/docs/training/policy-01-select.png"
+     alt="Policy 셀렉트 펼침"
+     status="missing"
+   />
+
+2. **Create New Policy +를 누릅니다.**
+
+   하단에 정책 폼이 나타납니다.
+
+   <DocsImage
+     src="/docs/training/policy-02-create-new.png"
+     alt="Create New Policy 폼"
+     status="missing"
+   />
+
+3. **Policy Type을 선택합니다.**
+
+   - **ACT** — 가장 빠르고 안정적. 처음 학습하기 좋음
+   - **Diffusion** — 다양한 동작 분포 학습에 강함. 학습/추론 둘 다 느림
+   - **PI0** — 멀티모달 입력 처리에 강함. 큰 데이터셋이 필요
+
+4. **타입별 파라미터 폼이 표시됩니다.**
+
+   <DocsImage
+     src="/docs/training/policy-03-act-params.png"
+     alt="ACT 파라미터 폼"
+     status="missing"
+   />
+
+5. **(ACT/Diffusion 등) pretrained_backbone_weights를 선택할 수 있습니다.**
+
+   ImageNet pretrained 가중치를 시작점으로 쓸지 결정합니다.
+
+   <DocsImage
+     src="/docs/training/policy-04-pretrained.png"
+     alt="pretrained_backbone_weights 셀렉트"
+     status="missing"
+   />
+
+6. **이름을 입력하고 Save 또는 Save As로 저장합니다.**
+
+   <DocsImage
+     src="/docs/training/policy-05-save-as.png"
+     alt="Save Policy As 다이얼로그"
+     status="missing"
+   />
+</Steps>
+
+## 기존 체크포인트 이어 학습 (Fine-tune)
+
+상단의 **Load Model from Checkpoint** 셀렉트에서 이전 체크포인트를 고르면 그 가중치로 시작해 추가 학습합니다. 정책 타입과 이름은 자동으로 잠깁니다.
+
+<Callout type="info">
+정책 설정은 데이터셋과 무관한 "레시피"입니다. 같은 정책을 여러 데이터셋에 재사용하거나, 같은 데이터셋에 여러 정책을 시도해 비교할 수 있습니다.
+</Callout>

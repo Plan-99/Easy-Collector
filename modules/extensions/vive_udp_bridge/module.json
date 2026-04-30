@@ -1,16 +1,17 @@
 {
   "id": "vr_teleop",
   "name": "VR 텔레오퍼레이션",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "category": "extension",
-  "target": "backend",
-  "install_path": "extensions",
-  "build": "none",
   "description": "VR 기반 원격 조종 (Vive UDP Bridge)",
+  "install": {
+    "target": "backend/extensions"
+  },
   "dependencies": {
     "apt": [],
-    "pip": [],
-    "modules": []
+    "pip": []
   },
-  "install_script": "install.sh"
+  "check": {
+    "type": "path"
+  }
 }

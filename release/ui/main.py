@@ -6,7 +6,7 @@ import sys
 from app_context import QApplication, QMessageBox, QTimer, _window_icon, load_config, resolve_project_root
 from installer import run_setup_wizard
 from launcher import MainWindow
-from service import RuntimeServiceMixin, check_license_gui, docker_compose_available
+from service import RuntimeServiceMixin, docker_compose_available, ensure_signed_in
 from update import CONFIG_UPGRADE_KEY
 
 _APP_STYLE = """
@@ -148,9 +148,18 @@ def main() -> int:
     if not _ensure_startup_permissions():
         QMessageBox.critical(None, "권한 필요", "데이터/프로젝트 경로 권한을 획득하지 못해 종료합니다.")
         return 1
-    if not check_license_gui():
-        QMessageBox.critical(None, "라이선스 오류", "라이선스 인증에 실패했습니다. 프로그램을 종료합니다.")
+    if not ensure_signed_in():
+        QMessageBox.critical(None, "로그인 필요", "로그인을 완료하지 못해 프로그램을 종료합니다.")
         return 1
+
+    # Warm the module catalog + entitlement caches in the background. The UI
+    # will re-fetch on demand, but this keeps the first dialog open snappy.
+    try:
+        import threading
+        from modules import refresh_remote_state
+        threading.Thread(target=refresh_remote_state, daemon=True).start()
+    except Exception:
+        pass
 
     if not docker_compose_available():
         QMessageBox.critical(None, "오류", "Docker가 설치되어 있지 않거나 PATH에 없습니다.")

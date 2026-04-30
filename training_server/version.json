@@ -1,0 +1,5 @@
+{
+  "name": "Training Server",
+  "version": "1.0.1",
+  "description": "EasyTrainer remote training server (ACT, Diffusion, PI05). Runs in its own Docker container with NVIDIA GPU access."
+}

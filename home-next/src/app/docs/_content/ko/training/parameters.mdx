@@ -1,0 +1,43 @@
+---
+title: 학습 파라미터 (Step 3)
+description: Checkpoint Name과 학습 하이퍼파라미터(learning rate, batch size, epochs 등) 설정.
+section: training
+order: 5
+sourceRefs:
+  - frontend/src/pages/v2/TrainPage.vue
+  - training_server/train_worker.py
+lastVerifiedVersion: 0.0.0
+---
+
+Step 3에서는 결과 체크포인트 이름과 학습 하이퍼파라미터를 정합니다.
+
+<Steps>
+1. **Checkpoint Name을 입력합니다.**
+
+   결과 모델이 저장될 이름. 예: `pick_v1_act_2026-04-28`.
+
+   <DocsImage
+     src="/docs/training/params-01-checkpoint-name.png"
+     alt="Checkpoint Name 입력"
+     status="missing"
+   />
+
+2. **Training 폼의 하이퍼파라미터를 설정합니다.**
+
+   주요 항목:
+
+   - **Learning Rate** — 보통 1e-4
+   - **Batch Size** — GPU VRAM에 맞춰 (8/16/32 등)
+   - **Epochs** — 보통 100–500
+   - **(LoRA 등) 정책 타입에 따른 추가 옵션**
+
+   <DocsImage
+     src="/docs/training/params-02-form.png"
+     alt="training 폼"
+     status="missing"
+   />
+</Steps>
+
+<Callout type="tip">
+처음에는 기본값을 그대로 두고 학습이 잘 되는지 확인하세요. 결과가 나오면 그때 학습률·에폭을 조정하는 게 시간 효율이 좋습니다.
+</Callout>

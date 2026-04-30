@@ -273,7 +273,7 @@ def main(args):
                 break
 
     # Count episodes
-    from lerobot_io import list_episodes, get_dataset_info, _read_json, INFO_PATH
+    from policies.utils import list_episodes, get_dataset_info, _read_json, INFO_PATH
     info = get_dataset_info(actual_dataset_dir)
     if not info:
         print(f'[ERROR] No dataset info found in {actual_dataset_dir}', flush=True)
@@ -398,7 +398,7 @@ def _predecode_videos(dataset_dir, info):
                     continue
                 mp4_path = os.path.join(feat_dir, mp4_file)
                 try:
-                    from lerobot_io import _decode_video_frames
+                    from policies.utils import _decode_video_frames
                     frames = _decode_video_frames(mp4_path)
                     if frames:
                         arr = np.stack(frames)

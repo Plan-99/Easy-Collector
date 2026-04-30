@@ -9,15 +9,8 @@ ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 RUN sed -i 's/archive.ubuntu.com/mirror.kakao.com/g' /etc/apt/sources.list && \
     sed -i 's/security.ubuntu.com/mirror.kakao.com/g' /etc/apt/sources.list
 
-# RealSense repository
-RUN apt-key adv --keyserver keyserver.ubuntu.com --recv-keys FB0B24895113F120 && \
-    echo "deb https://librealsense.intel.com/Debian/apt-repo $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/librealsense.list > /dev/null
-
-# ROS 2 packages
+# ROS 2 packages (realsense는 모듈로 분리됨, 런타임에 설치)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # Sensor
-    ros-humble-realsense2-camera \
-    ros-humble-realsense2-description \
     ros-humble-usb-cam \
     ros-humble-image-transport-plugins \
     # Robot control
@@ -71,6 +64,7 @@ ENV LD_LIBRARY_PATH="/opt/openrobots/lib:${LD_LIBRARY_PATH}"
 # Python packages for ROS2 bridge
 COPY ros2/requirements.ros2.txt /tmp/requirements.ros2.txt
 RUN python3 -m pip install --no-cache-dir -r /tmp/requirements.ros2.txt && \
+    python3 -m pip install --no-cache-dir --force-reinstall "setuptools==70.0.0" "packaging>=23.0" && \
     rm /tmp/requirements.ros2.txt
 
 WORKDIR /root

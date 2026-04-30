@@ -1,0 +1,47 @@
+---
+title: Intel RealSense
+description: RealSense 카메라(D400 시리즈 등)를 등록하는 방법.
+section: sensors
+order: 2
+sourceRefs:
+  - frontend/src/pages/v2/SensorPage.vue
+  - modules/sensors/realsense/
+lastVerifiedVersion: 0.0.0
+---
+
+RealSense 카메라는 시리얼 번호 기반으로 식별되므로 PC에 여러 대를 동시에 연결해도 충돌이 없습니다.
+
+## 사전 조건
+
+- [모듈 추가](/docs/modules)에서 **Intel RealSense** 모듈 설치 완료
+- 카메라 USB 연결 후 `rs-enumerate-devices` 또는 RealSense Viewer로 시리얼 번호 확인
+
+## 등록 절차
+
+<Steps>
+1. **Sensors 페이지에서 Add Sensor를 누릅니다.**
+
+2. **Sensor Type에서 realsense를 선택합니다.**
+
+   <DocsImage
+     src="/docs/sensors/realsense-01-form.png"
+     alt="SensorForm — Type=realsense, Serial Number 입력"
+     status="missing"
+   />
+
+3. **이름과 Serial Number를 입력하고 Add를 누릅니다.**
+
+   IP 주소나 디바이스 인덱스는 RealSense에서는 사용하지 않습니다.
+
+4. **카드의 토글을 켭니다. 상태가 ONLINE이 되면 라이브 프리뷰가 표시됩니다.**
+
+   <DocsImage
+     src="/docs/sensors/realsense-02-online.png"
+     alt="Realsense ONLINE + 라이브 프리뷰"
+     status="missing"
+   />
+</Steps>
+
+<Callout type="warning">
+USB 3.0 포트가 아니면 프레임 드롭이 발생할 수 있습니다. **반드시 파란색 USB 3.0 포트**에 연결하세요.
+</Callout>

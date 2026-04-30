@@ -1,0 +1,61 @@
+---
+title: 추론 실행
+description: Hz · Home Pose 귀환 · Succeed / OOD 모니터링.
+section: inference
+order: 3
+sourceRefs:
+  - frontend/src/components/v2/MonitoringWindow.vue
+lastVerifiedVersion: 0.0.0
+---
+
+<Steps>
+1. **체크포인트 선택 후 MonitoringWindow에 inference 헤더가 나타납니다.**
+
+   <DocsImage
+     src="/docs/inference/run-01-header.png"
+     alt="MonitoringWindow inference 헤더"
+     status="missing"
+   />
+
+   - **Hz** — 추론 주기. 보통 30 Hz로 시작
+   - **🏠 배지** — 추론 시작 시 Home Pose로 갈지 (파란색=ON, 회색=OFF)
+   - **Start Inference** — 빨간색 play 버튼
+
+2. **Start Inference를 누르면 정책이 실시간 추론을 시작합니다.**
+
+   매 프레임마다 (이미지 + 관절 상태)를 받아 다음 액션을 추론하고 로봇에 보냅니다.
+
+   <DocsImage
+     src="/docs/inference/run-02-running.png"
+     alt="추론 중 화면"
+     status="missing"
+   />
+
+3. **상단 두 배지로 추론 품질을 모니터링합니다.**
+
+   <DocsImage
+     src="/docs/inference/run-03-succeed-ood.png"
+     alt="Succeed / OOD 배지 zoom"
+     status="missing"
+   />
+
+   - **Succeed** — 0.7 이상이면 녹색. 학습된 성공 분포와 닮은 정도
+   - **OOD** — 1.0 초과면 빨강(주황은 경계). 분포 이탈 정도
+
+4. **이상하거나 위험해 보이면 Stop을 누릅니다.**
+
+   <DocsImage
+     src="/docs/inference/run-04-stop.png"
+     alt="Stop 버튼"
+     status="missing"
+   />
+</Steps>
+
+## reinference 주기
+
+설정에 따라 정책이 한 번에 여러 step의 액션을 chunk로 출력합니다 (ACT의 chunk_size 등).
+재추론(reinference) 주기는 정책 학습 시 설정한 chunk_size와 추론 Hz의 관계로 결정됩니다.
+
+<Callout type="warning">
+OOD가 빨강이면 정책이 학습한 분포 밖이라는 뜻입니다. 동작이 안전해 보이더라도 즉시 멈추는 게 안전합니다. 데이터를 더 모으거나 OOD가 낮은 시점의 자세에서 다시 시도하세요.
+</Callout>

@@ -1,0 +1,74 @@
+# Isaac Lab + cuRobo for EasyTrainer
+# Started by launcher when sim_isaaclab module is enabled.
+# ROS_DOMAIN_ID is shared with EasyTrainer ros2 container via launcher config.
+#
+# Source code is at /opt/easytrainer/project/isaaclab/ (installed by module).
+
+x-gpu-deploy: &gpu-deploy
+  resources:
+    reservations:
+      devices:
+        - driver: nvidia
+          count: all
+          capabilities: [gpu]
+
+services:
+  # ── Isaac Lab + Isaac Sim 4.5 ──
+  isaac-lab-ros2:
+    image: isaac-lab-ros2:latest
+    container_name: easytrainer_isaaclab
+    network_mode: host
+    privileged: true
+    runtime: nvidia
+    shm_size: '16gb'
+    stdin_open: true
+    tty: true
+    environment:
+      - ACCEPT_EULA=Y
+      - OMNI_KIT_ALLOW_ROOT=1
+      - ISAACSIM_PATH=/workspace/isaaclab/_isaac_sim
+      - RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - LD_LIBRARY_PATH=/isaac-sim/exts/isaacsim.ros2.bridge/humble/lib
+      - DISPLAY=${DISPLAY}
+      - XAUTHORITY=/tmp/.Xauthority
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,graphics,utility,display
+    volumes:
+      # IsaacLab source (모듈 설치로 전개됨)
+      - /opt/easytrainer/project/isaaclab:/workspace/isaaclab
+      # X11
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ${HOME}/.Xauthority:/tmp/.Xauthority:ro
+      # Isaac Sim caches (사용자 홈에 영속)
+      - ${HOME}/docker/isaac-sim/cache/kit:/isaac-sim/kit/cache/Kit
+      - ${HOME}/docker/isaac-sim/cache/ov:/root/.cache/ov
+      - ${HOME}/docker/isaac-sim/cache/pip:/root/.cache/pip
+      - ${HOME}/docker/isaac-sim/cache/glcache:/root/.cache/nvidia/GLCache
+    deploy: *gpu-deploy
+    restart: unless-stopped
+
+  # ── cuRobo (GPU motion planner) ──
+  curobo:
+    image: curobo-ros2:latest
+    container_name: easytrainer_curobo
+    network_mode: host
+    privileged: true
+    runtime: nvidia
+    shm_size: '4gb'
+    stdin_open: true
+    tty: true
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - /opt/easytrainer/project/isaaclab/curobo/ws:/root/ws
+      - /opt/easytrainer/project/isaaclab/isaac_control_core:/root/ws/src/isaac_control_core
+      - /opt/easytrainer/project/isaaclab/ros_pkgs/piper_description:/root/ws/src/piper_description
+    deploy: *gpu-deploy
+    restart: unless-stopped

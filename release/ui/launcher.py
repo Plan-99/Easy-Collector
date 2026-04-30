@@ -72,6 +72,7 @@ from modules import (
     modules_by_category,
     get_installed_modules,
     get_installed_version,
+    is_module_installed,
     get_remote_versions,
     set_module_installed,
     download_module,
@@ -82,7 +83,13 @@ from modules import (
     set_training_server_installed,
     get_training_mode,
     set_training_mode,
+    get_training_server_config,
+    refresh_remote_state,
+    get_module_price_krw,
+    is_module_entitled,
+    fetch_owned_module_ids,
 )
+import training_server_install as _ts
 from service import ComposeServiceMixin, HealthServiceMixin, RuntimeServiceMixin, docker_compose_available
 from tools import ToolingMixin
 from update import UpdateManager, CONFIG_UPGRADE_KEY
@@ -486,45 +493,34 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         pad_layout.setSpacing(6)  # match pill button spacing
         pad_layout.setAlignment(Qt.AlignTop)
         (
-            self.pad_box_open_ui,
-            self.pad_label_open_ui,
-            self.pad_stack_open_ui,
-            self._open_ui_buttons,
-        ) = self._create_pad_open_mode_box(
-            "1. UI 열기",
-            self._open_ui_mode,
-            self._set_open_ui_mode,
-        )
-        (
             self.pad_box_sync,
             self.pad_label_sync,
             self.pad_stack_sync,
             self.pad_path_label,
             self.pad_path_change_btn,
-        ) = self._create_pad_path_box("2. 코드 동기화")
+        ) = self._create_pad_path_box("1. 코드 동기화")
         (
             self.pad_box_folder,
             self.pad_label_folder,
             self.pad_stack_folder,
             self.pad_import_buttons,
-        ) = self._create_pad_choice_box("3. 불러오기", self._pad_import_choice, self._set_import_choice)
+        ) = self._create_pad_choice_box("2. 불러오기", self._pad_import_choice, self._set_import_choice)
         (
         self.pad_box_logs,
         self.pad_label_logs,
         self.pad_stack_logs,
         self.pad_export_buttons,
-        ) = self._create_pad_choice_box("4. 내보내기", self._pad_export_choice, self._set_export_choice)
-        self.pad_box_settings, self.pad_label_settings, self.pad_stack_settings = self._create_pad_simple_box("5. 로그")
-        self.pad_box_modules, self.pad_label_modules, self.pad_stack_modules = self._create_pad_simple_box("6. 모듈 관리")
-        self.pad_box_training, self.pad_label_training, self.pad_stack_training = self._create_pad_simple_box("7. 학습 서버")
+        ) = self._create_pad_choice_box("3. 내보내기", self._pad_export_choice, self._set_export_choice)
+        self.pad_box_settings, self.pad_label_settings, self.pad_stack_settings = self._create_pad_simple_box("4. 로그")
+        self.pad_box_modules, self.pad_label_modules, self.pad_stack_modules = self._create_pad_simple_box("5. 모듈 관리")
+        self.pad_box_training, self.pad_label_training, self.pad_stack_training = self._create_pad_simple_box("6. 학습 서버")
         (
             self.pad_box_exit,
             self.pad_label_exit,
             self.pad_stack_exit,
             self._exit_action_buttons,
-        ) = self._create_pad_exit_action_box("8. 종료", self._exit_action, self._set_exit_action)
+        ) = self._create_pad_exit_action_box("7. 종료", self._exit_action, self._set_exit_action)
         self._pad_boxes = [
-            self.pad_box_open_ui,
             self.pad_box_sync,
             self.pad_box_folder,
             self.pad_box_logs,
@@ -537,7 +533,6 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self._pad_update_panel = self._create_pad_update_panel()
         self._setup_settings_status_mode()
         self._pad_desc_labels = [
-            self.pad_label_open_ui,
             self.pad_label_sync,
             self.pad_label_folder,
             self.pad_label_logs,
@@ -547,7 +542,6 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             self.pad_label_exit,
         ]
         self._pad_desc_stacks = [
-            self.pad_stack_open_ui,
             self.pad_stack_sync,
             self.pad_stack_folder,
             self.pad_stack_logs,
@@ -560,7 +554,6 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self._update_pad_choice_tooltips()
         self._update_exit_label()
         self._set_pad_description_indices(set(range(len(self._pad_desc_labels))))
-        pad_layout.addWidget(self.pad_box_open_ui)
         pad_layout.addWidget(self.pad_box_sync)
         pad_layout.addWidget(self.pad_box_folder)
         pad_layout.addWidget(self.pad_box_logs)
@@ -779,13 +772,11 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
     def _content_hover_bounds(self) -> list[int] | None:
         widgets = [
-            getattr(self, "btn_open_browser", None),
             getattr(self, "btn_quick_apply", None),
             getattr(self, "btn_folder", None),
             getattr(self, "btn_export", None),
             getattr(self, "btn_logs", None),
             getattr(self, "btn_exit", None),
-            getattr(self, "pad_box_open_ui", None),
             getattr(self, "pad_box_sync", None),
             getattr(self, "pad_box_folder", None),
             getattr(self, "pad_box_logs", None),
@@ -990,7 +981,6 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
     def _pill_button_entry(self, obj) -> tuple[int, QPushButton] | None:
         buttons = [
-            getattr(self, "btn_open_browser", None),
             getattr(self, "btn_quick_apply", None),
             getattr(self, "btn_folder", None),
             getattr(self, "btn_export", None),
@@ -1083,11 +1073,11 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
     def _update_pad_choice_labels(self):
         try:
-            self.pad_label_folder.setText(f"3. {self._pad_import_choice} 불러오기")
+            self.pad_label_folder.setText(f"2. {self._pad_import_choice} 불러오기")
         except Exception:
             pass
         try:
-            self.pad_label_logs.setText(f"4. {self._pad_export_choice} 내보내기")
+            self.pad_label_logs.setText(f"3. {self._pad_export_choice} 내보내기")
         except Exception:
             pass
 
@@ -1119,8 +1109,8 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
     def _exit_action_label(self, action: str) -> str:
         if action == "RESTART":
-            return "6. 재실행"
-        return "6. 종료"
+            return "7. 재실행"
+        return "7. 종료"
 
     def _update_open_ui_tooltip(self):
         mode = getattr(self, "_open_ui_mode", "NEW")
@@ -1866,6 +1856,16 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             save_config(cfg)
         except Exception:
             pass
+        # 실행 중인 compose 모듈(sim_isaaclab 등) 재시작
+        try:
+            from modules import get_installed_modules, restart_module, _load_module_meta
+            for mid in get_installed_modules():
+                meta = _load_module_meta(mid)
+                if meta and meta.get("install", {}).get("compose"):
+                    self.append_log(f"[SETTINGS] {mid} 재시작 중 (ROS_DOMAIN_ID 적용)...")
+                    restart_module(mid)
+        except Exception as e:
+            self.append_log(f"[SETTINGS][WARN] 모듈 재시작 실패: {e}")
         synced = self._sync_ros_domain_compose_files(value)
         if synced:
             self.append_log(f"[SETTINGS] ROS_DOMAIN_ID={value} 저장 완료.")
@@ -3225,10 +3225,18 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self.load_ui(open_mode=self._open_ui_mode)
 
     def _on_training_clicked(self):
-        """Open the training server management dialog."""
+        """Open the training server management dialog.
+
+        Local mode: training_server runs as a subprocess inside easytrainer_backend.
+        The dialog only toggles the local-training flag (which recreates backend),
+        and tails its log file.
+        """
+        import threading
+        import queue as _queue
+
         dlg = QDialog(self)
         dlg.setWindowTitle("학습 서버 관리")
-        dlg.resize(500, 420)
+        dlg.resize(680, 620)
         layout = QVBoxLayout(dlg)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
@@ -3248,154 +3256,280 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         gpu_title = QLabel("GPU 정보")
         gpu_title.setStyleSheet("font-weight: bold; font-size: 12px;")
         gpu_layout.addWidget(gpu_title)
-
         gpus = detect_gpus()
         if not gpus:
             gpu_info = QLabel("⚠ NVIDIA GPU가 감지되지 않았습니다.")
             gpu_info.setStyleSheet("color: #ff9800; font-size: 11px;")
         else:
-            lines = []
-            for g in gpus:
-                lines.append(f"GPU {g.index}: {g.name}  —  VRAM {g.vram_total_mb}MB "
-                             f"(사용: {g.vram_used_mb}MB / 여유: {g.vram_free_mb}MB)")
+            lines = [f"GPU {g.index}: {g.name}  —  VRAM {g.vram_total_mb}MB "
+                     f"(사용: {g.vram_used_mb}MB / 여유: {g.vram_free_mb}MB)" for g in gpus]
             gpu_info = QLabel("\n".join(lines))
             gpu_info.setStyleSheet("color: #86efac; font-size: 11px;")
         gpu_info.setWordWrap(True)
         gpu_layout.addWidget(gpu_info)
         layout.addWidget(gpu_box)
 
-        # Status
-        installed = is_training_server_installed()
-        status_label = QLabel(f"상태: {'설치됨' if installed else '미설치'}")
-        status_label.setStyleSheet(
-            f"font-size: 13px; font-weight: 600; color: {'#86efac' if installed else '#999'};"
-        )
-        layout.addWidget(status_label)
+        installed_label = QLabel()
+        installed_label.setStyleSheet("font-size: 13px; font-weight: 600;")
+        layout.addWidget(installed_label)
 
-        # Running status check
-        running = False
-        try:
-            import subprocess as _sp
-            out = _sp.check_output(["docker", "ps", "--format", "{{.Names}}"], text=True)
-            running = "easytrainer_trainer" in out or "training_server_trainer" in out
-        except Exception:
-            pass
-
-        running_label = QLabel(f"실행 상태: {'🟢 실행 중' if running else '⚫ 중지'}")
-        running_label.setStyleSheet("font-size: 12px;")
+        running_label = QLabel()
+        running_label.setStyleSheet("font-size: 13px; font-weight: 600;")
         layout.addWidget(running_label)
 
-        layout.addSpacing(6)
-
-        # Buttons
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(8)
-
-        if installed:
-            if running:
-                btn_stop = QPushButton("학습 서버 중지")
-                btn_stop.setStyleSheet("font-size: 12px;")
-
-                def _stop():
-                    try:
-                        import subprocess as _sp
-                        _sp.run(
-                            ["docker", "compose", "-f", "training_server/docker-compose.yml", "stop"],
-                            cwd=str(self.project_root), timeout=30,
-                        )
-                        running_label.setText("실행 상태: ⚫ 중지")
-                        btn_stop.setEnabled(False)
-                        btn_stop.setText("중지됨")
-                    except Exception as e:
-                        QMessageBox.warning(dlg, "오류", f"중지 실패: {e}")
-
-                btn_stop.clicked.connect(_stop)
-                btn_row.addWidget(btn_stop)
-            else:
-                btn_start = QPushButton("학습 서버 시작")
-                btn_start.setStyleSheet("font-size: 12px;")
-
-                def _start():
-                    try:
-                        import subprocess as _sp
-                        _sp.Popen(
-                            ["docker", "compose", "-f", "training_server/docker-compose.yml", "up", "-d"],
-                            cwd=str(self.project_root),
-                        )
-                        running_label.setText("실행 상태: 🟢 시작 중...")
-                        btn_start.setEnabled(False)
-                        btn_start.setText("시작 중...")
-                    except Exception as e:
-                        QMessageBox.warning(dlg, "오류", f"시작 실패: {e}")
-
-                btn_start.clicked.connect(_start)
-                btn_row.addWidget(btn_start)
-
-            btn_uninstall = QPushButton("학습 서버 제거")
-            btn_uninstall.setStyleSheet("font-size: 12px; color: #ef4444;")
-
-            def _uninstall():
-                res = QMessageBox.question(
-                    dlg, "확인", "학습 서버 Docker 이미지를 제거하시겠습니까?",
-                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
-                )
-                if res != QMessageBox.Yes:
-                    return
-                try:
-                    import subprocess as _sp
-                    _sp.run(
-                        ["docker", "compose", "-f", "training_server/docker-compose.yml", "down", "--rmi", "all", "--volumes"],
-                        cwd=str(self.project_root), timeout=60,
-                    )
-                    set_training_server_installed(False)
-                    status_label.setText("상태: 미설치")
-                    status_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #999;")
-                    running_label.setText("실행 상태: ⚫ 중지")
-                    btn_uninstall.setEnabled(False)
-                except Exception as e:
-                    QMessageBox.warning(dlg, "오류", f"제거 실패: {e}")
-
-            btn_uninstall.clicked.connect(_uninstall)
-            btn_row.addWidget(btn_uninstall)
-        else:
-            btn_install = QPushButton("학습 서버 설치")
-            btn_install.setStyleSheet("font-size: 12px;")
-
-            def _install():
-                btn_install.setEnabled(False)
-                btn_install.setText("설치 중...")
-                try:
-                    import subprocess as _sp
-                    _sp.Popen(
-                        ["docker", "compose", "-f", "training_server/docker-compose.yml", "build"],
-                        cwd=str(self.project_root),
-                    )
-                    set_training_server_installed(True)
-                    status_label.setText("상태: 설치됨 (빌드 진행 중)")
-                    status_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #7dd3fc;")
-                except Exception as e:
-                    btn_install.setEnabled(True)
-                    btn_install.setText("학습 서버 설치")
-                    QMessageBox.warning(dlg, "오류", f"설치 실패: {e}")
-
-            btn_install.clicked.connect(_install)
-            btn_row.addWidget(btn_install)
-
-        btn_row.addStretch(1)
+        # Port + action buttons row
+        ctrl_row = QHBoxLayout()
+        ctrl_row.setSpacing(8)
+        port_label = QLabel("포트:")
+        port_label.setStyleSheet("font-size: 12px;")
+        port_input = QLineEdit(str(_ts.get_configured_port()))
+        port_input.setFixedWidth(80)
+        port_input.setStyleSheet("font-size: 12px;")
+        ctrl_row.addWidget(port_label)
+        ctrl_row.addWidget(port_input)
+        ctrl_row.addStretch(1)
+        btn_install = QPushButton("설치")
+        btn_install.setStyleSheet("font-size: 12px;")
+        btn_start = QPushButton("실행")
+        btn_start.setStyleSheet("font-size: 12px;")
+        btn_stop = QPushButton("중지")
+        btn_stop.setStyleSheet("font-size: 12px;")
+        btn_remove = QPushButton("제거")
+        btn_remove.setStyleSheet("font-size: 12px; color: #ef4444;")
+        ctrl_row.addWidget(btn_install)
+        ctrl_row.addWidget(btn_start)
+        ctrl_row.addWidget(btn_stop)
+        ctrl_row.addWidget(btn_remove)
         btn_close = QPushButton("닫기")
-        btn_close.clicked.connect(dlg.accept)
-        btn_row.addWidget(btn_close)
-        layout.addLayout(btn_row)
+        ctrl_row.addWidget(btn_close)
+        layout.addLayout(ctrl_row)
 
-        layout.addStretch(1)
+        # Log viewer
+        log_widget = QTextEdit()
+        log_widget.setReadOnly(True)
+        log_widget.setStyleSheet(
+            "background-color: #111; color: #ddd; font-family: monospace; font-size: 11px;"
+        )
+        log_widget.setMinimumHeight(260)
+        layout.addWidget(log_widget, 1)
+
+        log_q: _queue.Queue[str] = _queue.Queue()
+        # Worker results queue — drained on the GUI thread by drain_timer below.
+        # We do NOT use QTimer.singleShot from the worker thread because it isn't
+        # reliable when the calling thread has no event loop.
+        result_q: _queue.Queue = _queue.Queue()
+        ts_state = {'busy': False, 'tail_proc': None}
+
+        def _append_log(msg: str):
+            log_widget.append(msg)
+            sb = log_widget.verticalScrollBar()
+            sb.setValue(sb.maximum())
+
+        drain_timer = QTimer(dlg)
+        drain_timer.setInterval(150)
+        drain_timer.timeout.connect(lambda: _drain_q())
+        def _drain_q():
+            # 1) log lines
+            try:
+                while True:
+                    _append_log(log_q.get_nowait())
+            except _queue.Empty:
+                pass
+            # 2) action results — clear busy flag and refresh UI on the GUI thread
+            try:
+                while True:
+                    ok, msg = result_q.get_nowait()
+                    ts_state['busy'] = False
+                    ts_state['transition_target'] = None
+                    _refresh()
+                    if not ok:
+                        QMessageBox.warning(dlg, "오류", msg)
+            except _queue.Empty:
+                pass
+        drain_timer.start()
+
+        def _stop_tail():
+            p = ts_state.get('tail_proc')
+            if p and p.poll() is None:
+                try:
+                    p.terminate()
+                except Exception:
+                    pass
+            ts_state['tail_proc'] = None
+
+        def _start_tail():
+            _stop_tail()
+            proc = _ts.open_log_stream(tail=200)
+            if not proc:
+                return
+            ts_state['tail_proc'] = proc
+
+            def _reader():
+                try:
+                    for line in proc.stdout:
+                        if proc.poll() is not None and not line:
+                            break
+                        log_q.put(line.rstrip())
+                except Exception:
+                    pass
+            threading.Thread(target=_reader, daemon=True).start()
+
+        def _refresh():
+            installed = _ts.is_installed()
+            running = _ts.is_running()
+            cfg = get_training_server_config() or {}
+            port = cfg.get('port', _ts.DEFAULT_PORT)
+            target = ts_state.get('transition_target')
+            busy = ts_state['busy']
+
+            # 1) 설치 여부
+            if installed:
+                installed_label.setText("설치 상태: ✓ 설치됨")
+                installed_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #86efac;")
+            else:
+                installed_label.setText("설치 상태: ✗ 미설치")
+                installed_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #ef4444;")
+
+            # 2) 켜짐 여부 — busy면 전이 진행 표시
+            if busy and target is not None and running is not target:
+                verb = '실행' if target else '중지'
+                running_label.setText(f"실행 상태: ⏳ {verb} 중...")
+                running_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #fbbf24;")
+            elif running:
+                running_label.setText(f"실행 상태: 🟢 켜짐 (port {port})")
+                running_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #86efac;")
+            else:
+                running_label.setText("실행 상태: ⚫ 꺼짐")
+                running_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #999;")
+
+            # 3) Buttons — [설치] when missing, [실행]/[중지] always visible while
+            #    installed (only one is enabled at a time), [제거] hidden while running.
+            btn_install.setVisible(not installed)
+            btn_start.setVisible(installed)
+            btn_stop.setVisible(installed)
+            btn_remove.setVisible(installed and not running)
+
+            btn_install.setEnabled(not installed and not busy)
+            btn_start.setEnabled(installed and not running and not busy)
+            btn_stop.setEnabled(installed and running and not busy)
+            btn_remove.setEnabled(installed and not running and not busy)
+            # Port is editable only while server is off (prevents accidentally
+            # changing the port mid-run; user must stop, edit, then start).
+            port_input.setEnabled(installed and not running and not busy)
+
+            # Speed up polling while we're waiting for a transition.
+            target_interval = 500 if busy else 3000
+            if status_timer.interval() != target_interval:
+                status_timer.setInterval(target_interval)
+
+            if ts_state.get('tail_proc') is None:
+                _start_tail()
+
+        def _run_action(fn):
+            if ts_state.get('busy'):
+                return  # ignore re-entry during an in-flight action
+            ts_state['busy'] = True
+            _refresh()
+
+            def _worker():
+                try:
+                    ok, msg = fn()
+                except Exception as e:
+                    ok, msg = False, str(e)
+                log_q.put(f"[{'OK' if ok else 'FAIL'}] {msg}")
+                # Push the result; drain_timer (GUI thread) clears busy and refreshes.
+                result_q.put((ok, msg))
+            threading.Thread(target=_worker, daemon=True).start()
+
+        def _read_port() -> int | None:
+            try:
+                p = int(port_input.text().strip() or _ts.DEFAULT_PORT)
+            except ValueError:
+                QMessageBox.warning(dlg, "오류", "포트는 숫자여야 합니다.")
+                return None
+            if not (1 <= p <= 65535):
+                QMessageBox.warning(dlg, "오류", "포트는 1~65535 사이여야 합니다.")
+                return None
+            return p
+
+        def _toggle_action(target: bool, port: int):
+            """Apply local-training flag and poll until is_running() == target."""
+            verb = '실행' if target else '중지'
+            log_q.put(f"[INFO] 백엔드 재생성 중 ({verb}, port {port})...")
+            pr = self.project_root if hasattr(self, 'project_root') else None
+            ts_state['transition_target'] = target
+
+            def _action():
+                import time as _time
+                ok, msg = _ts.apply_local_training(target, port=port, project_root=pr)
+                if not ok:
+                    return ok, msg
+                deadline = _time.monotonic() + 60
+                while _time.monotonic() < deadline:
+                    if _ts.is_running() is target:
+                        return True, f"{verb} 완료"
+                    _time.sleep(0.5)
+                return False, f"{verb} 요청은 보냈지만 60초 안에 상태 전환을 확인하지 못했습니다."
+
+            _run_action(_action)
+
+        def _on_install():
+            log_q.put("[INFO] 학습 서버 다운로드 중...")
+            _run_action(lambda: _ts.download_from_release(
+                on_log=lambda m: log_q.put(m),
+            ))
+
+        def _on_start():
+            port = _read_port()
+            if port is None:
+                return
+            _toggle_action(True, port)
+
+        def _on_stop():
+            port = _read_port() or _ts.DEFAULT_PORT
+            _toggle_action(False, port)
+
+        def _on_remove():
+            res = QMessageBox.question(
+                dlg, "확인",
+                "학습 서버 소스를 제거하시겠습니까?\n\n"
+                "학습 데이터(데이터셋/체크포인트)는 그대로 보존됩니다.\n"
+                "deb 패키지 업데이트 시 소스는 다시 설치됩니다.",
+                QMessageBox.Yes | QMessageBox.Cancel,
+                QMessageBox.Cancel,
+            )
+            if res != QMessageBox.Yes:
+                return
+            log_q.put("[INFO] 소스 제거 중 (데이터 보존)...")
+            _run_action(lambda: _ts.remove())
+
+        btn_install.clicked.connect(_on_install)
+        btn_start.clicked.connect(_on_start)
+        btn_stop.clicked.connect(_on_stop)
+        btn_remove.clicked.connect(_on_remove)
+        btn_close.clicked.connect(dlg.accept)
+
+        status_timer = QTimer(dlg)
+        status_timer.setInterval(3000)
+        status_timer.timeout.connect(_refresh)
+        status_timer.start()
+
+        def _on_finished():
+            status_timer.stop()
+            drain_timer.stop()
+            _stop_tail()
+        dlg.finished.connect(lambda *_: _on_finished())
+
+        _refresh()
         dlg.exec()
 
     def _on_modules_clicked(self):
         """Open the module management dialog."""
         from app_context import QScrollArea
 
-        dlg = QDialog(self)
+        dlg = QDialog()
         dlg.setWindowTitle("모듈 관리")
+        dlg.setWindowFlags(dlg.windowFlags() | Qt.Window)
         dlg.resize(750, 600)
         layout = QVBoxLayout(dlg)
         layout.setContentsMargins(16, 16, 16, 16)
@@ -3413,7 +3547,16 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         layout.addWidget(desc)
         layout.addSpacing(4)
 
-        installed = get_installed_modules()
+        # Kick off catalog + owned refresh in the background. The dialog
+        # renders against the currently cached registry (loaded on import) so
+        # it pops up instantly; the next open picks up any newly-fetched
+        # changes from this background pass.
+        try:
+            import threading
+            threading.Thread(target=refresh_remote_state, daemon=True).start()
+        except Exception:
+            pass
+
         by_cat = modules_by_category()
 
         # Fetch remote versions (best-effort)
@@ -3424,24 +3567,169 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         except Exception:
             release = None
 
+        def _format_krw(amount: int) -> str:
+            try:
+                return f"{amount:,}원"
+            except Exception:
+                return f"{amount}원"
+
+        def _open_checkout(module_id: str, btn=None, status_lbl=None, ver_lbl=None,
+                           release_ref=None):
+            """Open the PortOne checkout page in the user's browser and poll
+            /api/entitlements until the module is owned. On success, kick off
+            the install via _make_action(...).
+
+            If poll-success runs out (10 min) or the user cancels, we just
+            close the dialog and leave the row as-is.
+            """
+            import webbrowser
+            from urllib.parse import urlencode
+            from modules import get_api_base_url
+            from device_auth import get_signed_in_user
+
+            # Pass the launcher's signed-in user id so the checkout page can
+            # detect if the browser is logged in as a different account and
+            # warn before payment.
+            params: dict[str, str] = {}
+            try:
+                u = get_signed_in_user()
+                if u and u.get("id"):
+                    params["u"] = str(u["id"])
+            except Exception:
+                pass
+            qs = ("?" + urlencode(params)) if params else ""
+            checkout_url = f"{get_api_base_url()}/checkout/{module_id}{qs}"
+            try:
+                webbrowser.open(checkout_url, new=2)
+            except Exception:
+                pass
+
+            wait_dlg = QDialog(dlg)
+            wait_dlg.setWindowTitle("결제 진행")
+            wait_dlg.setModal(True)
+            wait_dlg.setMinimumWidth(480)
+            wlayout = QVBoxLayout(wait_dlg)
+            msg = QLabel(
+                "브라우저에서 결제를 완료해 주세요.\n"
+                "결제가 확인되면 자동으로 설치를 시작합니다.\n\n"
+                "창이 열리지 않았다면 아래 주소를 복사해 직접 여세요:"
+            )
+            msg.setWordWrap(True)
+            wlayout.addWidget(msg)
+
+            url_row = QHBoxLayout()
+            url_edit = QLineEdit(checkout_url)
+            url_edit.setReadOnly(True)
+            copy_btn = QPushButton("복사")
+            copy_btn.setFixedWidth(60)
+            url_row.addWidget(url_edit, 1)
+            url_row.addWidget(copy_btn)
+            wlayout.addLayout(url_row)
+
+            def _copy_url():
+                try:
+                    QApplication.clipboard().setText(checkout_url)
+                    copy_btn.setText("복사됨")
+                    QTimer.singleShot(1500, lambda: copy_btn.setText("복사"))
+                except Exception:
+                    pass
+            copy_btn.clicked.connect(_copy_url)
+
+            cancel_btn = QPushButton("취소")
+            wlayout.addWidget(cancel_btn)
+
+            timer = QTimer(wait_dlg)
+            deadline = time.monotonic() + 10 * 60  # 10 min
+            poll_state = {"running": True}
+
+            def _stop():
+                poll_state["running"] = False
+                timer.stop()
+                if wait_dlg.isVisible():
+                    wait_dlg.accept()
+
+            def _poll():
+                if not poll_state["running"]:
+                    return
+                if time.monotonic() > deadline:
+                    _stop()
+                    QMessageBox.warning(
+                        dlg, "시간 초과",
+                        "결제 확인 대기 시간이 만료되었습니다. 결제를 완료하셨다면 모듈 창을 다시 열어주세요.",
+                    )
+                    return
+                try:
+                    owned = fetch_owned_module_ids()
+                except Exception:
+                    owned = set()
+                if module_id in owned:
+                    _stop()
+                    try:
+                        refresh_remote_state()
+                    except Exception:
+                        pass
+                    if btn is not None and status_lbl is not None and ver_lbl is not None:
+                        try:
+                            _make_action(module_id, "install", btn, status_lbl, ver_lbl, release_ref)()
+                        except Exception:
+                            QMessageBox.information(
+                                dlg, "결제 완료",
+                                "결제가 확인되었습니다. 모듈 창을 다시 열어 설치를 진행해 주세요.",
+                            )
+                    else:
+                        QMessageBox.information(
+                            dlg, "결제 완료",
+                            "결제가 확인되었습니다. 모듈 창을 다시 열어 설치를 진행해 주세요.",
+                        )
+
+            timer.timeout.connect(_poll)
+            timer.start(3000)  # 3s polling
+            cancel_btn.clicked.connect(_stop)
+            wait_dlg.rejected.connect(_stop)
+            wait_dlg.exec()
+
         def _make_action(module_id, action, btn, status_lbl, ver_lbl, release_ref):
             def _do():
                 if action == "install" or action == "update":
                     btn.setEnabled(False)
-                    btn.setText("...")
-                    ok = download_module(module_id, release=release_ref)
-                    if ok:
-                        rv = remote_vers.get(module_id, "")
-                        status_lbl.setText(f"v{rv}" if rv else "설치됨")
-                        status_lbl.setStyleSheet("color: #86efac; font-size: 11px; font-weight: 600;")
-                        ver_lbl.setText("")
-                        btn.setText("제거")
-                        btn.setEnabled(True)
-                        btn.clicked.disconnect()
-                        btn.clicked.connect(_make_action(module_id, "remove", btn, status_lbl, ver_lbl, release_ref))
-                    else:
-                        btn.setText("실패")
-                        btn.setEnabled(True)
+                    btn.setText("⏳")
+                    status_lbl.setText("설치 중...")
+                    status_lbl.setStyleSheet("color: #facc15; font-size: 11px; font-weight: 600;")
+
+                    import threading
+                    result = [None]  # shared state
+
+                    def _run():
+                        result[0] = download_module(module_id)
+
+                    t = threading.Thread(target=_run, daemon=True)
+                    t.start()
+
+                    # Poll every 500ms until thread finishes
+                    timer = QTimer()
+                    def _check():
+                        if t.is_alive():
+                            return
+                        timer.stop()
+                        ok = result[0]
+                        if ok:
+                            rv = remote_vers.get(module_id, "")
+                            status_lbl.setText(f"v{rv}" if rv else "설치됨")
+                            status_lbl.setStyleSheet("color: #86efac; font-size: 11px; font-weight: 600;")
+                            ver_lbl.setText("")
+                            btn.setText("제거")
+                            btn.setEnabled(True)
+                            btn.clicked.disconnect()
+                            btn.clicked.connect(_make_action(module_id, "remove", btn, status_lbl, ver_lbl, release_ref))
+                        else:
+                            status_lbl.setText("실패")
+                            status_lbl.setStyleSheet("color: #ef4444; font-size: 11px; font-weight: 600;")
+                            btn.setText("재시도")
+                            btn.setEnabled(True)
+                    timer.timeout.connect(_check)
+                    timer.start(500)
+                    btn._poll_timer = timer  # prevent GC
+
                 elif action == "remove":
                     remove_module(module_id)
                     status_lbl.setText("미설치")
@@ -3480,7 +3768,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             search_input.setStyleSheet("font-size: 11px; padding: 2px 8px;")
             col.addWidget(search_input)
 
-            sorted_mods = sorted(mods, key=lambda m: (0 if m.id in installed else 1, m.name))
+            sorted_mods = sorted(mods, key=lambda m: (0 if is_module_installed(m.id) else 1, m.name))
             row_widgets: list[tuple[QWidget, str]] = []
 
             for mod in sorted_mods:
@@ -3494,7 +3782,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                 row.addWidget(name_label)
                 row.addStretch(1)
 
-                is_installed = mod.id in installed
+                is_installed = is_module_installed(mod.id)
                 local_ver = get_installed_version(mod.id)
                 remote_ver = remote_vers.get(mod.id)
                 has_update = is_installed and remote_ver and local_ver and remote_ver != local_ver
@@ -3530,10 +3818,29 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                     btn.setStyleSheet("font-size: 11px; border-radius: 6px;")
                     btn.clicked.connect(_make_action(mod.id, "remove", btn, status, ver_lbl, release))
                 else:
-                    btn = QPushButton("설치")
-                    btn.setFixedSize(52, 26)
-                    btn.setStyleSheet("font-size: 11px; border-radius: 6px;")
-                    btn.clicked.connect(_make_action(mod.id, "install", btn, status, ver_lbl, release))
+                    price_krw = get_module_price_krw(mod.id)
+                    entitled = is_module_entitled(mod.id)
+                    if price_krw > 0 and not entitled:
+                        # Paid module the user has not bought yet.
+                        btn = QPushButton(f"결제 · {_format_krw(price_krw)}")
+                        btn.setFixedSize(120, 26)
+                        btn.setStyleSheet(
+                            "font-size: 11px; border-radius: 6px; "
+                            "background-color: #4338ca; color: #ffffff; border: 1px solid #6366f1;"
+                        )
+                        btn.clicked.connect(
+                            lambda _checked, mid=mod.id, b=btn, s=status, v=ver_lbl, r=release:
+                            _open_checkout(mid, b, s, v, r)
+                        )
+                    else:
+                        # Free or already owned.
+                        label = "설치"
+                        if price_krw > 0 and entitled:
+                            label = "설치 (구매 완료)"
+                        btn = QPushButton(label)
+                        btn.setFixedSize(120 if price_krw > 0 else 52, 26)
+                        btn.setStyleSheet("font-size: 11px; border-radius: 6px;")
+                        btn.clicked.connect(_make_action(mod.id, "install", btn, status, ver_lbl, release))
                 row.addWidget(btn)
 
                 col.addWidget(row_widget)
@@ -3552,13 +3859,15 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         layout.addLayout(columns_row, 1)
 
         btn_close = QPushButton("닫기")
-        btn_close.clicked.connect(dlg.accept)
+        btn_close.clicked.connect(dlg.close)
         close_row = QHBoxLayout()
         close_row.addStretch(1)
         close_row.addWidget(btn_close)
         layout.addLayout(close_row)
 
-        dlg.exec()
+        dlg.setAttribute(Qt.WA_DeleteOnClose)
+        self._module_dlg = dlg
+        dlg.show()
 
     def _on_exit_action(self):
         action = getattr(self, "_exit_action", "EXIT")
@@ -4009,11 +4318,19 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
         win = QMainWindow()
         win.setWindowTitle("Easy Trainer")
-        win.resize(QSize(1280, 800))
+        screen = win.screen()
+        if screen:
+            geom = screen.availableGeometry()
+            w = int(geom.width() * 0.8)
+            h = geom.height()
+            x = geom.x() + (geom.width() - w) // 2
+            win.setGeometry(x, geom.y(), w, h)
+        else:
+            win.resize(QSize(1280, 800))
         view = QWebEngineView(win)
         view.setUrl(url)
         win.setCentralWidget(view)
-        win.show()
+        win.showMaximized() if not screen else win.show()
         self._embedded_window = win
         return True
 

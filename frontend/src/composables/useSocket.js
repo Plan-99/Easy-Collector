@@ -7,8 +7,7 @@ const backendUrl = 'http://localhost:5000'; // 백엔드 URL을 환경 변수로
 
 // 모듈 스코프에서 소켓 인스턴스를 한 번만 생성 (싱글톤)
 const socket = io(backendUrl, {
-  transports: ['websocket'], // 서버는 websocket만 허용
-  // upgrade: false,
+  transports: ['websocket'],
   reconnectionAttempts: 5,
   reconnectionDelay: 1000,
 });

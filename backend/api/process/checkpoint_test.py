@@ -8,9 +8,9 @@ from einops import rearrange
 from lerobot.configs.types import PolicyFeature, FeatureType
 from ...utils.image_parser import fetch_image_with_config
 
-from ...policies.utils import make_policy, VISION_BACKBONE_MAP, process_image, relative_trajectory_to_delta, make_easytrainer_processors
+from ...policies.utils import VISION_BACKBONE_MAP, process_image, relative_trajectory_to_delta, make_easytrainer_processors
 from collections import deque
-from ...bridge.remote_env import RemoteEnv
+from ...env.env import Env as RemoteEnv
 
 from lerobot.policies.act.modeling_act import ACTPolicy
 from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
@@ -59,11 +59,7 @@ def checkpoint_test(
         thread_pool = ThreadPoolExecutor(max_workers=len(agents))
         executor = None
         
-        # 기본 정책 로드
-        if checkpoint['is_base_model']:
-            ckpt_dir = "lerobot/pi0_base"
-        else:
-            ckpt_dir = os.path.join("/root/src/backend/checkpoints", str(checkpoint['id']))
+        ckpt_dir = os.path.join("/root/src/backend/checkpoints", str(checkpoint['id']))
 
         action_key = action_type or policy_obj.get('settings', {}).get('action_type') or checkpoint.get('train_settings', {}).get('action_type', 'qaction')
         _obs_keys = policy_obj.get('settings', {}).get('obs_state_keys')

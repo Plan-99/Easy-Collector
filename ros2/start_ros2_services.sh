@@ -31,6 +31,84 @@ elif [ -d /root/ros2_ws/src ] && [ "$(ls -A /root/ros2_ws/src 2>/dev/null)" ]; t
     [ -f /root/ros2_ws/install/setup.bash ] && source /root/ros2_ws/install/setup.bash
 fi
 
+# --- 모듈 의존성 복구 (project/modules/*.json = single source of truth) ---
+MODULES_DIR="/opt/easytrainer/project/modules"
+if [ -d "$MODULES_DIR" ]; then
+    MISSING_INFO=$(python3 -c "
+import json, subprocess, importlib, glob
+
+apt_missing = []
+pip_missing = []
+
+for mj_path in glob.glob('$MODULES_DIR/*.json'):
+    meta = json.load(open(mj_path))
+    deps = meta.get('dependencies', {})
+    for pkg in deps.get('apt', []):
+        r = subprocess.run(['dpkg-query','-W','-f=\${Status}',pkg], capture_output=True, text=True)
+        if 'install ok installed' not in r.stdout:
+            apt_missing.append(pkg)
+    for pkg in deps.get('pip', []):
+        mod = pkg.split('>=')[0].split('==')[0].replace('-','_')
+        try:
+            importlib.import_module(mod)
+        except ImportError:
+            pip_missing.append(pkg)
+
+apt_missing = list(dict.fromkeys(apt_missing))
+pip_missing = list(dict.fromkeys(pip_missing))
+print('APT:' + ' '.join(apt_missing))
+print('PIP:' + ' '.join(pip_missing))
+" 2>/dev/null)
+
+    APT_PKGS=$(echo "$MISSING_INFO" | grep '^APT:' | sed 's/^APT://')
+    PIP_PKGS=$(echo "$MISSING_INFO" | grep '^PIP:' | sed 's/^PIP://')
+
+    if [ -n "$APT_PKGS" ]; then
+        echo "[ROS2 Bridge] Installing missing apt packages: $APT_PKGS"
+        apt-get update -qq 2>/dev/null || true
+        apt-get install -y --no-install-recommends $APT_PKGS 2>/dev/null || true
+    fi
+    if [ -n "$PIP_PKGS" ]; then
+        echo "[ROS2 Bridge] Installing missing pip packages: $PIP_PKGS"
+        python3 -m pip install --quiet $PIP_PKGS 2>/dev/null || true
+    fi
+    if [ -z "$APT_PKGS" ] && [ -z "$PIP_PKGS" ]; then
+        echo "[ROS2 Bridge] All module dependencies satisfied."
+    else
+        echo "[ROS2 Bridge] Module dependencies installed."
+    fi
+fi
+
+# --- SDK 모듈 자동 설치 (robot_sdk/*/setup.py) ---
+SDK_DIR="/root/robot_sdk"
+if [ -d "$SDK_DIR" ]; then
+    for sdk_setup in "$SDK_DIR"/*/setup.py; do
+        [ -f "$sdk_setup" ] || continue
+        sdk_path=$(dirname "$sdk_setup")
+        sdk_name=$(basename "$sdk_path")
+        # setup.py의 패키지명으로 import 체크
+        PKG_NAME=$(python3 -c "
+import ast, sys
+try:
+    tree = ast.parse(open('$sdk_setup').read())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.keyword) and node.arg == 'name':
+            print(ast.literal_eval(node.value))
+            sys.exit(0)
+except: pass
+print('${sdk_name}_sdk')
+" 2>/dev/null)
+        IMPORT_NAME=$(echo "$PKG_NAME" | tr '-' '_')
+        if python3 -c "import $IMPORT_NAME" 2>/dev/null; then
+            echo "[ROS2 Bridge] SDK already installed: $sdk_name ($IMPORT_NAME)"
+        else
+            echo "[ROS2 Bridge] Installing SDK: $sdk_name..."
+            python3 -m pip install --quiet "setuptools==70.0.0" 2>/dev/null || true
+            python3 -m pip install -e "$sdk_path" 2>&1 || echo "[ROS2 Bridge] WARNING: SDK install failed: $sdk_name"
+        fi
+    done
+fi
+
 # --- 환경 변수 설정 ---
 export PYTHONPATH="/root/ros2:/opt/openrobots/lib/python3.10/site-packages:${PYTHONPATH}"
 export LD_LIBRARY_PATH="/opt/openrobots/lib:${LD_LIBRARY_PATH}"

@@ -82,6 +82,18 @@ class TopicList(_message.Message):
     topics: _containers.RepeatedCompositeFieldContainer[TopicInfo]
     def __init__(self, topics: _Optional[_Iterable[_Union[TopicInfo, _Mapping]]] = ...) -> None: ...
 
+class LaunchConfig(_message.Message):
+    __slots__ = ("process_id", "package", "launch_file", "args_json")
+    PROCESS_ID_FIELD_NUMBER: _ClassVar[int]
+    PACKAGE_FIELD_NUMBER: _ClassVar[int]
+    LAUNCH_FILE_FIELD_NUMBER: _ClassVar[int]
+    ARGS_JSON_FIELD_NUMBER: _ClassVar[int]
+    process_id: str
+    package: str
+    launch_file: str
+    args_json: str
+    def __init__(self, process_id: _Optional[str] = ..., package: _Optional[str] = ..., launch_file: _Optional[str] = ..., args_json: _Optional[str] = ...) -> None: ...
+
 class RobotConfig(_message.Message):
     __slots__ = ("robot_json",)
     ROBOT_JSON_FIELD_NUMBER: _ClassVar[int]
@@ -232,6 +244,18 @@ class Observation(_message.Message):
     language_instruction: str
     def __init__(self, robot_states_json: _Optional[str] = ..., images: _Optional[_Iterable[_Union[ImageData, _Mapping]]] = ..., language_instruction: _Optional[str] = ...) -> None: ...
 
+class SensorConfig(_message.Message):
+    __slots__ = ("sensors_json",)
+    SENSORS_JSON_FIELD_NUMBER: _ClassVar[int]
+    sensors_json: str
+    def __init__(self, sensors_json: _Optional[str] = ...) -> None: ...
+
+class SensorSessionId(_message.Message):
+    __slots__ = ("id",)
+    ID_FIELD_NUMBER: _ClassVar[int]
+    id: int
+    def __init__(self, id: _Optional[int] = ...) -> None: ...
+
 class ROSServiceRequest(_message.Message):
     __slots__ = ("service_type", "service_name", "request_json")
     SERVICE_TYPE_FIELD_NUMBER: _ClassVar[int]
@@ -317,3 +341,31 @@ class UpdateStreamConfig(_message.Message):
     stream_id: str
     config_json: str
     def __init__(self, stream_id: _Optional[str] = ..., config_json: _Optional[str] = ...) -> None: ...
+
+class ImageFrame(_message.Message):
+    __slots__ = ("jpeg_data", "width", "height", "stream_id")
+    JPEG_DATA_FIELD_NUMBER: _ClassVar[int]
+    WIDTH_FIELD_NUMBER: _ClassVar[int]
+    HEIGHT_FIELD_NUMBER: _ClassVar[int]
+    STREAM_ID_FIELD_NUMBER: _ClassVar[int]
+    jpeg_data: bytes
+    width: int
+    height: int
+    stream_id: str
+    def __init__(self, jpeg_data: _Optional[bytes] = ..., width: _Optional[int] = ..., height: _Optional[int] = ..., stream_id: _Optional[str] = ...) -> None: ...
+
+class SubscribeImageRequest(_message.Message):
+    __slots__ = ("topic", "msg_type", "stream_id")
+    TOPIC_FIELD_NUMBER: _ClassVar[int]
+    MSG_TYPE_FIELD_NUMBER: _ClassVar[int]
+    STREAM_ID_FIELD_NUMBER: _ClassVar[int]
+    topic: str
+    msg_type: str
+    stream_id: str
+    def __init__(self, topic: _Optional[str] = ..., msg_type: _Optional[str] = ..., stream_id: _Optional[str] = ...) -> None: ...
+
+class UnsubscribeImageRequest(_message.Message):
+    __slots__ = ("stream_id",)
+    STREAM_ID_FIELD_NUMBER: _ClassVar[int]
+    stream_id: str
+    def __init__(self, stream_id: _Optional[str] = ...) -> None: ...

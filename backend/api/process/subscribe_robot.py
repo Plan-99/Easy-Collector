@@ -21,8 +21,19 @@ def subscribe_robot_topic(agent: Agent, socketio_instance, task_control):
             agent.joint_states = js
             agent.joint_actions = ja
             connected = (now - last_js) <= stale_after and js is not None
+
+            # 시뮬레이션 동기화: joint_states를 SimEngine에 전달
+            if js is not None:
+                try:
+                    from ..routes.sim import get_sim_engine
+                    sim = get_sim_engine()
+                    if sim and sim.is_running:
+                        positions = {i: v for i, v in enumerate(js)}
+                        sim.set_joint_positions(positions)
+                except Exception:
+                    pass
+
             socketio_instance.emit('robot_status_' + str(agent.id), {
-                # .tolist()를 호출하여 파이썬 list로 변환
                 'joint_states': js if js is not None else None,
                 'joint_actions': ja if ja is not None else None,
                 'ee_pos': ep if ep is not None else None,

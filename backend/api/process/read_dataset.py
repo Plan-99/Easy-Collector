@@ -6,7 +6,7 @@ import cv2
 import base64
 import threading
 from .augment_dataset import adjust_lightness, draw_rectangles, add_salt_and_pepper_noise, add_gaussian_noise, generate_rect_params, prospective_transform, generate_prospective_transform, apply_hsv
-from .lerobot_io import read_episode, append_episode as lerobot_append_episode
+from ...utils.lerobot_io import read_episode, append_episode as lerobot_append_episode
 from ...configs.global_configs import DATASET_DIR
 from ...utils.image_parser import fetch_image_with_config
 from PIL import Image
@@ -24,8 +24,8 @@ def read_dataset(node, episode_path, socketio_instance, sid, task_control, move_
     config = {}
     capture_env = None
     if move_robot:
-        from ...bridge.remote_env import RemoteEnv
-        env = RemoteEnv(agents=agents, sensors=sensors)
+        from ...env.env import Env
+        env = Env(agents=agents, sensors=sensors)
         if capture_dataset_id is not None:
             capture_env = env
 

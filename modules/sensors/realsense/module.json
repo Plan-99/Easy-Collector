@@ -1,0 +1,24 @@
+{
+  "id": "sensor_realsense",
+  "name": "Intel RealSense",
+  "version": "1.0.0",
+  "category": "sensor",
+  "description": "Intel RealSense 깊이 카메라 (D435, D405 등)",
+  "install": {
+    "ros2": {
+      "target": "ros2/ros2_ws/src",
+      "build": "none"
+    }
+  },
+  "check": {
+    "type": "apt",
+    "packages": ["ros-humble-realsense2-camera"]
+  },
+  "dependencies": {
+    "apt": [
+      "ros-humble-realsense2-camera",
+      "ros-humble-realsense2-description"
+    ],
+    "pip": []
+  }
+}

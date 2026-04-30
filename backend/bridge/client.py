@@ -28,6 +28,8 @@ class BridgeClient:
         self._ros_proxy_stub = None
         self._vive_stub = None
         self._uncertainty_stub = None
+        self._streaming_stub = None
+        self._obs_stub = None
         self._connect()
 
     def _connect(self):
@@ -46,6 +48,8 @@ class BridgeClient:
         self._ros_proxy_stub = pb_grpc.ROSProxyStub(self._channel)
         self._vive_stub = pb_grpc.ViveServiceStub(self._channel)
         self._uncertainty_stub = pb_grpc.UncertaintyServiceStub(self._channel)
+        self._streaming_stub = pb_grpc.StreamingServiceStub(self._channel)
+        self._obs_stub = pb_grpc.ObsServiceStub(self._channel)
 
     @property
     def agent(self):
@@ -70,6 +74,14 @@ class BridgeClient:
     @property
     def uncertainty(self):
         return self._uncertainty_stub
+
+    @property
+    def streaming(self):
+        return self._streaming_stub
+
+    @property
+    def obs(self):
+        return self._obs_stub
 
     def wait_for_ready(self, timeout=60):
         """gRPC 서버가 준비될 때까지 대기."""

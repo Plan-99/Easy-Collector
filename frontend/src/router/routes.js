@@ -7,6 +7,7 @@ const routes = [
       { path: 'sensors', component: () => import('src/pages/v2/SensorPage.vue') },
       { path: 'robots/management', component: () => import('src/pages/v2/RobotPage.vue') },
       { path: 'robots/assemble', component: () => import('src/pages/v2/AssemblePage.vue') },
+      { path: 'robots/teleoperation', component: () => import('src/pages/v2/TeleoperationPage.vue') },
       { path: 'workspace', component: () => import('src/pages/v2/WorkspacePage.vue') },
       { path: 'train', component: () => import('src/pages/v2/TrainPage.vue') },
       { path: 'datasets', component: () => import('pages/v2/DatasetPage.vue') }
