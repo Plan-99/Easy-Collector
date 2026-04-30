@@ -44,6 +44,7 @@ TUTORIAL_ROBOT = {
         'tool_index': [6],
         'tool_inner': True,
         'interpolation': False,
+        'is_sim': True,
         # Task-space (IK) support: kinematics mirror assets/scene.xml.
         # End-effector frame = link6 + (0.045 + 0.05) along x = 0.095 from joint6.
         'urdf_path': '/root/ros2_ws/src/mujoco_world/urdf/tutorial_arm.urdf',

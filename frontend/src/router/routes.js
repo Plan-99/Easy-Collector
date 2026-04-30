@@ -10,6 +10,7 @@ const routes = [
       { path: 'robots/teleoperation', component: () => import('src/pages/v2/TeleoperationPage.vue') },
       { path: 'workspace', component: () => import('src/pages/v2/WorkspacePage.vue') },
       { path: 'train', component: () => import('src/pages/v2/TrainPage.vue') },
+      { path: 'planner', component: () => import('src/pages/v2/PlannerPage.vue') },
       { path: 'datasets', component: () => import('pages/v2/DatasetPage.vue') }
     ]
   },

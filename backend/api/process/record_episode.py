@@ -59,6 +59,16 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
             task_control['episode_stop'] = False
             task_control['succeed'] = False
 
+            # Tutorial mode: snap the MuJoCo world back to its home keyframe
+            # at the start of every episode so each recording begins from the
+            # same arm pose AND cube location. No-op if the bundled sim isn't
+            # running, so non-tutorial collections are unaffected.
+            try:
+                from ..routes.tutorial import reset_tutorial_world
+                reset_tutorial_world()
+            except Exception as e:
+                print(f"[record_episode] tutorial reset skipped: {e}")
+
             ep_count = get_episode_count(dataset_dir)
             dataset_name = f"episode_{ep_count:06d}"
 

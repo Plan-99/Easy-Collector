@@ -190,6 +190,11 @@ const linksList = computed(() => [
     title: t('navTrain'),
     icon: 'school',
     link: '/train'
+  },
+  {
+    title: 'Planner',
+    icon: 'event_note',
+    link: '/planner'
   }
 ])
 

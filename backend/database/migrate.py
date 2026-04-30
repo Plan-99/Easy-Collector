@@ -21,12 +21,13 @@ from backend.database.models.checkpoint_model import Checkpoint
 from backend.database.models.assembly_model import Assembly
 from backend.database.models.teleoperator_model import Teleoperator
 from backend.database.models.robot_pose_model import RobotPose
+from backend.database.models.planner_model import Planner
 
 
 ALL_MODELS = [
     Robot, Sensor, Policy, Gripper, LeaderRobotPreset,
     Task, Dataset, Checkpoint, Assembly, Teleoperator,
-    RobotPose,
+    RobotPose, Planner,
 ]
 
 

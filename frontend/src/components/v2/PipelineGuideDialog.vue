@@ -92,5 +92,6 @@ const steps = [
     { name: 4, key: 'pipelineStep4', icon: 'workspaces' },
     { name: 5, key: 'pipelineStep5', icon: 'school' },
     { name: 6, key: 'pipelineStep6', icon: 'psychology' },
+    { name: 7, key: 'pipelineStep7', icon: 'account_tree' },
 ]
 </script>

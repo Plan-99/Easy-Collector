@@ -7,6 +7,7 @@
         </q-card-section>
         <q-separator></q-separator>
         <q-card-section class="bg-secondary q-px-xl q-py-lg col">
+            <TutorialHint class="q-mb-md" :text="$t('tutorialAugmentIntro')" />
             <div class="row q-col-gutter-lg">
                 <div class="col-md-4 col-sm-12">
                     <q-input
@@ -32,6 +33,7 @@
                         >
                             <q-card class="bg-secondary" dark>
                                 <q-card-section class="q-pa-md">
+                                    <TutorialHint class="q-mb-md" :text="$t('tutorialAugmentLightness')" />
                                     <q-slider
                                         v-model="form.lightness"
                                         :min="-100"
@@ -52,6 +54,7 @@
                         >
                             <q-card class="bg-secondary" dark>
                                 <q-card-section>
+                                    <TutorialHint class="q-mb-md" :text="$t('tutorialAugmentHSV')" />
                                     <q-checkbox
                                         v-model="form.hsv.random"
                                         :label="$t('augHsvRandom')"
@@ -103,6 +106,7 @@
                         >
                             <q-card class="bg-secondary" dark>
                                 <q-card-section>
+                                    <TutorialHint class="q-mb-md" :text="$t('tutorialAugmentDisturbances')" />
                                     <q-input
                                         v-model.number="form.rectangles.count"
                                         type="number"
@@ -137,6 +141,7 @@
                         >
                             <q-card class="bg-secondary" dark>
                                 <q-card-section>
+                                    <TutorialHint class="q-mb-md" :text="$t('tutorialAugmentSaltPepper')" />
                                     <q-slider
                                         v-model="form.saltAndPepper.amount"
                                         :min="0"
@@ -158,6 +163,7 @@
                         >
                             <q-card class="bg-secondary" dark>
                                 <q-card-section>
+                                    <TutorialHint class="q-mb-md" :text="$t('tutorialAugmentGaussian')" />
                                     <div class="text-caption">{{ $t('augGaussianMean') }}</div>
                                     <q-slider
                                         v-model="form.gaussian.mean"
@@ -188,6 +194,7 @@
                         >
                             <q-card class="bg-secondary" dark>
                                 <q-card-section>
+                                    <TutorialHint class="q-mb-md" :text="$t('tutorialAugmentPerspective')" />
                                     <div class="text-caption">{{ $t('augProspectiveScaleFactor') }}</div>
                                     <q-slider
                                         v-model="form.prospective.scale_factor"
@@ -273,6 +280,7 @@ import { Notify } from 'quasar';
 import Hdf5Viewer from 'src/components/v2/Hdf5Viewer.vue';
 import { useSocket } from 'src/composables/useSocket';
 import { useI18n } from 'vue-i18n';
+import TutorialHint from 'src/components/v2/TutorialHint.vue';
 
 const { t } = useI18n();
 const { socket } = useSocket()

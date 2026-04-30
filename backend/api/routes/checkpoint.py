@@ -8,6 +8,7 @@ from ..process.checkpoint_test import checkpoint_test
 from ..process.failure_detection import failure_detection
 from ..process.generate_ood_features import generate_ood_features
 from ..process.export_checkpoint import bundle_checkpoint_zip
+from ...configs.global_configs import resolve_checkpoint_dir
 
 
 checkpoint_bp = Blueprint('checkpoint_bp', __name__)
@@ -40,7 +41,7 @@ def get_checkpoints():
 
 @checkpoint_bp.route('/checkpoints/<folder_name>', methods=['GET'])
 def get_checkpoint_files(id):
-    folder_path = get_checkpoint_dir(id)
+    folder_path = resolve_checkpoint_dir(id)
     if not os.path.exists(folder_path) or not os.path.isdir(folder_path):
         return {'status': 'error', 'message': 'Folder not found'}, 404
 
@@ -78,7 +79,7 @@ def check_create_successed(id):
     if not checkpoint:
         return {'check_create_successed': False, 'message': 'Checkpoint creation failed'}, 200
 
-    folder_path = get_checkpoint_dir(checkpoint.id)
+    folder_path = resolve_checkpoint_dir(checkpoint.id)
     if os.path.exists(folder_path) and os.path.isdir(folder_path):
         return {'check_create_successed': True, 'message': 'Checkpoint created successfully'}, 200
     else:
@@ -218,7 +219,7 @@ def delete_checkpoint(id):
     if not checkpoint:
         return {'status': 'error', 'message': 'Checkpoint not found'}, 404
 
-    folder_path = get_checkpoint_dir(checkpoint.id)
+    folder_path = resolve_checkpoint_dir(checkpoint.id)
     if os.path.exists(folder_path) and os.path.isdir(folder_path):
         shutil.rmtree(folder_path)
 

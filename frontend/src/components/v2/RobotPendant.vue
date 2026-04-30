@@ -47,7 +47,7 @@
                     ></q-btn>
                     <div class="col text-center text-caption"> {{ j }} </div>
                     <div class="col text-center text-caption text-primary">
-                        {{ props.robot.joint_pos[i] ? props.robot.joint_pos[i].toFixed(4) : '0' }}
+                        {{ jointReading(i) }}
                     </div>
                     <q-btn
                         dense
@@ -124,6 +124,12 @@ const props = defineProps({
         required: true
     }
 })
+
+function jointReading(i) {
+    const src = props.robot.joint_pos || props.robot.jointState
+    const v = src && src[i]
+    return typeof v === 'number' ? v.toFixed(4) : '0'
+}
 
 function moveOneJoint(index, delta) {
     if (props.robot.role === 'tool') {

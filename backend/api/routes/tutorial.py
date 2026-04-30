@@ -168,6 +168,26 @@ def _is_sim_running():
         return False
 
 
+def reset_tutorial_world():
+    """Tell the running MuJoCo world to snap back to its home keyframe.
+
+    Returns (success: bool, message: str). No-op (returns success=False with a
+    'not running' message) when the sim isn't up — callers can ignore it.
+    """
+    if not _is_sim_running():
+        return False, 'Tutorial sim not running'
+    try:
+        client = get_bridge_client()
+        resp = client.ros_proxy.CallService(pb.ROSServiceRequest(
+            service_type='std_srvs/srv/Trigger',
+            service_name=f'{TUTORIAL_TOPIC_PREFIX}/reset',
+            request_json='',
+        ))
+        return bool(resp.success), resp.response_json or ''
+    except Exception as e:
+        return False, f'Bridge call failed: {e}'
+
+
 def _topics_active():
     """Check whether the sim's published topics are visible on the ROS graph."""
     try:
@@ -274,3 +294,12 @@ def tutorial_stop():
         return jsonify({'status': 'error', 'message': f'Bridge call failed: {e}'}), 500
 
     return jsonify({'status': 'success', 'message': 'Tutorial world stopped'}), 200
+
+
+@tutorial_bp.route('/tutorial:reset', methods=['POST'])
+def tutorial_reset():
+    """Snap the MuJoCo world back to the home keyframe."""
+    ok, message = reset_tutorial_world()
+    if not ok:
+        return jsonify({'status': 'error', 'message': message}), 400
+    return jsonify({'status': 'success', 'message': message or 'reset'}), 200

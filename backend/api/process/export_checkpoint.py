@@ -11,8 +11,8 @@ Bundle layout (see export_templates/README.md for the user-facing doc)::
     ├── README.md               (verbatim)
     ├── requirements.txt        (verbatim)
     ├── export_meta.json        (built from DB row)
-    ├── model/                  (every file in get_checkpoint_dir(<id>)/)
-    └── lerobot/                (vendored src/backend/lerobot/src/lerobot/)
+    ├── model/                  (every file in the resolved checkpoint dir)
+    └── lerobot/                (vendored backend/lerobot/src/lerobot/)
 """
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ from pathlib import Path
 from ...configs.global_configs import get_checkpoint_dir
 from ...database.models.assembly_model import Assembly as AssemblyModel
 from ...database.models.sensor_model import Sensor as SensorModel
+from ...configs.global_configs import resolve_checkpoint_dir
 
 # Vendored lerobot package — copied wholesale into the bundle so the exported
 # inference script doesn't depend on the user pip-installing a matching version.
@@ -105,7 +106,7 @@ def build_export_meta(checkpoint, task, policy) -> dict:
     # state_dim / action_dim live in the saved config.json. We read them here
     # so the bundle has a single self-describing meta file (the user doesn't
     # need to parse the policy config to know shapes).
-    ckpt_dir = get_checkpoint_dir(checkpoint["id"])
+    ckpt_dir = resolve_checkpoint_dir(checkpoint["id"])
     state_dim = None
     action_dim = None
     config_path = os.path.join(ckpt_dir, "config.json")
@@ -210,7 +211,7 @@ def bundle_checkpoint_zip(checkpoint, task, policy) -> tuple[io.BytesIO, str]:
         ``filename`` is the suggested download name (sanitized).
     """
     ckpt_id = checkpoint["id"]
-    ckpt_dir = Path(get_checkpoint_dir(ckpt_id))
+    ckpt_dir = Path(resolve_checkpoint_dir(ckpt_id))
     if not ckpt_dir.is_dir():
         raise FileNotFoundError(
             f"Checkpoint directory not found: {ckpt_dir}. "

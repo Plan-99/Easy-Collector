@@ -27,6 +27,7 @@ from .routes.robot_pose import robot_pose_bp
 from .routes.remote_train import remote_train_bp
 from .routes.tutorial import tutorial_bp
 from .routes.remote_train import run_training_job
+from .routes.planner import planner_bp
 
 from ..bridge.client import get_bridge_client
 from ..bridge.remote_agent import RemoteAgent
@@ -52,8 +53,11 @@ args = argparse.parse_args()
 debug = True
 
 class _HealthzFilter(logging.Filter):
+    _SILENCED = ('GET /api/healthz', 'GET /api/health ', 'GET / HTTP')
+
     def filter(self, record):
-        return 'GET /api/healthz' not in record.getMessage()
+        msg = record.getMessage()
+        return not any(s in msg for s in self._SILENCED)
 
 logging.getLogger('werkzeug').addFilter(_HealthzFilter())
 
@@ -95,6 +99,7 @@ app.register_blueprint(sim_bp, url_prefix='/api')
 app.register_blueprint(robot_pose_bp, url_prefix='/api')
 app.register_blueprint(remote_train_bp, url_prefix='/api')
 app.register_blueprint(tutorial_bp, url_prefix='/api')
+app.register_blueprint(planner_bp, url_prefix='/api')
 
 socketio.on_namespace(SensorNamespace('/sensor', pm))
 socketio.on_namespace(RobotNamespace('/robot', pm))
@@ -108,11 +113,16 @@ pcs = set()
 # 스트리밍은 ROS2 컨테이너에서 실행됨 (port 5002)
 
 @app.route('/api/healthz', methods=['GET'])
+@app.route('/api/health', methods=['GET'])
 def healthz():
     return {
         'status': 'ok',
         'ros_ok': bridge_client.is_ready(),
     }, 200
+
+@app.route('/', methods=['GET'])
+def root():
+    return {'status': 'ok'}, 200
 
 @app.route('/api/db/path', methods=['GET'])
 def db_path():

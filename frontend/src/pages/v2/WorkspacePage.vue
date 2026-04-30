@@ -476,7 +476,6 @@
                 </div>
             </div>
             <div class="col column">
-                <TutorialHint class="q-mb-sm" :text="$t('tutorialWorkspaceMonitoring')" />
                 <monitoring-window
                     class="col"
                     :workspace="selectedWorkspace"
@@ -791,7 +790,8 @@ function updateAllSensorResolutions(width, height) {
 
 function openSensorForm() {
     if (selectedWorkspace.value) {
-        sensorForm.value.find(e => e.key === 'sensor_ids').value = Object.keys(selectedWorkspace.value.sensors || {}).map(id => parseInt(id, 10)).filter(id => id !== 0);
+        sensorForm.value.find(e => e.key === 'sensor_ids').value =
+            (selectedWorkspace.value.sensors || []).map(s => s.id).filter(id => id != null);
     }
     showSensorForm.value = true;
 }

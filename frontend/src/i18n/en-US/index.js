@@ -221,6 +221,70 @@ export default {
   trainLossTrain: 'Train Loss',
   trainLossValidate: 'Validate Loss',
 
+  // ───── Planner page ─────
+  plannerIntroTitle: 'Planner, Orchestrate Your Robot',
+  plannerIntroBody: 'Chain workspaces, checkpoints, and waits into a single plan to run end-to-end.',
+  plannerIntroBody2: 'Build reusable routines by combining joint moves, trained policies, and time delays.',
+  plannerCreateFormTitle: 'Create New Planner',
+  plannerEditFormTitle: 'Edit Planner',
+  plannerSelectLabel: 'Select Planner',
+  plannerInitializing: 'Initializing...',
+  plannerSelectFirst: 'Pick a planner above to start editing.',
+  plannerWorkspacesTitle: 'Workspaces',
+  plannerAddWorkspaces: 'Add Workspaces',
+  plannerAddWorkspacesTitle: 'Select Workspaces',
+  plannerSensorsTitle: 'Sensors',
+  plannerRobotsTitle: 'Robots',
+  plannerNoAssembly: 'No assembly attached.',
+  plannerErrorBadge: 'error',
+  plannerOnline: 'online',
+  plannerOffline: 'off',
+  plannerBlocksTitle: 'Blocks',
+  plannerNewBlock: 'New Block',
+  plannerRunAll: 'Run All',
+  plannerStop: 'Stop',
+  plannerNoBlocks: 'No blocks yet. Click + to create one.',
+  plannerShowDetails: 'Show Details',
+  plannerEditBlock: 'Edit Block',
+  plannerCopyBlock: 'Duplicate Block',
+  plannerDeleteBlock: 'Delete Block',
+  plannerCreateBlock: 'Create Block',
+  plannerBlockDetails: 'Block Details',
+  plannerBlockDetailsType: 'Type',
+  plannerBlockDetailsName: 'Name',
+  plannerBlockDetailsWorkspace: 'Workspace',
+  plannerBlockDetailsCheckpoint: 'Checkpoint',
+  plannerBlockDetailsDuration: 'Duration',
+  plannerBlockTypeLabel: 'Block Type',
+  plannerBlockNameLabel: 'Block Name',
+  plannerWorkspaceLabel: 'Workspace',
+  plannerCheckpointLabel: 'Checkpoint',
+  plannerDurationSeconds: 'Duration (seconds)',
+  plannerHzLabel: 'Inference Hz',
+  plannerHzHint: 'How often the policy is queried per second.',
+  plannerNameLabel: 'Name',
+  plannerCreateNew: '+ Create New Planner',
+  plannerDeleteConfirm: "Delete planner '{name}'?",
+  plannerSavedPosition: 'Saved Position',
+  plannerMoveBtn: 'Move',
+  plannerApplyCurrentPos: 'Apply Current Pose',
+  plannerPendantHint: 'Use the pendant to move the robot, then click Apply Current Pose to record this configuration.',
+  plannerPendantOffHint: 'Turn the robot on to use the pendant.',
+  plannerUnknown: 'Unknown',
+  plannerUnknownError: 'unknown error',
+  plannerSelectTypeError: 'Please select a block type first.',
+  plannerNameAutoMove: 'Move ({workspace})',
+  plannerNameAutoCheckpoint: 'Run {checkpoint}',
+  plannerNameAutoSleep: 'Wait {duration}s',
+  plannerStartingStatus: 'Starting...',
+  plannerStartFailed: 'Failed to start the planner run.',
+  plannerRunningStatus: 'Running ({current}/{total})',
+  plannerRunningStatusDetail: 'Running ({current}/{total}) — {name}',
+  plannerBlockFailed: "Block '{name}' failed: {error}",
+  plannerRunFinished: 'Planner run finished.',
+  plannerRunStopped: 'Planner run stopped.',
+  plannerRunFailed: 'Planner run failed: {error}',
+
   // ───── Assemble page ─────
   assembleIntroTitle: 'Assemble, Build Your Ideal Robot',
   assembleIntroBody: 'Combine different robot parts to create your ideal robot configuration.',
@@ -458,7 +522,48 @@ export default {
   tutorialWorkspaceRobotConfig:
     "Set the robot's default starting pose (home pose) for each task.",
   tutorialWorkspaceMonitoring:
-    'Click any camera feed or robot card shown here, and the detailed settings for that item appear on the left.',
+    '여기 보이는 카메라 영상이나 로봇 카드를 누르면, 왼쪽에서 그 항목의 세부 설정을 할 수 있어요.',
+  tutorialAugmentIntro:
+    '데이터 증강(Augmentation)은 같은 시연을 색감·밝기·노이즈·시점 등을 살짝씩 바꿔 복제해서 학습 데이터를 늘리는 작업이에요. 직접 더 시연하지 않아도 다양한 환경에 강한 AI를 만들 수 있어요. 왼쪽에서 적용할 항목을 펼치고 슬라이더를 움직이면 오른쪽 미리보기에 즉시 결과가 반영됩니다. 다 정한 뒤 Start Augmentation을 누르면 새 데이터셋이 생성돼요.',
+  tutorialAugmentLightness:
+    '이미지의 밝기를 전체적으로 더 밝게(+) 또는 더 어둡게(−) 조정해요. 같은 작업을 다양한 조명에서 한 것처럼 보이게 만들어, 형광등/햇빛/저녁 같은 환경 변화에 강해집니다.',
+  tutorialAugmentHSV:
+    '색상(Hue)·채도(Saturation)·밝기값(Value)을 살짝씩 바꿔요. 카메라 화이트밸런스가 다르거나 배경 색이 살짝 달라도 잘 동작하게 만드는 데 효과적이에요. Random HSV를 켜면 매번 무작위로 흔들어 더 다양한 변형을 만듭니다.',
+  tutorialAugmentDisturbances:
+    '이미지에 작은 사각형 노이즈를 무작위로 그려 넣어요. 시연 도중 손/물체가 카메라를 살짝 가리는 상황을 흉내내서, 일부분이 가려져도 작업을 이어갈 수 있게 학습됩니다.',
+  tutorialAugmentSaltPepper:
+    '검은 점·흰 점을 무작위로 흩뿌려 카메라 센서 노이즈처럼 보이게 만들어요. 저조도/저화질 카메라에서도 강하게 동작하도록 도와줍니다.',
+  tutorialAugmentGaussian:
+    '평균(Mean)과 표준편차(Sigma)로 정의되는 가우시안 노이즈를 픽셀에 더해요. 일반적인 영상 잡음에 잘 견디는 모델을 만드는 가장 보편적인 방법입니다.',
+  tutorialAugmentPerspective:
+    '이미지 크기·회전·기울임(Shear)·원근(Perspective)을 변형해요. 카메라가 살짝 움직였거나 시점이 조금 달라져도 잘 동작하도록, 시점 변화에 대한 강건성을 높입니다.',
+
+  tutorialMonOverview:
+    '여기 보이는 카메라 영상이나 로봇 카드를 누르면, 왼쪽에서 그 항목의 세부 설정을 할 수 있어요. 카메라/로봇이 모두 켜지면 아래에 데이터 수집 또는 추론 버튼이 나타납니다.',
+  tutorialMonIdlePending:
+    '데이터를 모으기 전에 4가지를 정해주세요. (1) 어느 폴더에 모을지(Dataset) (2) 어떤 작업인지 한 줄 설명(Language Instruction) (3) 어떻게 조종할지(Teleoperation Type) (4) 초당 몇 프레임으로 기록할지(Hz). 빨간 REC 버튼을 누르면 녹화가 시작되고, 버튼 옆 집모양 뱃지를 켜두면 녹화 직전에 로봇이 자동으로 홈 포즈로 이동합니다.',
+  tutorialMonCollectingLeader:
+    'Easy Controller(리더 로봇)로 시연 중이에요. 리더를 직접 움직이면 화면 속 로봇이 그대로 따라오고, 그 동작이 데이터로 저장됩니다. 작업이 잘 끝났으면 SUCCESS(C)를 눌러 성공 라벨을 찍고, COMPLETE로 에피소드를 저장하세요.',
+  tutorialMonCollectingKeyboard:
+    '키보드로 로봇 끝(EE)을 직접 움직이는 모드예요. 왼쪽의 로봇 카드를 한 번 클릭해서 조작 대상을 고른 뒤 — W/S(앞뒤), A/D(좌우), E/Z(위아래), .[/]: 회전, B/N(그리퍼), Space(정지). Step Size를 조절해 한 번에 움직이는 거리를 바꿀 수 있어요. 작업 끝나면 SUCCESS(C) → COMPLETE.',
+  tutorialMonCollectingExternal:
+    '외부 시스템(다른 노드/조이스틱 등)이 로봇을 움직이고 있어요. EasyTrainer는 그 동작을 받아서 그대로 기록만 합니다. 끝나면 SUCCESS(C) → COMPLETE를 누르세요.',
+  tutorialMonCollectingViveExternal:
+    'HTC Vive 트래커로 손을 움직이면 그 위치를 따라 로봇이 함께 움직이고, 그 시연이 기록됩니다. 작업이 끝나면 SUCCESS(C) → COMPLETE.',
+  tutorialMonCollectingViveOnly:
+    '로봇 없이 Vive 트래커의 손 움직임만 기록하는 모드예요. 사람 시연을 데이터화해서 나중에 학습에 쓰기 위한 용도. 끝나면 SUCCESS(C) → COMPLETE.',
+  tutorialMonCollectingMotionPlanning:
+    '외부 ROS2 서비스(예: pick_and_place)가 자동으로 로봇을 움직이고, 그 동작이 데이터로 저장됩니다. 끝나면 SUCCESS(C) → COMPLETE.',
+  tutorialMonViveInit:
+    'Vive 트래커가 켜지길 기다리는 중이에요. 트래커 전원이 켜져 있고 베이스 스테이션과 연결됐는지 확인해주세요.',
+  tutorialMonMovingHome:
+    '로봇이 홈 포즈로 자동 이동 중이에요. 도착하면 곧바로 데이터 수집이 시작됩니다.',
+  tutorialMonReplay:
+    '저장된 에피소드를 다시 재생하는 화면이에요. qaction(저장된 관절 명령) 또는 ee_delta(EE 증분)로 재생할 수 있고, Capture Episode를 켜면 재생하면서 새 데이터셋에 다시 녹화도 됩니다.',
+  tutorialMonInferenceSelected:
+    '학습된 AI(체크포인트)를 골라뒀어요. Hz를 정하고 빨간 Start Inference 버튼을 누르면 AI가 직접 로봇을 움직입니다. 버튼 옆 집모양 뱃지를 켜두면 시작 전에 로봇이 자동으로 홈 포즈로 이동합니다.',
+  tutorialMonInferenceRunning:
+    'AI가 직접 로봇을 움직이는 중이에요. 위쪽 점수(Succeed/OOD)를 보면서 잘 동작하는지 지켜보고, 이상하면 Stop으로 즉시 멈추세요.',
 
   tutorialTrainIntro:
     'A place to teach AI new skills using the data you collected. Pick a workspace above to start the step-by-step training flow.',
@@ -468,6 +573,17 @@ export default {
     'Step to choose the AI type. Create a new policy, or load a previous checkpoint to continue training from there.',
   tutorialTrainStep3:
     'Enter the training computer (server) address, verify connection, and start. Once done, use it from the workspace inference tab.',
+
+  tutorialPlannerIntro:
+    'Build a plan that chains tasks together and runs them in one go. Pick a plan above or create a new one, then stack blocks to automate the flow.',
+  tutorialPlannerWorkspaces:
+    'Add the workspaces this plan will use. Cameras and robots must be turned on here so blocks can run immediately.',
+  tutorialPlannerBlocks:
+    'Blocks run from top to bottom. Drag to reorder, right-click to edit/duplicate/delete.',
+  tutorialPlannerRun:
+    'Press Run All to execute every block in order. Checkpoint blocks are preloaded on start so playback runs without interruption.',
+  tutorialPlannerBlockForm:
+    'Three block types are available: joint position (move to a pose), checkpoint (run a trained AI), and time delay.',
 
   // ───── Pipeline guide ─────
   pipelineGuideTitle: 'Full Usage Guide',
@@ -517,6 +633,13 @@ export default {
     'Pick a finished checkpoint and press Start Inference, and the robot acts autonomously as trained. Adjust details like inference frequency (re-inference steps) and the temporal ensemble coefficient here.',
   pipelineStep6Why:
     'The final step verifying training worked on the real robot. If behavior is off, return to step 4 to augment data, or to step 5 to retrain with another policy/checkpoint. Iterating this 4 → 5 → 6 cycle is the core of the EasyTrainer workflow.',
+
+  pipelineStep7Title: '7. Planner (Chained Execution)',
+  pipelineStep7Where: 'The "Planner" tab in the left menu',
+  pipelineStep7What:
+    'Stack multiple blocks — joint-position moves, trained checkpoints, time delays, and user-confirmation pauses — into a single plan and run them in order with Run All. Multiple workspaces can be combined inside one plan, and checkpoints are preloaded on start so playback runs without interruption.',
+  pipelineStep7Why:
+    'A single trained model rarely covers an end-to-end task on its own. Planner is for orchestrating step 6 outputs into a longer routine — e.g. "go home → run pick checkpoint → wait 1s → run place checkpoint → confirm → go home". This is where individual checkpoints become a real working pipeline.',
 
   pipelinePrev: 'Previous',
   pipelineNext: 'Next',

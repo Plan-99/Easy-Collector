@@ -10,7 +10,7 @@ import traceback
 import requests
 from flask import Blueprint, current_app, request
 
-from ...configs.global_configs import DATASET_DIR, get_checkpoint_dir
+from ...configs.global_configs import DATASET_DIR, CHECKPOINT_DIR, get_checkpoint_dir, resolve_checkpoint_dir
 from ...database.models.checkpoint_model import Checkpoint as CheckpointModel
 
 remote_train_bp = Blueprint('remote_train', __name__)
@@ -218,7 +218,8 @@ def remote_train_receive_model():
 
     ckpt = CheckpointModel.find(checkpoint_id)
     if ckpt is not None:
-        ckpt.update({'status': 'finished'})
+        ckpt.status = 'finished'
+        ckpt.save()
 
     return {'status': 'success', 'checkpoint_id': checkpoint_id}, 200
 

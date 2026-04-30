@@ -63,13 +63,9 @@ class SimRunner:
         self._show_viewer = bool(show_viewer)
         self._viewer = None
 
-        # Reset to keyframe "home" if present
-        try:
-            home_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_KEY, "home")
-            if home_id >= 0:
-                mujoco.mj_resetDataKeyframe(self.model, self.data, home_id)
-        except Exception:
-            mujoco.mj_resetData(self.model, self.data)
+        self._home_keyframe_id = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_KEY, "home")
+        self._reset_to_home()
 
         self._joints = self._build_joint_specs(joint_names)
         self._target = np.array([self.data.ctrl[j.actuator_id] for j in self._joints], dtype=np.float64)
@@ -93,6 +89,8 @@ class SimRunner:
         self._target_lock = threading.Lock()
         self._stop_event = threading.Event()
         self._reset_objects_event = threading.Event()
+        self._reset_request = threading.Event()
+        self._reset_done = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._realtime_factor = float(realtime_factor)
         self._render_period = 1.0 / max(1.0, float(image_publish_hz))
@@ -150,6 +148,34 @@ class SimRunner:
     @property
     def camera_names(self) -> list[str]:
         return list(self._camera_names)
+
+    def _reset_to_home(self) -> None:
+        """Re-load the 'home' keyframe (or zero-init if none defined)."""
+        try:
+            if self._home_keyframe_id >= 0:
+                mujoco.mj_resetDataKeyframe(self.model, self.data, self._home_keyframe_id)
+            else:
+                mujoco.mj_resetData(self.model, self.data)
+        except Exception:
+            mujoco.mj_resetData(self.model, self.data)
+
+    def reset(self, timeout: float = 2.0) -> bool:
+        """Snap world back to the home keyframe (arm + gripper + cube + velocities).
+
+        Performed on the physics thread to avoid racing with mj_step on
+        mjData. We just flip a request flag and wait for the loop to ack;
+        if the loop isn't running we fall back to an in-place reset.
+        """
+        if self._thread is None or not self._thread.is_alive():
+            with self._target_lock:
+                self._reset_to_home()
+                for i, j in enumerate(self._joints):
+                    self._target[i] = float(self.data.ctrl[j.actuator_id])
+            return True
+
+        self._reset_done.clear()
+        self._reset_request.set()
+        return self._reset_done.wait(timeout=timeout)
 
     def get_joint_state(self) -> tuple[np.ndarray, np.ndarray]:
         """Return (positions, velocities) for the configured joints, in order."""
@@ -271,6 +297,18 @@ class SimRunner:
                 if self._reset_objects_event.is_set():
                     self._do_reset_objects()
                     self._reset_objects_event.clear()
+                # Honor reset requests on the physics thread so we don't race
+                # mj_step on mjData. Resets arm + gripper + cube + velocities
+                # via the 'home' keyframe.
+                if self._reset_request.is_set():
+                    with self._target_lock:
+                        self._reset_to_home()
+                        for i, j in enumerate(self._joints):
+                            self._target[i] = float(self.data.ctrl[j.actuator_id])
+                    wall_start = time.monotonic()
+                    sim_start = self.data.time
+                    self._reset_request.clear()
+                    self._reset_done.set()
                 self._apply_targets()
                 mujoco.mj_step(self.model, self.data)
 

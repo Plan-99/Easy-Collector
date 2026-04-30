@@ -1,6 +1,8 @@
 <template>
-    <div class="bg-secondary border-rounded border-white column q-px-sm" style="max-height: 700px;">
-        <div class="col-6 row flex felx-center q-col-gutter-x-sm" v-if="sensors.length > 0">
+    <div class="column full-height" style="max-height: 700px;">
+        <TutorialHint v-if="!monitorOnly" :text="$t(monitoringHintKey)" class="q-mb-sm" />
+        <div class="bg-secondary border-rounded border-white column q-px-sm col">
+        <div :class="[monitorOnly ? 'col' : 'col-6', 'row flex felx-center q-col-gutter-x-sm']" v-if="sensors.length > 0">
             <div v-for="sensor in sensors" :key="sensor.id" class="col q-py-sm relative-position">
                 <web-rtc-video
                     :process-id="`sensor_${sensor.id}`"
@@ -25,10 +27,10 @@
                 <q-chip color="blue-10" text-color="white" class="absolute-top-left" style="top: 20px; left: 15px">{{ sensor.name }} {{ $t('sensorSuffix') }}</q-chip>
             </div>
         </div>
-        <div v-else class="col-6 q-py-sm">
+        <div v-else :class="[monitorOnly ? 'col' : 'col-6', 'q-py-sm']">
             <div class="text-white border-rounded border-white bg-dark full-height flex flex-center">{{ $t('noSensorsMsg') }}</div>
         </div>
-        <div class="col-5 row q-gutter-x-sm" v-if="robots.length > 0">
+        <div :class="[monitorOnly ? 'col' : 'col-5', 'row q-gutter-x-sm']" v-if="robots.length > 0">
             <div v-for="robot in robots" :key="robot.id" class="col column q-pa-md relative-position border-rounded border-white text-white cursor-pointer"
                     :class="{
                         'border-primary': focused.id === robot.id && focused.device_type === 'robot',
@@ -54,9 +56,10 @@
                 <q-chip color="green-10" text-color="white" class="absolute-top-left" style="top: 20px; left: 15px">{{ robot.name }} {{ $t('robotSuffix') }}</q-chip>
             </div>
         </div>
-        <div v-else class="col-5 border-rounded border-white bg-dark flex flex-center">
+        <div v-else :class="[monitorOnly ? 'col' : 'col-5', 'border-rounded border-white bg-dark flex flex-center']">
             <div class="text-white">{{ $t('noRobotsMsg') }}</div>
         </div>
+        <template v-if="!monitorOnly">
         <div class="flex flex-center col" v-if="!isRobotSensorAllOn">
             <div class="text-yellow">{{ $t('startAllDevices') }}</div>
         </div>
@@ -498,6 +501,8 @@
                 </q-card-actions>
             </q-card>
             </q-dialog>
+        </template>
+        </div>
         </div>
 </template>
 
@@ -512,6 +517,7 @@ import WebRtcVideo from './WebRtcVideo.vue';
 import Hdf5Viewer from 'src/components/v2/Hdf5Viewer.vue';
 import FormDialog from './FormDialog.vue';
 import { DEFAULT_KEYBOARD_SETTINGS, AXIS_TO_EE_INDEX, normalizeEventKey } from 'src/configs/teleopDefaults';
+import TutorialHint from './TutorialHint.vue';
 
 
 const { socket } = useSocket();
@@ -541,6 +547,10 @@ const props = defineProps({
     datasets: {
         type: Array,
         required: true
+    },
+    monitorOnly: {
+        type: Boolean,
+        default: false,
     },
 });
 
@@ -595,6 +605,26 @@ const isRobotSensorAllOn = computed(() => {
     const allRobotsOn = props.robots.every(r => r.status === 'on');
     const allSensorsOn = props.sensors.every(s => s.status === 'on');
     return allRobotsOn && allSensorsOn;
+});
+
+const monitoringHintKey = computed(() => {
+    if (!isRobotSensorAllOn.value) return 'tutorialMonOverview';
+    if (selectedEpisode.value?.name && selectedDatasetId.value) return 'tutorialMonReplay';
+    if (checkpoint.value) {
+        return props.status === 'pending' ? 'tutorialMonInferenceSelected' : 'tutorialMonInferenceRunning';
+    }
+    if (props.status === 'pending') return 'tutorialMonIdlePending';
+    if (viveInitializing.value) return 'tutorialMonViveInit';
+    if (movingHomepose.value) return 'tutorialMonMovingHome';
+    switch (teleType.value) {
+        case 'keyboard': return 'tutorialMonCollectingKeyboard';
+        case 'leader': return 'tutorialMonCollectingLeader';
+        case 'external': return 'tutorialMonCollectingExternal';
+        case 'vive_external': return 'tutorialMonCollectingViveExternal';
+        case 'vive_only': return 'tutorialMonCollectingViveOnly';
+        case 'motion_planning': return 'tutorialMonCollectingMotionPlanning';
+        default: return 'tutorialMonOverview';
+    }
 });
 
 function focusSensorRobot(device, type) {
@@ -765,8 +795,25 @@ function sendDelta(robot, eeDelta) {
 }
 
 const keyboardHandler = (event) => {
-    const tag = (event.target?.tagName || '').toLowerCase();
-    if (tag === 'input' || tag === 'textarea') return;
+    // Step size 등 폼 입력란이 포커스된 상태에서, 숫자 편집 키는 입력에 양보하고
+    // 그 외 키(WASD 등 로봇 제어키)는 자동으로 input을 blur 후 그대로 로봇 제어로 처리.
+    const ae = document.activeElement;
+    if (ae) {
+        const tag = ae.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || ae.isContentEditable) {
+            const isEditingKey = (
+                /^[0-9]$/.test(event.key) ||
+                event.key === '.' || event.key === 'e' || event.key === 'E' ||
+                event.key === '+' || event.key === '-' ||
+                event.key === 'Backspace' || event.key === 'Delete' ||
+                event.key === 'Tab' || event.key === 'Enter' ||
+                event.key === 'Home' || event.key === 'End' ||
+                event.key.startsWith('Arrow')
+            );
+            if (isEditingKey) return;
+            ae.blur();
+        }
+    }
 
     const map = keyboardSetting.value.axis_map || {};
     // UI step size override; fall back to assembly setting; finally default.

@@ -9,6 +9,7 @@ from lerobot.configs.types import PolicyFeature, FeatureType
 from ...utils.image_parser import fetch_image_with_config
 
 from ...policies.utils import VISION_BACKBONE_MAP, process_image, relative_trajectory_to_delta, make_easytrainer_processors
+from ...configs.global_configs import resolve_checkpoint_dir
 from collections import deque
 from ...env.env import Env as RemoteEnv
 
@@ -70,6 +71,8 @@ def checkpoint_test(
     temporal_ensemble_coeff=0.01,
     action_type=None,
     inference_episode_len=None,
+    preloaded=None,
+    go_home_first=True,
     ):
 
     agents = sorted(agents, key=lambda a: a.id)
@@ -85,8 +88,7 @@ def checkpoint_test(
         thread_pool = ThreadPoolExecutor(max_workers=len(agents))
         executor = None
         
-        from ...configs.global_configs import get_checkpoint_dir
-        ckpt_dir = get_checkpoint_dir(checkpoint['id'])
+        ckpt_dir = resolve_checkpoint_dir(checkpoint['id'])
 
         action_key = action_type or policy_obj.get('settings', {}).get('action_type') or checkpoint.get('train_settings', {}).get('action_type', 'qaction')
         _obs_keys = policy_obj.get('settings', {}).get('obs_state_keys')
@@ -96,62 +98,87 @@ def checkpoint_test(
         use_relative_trajectory = checkpoint.get('train_settings', {}).get('use_relative_trajectory', False)
         has_succeed = checkpoint.get('train_settings', {}).get('has_succeed', False)
 
+        # Either reuse a CPU-resident model from the planner prefetch cache, or
+        # build everything fresh from disk. Per-block config (temporal ensemble,
+        # n_action_steps) is applied AFTER this branch so the same cached policy
+        # can be driven with different settings across blocks.
+        if preloaded is not None:
+            policy = preloaded['policy']
+            preprocessor = preloaded['preprocessor']
+            postprocessor = preloaded['postprocessor']
+            ood_cpu = preloaded.get('ood') or {}
+            print(f'[INFER] Using preloaded checkpoint {checkpoint["id"]} from CPU cache')
+        else:
+            if policy_obj['type'] == 'ACT':
+                policy = ACTPolicy.from_pretrained(ckpt_dir)
+            elif policy_obj['type'] == 'Diffusion':
+                policy = DiffusionPolicy.from_pretrained(ckpt_dir)
+            elif policy_obj['type'] == 'PI05':
+                from lerobot.policies.pi05.modeling_pi05 import PI05Policy
+                policy = PI05Policy.from_pretrained(ckpt_dir)
+
+            # Load preprocessor/postprocessor saved alongside the model. These wrap input
+            # observations with Normalize and the model output action with Unnormalize, using
+            # the dataset stats captured at training time. Required for correct predictions
+            # on tiny-scale joints (e.g. gripper) — without normalization the L1 loss is
+            # dominated by larger joints and the gripper is essentially untrained.
+            # Older checkpoints (no processor files) return (None, None) so the call site
+            # can stay uniform and fall back to raw I/O.
+            preprocessor, postprocessor = make_easytrainer_processors(
+                policy_type=policy_obj['type'],
+                cfg=policy.config,
+                pretrained_path=ckpt_dir,
+            )
+            ood_cpu = {}
+            ood_features_path = os.path.join(ckpt_dir, 'ood_features.npz')
+            if os.path.exists(ood_features_path) and hasattr(policy, 'enable_feature_caching'):
+                ood_data = np.load(ood_features_path)
+                if 'image_features' in ood_data:
+                    ood_cpu['image_feats'] = torch.from_numpy(ood_data['image_features']).float()
+                if 'state_features' in ood_data:
+                    ood_cpu['state_feats'] = torch.from_numpy(ood_data['state_features']).float()
+                if 'image_dist_sorted' in ood_data:
+                    ood_cpu['image_dist_sorted'] = ood_data['image_dist_sorted']
+                if 'state_dist_sorted' in ood_data:
+                    ood_cpu['state_dist_sorted'] = ood_data['state_dist_sorted']
+
+        # Per-block re-inference / temporal ensemble setup. Always reapply because
+        # the same cached policy may be reused with different params across blocks.
+        # ACT uses ``config.temporal_ensemble_coeff`` (not the attribute) to choose
+        # between ensembler and action-queue branches in select_action/reset, so we
+        # toggle the config flag rather than nulling the attribute.
         if policy_obj['type'] == 'ACT':
-            policy = ACTPolicy.from_pretrained(ckpt_dir)
             # re_inference_steps=1: temporal ensemble 활성화 (매 스텝 추론 + 가중 평균)
             # re_inference_steps>1: temporal ensemble 비활성화, N스텝마다 재추론
             if re_inference_steps == 1:
                 from lerobot.policies.act.modeling_act import ACTTemporalEnsembler
+                policy.config.temporal_ensemble_coeff = temporal_ensemble_coeff
                 policy.temporal_ensembler = ACTTemporalEnsembler(temporal_ensemble_coeff, policy.config.chunk_size)
             else:
+                policy.config.temporal_ensemble_coeff = None
                 policy.config.n_action_steps = re_inference_steps
                 policy._action_queue = deque([], maxlen=re_inference_steps)
         elif policy_obj['type'] == 'Diffusion':
-            policy = DiffusionPolicy.from_pretrained(ckpt_dir)
             policy.config.n_action_steps = re_inference_steps
             policy._queues['action'] = deque(maxlen=re_inference_steps)
-        elif policy_obj['type'] == 'PI05':
-            from lerobot.policies.pi05.modeling_pi05 import PI05Policy
-            policy = PI05Policy.from_pretrained(ckpt_dir)
 
         policy.cuda()
         policy.eval()
         print(f'Loaded Policy from {ckpt_dir}, hz: {hz}, re_inference_steps: {re_inference_steps}, action_key: {action_key}')
 
-        # Load preprocessor/postprocessor saved alongside the model. These wrap input
-        # observations with Normalize and the model output action with Unnormalize, using
-        # the dataset stats captured at training time. Required for correct predictions
-        # on tiny-scale joints (e.g. gripper) — without normalization the L1 loss is
-        # dominated by larger joints and the gripper is essentially untrained.
-        # Older checkpoints (no processor files) return (None, None) so the call site
-        # can stay uniform and fall back to raw I/O.
-        preprocessor, postprocessor = make_easytrainer_processors(
-            policy_type=policy_obj['type'],
-            cfg=policy.config,
-            pretrained_path=ckpt_dir,
-        )
         if preprocessor is None:
             print(f'[INFER][WARN] No processor pipeline found at {ckpt_dir}. '
                   f'Falling back to raw model I/O — retrain to enable normalization.')
         else:
             print(f'[INFER] Loaded preprocessor/postprocessor from {ckpt_dir}')
 
-        # OOD feature store 로드
-        ood_image_feats = None
-        ood_state_feats = None
-        ood_image_dist_sorted = None
-        ood_state_dist_sorted = None
-        ood_features_path = os.path.join(ckpt_dir, 'ood_features.npz')
-        if os.path.exists(ood_features_path) and hasattr(policy, 'enable_feature_caching'):
-            ood_data = np.load(ood_features_path)
-            if 'image_features' in ood_data:
-                ood_image_feats = torch.from_numpy(ood_data['image_features']).float().cuda()
-            if 'state_features' in ood_data:
-                ood_state_feats = torch.from_numpy(ood_data['state_features']).float().cuda()
-            if 'image_dist_sorted' in ood_data:
-                ood_image_dist_sorted = ood_data['image_dist_sorted']
-            if 'state_dist_sorted' in ood_data:
-                ood_state_dist_sorted = ood_data['state_dist_sorted']
+        # OOD reference tensors — keep originals on CPU (so the cache survives),
+        # ship a CUDA copy into the loop. The CUDA copies are freed in finally.
+        ood_image_feats = ood_cpu['image_feats'].cuda() if ood_cpu.get('image_feats') is not None else None
+        ood_state_feats = ood_cpu['state_feats'].cuda() if ood_cpu.get('state_feats') is not None else None
+        ood_image_dist_sorted = ood_cpu.get('image_dist_sorted')
+        ood_state_dist_sorted = ood_cpu.get('state_dist_sorted')
+        if (ood_image_feats is not None or ood_state_feats is not None) and hasattr(policy, 'enable_feature_caching'):
             policy.enable_feature_caching(True)
             print(f'[OOD] Loaded reference features: image={ood_image_feats.shape if ood_image_feats is not None else None}, state={ood_state_feats.shape if ood_state_feats is not None else None}')
 
@@ -252,11 +279,22 @@ def checkpoint_test(
         probing_freqs = np.linspace(0.1, 0.4, joint_len) * 2 * np.pi
 
         policy.reset()
-        _move_to_homepose(env.agents, home_pose, task_control, socketio_instance)
-        if task_control['stop']:
-            return
+        if go_home_first:
+            _move_to_homepose(env.agents, home_pose, task_control, socketio_instance)
+            if task_control['stop']:
+                return
+            print('Robot moved to homepose')
+        # Block until every sensor has produced its first frame; otherwise the
+        # first iteration of the main loop hits ``None`` images.
+        env.wait_for_images(timeout=10.0)
+        # Robots may not have published their first joint_states yet either —
+        # poll until each agent has one before the inference loop reads it.
+        _deadline = time.time() + 10.0
+        while time.time() < _deadline:
+            if all(getattr(a, 'joint_states', None) is not None for a in agents):
+                break
+            time.sleep(0.05)
         ts = env.reset()
-        print('Robot moved to homepose')
         if move_homepose:
             socketio_instance.emit('inference_progress', {
                 'progress': 0.0, 'step': 0, 'episode_len': episode_len,
@@ -585,7 +623,24 @@ def checkpoint_test(
                 bridge_client.uncertainty.StopSubscriber(pb.Empty())
             except Exception:
                 pass
-        
+
+        # Drop GPU copies of the OOD tensors (originals stay on CPU in preloaded).
+        try:
+            del ood_image_feats
+            del ood_state_feats
+        except NameError:
+            pass
+
+        # If the policy came from the planner prefetch cache, return it to CPU
+        # so VRAM is freed for the next block. Otherwise let it go out of scope.
+        if preloaded is not None and 'policy' in locals():
+            try:
+                policy.cpu()
+            except Exception:
+                pass
+        elif 'policy' in locals():
+            del policy
+
         gc.collect()
         torch.cuda.empty_cache()
 

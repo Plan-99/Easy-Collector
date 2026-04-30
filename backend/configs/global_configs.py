@@ -6,6 +6,42 @@ import os
 # EASYTRAINER_DATA_DIR when available so writes land on the persistent volume.
 _data_root = os.environ.get('EASYTRAINER_DATA_DIR')
 DATASET_DIR = os.path.join(_data_root, 'datasets') if _data_root else '/root/src/backend/datasets'
+CHECKPOINT_DIR = os.path.join(_data_root, 'checkpoints') if _data_root else '/root/src/backend/checkpoints'
+
+
+def resolve_checkpoint_dir(checkpoint_id):
+    """Locate the on-disk checkpoint directory for a given id.
+
+    Tries, in order:
+      1. ``$EASYTRAINER_DATA_DIR/checkpoints/<id>`` — canonical install location
+         (where remote_train extracts the downloaded model).
+      2. ``$TRAINING_SERVER_DATA_DIR/checkpoints/<machine_id>/<id>`` — raw output
+         of local in-container training.
+      3. ``/root/src/backend/checkpoints/<id>`` — legacy path from when the
+         project lived under ``src/``.
+
+    Returns the first existing directory, or the canonical path (1) if none
+    exist so callers attempting writes still get a sensible target.
+    """
+    cid = str(checkpoint_id)
+    candidates = [os.path.join(CHECKPOINT_DIR, cid)]
+
+    training_data = os.environ.get('TRAINING_SERVER_DATA_DIR')
+    if training_data:
+        try:
+            from ..utils.machine_id import machine_id
+            candidates.append(os.path.join(training_data, 'checkpoints', machine_id(), cid))
+        except Exception:
+            pass
+
+    legacy = os.path.join('/root/src/backend/checkpoints', cid)
+    if legacy not in candidates:
+        candidates.append(legacy)
+
+    for path in candidates:
+        if os.path.isdir(path):
+            return path
+    return candidates[0]
 
 # Trained checkpoints — training_server가 이 경로에 직접 저장하고 (host volume
 # share), remote 학습 시 _download_and_install_model이 동일한 경로에 풀어준다.

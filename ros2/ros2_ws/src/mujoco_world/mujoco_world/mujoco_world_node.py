@@ -22,7 +22,7 @@ from cv_bridge import CvBridge
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import CompressedImage, JointState
-from std_srvs.srv import Empty
+from std_srvs.srv import Empty, Trigger
 
 from .sim_runner import SimRunner
 
@@ -116,11 +116,13 @@ class MuJoCoWorldNode(Node):
             JointState, f"{self._prefix}/joint_command",
             self._on_joint_command, reliable_qos)
 
-        # 환경 초기화 서비스 — 호출 시 큐브 등 자유 객체만 keyframe 초기 상태로
-        # 되돌린다 (로봇 관절은 그대로). record_episode가 한 에피소드 끝날 때
-        # 호출하여 다음 시연을 동일 출발점에서 시작하기 위함.
+        # 환경 초기화 서비스 — reset_world(Empty)는 큐브 등 자유 객체만 keyframe
+        # 초기 상태로 되돌리고(로봇 관절은 그대로), reset(Trigger)는 home keyframe
+        # 전체로 스냅한다. record_episode/backend가 시점별로 골라 호출.
         self.create_service(
             Empty, f"{self._prefix}/reset_world", self._on_reset_world)
+        self.create_service(
+            Trigger, f"{self._prefix}/reset", self._on_reset)
 
         # --- Timers -----------------------------------------------------
         state_period = 1.0 / max(1.0, float(self.get_parameter("state_publish_hz").value))
@@ -135,6 +137,17 @@ class MuJoCoWorldNode(Node):
         )
 
     # --- Callbacks -----------------------------------------------------
+
+    def _on_reset(self, request: Trigger.Request, response: Trigger.Response) -> Trigger.Response:
+        try:
+            self._sim.reset()
+            response.success = True
+            response.message = "Sim reset to home keyframe."
+        except Exception as e:
+            response.success = False
+            response.message = f"Reset failed: {e}"
+            self.get_logger().error(response.message)
+        return response
 
     def _on_joint_command(self, msg: JointState) -> None:
         if not msg.position:

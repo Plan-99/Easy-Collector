@@ -221,6 +221,70 @@ export default {
   trainLossTrain: '학습 손실',
   trainLossValidate: '검증 손실',
 
+  // ───── Planner page ─────
+  plannerIntroTitle: '플래너, 로봇을 지휘하기',
+  plannerIntroBody: '워크스페이스, 체크포인트, 대기 동작을 하나의 플랜으로 묶어 한 번에 실행하세요.',
+  plannerIntroBody2: '관절 이동, 학습된 정책, 시간 대기를 조합해 재사용 가능한 루틴을 만들어보세요.',
+  plannerCreateFormTitle: '새 플래너 만들기',
+  plannerEditFormTitle: '플래너 편집',
+  plannerSelectLabel: '플래너 선택',
+  plannerInitializing: '준비 중...',
+  plannerSelectFirst: '편집을 시작하려면 위에서 플래너를 선택하세요.',
+  plannerWorkspacesTitle: '워크스페이스',
+  plannerAddWorkspaces: '워크스페이스 추가',
+  plannerAddWorkspacesTitle: '워크스페이스 선택',
+  plannerSensorsTitle: '센서',
+  plannerRobotsTitle: '로봇',
+  plannerNoAssembly: '어셈블리가 연결되어 있지 않습니다.',
+  plannerErrorBadge: '에러',
+  plannerOnline: '켜짐',
+  plannerOffline: '꺼짐',
+  plannerBlocksTitle: '블록',
+  plannerNewBlock: '새 블록',
+  plannerRunAll: '전체 실행',
+  plannerStop: '중지',
+  plannerNoBlocks: '아직 블록이 없습니다. + 버튼으로 추가하세요.',
+  plannerShowDetails: '상세 보기',
+  plannerEditBlock: '블록 편집',
+  plannerCopyBlock: '블록 복제',
+  plannerDeleteBlock: '블록 삭제',
+  plannerCreateBlock: '블록 생성',
+  plannerBlockDetails: '블록 상세',
+  plannerBlockDetailsType: '종류',
+  plannerBlockDetailsName: '이름',
+  plannerBlockDetailsWorkspace: '워크스페이스',
+  plannerBlockDetailsCheckpoint: '체크포인트',
+  plannerBlockDetailsDuration: '지속 시간',
+  plannerBlockTypeLabel: '블록 종류',
+  plannerBlockNameLabel: '블록 이름',
+  plannerWorkspaceLabel: '워크스페이스',
+  plannerCheckpointLabel: '체크포인트',
+  plannerDurationSeconds: '시간 (초)',
+  plannerHzLabel: '추론 Hz',
+  plannerHzHint: '초당 정책을 몇 번 호출할지 설정합니다.',
+  plannerNameLabel: '이름',
+  plannerCreateNew: '+ 새 플래너 만들기',
+  plannerDeleteConfirm: "플래너 '{name}'을(를) 삭제할까요?",
+  plannerSavedPosition: '저장된 자세',
+  plannerMoveBtn: '이동',
+  plannerApplyCurrentPos: '현재 자세 적용',
+  plannerPendantHint: '펜던트로 로봇을 움직인 뒤 "현재 자세 적용"을 눌러 이 구성을 저장하세요.',
+  plannerPendantOffHint: '펜던트를 사용하려면 로봇을 켜주세요.',
+  plannerUnknown: '알 수 없음',
+  plannerUnknownError: '알 수 없는 오류',
+  plannerSelectTypeError: '먼저 블록 종류를 선택하세요.',
+  plannerNameAutoMove: '이동 ({workspace})',
+  plannerNameAutoCheckpoint: '{checkpoint} 실행',
+  plannerNameAutoSleep: '{duration}초 대기',
+  plannerStartingStatus: '시작 중...',
+  plannerStartFailed: '플래너 실행 시작에 실패했습니다.',
+  plannerRunningStatus: '실행 중 ({current}/{total})',
+  plannerRunningStatusDetail: '실행 중 ({current}/{total}) — {name}',
+  plannerBlockFailed: "블록 '{name}' 실패: {error}",
+  plannerRunFinished: '플래너 실행이 완료되었습니다.',
+  plannerRunStopped: '플래너 실행이 중지되었습니다.',
+  plannerRunFailed: '플래너 실행 실패: {error}',
+
   // ───── Assemble page ─────
   assembleIntroTitle: '어셈블, 이상적인 로봇을 조립하자',
   assembleIntroBody: '여러 로봇 부품을 조합해 이상적인 로봇 구성을 만드세요.',
@@ -469,6 +533,17 @@ export default {
   tutorialTrainStep3:
     '학습할 컴퓨터(서버) 주소를 넣고 연결을 확인한 뒤 시작하세요. 학습이 끝나면 워크스페이스 inference 탭에서 바로 써볼 수 있어요.',
 
+  tutorialPlannerIntro:
+    '여러 작업을 순서대로 묶어서 한 번에 실행하는 플랜을 만드는 곳이에요. 위에서 플랜을 고르거나 새로 만들고, 블록을 쌓아서 자동으로 돌려보세요.',
+  tutorialPlannerWorkspaces:
+    '이 플랜에서 쓸 워크스페이스를 골라서 추가하세요. 여기서 카메라/로봇을 켜둬야 블록 실행 시 바로 동작합니다.',
+  tutorialPlannerBlocks:
+    '블록을 위에서부터 차례로 실행해요. 드래그로 순서를 바꾸고, 우클릭으로 수정/복사/삭제할 수 있어요.',
+  tutorialPlannerRun:
+    'Run All을 누르면 모든 블록이 차례대로 실행돼요. 체크포인트 블록은 시작할 때 미리 로드되어 중간에 끊김 없이 이어집니다.',
+  tutorialPlannerBlockForm:
+    '블록은 3가지예요. 관절 위치(원하는 자세로 이동), 체크포인트(학습된 AI 실행), 시간 대기.',
+
   // ───── Pipeline guide ─────
   pipelineGuideTitle: '전체 사용 가이드',
   pipelineGuideSubtitle: '센서 등록부터 학습·추론까지 EasyTrainer 전체 흐름',
@@ -517,6 +592,13 @@ export default {
     '학습이 끝난 체크포인트를 골라 Start Inference를 누르면 로봇이 학습한 대로 자율 동작합니다. 추론 주기(re-inference steps)·temporal ensemble 계수 같은 세부 옵션도 여기서 조정해요.',
   pipelineStep6Why:
     '학습이 잘 됐는지 실제 로봇으로 검증하는 마지막 단계예요. 의도대로 안 움직이면 4번으로 가서 데이터를 보강하거나, 5번에서 다른 정책/체크포인트로 재학습합니다. 이 4 → 5 → 6 사이클을 반복하면서 성능을 끌어올리는 게 EasyTrainer 워크플로의 핵심이에요.',
+
+  pipelineStep7Title: '7. Planner (연쇄 실행)',
+  pipelineStep7Where: '왼쪽 메뉴의 "Planner" 탭',
+  pipelineStep7What:
+    '여러 블록 — 관절 위치 이동, 학습된 체크포인트, 시간 대기, 사용자 확인 정지 — 을 하나의 플랜으로 쌓아 Run All로 차례대로 실행해요. 한 플랜 안에 여러 워크스페이스를 묶을 수 있고, 체크포인트는 시작 시 미리 로드되어 중간 끊김 없이 이어집니다.',
+  pipelineStep7Why:
+    '학습된 모델 하나로 전체 작업을 끝까지 수행하기는 어려워요. Planner는 6단계의 결과물(체크포인트)들을 더 긴 루틴으로 엮는 단계입니다 — 예: "홈으로 → pick 체크포인트 실행 → 1초 대기 → place 체크포인트 실행 → 확인 → 홈으로". 개별 체크포인트가 실제로 동작하는 파이프라인이 되는 단계예요.',
 
   pipelinePrev: '이전',
   pipelineNext: '다음',

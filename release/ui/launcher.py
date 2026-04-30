@@ -776,11 +776,15 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             getattr(self, "btn_folder", None),
             getattr(self, "btn_export", None),
             getattr(self, "btn_logs", None),
+            getattr(self, "btn_modules", None),
+            getattr(self, "btn_training", None),
             getattr(self, "btn_exit", None),
             getattr(self, "pad_box_sync", None),
             getattr(self, "pad_box_folder", None),
             getattr(self, "pad_box_logs", None),
             getattr(self, "pad_box_settings", None),
+            getattr(self, "pad_box_modules", None),
+            getattr(self, "pad_box_training", None),
             getattr(self, "pad_box_exit", None),
         ]
         bounds = None
@@ -872,11 +876,12 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             if gx < pad_x1 or gx >= pad_x2 or gy < pad_y1 or gy >= pad_y2:
                 return False
             boxes = [
-                getattr(self, "pad_box_open_ui", None),
                 getattr(self, "pad_box_sync", None),
                 getattr(self, "pad_box_folder", None),
                 getattr(self, "pad_box_logs", None),
                 getattr(self, "pad_box_settings", None),
+                getattr(self, "pad_box_modules", None),
+                getattr(self, "pad_box_training", None),
                 getattr(self, "pad_box_exit", None),
             ]
             x_min = None

@@ -22,6 +22,7 @@ from flask import Flask, request, jsonify, send_file
 from flask_socketio import SocketIO
 from flask_cors import CORS
 
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.environ.get('TRAINING_SERVER_DATA_DIR', '/data')
 DATASETS_DIR = os.path.join(DATA_DIR, 'datasets')
 CHECKPOINTS_DIR = os.path.join(DATA_DIR, 'checkpoints')
@@ -394,7 +395,16 @@ def _run_training(job_id, job_dir, ckpt_out_dir, config):
         ]
 
         env = os.environ.copy()
-        env['PYTHONPATH'] = f'{APP_DIR}:{APP_DIR}/lerobot/src'
+        # APP_DIR: training_server itself.
+        # APP_DIR/lerobot/src: vendored lerobot.
+        # parent of APP_DIR: in embedded mode (training_server inside backend container)
+        #   this is /root/backend, which exposes `utils`, `api`, etc. as packages.
+        parent_dir = os.path.dirname(APP_DIR)
+        env['PYTHONPATH'] = ':'.join([
+            APP_DIR,
+            os.path.join(APP_DIR, 'lerobot', 'src'),
+            parent_dir,
+        ])
 
         popen_args = {
             'stdout': subprocess.PIPE,
