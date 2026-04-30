@@ -1199,11 +1199,15 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
         item = dict()
         item['language_instruction'] = language_instruction
+        # PI05/PaliGemma pretrained weights expect [-1, 1] (audit-doc bug #1).
+        # Feeding [0, 1] into pi05_base shifts the SigLIP feature distribution and
+        # wrecks pretrained visual grounding; LoRA can't fully recover.
+        _pixel_range = '-11' if self.policy_type == 'PI05' else '01'
         for sensor_id in self.sensor_ids:
             processed_images = []
             for image in image_dict[f"sensor_{sensor_id}"]:
                 image = Image.fromarray(np.array(image))
-                image = process_image(image)
+                image = process_image(image, self.vision_backbone, pixel_range=_pixel_range)
                 processed_images.append(image)
 
             # New lerobot expects [C, H, W] per sample (collate → [batch, C, H, W])
@@ -1240,7 +1244,17 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
 
 
-def process_image(image, vision_backbone='resnet18', to_cuda=False):
+def process_image(image, vision_backbone='resnet18', to_cuda=False, pixel_range='01'):
+    """Preprocess an image into a model-ready tensor.
+
+    pixel_range: '01' → standard torchvision ToTensor output in [0, 1].
+                 '-11' → scaled to [-1, 1] (mandatory for PI05 / PaliGemma / SigLIP —
+                         openpi preprocess_observation explicitly does `img / 255 * 2 - 1`).
+                         Feeding [0, 1] into pi05_base shifts the vision feature
+                         distribution and wrecks pretrained visual grounding (audit-doc
+                         bug #1). NOTE: modeling_pi05._preprocess_images expects [-1,1]
+                         and does NOT re-scale (audit-doc bug #28 fix).
+    """
     if not isinstance(image, Image.Image):
         image = Image.fromarray(np.array(image))
     if vision_backbone not in VISION_BACKBONE_MAP:
@@ -1249,11 +1263,13 @@ def process_image(image, vision_backbone='resnet18', to_cuda=False):
             transforms.ToTensor(),
         ])
         image = image_transform(image)
+        if pixel_range == '-11':
+            image = image * 2.0 - 1.0
     else:
         image_processor = AutoImageProcessor.from_pretrained(VISION_BACKBONE_MAP[vision_backbone])
-        image = image_processor(image)['pixel_values'][0]  # Assuming the image is a PIL Image or numpy array
+        image = image_processor(image)['pixel_values'][0]  # backbone's own normalization
 
-    return image.cuda() if to_cuda else image  # Add batch dimension
+    return image.cuda() if to_cuda else image
 
 
 def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None):
@@ -1480,11 +1496,15 @@ class FullScanDataset(EpisodicDataset):
 
         item = dict()
         item['language_instruction'] = language_instruction
+        # PI05/PaliGemma pretrained weights expect [-1, 1] (audit-doc bug #1).
+        # Feeding [0, 1] into pi05_base shifts the SigLIP feature distribution and
+        # wrecks pretrained visual grounding; LoRA can't fully recover.
+        _pixel_range = '-11' if self.policy_type == 'PI05' else '01'
         for sensor_id in self.sensor_ids:
             processed_images = []
             for image in image_dict[f"sensor_{sensor_id}"]:
                 image = Image.fromarray(np.array(image))
-                image = process_image(image)
+                image = process_image(image, self.vision_backbone, pixel_range=_pixel_range)
                 processed_images.append(image)
 
             # New lerobot expects [C, H, W] per sample (collate → [batch, C, H, W])
@@ -1774,13 +1794,37 @@ def prepare_pi05_language_tokens(batch, config, norm_stats=None):
 
 def forward_pass(batch, policy, norm_stats=None, preprocessor=None):
     data = {k: (v.cuda() if isinstance(v, torch.Tensor) else v) for k, v in batch.items()}
-    # PI05 needs tokenized language inputs
-    if hasattr(policy, 'config') and hasattr(policy.config, 'tokenizer_max_length'):
-        data = prepare_pi05_language_tokens(data, policy.config, norm_stats=norm_stats)
+    # Bridge language_instruction → task for PI05 (audit-doc bug #8). The PI05
+    # preprocessor pipeline expects `complementary_data['task']` (a list of strings).
+    # Datasets / dataloaders may carry it as `language_instruction` instead.
+    is_pi05 = hasattr(policy, 'config') and hasattr(policy.config, 'tokenizer_max_length')
+    if is_pi05 and 'task' not in data:
+        lang = data.get('language_instruction', '')
+        if isinstance(lang, str):
+            # Determine batch size to build a placeholder list of the right length.
+            bsz = None
+            for v in data.values():
+                if isinstance(v, torch.Tensor) and v.dim() >= 1:
+                    bsz = v.shape[0]
+                    break
+            data['task'] = [lang] * (bsz or 1)
+        elif isinstance(lang, (list, tuple)):
+            data['task'] = list(lang)
+        else:
+            data['task'] = ['']
     # Apply input preprocessor (Normalize state/action/images per cfg.normalization_mapping)
     # so the model trains on normalized targets and the gradient is balanced across joints.
+    # The PI05 preprocessor pipeline includes Pi05PrepareStateTokenizerProcessorStep +
+    # TokenizerProcessorStep which write `observation.language.tokens` correctly using
+    # QUANTILE-normalized state and native state_dim (audit-doc bug #23 fix).
     if preprocessor is not None:
         data = preprocessor(data)
+    elif is_pi05:
+        # Fallback for the rare case where preprocessor failed to load (e.g. corrupted
+        # checkpoint json). Use the legacy `prepare_pi05_language_tokens` to produce
+        # *some* language tokens — divergent from training (min-max norm, padded state)
+        # but keeps the model from crashing. Normal flow always has preprocessor.
+        data = prepare_pi05_language_tokens(data, policy.config, norm_stats=norm_stats)
     return policy.forward(data)
 
 

@@ -55,7 +55,28 @@ class PI05Config(PreTrainedConfig):
     # Joint names to exclude from relative (kept absolute). Empty list = all dims relative.
     relative_exclude_joints: list[str] = field(default_factory=lambda: ["gripper"])
     # Populated at runtime from dataset metadata by make_policy.
-    action_feature_names: list[str] | None = None
+    # NOTE: draccus's type-encoder chokes on `list[X] | None` (Python 3.10 union syntax)
+    # when the value is non-None — it dispatches to the wrong encoder and emits
+    # "Couldn't encode <int>". Use `field(default_factory=list)` with default empty
+    # list instead. Empty list means "feature absent / fall through" downstream.
+    action_feature_names: list[str] = field(default_factory=list)
+    # Explicit leading-joint count for delta conversion (openpi `make_bool_mask(N, -1)`
+    # equivalent). When > 0, only the first N action dims become delta; the rest
+    # (gripper, done flag, etc.) stay absolute. 0 = fall back to exclude_joints/mask.
+    # Typical value: 6 for a 6-DOF arm.
+    relative_joints_dim: int = 0
+    # Explicit per-dim mask (True = delta, False = absolute). Most general — use for
+    # dual-arm or interleaved layouts where `relative_joints_dim` isn't enough.
+    # Example (two 6-DOF arms, each with gripper, plus done):
+    #   [T,T,T,T,T,T,F, T,T,T,T,T,T,F, F]
+    # Empty list = fall back to absolute_action_dims / joints_dim path.
+    relative_action_mask: list[bool] = field(default_factory=list)
+    # User-friendly: list of action-dim indices that should stay ABSOLUTE while
+    # all other dims become delta. Easiest UX: "I have 8-dim action, dims 6 and 7
+    # are gripper and done flag → set absolute_action_dims=[6, 7]". Auto-builds the
+    # full mask. Lower priority than relative_action_mask (when non-empty) but
+    # higher than relative_joints_dim. Empty list = fall back to joints_dim.
+    absolute_action_dims: list[int] = field(default_factory=list)
 
     # Real-Time Chunking (RTC) configuration
     rtc_config: RTCConfig | None = None

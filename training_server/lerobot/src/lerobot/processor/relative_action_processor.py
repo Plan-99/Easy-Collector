@@ -45,8 +45,10 @@ def to_relative_actions(actions: Tensor, state: Tensor, mask: Sequence[bool]) ->
         state: (B, state_dim). Broadcast across time dimension.
         mask: Which dims to convert. Can be shorter than action_dim.
     """
-    mask_t = torch.tensor(mask, dtype=actions.dtype, device=actions.device)
-    dims = mask_t.shape[0]
+    # Clip to dims shared by state, action, and mask. Extra action dims (e.g. gripper
+    # when state is qpos-only) stay absolute since there's no matching state value.
+    dims = min(len(mask), state.shape[-1], actions.shape[-1])
+    mask_t = torch.tensor(mask[:dims], dtype=actions.dtype, device=actions.device)
     # Align state to the same device/dtype as actions. _last_state is cached before
     # DeviceProcessorStep moves the transition, so it can be on CPU while actions are on CUDA.
     if state.device != actions.device or state.dtype != actions.dtype:
@@ -67,8 +69,9 @@ def to_absolute_actions(actions: Tensor, state: Tensor, mask: Sequence[bool]) ->
         state: (B, state_dim). Broadcast across time dimension.
         mask: Which dims to convert. Can be shorter than action_dim.
     """
-    mask_t = torch.tensor(mask, dtype=actions.dtype, device=actions.device)
-    dims = mask_t.shape[0]
+    # Match the clipping rule used in to_relative_actions so the inverse stays correct.
+    dims = min(len(mask), state.shape[-1], actions.shape[-1])
+    mask_t = torch.tensor(mask[:dims], dtype=actions.dtype, device=actions.device)
     # Align state to the same device/dtype as actions. _last_state is cached before
     # DeviceProcessorStep moves the transition, so it can be on CPU while actions are on CUDA.
     if state.device != actions.device or state.dtype != actions.dtype:
@@ -101,9 +104,48 @@ class RelativeActionsProcessorStep(ProcessorStep):
     enabled: bool = False
     exclude_joints: list[str] = field(default_factory=list)
     action_names: list[str] | None = None
+    # Explicit per-dim mask (True = delta, False = absolute). Most general: handles
+    # dual-arm or interleaved layouts like [arm1_joints, arm1_gripper, arm2_joints,
+    # arm2_gripper, done] = [T,T,T,T,T,T,F,T,T,T,T,T,T,F,F]. Highest priority — when
+    # set, takes over all other mask-building paths.
+    relative_action_mask: list[bool] | None = None
+    # User-friendly path: list of action dim indices that should stay ABSOLUTE
+    # (everything else becomes delta). Best for the common "everything is a joint
+    # except these few non-joint dims" pattern. Example for a 6-DOF arm + gripper
+    # + done: absolute_action_dims=[6, 7] → joints 0-5 delta, gripper 6 absolute,
+    # done 7 absolute. Dual-arm + 2 grippers + done: [6, 13, 14].
+    absolute_action_dims: list[int] | None = None
+    # Leading-joint shortcut for single-arm rigs: first N dims delta, rest absolute.
+    # Equivalent to openpi's `make_bool_mask(N, -1)`. Used when relative_action_mask
+    # is None. For a 6-DOF arm + gripper + done: relative_joints_dim=6.
+    relative_joints_dim: int | None = None
     _last_state: torch.Tensor | None = field(default=None, init=False, repr=False)
 
     def _build_mask(self, action_dim: int) -> list[bool]:
+        # Priority 1: explicit mask (most general — covers dual-arm, interleaved).
+        # Truthy check (non-empty) so default empty list falls through.
+        if self.relative_action_mask:
+            m = list(self.relative_action_mask)
+            if len(m) < action_dim:
+                m = m + [False] * (action_dim - len(m))  # pad-absolute
+            elif len(m) > action_dim:
+                m = m[:action_dim]
+            return [bool(x) for x in m]
+
+        # Priority 2: absolute_action_dims — user lists which indices stay absolute,
+        # everything else becomes delta. Works for any layout (dual-arm, etc.).
+        if self.absolute_action_dims:
+            mask = [True] * action_dim
+            for idx in self.absolute_action_dims:
+                if 0 <= int(idx) < action_dim:
+                    mask[int(idx)] = False
+            return mask
+
+        # Priority 3: leading-joint shortcut (single-arm). 0 means "not set".
+        if self.relative_joints_dim and self.relative_joints_dim > 0:
+            n = min(self.relative_joints_dim, action_dim)
+            return [True] * n + [False] * (action_dim - n)
+
         if not self.exclude_joints or self.action_names is None:
             return [True] * action_dim
 
@@ -147,6 +189,9 @@ class RelativeActionsProcessorStep(ProcessorStep):
             "enabled": self.enabled,
             "exclude_joints": self.exclude_joints,
             "action_names": self.action_names,
+            "relative_joints_dim": self.relative_joints_dim,
+            "relative_action_mask": self.relative_action_mask,
+            "absolute_action_dims": self.absolute_action_dims,
         }
 
     def transform_features(

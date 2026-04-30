@@ -51,10 +51,21 @@ from lerobot.utils.constants import (
 class Pi05PrepareStateTokenizerProcessorStep(ProcessorStep):
     """
     Processor step to prepare the state and tokenize the language input.
+
+    Note on state_dim: state arrives padded to max_state_dim (32) by upstream feature
+    handling, but only the first ``state_dim`` entries carry real values; the rest are
+    padding zeros. openpi tokenizes the prompt BEFORE padding so its prompt only contains
+    real state tokens. We must replicate that here — feeding pi05_base a 32-token state
+    string (with ~25 padding tokens at mid-bin index ~127) is out-of-distribution for
+    the pretrained prompt format and degrades prefix attention. state_dim defaults to
+    max_state_dim for backward compatibility with older saved processors.
     """
 
     max_state_dim: int = 32
     task_key: str = "task"
+    # Number of REAL (non-padded) state dims to include in the discretized prompt.
+    # Set by make_pi05_pre_post_processors from config.input_features['observation.state'].shape.
+    state_dim: int = 32
 
     def __call__(self, transition: EnvTransition) -> EnvTransition:
         transition = transition.copy()
@@ -73,6 +84,13 @@ class Pi05PrepareStateTokenizerProcessorStep(ProcessorStep):
         # Discretize into 256 bins (see openpi `PaligemmaTokenizer.tokenize()`)
         state_np = state.cpu().numpy()
         discretized_states = np.digitize(state_np, bins=np.linspace(-1, 1, 256 + 1)[:-1]) - 1
+
+        # Truncate to the real state dim — drops padding tokens from the prompt string
+        # so it matches pi05_base's training distribution (variable native length, not
+        # the padded max_state_dim). Slicing on dim -1 handles both (B, max_state_dim)
+        # and (max_state_dim,) shapes.
+        real_dim = min(int(self.state_dim), discretized_states.shape[-1])
+        discretized_states = discretized_states[..., :real_dim]
 
         full_prompts = []
         for i, task in enumerate(tasks):
@@ -131,6 +149,13 @@ def make_pi05_pre_post_processors(
         enabled=config.use_relative_actions,
         exclude_joints=getattr(config, "relative_exclude_joints", []),
         action_names=getattr(config, "action_feature_names", None),
+        # Three ways to specify which dims are delta vs absolute (priority order):
+        #   1. relative_action_mask: explicit per-dim list (full control)
+        #   2. absolute_action_dims: list of indices to keep ABSOLUTE (user-friendly)
+        #   3. relative_joints_dim: int N → first N delta, rest absolute (single-arm)
+        relative_joints_dim=getattr(config, "relative_joints_dim", None),
+        relative_action_mask=getattr(config, "relative_action_mask", None),
+        absolute_action_dims=getattr(config, "absolute_action_dims", None),
     )
 
     # OpenPI order: raw → relative → normalize → model → unnormalize → absolute
@@ -145,7 +170,16 @@ def make_pi05_pre_post_processors(
             norm_map=config.normalization_mapping,
             stats=dataset_stats,
         ),
-        Pi05PrepareStateTokenizerProcessorStep(max_state_dim=config.max_state_dim),
+        # state_dim derived from the dataset feature shape (real, non-padded dim).
+        # Falls back to max_state_dim if the feature is missing for any reason.
+        Pi05PrepareStateTokenizerProcessorStep(
+            max_state_dim=config.max_state_dim,
+            state_dim=int(
+                config.input_features["observation.state"].shape[0]
+                if "observation.state" in config.input_features
+                else config.max_state_dim
+            ),
+        ),
         TokenizerProcessorStep(
             tokenizer_name="google/paligemma-3b-pt-224",
             max_length=config.tokenizer_max_length,
