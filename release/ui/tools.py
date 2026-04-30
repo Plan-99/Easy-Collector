@@ -657,12 +657,20 @@ class ToolingMixin:
         self._ensure_service_running("RESTART", restart_if_running=True, on_finish=_after_restart)
 
     def _quick_apply_script_candidates(self) -> list[Path]:
-        return [
+        candidates = [
             REPO_ROOT_CANDIDATE / "scripts" / "quick_apply.sh",
             Path("/opt/easytrainer/scripts/quick_apply.sh"),
             APP_HOME / "scripts" / "quick_apply.sh",
             self.project_root / "scripts" / "quick_apply.sh",
         ]
+        # Dev source root (user-selected repo) was missing from the candidate list.
+        # Without it the launcher couldn't find scripts/quick_apply.sh from the
+        # current checkout and fell back to _sync_dirs (which has no ignore-patterns
+        # and dies on root-owned files like frontend/.quasar produced inside the
+        # docker container).
+        if self.dev_src_root:
+            candidates.insert(0, Path(self.dev_src_root) / "scripts" / "quick_apply.sh")
+        return candidates
 
     def _resolve_quick_apply_script(self) -> Path | None:
         for cand in self._quick_apply_script_candidates():
@@ -673,16 +681,56 @@ class ToolingMixin:
                 continue
         return None
 
+    # Skip build artifacts and runtime-generated paths that the host launcher
+    # cannot rewrite (Docker container creates them as root, host launcher runs
+    # as the user). These show up under frontend/ and backend/ trees and cause
+    # PermissionError on copy:
+    #   - frontend/.quasar    : Quasar dev-server compiled types (root-owned)
+    #   - frontend/node_modules: package install (root-owned, huge)
+    #   - frontend/dist       : production build output
+    #   - **/__pycache__       : python bytecode caches
+    #   - **/*.pyc             : python bytecode files
+    #   - .venv               : per-host virtualenv if any
+    _SYNC_SKIP_DIRS = (
+        ".quasar", "node_modules", "dist", "__pycache__", ".venv",
+    )
+    _SYNC_SKIP_FILES = (".pyc",)
+
+    def _should_skip_sync(self, path: Path) -> bool:
+        # Skip if any path part matches a known skip-dir, or file ends with skipped suffix.
+        for part in path.parts:
+            if part in self._SYNC_SKIP_DIRS:
+                return True
+        if path.suffix in self._SYNC_SKIP_FILES:
+            return True
+        return False
+
     def _sync_dirs(self, src: Path, dst: Path):
         dst.mkdir(parents=True, exist_ok=True)
         for item in src.rglob("*"):
             rel = item.relative_to(src)
+            # Filter out build artifacts / runtime-generated paths that may be
+            # root-owned inside the docker mount (PermissionError otherwise).
+            if self._should_skip_sync(rel):
+                continue
             target = dst / rel
             if item.is_dir():
-                target.mkdir(parents=True, exist_ok=True)
+                try:
+                    target.mkdir(parents=True, exist_ok=True)
+                except PermissionError:
+                    # Target directory is root-owned (e.g., container created it).
+                    # Skip silently — the directory's contents are also skipped via
+                    # _should_skip_sync once we descend into them.
+                    continue
             else:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(item, target)
+                try:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(item, target)
+                except PermissionError as e:
+                    # Don't abort the whole sync on a single permission issue.
+                    # Log + continue so other files still get copied.
+                    self.append_log(f"[SYNC][SKIP] permission denied: {rel}")
+                    continue
 
     def _sync_core_files(self):
         if not self.dev_src_root:
