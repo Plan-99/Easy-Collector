@@ -94,6 +94,7 @@ export default async function DeviceAuthPage({ searchParams }: Props) {
       termsAcceptedAt: true,
       privacyAcceptedAt: true,
       refundAcceptedAt: true,
+      plan: true,
     },
   });
   const onboarded =
@@ -133,7 +134,9 @@ export default async function DeviceAuthPage({ searchParams }: Props) {
   else if (
     existingDevice &&
     reqRow &&
-    existingDevice.machineId !== reqRow.machineId
+    existingDevice.machineId !== reqRow.machineId &&
+    me?.plan !== "unlimited" &&
+    me?.plan !== "business"
   )
     state = "blocked";
 

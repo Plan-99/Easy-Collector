@@ -7,6 +7,19 @@ import os
 _data_root = os.environ.get('EASYTRAINER_DATA_DIR')
 DATASET_DIR = os.path.join(_data_root, 'datasets') if _data_root else '/root/src/backend/datasets'
 
+# Trained checkpoints — training_server가 이 경로에 직접 저장하고 (host volume
+# share), remote 학습 시 _download_and_install_model이 동일한 경로에 풀어준다.
+# machine_id namespace는 lazy하게 평가해야 하므로 함수로 노출.
+_checkpoint_base = os.path.join(
+    _data_root or '/opt/easytrainer', 'training_data', 'checkpoints'
+)
+
+
+def get_checkpoint_dir(checkpoint_id) -> str:
+    """checkpoint_id에 해당하는 로컬 체크포인트 디렉터리 절대경로."""
+    from ..utils.machine_id import machine_id
+    return os.path.join(_checkpoint_base, machine_id(), str(checkpoint_id))
+
 _ALL_ROBOTS = [
     {
         'name': 'test_arm',

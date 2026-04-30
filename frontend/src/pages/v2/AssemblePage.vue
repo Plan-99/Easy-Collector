@@ -28,7 +28,7 @@
                     <q-menu context-menu>
                             <q-list bordered separator>
                                 <q-item clickable v-ripple class="text-negative" @click="deleteAssembly(assembly)">
-                                    <q-item-section>Hide Assembly</q-item-section>
+                                    <q-item-section>{{ $t('assemblyContextHide') }}</q-item-section>
                                     <q-item-section side>
                                         <q-icon color="negative" name="visibility" size="xs" />
                                     </q-item-section>
@@ -41,7 +41,7 @@
 
         <bottom-terminal
             v-model="watchingAssembly"
-            :tabs="[...assemblies, { name: 'New', id: 'new' }]"
+            :tabs="[...assemblies, { name: $t('assemblyTabNew'), id: 'new' }]"
             tab-label="name"
             tab-value="id"
             no-close
@@ -69,6 +69,9 @@ import { api } from 'src/boot/axios';
 import AssemblyForm from 'src/components/v2/AssemblyForm.vue';
 import BottomTerminal from 'src/components/v2/BottomTerminal.vue';
 import TutorialHint from 'src/components/v2/TutorialHint.vue';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 const assemblies = ref([]);
 // const watchingAssembly = ref(null);
@@ -87,7 +90,7 @@ function listRobots() {
 }
 
 const watchingAssembly = ref({
-    name: 'New',
+    name: t('assemblyTabNew'),
     id: 'new',
 });
 
@@ -108,7 +111,7 @@ function deleteAssembly(assembly) {
     api.delete(`/assembly/${assembly.id}`).then(() => {
         listAssemblies();
         if (watchingAssembly.value && watchingAssembly.value.id === assembly.id) {
-            watchingAssembly.value = { name: 'New', id: 'new' };
+            watchingAssembly.value = { name: t('assemblyTabNew'), id: 'new' };
         }
     });
 }

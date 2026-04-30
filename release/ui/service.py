@@ -50,6 +50,32 @@ def docker_compose_available() -> bool:
     return shutil.which("docker-compose") is not None
 
 
+def grant_local_x11_access() -> None:
+    """Allow the docker container's root user to talk to the host X server.
+
+    MuJoCo viewer / RViz / Quasar PWA(Webview) 등 호스트 디스플레이를 쓰는 GUI는
+    컨테이너 내부 root가 X 서버에 붙을 수 있어야 한다. xhost ACL은 X 세션 동안만
+    유지되므로 런처 시작 시마다 한 번씩 호출해 두는 게 안전.
+
+    Idempotent — 이미 추가돼 있어도 무해. headless / DISPLAY 미설정 / xhost 미설치
+    환경에서는 조용히 skip하므로 서버 환경에서도 문제 없음.
+    """
+    if not os.environ.get("DISPLAY"):
+        return
+    xhost = shutil.which("xhost")
+    if not xhost:
+        return
+    try:
+        subprocess.run(
+            [xhost, "+SI:localuser:root"],
+            check=False, timeout=5,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        # X 서버 미가동 / 권한 부족 등 — 호출자(GUI 시작 단계) 입장에선 비치명적.
+        pass
+
+
 def get_compose_cmd():
     """Return (program, prefix_args) for Compose.
     Prefer `docker compose` (v2 plugin); fallback to legacy `docker-compose`.

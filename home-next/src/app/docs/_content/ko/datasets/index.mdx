@@ -6,17 +6,34 @@ order: 1
 sourceRefs:
   - frontend/src/pages/v2/WorkspacePage.vue
   - frontend/src/components/v2/DataAugmentationDialog.vue
+related:
+  - /docs/data-collection
+  - /docs/training/dataset-select
 lastVerifiedVersion: 0.0.0
 ---
 
 수집한 에피소드는 워크스페이스의 **data 탭**에서 관리합니다.
+한 워크스페이스에 여러 데이터셋을 둘 수 있고, 각각을 학습에 다른 조합으로 사용할 수 있습니다.
+
+## 데이터셋을 분리해야 할 때
+
+| 분리 전략 | 예시 |
+|---------|------|
+| **버전별** | `pick_v1` (초기 시연) / `pick_v2` (개선) |
+| **시점별** | `pick_morning` / `pick_afternoon` (조명 차이) |
+| **시연자별** | `pick_alice` / `pick_bob` (스타일 차이) |
+| **train / eval** | `pick_train` / `pick_eval` (학습·평가 분리) |
 
 ## 가능한 작업
 
-- [리플레이](/docs/datasets/replay) — 에피소드를 다시 재생, 액션 형식 비교, 다른 데이터셋으로 다시 캡처
+- [리플레이](/docs/datasets/replay) — 에피소드를 재생, 액션 형식 비교, 다른 데이터셋으로 다시 캡처
 - [증강](/docs/datasets/augment) — 색상·크롭 변형으로 데이터 양 늘리기
 - [편집](/docs/datasets/edit) — 이름 변경, 병합, sensor/robot 매핑 재지정, 삭제
 
+## 다음 단계
+
+원하는 데이터셋이 준비되면 [학습](/docs/training/dataset-select)에서 한 번에 여러 데이터셋을 선택해 학습할 수 있습니다.
+
 <Callout type="tip">
-같은 작업이라도 데이터셋을 작업 단계별로 분리해 두면 학습 실험이 편합니다 (예: `pick_v1`, `pick_v2`, `pick_eval`).
+같은 작업의 여러 버전을 한 번에 학습하면 일반화에 도움이 됩니다. 예: `pick_v1`(20 ep) + `pick_v2`(15 ep)를 함께 선택해 35 ep 정책 학습.
 </Callout>

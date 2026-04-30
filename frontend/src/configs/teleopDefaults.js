@@ -6,7 +6,7 @@
 // side: 'left' | 'right' — single arm assembly에서는 left만, dual arm에서는 양쪽 모두 활성화.
 // axis: x | y | z | ax | ay | az | tool
 // sign: +1 | -1
-// scale: stepSize 곱 (회전축 기본 20, gripper 30)
+// scale: stepSize 곱 (회전축 기본 20, gripper 1)
 
 export const DEFAULT_KEYBOARD_AXIS_MAP = {
   // ── Left arm (or single arm) ──
@@ -22,8 +22,8 @@ export const DEFAULT_KEYBOARD_AXIS_MAP = {
   'shift+d': { side: 'left', axis: 'ay', sign: -1, scale: 20 },
   'shift+e': { side: 'left', axis: 'az', sign: +1, scale: 20 },
   'shift+z': { side: 'left', axis: 'az', sign: -1, scale: 20 },
-  c: { side: 'left', axis: 'tool', sign: +1, scale: 30 },
-  v: { side: 'left', axis: 'tool', sign: -1, scale: 30 },
+  c: { side: 'left', axis: 'tool', sign: +1, scale: 1 },
+  v: { side: 'left', axis: 'tool', sign: -1, scale: 1 },
 
   // ── Right arm (dual arm assembly에서만 노출) ──
   '.': { side: 'right', axis: 'x', sign: +1, scale: 1 },
@@ -38,12 +38,12 @@ export const DEFAULT_KEYBOARD_AXIS_MAP = {
   'shift+;': { side: 'right', axis: 'ay', sign: -1, scale: 20 },
   'shift+l': { side: 'right', axis: 'az', sign: +1, scale: 20 },
   "shift+'": { side: 'right', axis: 'az', sign: -1, scale: 20 },
-  m: { side: 'right', axis: 'tool', sign: +1, scale: 30 },
-  n: { side: 'right', axis: 'tool', sign: -1, scale: 30 },
+  m: { side: 'right', axis: 'tool', sign: +1, scale: 1 },
+  n: { side: 'right', axis: 'tool', sign: -1, scale: 1 },
 }
 
 export const DEFAULT_KEYBOARD_SETTINGS = {
-  step_size: 0.0005,
+  step_size: 0.003,
   axis_map: { ...DEFAULT_KEYBOARD_AXIS_MAP },
 }
 

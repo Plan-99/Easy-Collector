@@ -22,22 +22,21 @@
 
 폴더: `public/docs/installation/`
 
+GUI 흐름 우선. 터미널 명령은 트러블슈팅에서만 다루므로 별도 캡처 슬롯 없음.
+
 | # | 파일명 | 캡처 대상 (UI 위치) |
 |---|---|---|
-| - [ ] 01 | `01-docker-version.png` | 터미널 `docker --version` 출력 |
-| - [ ] 02 | `02-nvidia-smi.png` | `nvidia-smi` + `docker run --gpus all hello-world` 출력 |
-| - [ ] 03 | `03-df-check.png` | `df -h /` 출력 (≥20 GB 여유 보이도록) |
-| - [ ] 04 | `04-deb-download.png` | home-next 다운로드 페이지 또는 GitHub Releases |
-| - [ ] 05 | `05-apt-install.png` | `sudo apt install ./easytrainer_*.deb` 터미널 출력 |
-| - [ ] 06 | `06-launcher-launch.png` | `easytrainer-launcher` 첫 실행 셸 명령 |
-| - [ ] 07 | `07-login-dialog.png` | "Easy Trainer 로그인" 다이얼로그 (560×260) |
-| - [ ] 08 | `08-browser-oauth.png` | 브라우저 `/auth/device?code=...` Google OAuth 동의 |
-| - [ ] 09 | `09-installer-eula.png` | 설치 마법사 page 0 — EULA + 동의함 체크박스 |
-| - [ ] 10 | `10-installer-disk.png` | page 1 — 저장 공간 확인 (현재 여유 공간 X.X GB) |
-| - [ ] 11 | `11-installer-mode.png` | page 2 — CPU/GPU 라디오 + GPU 정보 박스 + 학습 서버 선택 |
-| - [ ] 12 | `12-installer-progress.png` | page 3 — 설치 중 progress bar + 로그 |
-| - [ ] 13 | `13-installer-done.png` | page 4 — 설치 완료 + "Easy Trainer 실행하기" 체크박스 |
-| - [ ] 14 | `14-launcher-main.png` | 메인 런처 floating pill bar 전체 (상태등 포함) |
+| - [ ] 01 | `01-deb-download.png` | 다운로드 페이지 또는 GitHub Releases — easytrainer_*.deb 항목 |
+| - [ ] 02 | `02-gui-install.png` | 파일 매니저에서 deb 더블클릭 후 뜨는 Ubuntu Software Install 다이얼로그 (Install 버튼 보이게) |
+| - [ ] 03 | `03-launcher-app-menu.png` | Activities/시작 메뉴에서 "Easy Trainer" 검색 결과 + 아이콘 |
+| - [ ] 04 | `04-login-dialog.png` | PyQt "Easy Trainer 로그인" 다이얼로그 (560×260) |
+| - [ ] 05 | `05-browser-oauth.png` | 브라우저 `/auth/device?code=...` Google OAuth 동의 화면 |
+| - [ ] 06 | `06-installer-eula.png` | 설치 마법사 page 0 — EULA + 동의함 체크박스 |
+| - [ ] 07 | `07-installer-disk.png` | page 1 — 저장 공간 확인 (현재 여유 공간 X.X GB) |
+| - [ ] 08 | `08-installer-mode.png` | page 2 — 학습 서버 옵션 라디오 (원격 기본값 / 로컬) |
+| - [ ] 09 | `09-installer-progress.png` | page 3 — 설치 중 progress bar + 로그 |
+| - [ ] 10 | `10-installer-done.png` | page 4 — 설치 완료 + "Easy Trainer 실행하기" 체크박스 |
+| - [ ] 11 | `11-launcher-main.png` | 메인 런처 floating pill bar 전체 (상태등 포함) |
 
 ---
 
@@ -49,7 +48,6 @@
 | # | 파일명 | 캡처 대상 |
 |---|---|---|
 | - [ ] 01 | `01-tutorial-toggle.png` | MainLayout 사이드바 Tutorial 토글 |
-| - [ ] 02 | `02-tutorial-running.png` | 헤더 "Tutorial Mode" chip + "Sim running" 상태 |
 | - [ ] 03 | `03-pipeline-guide.png` | PipelineGuideDialog — 6단계 stepper 펼친 상태 |
 
 ### 센서 확인
@@ -80,7 +78,6 @@
 |---|---|---|
 | - [ ] 15 | `15-teleop-overview.png` | TeleoperationPage — 카드 mode indicator (키보드 ✅, 게임패드 ❌) |
 | - [ ] 16 | `16-teleop-setting-open.png` | 카드 ⚙️ 버튼 클릭 → TeleSettingDialog 열림 |
-| - [ ] 17 | `17-teleop-general.png` | TeleSettingDialog General 탭 (EE offset) |
 | - [ ] 18 | `18-teleop-keyboard.png` | Keyboard 탭 — step size + 키 매핑 표 |
 | - [ ] 19 | `19-teleop-running.png` | TeleopConsole — Start Keyboard Teleop 활성 + 로그 |
 
@@ -102,7 +99,6 @@
 | - [ ] 28 | `28-monitoring-overview.png` | MonitoringWindow 전체 (sensor feed + robot state) |
 | - [ ] 29 | `29-record-setup.png` | 수집 setup row (Dataset/Instruction/Teleop type/Hz/REC) |
 | - [ ] 30 | `30-moving-home.png` | "Moving to Home Pose" 스피너 |
-| - [ ] 31 | `31-recording.png` | 수집 중 — progress bar + SUCCESS/DONE/STOP 버튼 |
 | - [ ] 32 | `32-episode-done.png` | DONE 후 다음 에피소드 자동 시작 |
 | - [ ] 33 | `33-dataset-10-episodes.png` | data 탭 expansion — 10 에피소드 쌓인 모습 |
 
@@ -113,7 +109,6 @@
 | - [ ] 35 | `35-train-dataset-select.png` | step1 — 데이터셋 카드 선택 + Continue |
 | - [ ] 36 | `36-train-step2-newpolicy.png` | step2 — "Create New Policy +" 선택 |
 | - [ ] 37 | `37-train-act-form.png` | Policy 타입 = ACT 파라미터 폼 |
-| - [ ] 38 | `38-train-step3.png` | Save 후 Continue → step3 |
 | - [ ] 39 | `39-train-server-ok.png` | Training Server URL 입력 + 헬스체크 OK |
 | - [ ] 40 | `40-training-running.png` | TrainingDialog — progress bar + loss chart + ProcessConsole |
 | - [ ] 41 | `41-train-done.png` | 학습 완료 — 우하단 floating button |
@@ -319,10 +314,10 @@
 
 ## 진행 요약
 
-총 **약 165장**의 스크린샷이 필요합니다. 빠른 시작(섹션 2)이 44장으로 가장 큰 비중이며, 나머지는 reference에 가깝습니다.
+총 **약 162장**의 스크린샷이 필요합니다. 빠른 시작(섹션 2)이 44장으로 가장 큰 비중이며, 나머지는 reference에 가깝습니다.
 
 캡처 우선순위 권장:
-1. **installation (14장)** — 첫 사용자가 가장 먼저 보는 섹션
+1. **installation (11장)** — 첫 사용자가 가장 먼저 보는 섹션
 2. **quickstart (44장)** — 가장 가치 높은 가이드
 3. **modules / training / inference** — 자주 참조됨
 4. 나머지 reference 섹션은 점진적으로

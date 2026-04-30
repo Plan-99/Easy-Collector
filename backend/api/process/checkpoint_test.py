@@ -28,6 +28,32 @@ import gc
 import threading
 
 
+def _move_to_homepose(agents, home_pose, task_control, socketio_instance, timeout=30.0):
+    """home_pose가 None이거나 매핑이 없으면 즉시 리턴.
+
+    record_episode와 동일 패턴: agent.is_moving 폴링 + 안정화 대기.
+    moving_homepose 이벤트로 프론트엔드 오버레이를 켰다 끈다.
+    """
+    if home_pose is None:
+        return
+    socketio_instance.emit('moving_homepose', {'moving': True})
+    try:
+        for agent in agents:
+            target = home_pose.get(str(agent.id))
+            if target is not None:
+                agent.move_to(target)
+        start_wait = time.time()
+        while time.time() - start_wait < timeout:
+            if task_control.get('stop'):
+                return
+            if not any(a.is_moving for a in agents):
+                break
+            time.sleep(0.1)
+        time.sleep(0.5)  # 안정화 대기 (record_episode와 동일)
+    finally:
+        socketio_instance.emit('moving_homepose', {'moving': False})
+
+
 def checkpoint_test(
     node,
     checkpoint,
@@ -43,6 +69,7 @@ def checkpoint_test(
     re_inference_steps=1,
     temporal_ensemble_coeff=0.01,
     action_type=None,
+    inference_episode_len=None,
     ):
 
     agents = sorted(agents, key=lambda a: a.id)
@@ -58,7 +85,8 @@ def checkpoint_test(
         thread_pool = ThreadPoolExecutor(max_workers=len(agents))
         executor = None
         
-        ckpt_dir = os.path.join("/root/src/backend/checkpoints", str(checkpoint['id']))
+        from ...configs.global_configs import get_checkpoint_dir
+        ckpt_dir = get_checkpoint_dir(checkpoint['id'])
 
         action_key = action_type or policy_obj.get('settings', {}).get('action_type') or checkpoint.get('train_settings', {}).get('action_type', 'qaction')
         _obs_keys = policy_obj.get('settings', {}).get('obs_state_keys')
@@ -135,9 +163,17 @@ def checkpoint_test(
 
         # 환경 및 RL 에이전트 초기화
         state_dim = sum(agent.joint_len for agent in agents)
-        env = RemoteEnv(agents, sensors)
+        tutorial = any((s.get('settings') or {}).get('is_tutorial') for s in (sensors or []))
+        env = RemoteEnv(agents, sensors, tutorial=tutorial)
         vision_backbone = policy_obj.get('vision_backbone')
-        episode_len = task.get('episode_len', 300) * 1.5
+        # 추론 1 에피소드 길이 — move_homepose가 켜져 있으면 이 step 만큼 추론한 뒤
+        # 다시 home으로 돌아간다. 프론트에서 명시한 값이 있으면 그것을 쓰고,
+        # 없으면 task의 episode_len * 2를 기본값으로 사용.
+        _base_ep_len = int(task.get('episode_len', 300))
+        if inference_episode_len:
+            episode_len = max(1, int(inference_episode_len))
+        else:
+            episode_len = max(1, _base_ep_len * 2)
 
         # OTI-RL 관련 요소들 조건부 초기화
         if oti_rl:
@@ -216,12 +252,15 @@ def checkpoint_test(
         probing_freqs = np.linspace(0.1, 0.4, joint_len) * 2 * np.pi
 
         policy.reset()
-        if home_pose is not None:
-            for agent in env.agents:
-                agent.move_to(home_pose[str(agent.id)])
-        time.sleep(8)
+        _move_to_homepose(env.agents, home_pose, task_control, socketio_instance)
+        if task_control['stop']:
+            return
         ts = env.reset()
         print('Robot moved to homepose')
+        if move_homepose:
+            socketio_instance.emit('inference_progress', {
+                'progress': 0.0, 'step': 0, 'episode_len': episode_len,
+            })
 
         prev_qpos_dict = {}
         for agent in agents:
@@ -235,15 +274,27 @@ def checkpoint_test(
                 episode_reward = 0.0
                 policy.reset()
                 rel_action_queue.clear()
-                if home_pose is not None:
-                    for agent in env.agents:
-                        agent.move_to(home_pose[str(agent.id)])
-                time.sleep(6)
+                _move_to_homepose(env.agents, home_pose, task_control, socketio_instance)
+                if task_control['stop']:
+                    return
                 ts = env.reset()
                 for agent in agents:
                     if agent.role != 'tool' and agent.ik_solver is not None:
                         prev_qpos_dict[agent.id] = ts.observation['robot_states'][agent.id]['qpos']
                 print('Robot moved to homepose')
+                socketio_instance.emit('inference_progress', {
+                    'progress': 0.0, 'step': 0, 'episode_len': episode_len,
+                })
+
+            if move_homepose:
+                ep_step = step_num % episode_len
+                # progress emit은 5 step마다(또는 episode 막판) — 너무 자주 보내면 UI 깜빡임.
+                if ep_step % 5 == 0 or ep_step == episode_len - 1:
+                    socketio_instance.emit('inference_progress', {
+                        'progress': ep_step / episode_len,
+                        'step': ep_step,
+                        'episode_len': episode_len,
+                    })
 
             # 일정 스텝마다 강제 메모리 정리 (예: 100스텝마다)
             if step_num % 100 == 0:

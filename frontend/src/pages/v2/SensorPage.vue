@@ -13,18 +13,18 @@
 
         <div class="row q-col-gutter-md">
             <div class="col-6 col-sm-4 col-md-3 col-lg-2"  v-for="sensor in sensors" :key="sensor.id">
-                <q-card class="q-pa-md bg-secondary border-rounded border-white text-white" :class="watchingSensor && sensor.id === watchingSensor.id ? 'border-primary' : ''">
+                <q-card class="q-pa-md bg-secondary border-rounded border-white text-white full-height" :class="watchingSensor && sensor.id === watchingSensor.id ? 'border-primary' : ''">
                     <q-img :src="sensor.image" @click="watchSensor(sensor)" class="cursor-pointer bg-white" ratio="2.5" fit="contain">
                         <q-menu context-menu>
                             <q-list bordered separator>
                                 <q-item clickable v-ripple v-close-popup @click="openEditSensorForm(sensor)">
-                                    <q-item-section>Edit Sensor</q-item-section>
+                                    <q-item-section>{{ $t('sensorContextEdit') }}</q-item-section>
                                     <q-item-section side>
                                         <q-icon name="edit" size="xs" />
                                     </q-item-section>
                                 </q-item>
                                 <q-item clickable v-ripple class="text-negative" @click="deleteSensor(sensor)">
-                                    <q-item-section>Hide Sensor</q-item-section>
+                                    <q-item-section>{{ $t('sensorContextHide') }}</q-item-section>
                                     <q-item-section side>
                                         <q-icon color="negative" name="visibility" size="xs" />
                                     </q-item-section>
@@ -41,9 +41,9 @@
                         <!-- <div class="text-grey-6 text-caption" v-if="sensor.device_index">Device Index: {{ sensor.device_index }}</div> -->
                     </q-card-section>
                     <q-card-section class="q-pa-none q-mt-sm row" v-if="sensor.type !== 'custom'">
-                        <div class="text-primary text-caption" v-if="sensor.status === 'on'">ONLINE</div>
-                        <div class="text-orange text-caption" v-if="sensor.status === 'loading'">LOADING</div>
-                        <div class="text-grey-7 text-caption" v-if="sensor.status === 'off'">OFFLINE</div>
+                        <div class="text-primary text-caption" v-if="sensor.status === 'on'">{{ $t('statusOnline') }}</div>
+                        <div class="text-orange text-caption" v-if="sensor.status === 'loading'">{{ $t('statusLoading') }}</div>
+                        <div class="text-grey-7 text-caption" v-if="sensor.status === 'off'">{{ $t('statusOffline') }}</div>
                         <q-space></q-space>
                         <q-toggle
                             :model-value="sensor.status === 'on'"
@@ -53,9 +53,9 @@
                         />
                     </q-card-section>
                     <q-card-section class="q-pa-none q-mt-sm row" v-else>
-                        <div class="text-primary text-caption" v-if="sensor.status === 'on'">TOPIC ON</div>
-                        <div class="text-grey-7 text-caption" v-else-if="sensor.status === 'off'">TOPIC OFF</div>
-                        <div class="text-grey-7 text-caption" v-else>LOADING</div>
+                        <div class="text-primary text-caption" v-if="sensor.status === 'on'">{{ $t('topicOn') }}</div>
+                        <div class="text-grey-7 text-caption" v-else-if="sensor.status === 'off'">{{ $t('topicOff') }}</div>
+                        <div class="text-grey-7 text-caption" v-else>{{ $t('statusLoading') }}</div>
                     </q-card-section>
                     <TutorialHint
                         v-if="tutorial.running && tutorial.sensorId === sensor.id"
@@ -78,7 +78,7 @@
                 </q-card>
             </div>
             
-            <div class="col-6 col-sm-4 col-md-3  col-lg-2" style="min-height: 220px;" >
+            <div class="col-6 col-sm-4 col-md-3  col-lg-2" :style="!sensors.length ? 'min-height: 220px;' : ''" >
                 <q-btn color="white" class="full-height full-width border-rounded" outline size="lg" icon="add" @click="openAddSensorForm"></q-btn>
                 <TutorialHint step="2" class="q-mt-sm" :text="$t('tutorialSensorAdd')" />
             </div>
@@ -156,16 +156,16 @@ const sensorForm = ref([
     { key: 'ip_address', label: t('ipAddress'), value: '', default: '192.168.50.10', type: 'text', show: (form) => getFormSensorInfo(form) && getFormSensorInfo(form).custom_fields && getFormSensorInfo(form).custom_fields.includes('ip_address') },
     { key: 'device_index', label: t('deviceIndex'), value: 0, default: 0, type: 'number', show: (form) => getFormSensorInfo(form) && getFormSensorInfo(form).custom_fields && getFormSensorInfo(form).custom_fields.includes('device_index') },
     // Custom sensor fields
-    { key: 'read_topic', label: 'Read Topic', value: '', default: '', type: 'text', show: isCustomSensor },
-    { key: 'read_topic_msg', label: 'Read Topic Message Type', value: 'sensor_msgs/CompressedImage', default: 'sensor_msgs/CompressedImage', type: 'select',
+    { key: 'read_topic', label: t('customSensorReadTopic'), value: '', default: '', type: 'text', show: isCustomSensor },
+    { key: 'read_topic_msg', label: t('customSensorReadTopicMsgType'), value: 'sensor_msgs/CompressedImage', default: 'sensor_msgs/CompressedImage', type: 'select',
         options: [
             { label: 'sensor_msgs/CompressedImage', value: 'sensor_msgs/CompressedImage' },
             { label: 'sensor_msgs/Image', value: 'sensor_msgs/Image' },
         ],
         show: isCustomSensor
     },
-    { key: 'resolution_width', label: 'Resolution Width', value: 640, default: 640, type: 'number', show: isCustomSensor },
-    { key: 'resolution_height', label: 'Resolution Height', value: 480, default: 480, type: 'number', show: isCustomSensor },
+    { key: 'resolution_width', label: t('customSensorResolutionWidth'), value: 640, default: 640, type: 'number', show: isCustomSensor },
+    { key: 'resolution_height', label: t('customSensorResolutionHeight'), value: 480, default: 480, type: 'number', show: isCustomSensor },
 ]);
 const showSensorForm = ref(false);
 const watchingSensor = ref(null);
@@ -249,7 +249,7 @@ function deleteSensor(sensor) {
     if (sensor.status === 'on') {
         Notify.create({
             color: 'negative',
-            message: 'Turn off the sensor first.'
+            message: t('errorTurnOffSensorFirst')
         })
         return;
     }

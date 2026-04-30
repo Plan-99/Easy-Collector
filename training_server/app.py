@@ -27,6 +27,15 @@ DATASETS_DIR = os.path.join(DATA_DIR, 'datasets')
 CHECKPOINTS_DIR = os.path.join(DATA_DIR, 'checkpoints')
 UPLOADS_DIR = os.path.join(DATA_DIR, 'uploads')
 
+# 학습 자식 프로세스의 cwd / PYTHONPATH 베이스. 이 파일이 위치한 디렉터리를 기본
+# 으로 쓴다 — training_server가 자체 컨테이너(WORKDIR=/app) 안이든, backend
+# 컨테이너 안의 마운트 경로(/root/backend/training_server) 안이든 자동으로 잡힘.
+# 외부에서 강제하려면 TRAINING_SERVER_APP_DIR 환경변수로 override 가능.
+APP_DIR = os.environ.get(
+    'TRAINING_SERVER_APP_DIR',
+    os.path.dirname(os.path.abspath(__file__)),
+)
+
 for d in [DATASETS_DIR, CHECKPOINTS_DIR, UPLOADS_DIR]:
     os.makedirs(d, exist_ok=True)
 
@@ -385,7 +394,7 @@ def _run_training(job_id, job_dir, ckpt_out_dir, config):
         ]
 
         env = os.environ.copy()
-        env['PYTHONPATH'] = '/app:/app/lerobot/src'
+        env['PYTHONPATH'] = f'{APP_DIR}:{APP_DIR}/lerobot/src'
 
         popen_args = {
             'stdout': subprocess.PIPE,
@@ -393,7 +402,7 @@ def _run_training(job_id, job_dir, ckpt_out_dir, config):
             'text': True,
             'bufsize': 1,
             'env': env,
-            'cwd': '/app',
+            'cwd': APP_DIR,
         }
         if os.name != 'nt':
             popen_args['preexec_fn'] = os.setsid

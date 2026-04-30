@@ -5,9 +5,11 @@
 <script setup>
 import { onMounted } from 'vue';
 import { useProcessStore } from 'src/stores/processStore';
+import { useTopicStore } from 'src/stores/topicStore';
 import { api } from 'src/boot/axios';
 
 const processStore = useProcessStore();
+const topicStore = useTopicStore();
 
 function cleanup() {
   processStore.processIds.forEach((processId) => {
@@ -29,6 +31,14 @@ onMounted(() => {
     cleanup();
   }).catch((error) => {
     console.error('Error initializing process store:', error);
+  });
+
+  // 활성 ROS2 토픽 push 구독 — useRobot/useSensor가 이 store를 watch하여
+  // 토픽 가시성 변화에 자동 반응한다.
+  topicStore.initialize().then(() => {
+    console.log('Topic store initialized');
+  }).catch((error) => {
+    console.error('Error initializing topic store:', error);
   });
 
   // onMounted(() => {

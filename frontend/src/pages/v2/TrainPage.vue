@@ -12,7 +12,7 @@
                         bg-color="dark"
                         v-model="selectedWorkspaceId"
                         :options="workspaces"
-                        label="Select Workspace"
+                        :label="$t('workspaceSelectLabel')"
                         style="width: 400px"
                         class="q-ml-lg"
                         map-options
@@ -30,17 +30,17 @@
         <TutorialHint class="q-mb-md" :text="$t('tutorialTrainIntro')" />
 
         <div class="col q-mb-lg border-rounded border-grey text-grey flex-center flex text-h6" v-if="!selectedWorkspaceId">
-            Select Workspace First
+            {{ $t('selectWorkspaceFirst') }}
         </div>
         <q-stepper v-model="step" ref="stepper" animated dark v-else flat class="col" active-color="accent" done-color="accent" >
             <q-step
                 :name="1"
-                title="Select Datasets"
+                :title="$t('trainStep1Title')"
                 icon="collections_bookmark"
                 :done="step > 1"
                 class="border-white border-rounded q-mt-lg bg-secondary col"
             >
-                <div class="text-h6 q-mb-md">Select datasets for training</div>
+                <div class="text-h6 q-mb-md">{{ $t('trainStep1Heading') }}</div>
                 <TutorialHint step="1" class="q-mb-md" :text="$t('tutorialTrainStep1')" />
                 <q-scroll-area style="height: 420px">                
                     <div class="row q-col-gutter-md">
@@ -74,18 +74,18 @@
                     </div>
                 </q-scroll-area>
                 <q-stepper-navigation align="right" class="q-mt-md">
-                    <q-btn @click="nextStep" color="primary" outline :label="'Continue'"/>
+                    <q-btn @click="nextStep" color="primary" outline :label="$t('continueBtn')"/>
                 </q-stepper-navigation>
             </q-step>
 
             <q-step
                 :name="2"
-                title="Select Policy"
+                :title="$t('trainStep2Title')"
                 icon="policy"
                 :done="step > 2"
                 class="border-white border-rounded q-mt-lg bg-secondary col"
             >
-                <div class="text-h6 q-mb-md">Configure Policy</div>
+                <div class="text-h6 q-mb-md">{{ $t('trainStep2Heading') }}</div>
                 <TutorialHint step="2" class="q-mb-md" :text="$t('tutorialTrainStep2')" />
                 <div class="row">
                     <q-scroll-area class="col-12" style="height: 420px">                
@@ -95,7 +95,7 @@
                                     outlined
                                     v-model="selectedCheckpoint"
                                     :options="checkpointOptions"
-                                    label="Load Model from Checkpoint"
+                                    :label="$t('trainPolicyLoadFromCheckpoint')"
                                     emit-value
                                     map-options
                                     clearable
@@ -121,7 +121,7 @@
                                     outlined
                                     v-model="selectedPolicy"
                                     :options="policyOptions"
-                                    label="Select Policy"
+                                    :label="$t('trainPolicySelect')"
                                     emit-value
                                     map-options
                                     :disable="!!selectedCheckpoint"
@@ -132,7 +132,7 @@
                                     <template v-slot:option="scope">
                                         <q-item v-if="scope.opt.value === 'new'" v-bind="scope.itemProps" @click="handleCreateNewPolicy">
                                             <q-item-section>
-                                                <q-item-label class="text-grey">Create New Policy +</q-item-label>
+                                                <q-item-label class="text-grey">{{ $t('trainPolicyCreateNew') }}</q-item-label>
                                             </q-item-section>
                                         </q-item>
                                         <q-item v-else v-bind="scope.itemProps">
@@ -154,10 +154,10 @@
                             <q-card-section>
                                 <q-form class="q-col-gutter-md row">
                                     <div class="col-6">
-                                        <q-input dense outlined v-model="policyForm.name" class="bg-secondary" dark label="Policy Name" :readonly="isNameReadonly" />
+                                        <q-input dense outlined v-model="policyForm.name" class="bg-secondary" dark :label="$t('trainPolicyName')" :readonly="isNameReadonly" />
                                     </div>
                                     <div class="col-6">
-                                        <q-select dense outlined v-model="policyForm.type" :options="policyTypes" dark class="bg-secondary" label="Policy Type" :readonly="isTypeReadonly" @update:model-value="handlePolicyTypeChange" />
+                                        <q-select dense outlined v-model="policyForm.type" :options="policyTypes" dark class="bg-secondary" :label="$t('trainPolicyType')" :readonly="isTypeReadonly" @update:model-value="handlePolicyTypeChange" />
                                     </div>
                                     <div v-for="(config, key) in policyForm.settings" :key="key" class="col-4">
                                         <q-select
@@ -216,7 +216,7 @@
                                             v-else-if="config.type === 'boolean'"
                                             dense
                                             v-model="config.value"
-                                            :options="[{ label: config.label, value: true }, { label: 'No', value: false }]"
+                                            :options="[{ label: config.label, value: true }, { label: $t('no'), value: false }]"
                                             :label="config.label"
                                             :readonly="isSettingsReadonly"
                                             :disable="isSettingsReadonly"
@@ -245,21 +245,21 @@
                     </q-scroll-area>
                 </div>
                 <q-stepper-navigation align="right" class="q-mt-md q-gutter-x-md">
-                    <q-btn @click="step = 1" color="grey" outline :label="'Back'"/>
-                    <q-btn @click="savePolicy" color="primary" outline :label="'Save'" v-if="selectedPolicy === 'new'" />
-                    <q-btn @click="showSaveAsDialog = true" color="primary" outline :label="'Save As'" v-if="isPolicyFormChanged && selectedPolicy !== 'new'"/>
-                    <q-btn @click="nextStep" color="primary" outline :label="'Continue'" v-if="!isPolicyFormChanged && selectedPolicy !== 'new'" />
+                    <q-btn @click="step = 1" color="grey" outline :label="$t('back')"/>
+                    <q-btn @click="savePolicy" color="primary" outline :label="$t('save')" v-if="selectedPolicy === 'new'" />
+                    <q-btn @click="showSaveAsDialog = true" color="primary" outline :label="$t('saveAs')" v-if="isPolicyFormChanged && selectedPolicy !== 'new'"/>
+                    <q-btn @click="nextStep" color="primary" outline :label="$t('continueBtn')" v-if="!isPolicyFormChanged && selectedPolicy !== 'new'" />
                 </q-stepper-navigation>
             </q-step>
 
             <q-step
                 :name="3"
-                title="Train Model"
+                :title="$t('trainStep3Title')"
                 icon="model_training"
                 class="border-white border-rounded q-mt-lg bg-secondary col"
 
             >
-                <div class="text-h6 q-mb-md">Training Configuration</div>
+                <div class="text-h6 q-mb-md">{{ $t('trainStep3Heading') }}</div>
                 <TutorialHint step="3" class="q-mb-md" :text="$t('tutorialTrainStep3')" />
                 <q-scroll-area class="col-12" style="height: 420px">
                     <div class="q-gutter-y-md">
@@ -270,8 +270,8 @@
                                     dense
                                     outlined
                                     v-model="remoteServerUrl"
-                                    label="Training Server URL"
-                                    placeholder="http://192.168.1.100:5100"
+                                    :label="$t('trainServerUrl')"
+                                    :placeholder="$t('trainServerUrlPlaceholder')"
                                     class="col bg-secondary"
                                     dark
                                 >
@@ -286,13 +286,13 @@
                                         />
                                     </template>
                                 </q-input>
-                                <q-badge v-if="serverGpuAvailable" color="positive" label="GPU Available" class="q-ml-sm" />
+                                <q-badge v-if="serverGpuAvailable" color="positive" :label="$t('trainServerGpuAvailable')" class="q-ml-sm" />
                             </div>
                         </q-card>
 
                         <q-form class="q-col-gutter-md row">
                             <div class="col-12">
-                                <q-input dense outlined v-model="newCheckpointName" label="Checkpoint Name" 
+                                <q-input dense outlined v-model="newCheckpointName" :label="$t('trainCheckpointName')"
                                     class="bg-dark" dark
                                 />
                             </div>
@@ -326,7 +326,7 @@
                                     dense
                                     outlined
                                     v-model="config.value"
-                                    :options="[{ label: config.label, value: true }, { label: 'No', value: false }]"
+                                    :options="[{ label: config.label, value: true }, { label: $t('no'), value: false }]"
                                     :label="config.label"
                                     spread
                                     class="full-height bg-dark"
@@ -346,42 +346,29 @@
                     </div>
                 </q-scroll-area>
                 <q-stepper-navigation align="right" class="q-mt-md q-gutter-x-md">
-                    <q-btn @click="step = 2" color="grey" outline :label="'Back'"/>
-                    <q-btn @click="createCheckpoint" color="primary" outline :label="'Start Training'"/>
+                    <q-btn @click="step = 2" color="grey" outline :label="$t('back')"/>
+                    <q-btn @click="createCheckpoint" color="primary" outline :label="$t('trainStartTraining')"/>
                 </q-stepper-navigation>
             </q-step>
         </q-stepper>
 
-        <q-page-sticky position="bottom-right" :offset="[18, 18]">
-            <q-btn
-                push
-                round
-                size="xl"
-                :color="trainingCheckpoint.id === cp.id ? 'deep-orange' : 'grey-5'"
-                :icon="trainingCheckpoint.id === cp.id ? 'model_training' : 'pending'"
-                @click="watchCheckpoint(cp)"
-                v-for="cp in unfinishedCheckpoints.toReversed()"
-                :key="cp.id"
-                class="q-ml-sm"
-            />
-
-        </q-page-sticky>
+        <TrainingQueuePanel ref="queuePanel" @watch="watchCheckpoint" />
 
         <q-dialog v-model="showSaveAsDialog">
             <q-card style="min-width: 350px" dark>
                 <q-card-section>
-                    <div class="text-h6">Save Policy As</div>
+                    <div class="text-h6">{{ $t('trainSavePolicyAs') }}</div>
                 </q-card-section>
                 <q-card-section class="q-pt-none">
-                    <q-input dense outlined v-model="newPolicyName" dark label="New Policy Name" autofocus />
+                    <q-input dense outlined v-model="newPolicyName" dark :label="$t('trainNewPolicyName')" autofocus />
                 </q-card-section>
                 <q-card-actions align="right">
-                    <q-btn flat label="Cancel" v-close-popup />
-                    <q-btn flat label="Save" color="primary" @click="savePolicyAs" v-close-popup />
+                    <q-btn flat :label="$t('cancel')" v-close-popup />
+                    <q-btn flat :label="$t('save')" color="primary" @click="savePolicyAs" v-close-popup />
                 </q-card-actions>
             </q-card>
         </q-dialog>
-        <TrainingDialog v-model="showTrainingDialog" :checkpoint="watchingCheckpoint" :isTraining="watchingIsTraining" @hide="unwatchCheckpoint" @cpRemoved="getUnfinishedCheckpoint" />
+        <TrainingDialog v-model="showTrainingDialog" :checkpoint="watchingCheckpoint" :isTraining="watchingIsTraining" @hide="unwatchCheckpoint" @cpRemoved="queuePanel?.refresh()" />
     </q-page>
 </template>
 
@@ -392,11 +379,12 @@ import { api } from 'src/boot/axios';
 import { POLICY_CONFIGS, TRAIN_CONFIGS } from 'src/configs/modelConfigs';
 // import { useTraining } from 'src/composables/useTraining';
 import TrainingDialog from 'src/components/v2/TrainingDialog.vue';
+import TrainingQueuePanel from 'src/components/v2/TrainingQueuePanel.vue';
 import TutorialHint from 'src/components/v2/TutorialHint.vue';
 import { useSocket } from 'src/composables/useSocket';
-import { useProcessStore } from 'src/stores/processStore';
+import { useI18n } from 'vue-i18n';
 
-const processStore = useProcessStore();
+const { t } = useI18n();
 
 const $q = useQuasar();
 const step = ref(1);
@@ -420,9 +408,27 @@ const newCheckpointName = ref('');
 const trainingForm = ref({});
 
 // Remote Training Server
+// 사용자가 한 번이라도 명시 입력했으면 localStorage 값을 그대로 쓰고, 없으면
+// 백엔드에 default-url을 물어 (로컬 training_server 살아있으면 localhost,
+// 아니면 공용 원격) 응답을 기본값으로 채워준다.
 const remoteServerUrl = ref(localStorage.getItem('remoteTrainingServerUrl') || '');
 const serverStatus = ref('unknown'); // 'unknown', 'checking', 'connected', 'error'
 const serverGpuAvailable = ref(false);
+
+if (!remoteServerUrl.value) {
+    api.get('/remote-train/default-url')
+        .then((res) => {
+            if (!remoteServerUrl.value && res?.data?.default_url) {
+                remoteServerUrl.value = res.data.default_url;
+            }
+        })
+        .catch(() => {
+            // 백엔드 미응답 시 공용 원격을 안전한 기본값으로
+            if (!remoteServerUrl.value) {
+                remoteServerUrl.value = 'http://easytrainer.training_server.com';
+            }
+        });
+}
 
 watch(remoteServerUrl, (newVal) => {
     localStorage.setItem('remoteTrainingServerUrl', newVal);
@@ -431,7 +437,7 @@ watch(remoteServerUrl, (newVal) => {
 
 function checkServerHealth() {
     if (!remoteServerUrl.value) {
-        Notify.create({ color: 'negative', message: 'Please enter the server URL.' });
+        Notify.create({ color: 'negative', message: t('trainEnterServerUrl') });
         return;
     }
     serverStatus.value = 'checking';
@@ -439,12 +445,12 @@ function checkServerHealth() {
         .then((res) => {
             serverStatus.value = 'connected';
             serverGpuAvailable.value = res.data.server?.gpu_available || false;
-            Notify.create({ color: 'positive', message: 'Training server connected!' });
+            Notify.create({ color: 'positive', message: t('trainServerConnected') });
         })
         .catch(() => {
             serverStatus.value = 'error';
             serverGpuAvailable.value = false;
-            Notify.create({ color: 'negative', message: 'Cannot connect to training server.' });
+            Notify.create({ color: 'negative', message: t('trainServerCannotConnect') });
         });
 }
 
@@ -459,7 +465,7 @@ watch(selectedWorkspaceId, (newVal) => {
         listDatasets();
         listPolicies();
         listCheckpoints();
-        getUnfinishedCheckpoint();
+        // 큐 상태는 TrainingQueuePanel이 자체 fetch + socketio로 갱신.
     }
 });
 
@@ -475,21 +481,21 @@ function listWorkspaces() {
 // --- Computed Properties for Step 2 ---
 const checkpointOptions = computed(() => {
     return [
-        { label: 'Start without checkpoint', value: null },
+        { label: t('trainPolicyStartWithoutCheckpoint'), value: null },
         ...checkpoints.value.filter(c => c.task_id === selectedWorkspaceId.value).map(c => ({ label: c.name, value: c.id }))
     ];
 });
 
 const policyOptions = computed(() => {
     const options = policies.value.map(p => ({ label: p.name, value: p.id }));
-    options.push({ label: 'Create New Policy +', value: 'new' });
+    options.push({ label: t('trainPolicyCreateNew'), value: 'new' });
     return options;
 });
 
 const formTitle = computed(() => {
-    if (selectedCheckpoint.value) return 'Finetune Policy';
-    if (selectedPolicy.value === 'new') return 'Create New Policy';
-    if (selectedPolicy.value) return 'Edit Policy';
+    if (selectedCheckpoint.value) return t('trainPolicyFormFinetune');
+    if (selectedPolicy.value === 'new') return t('trainPolicyFormCreate');
+    if (selectedPolicy.value) return t('trainPolicyFormEdit');
     return '';
 });
 
@@ -501,11 +507,11 @@ function validatePolicyForm() {
     const form = policyForm.value;
 
     if (!form.name || form.name.trim() === '') {
-        Notify.create({ color: 'negative', message: 'Policy Name is required.' });
+        Notify.create({ color: 'negative', message: t('trainPolicyNameRequired') });
         return false;
     }
     if (!form.type) {
-        Notify.create({ color: 'negative', message: 'Policy Type is required.' });
+        Notify.create({ color: 'negative', message: t('trainPolicyTypeRequired') });
         return false;
     }
 
@@ -517,7 +523,7 @@ function validatePolicyForm() {
                 continue;
             }
             if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) {
-                Notify.create({ color: 'negative', message: `Setting '${setting.label}' is required.` });
+                Notify.create({ color: 'negative', message: t('trainSettingRequired', { label: setting.label }) });
                 return false;
             }
         }
@@ -620,7 +626,7 @@ function listDatasets() {
         availableDatasets.value = response.data.datasets.filter(dataset => dataset.task_id == selectedWorkspaceId.value) || [];
     }).catch((error) => {
         console.error('Error fetching datasets:', error);
-        Notify.create({ color: 'negative', message: 'Failed to load datasets.' });
+        Notify.create({ color: 'negative', message: t('trainLoadDatasetsFailed') });
     });
 }
 
@@ -679,14 +685,14 @@ function getPolicyPayload() {
 
 function deletePolicy(policyId) {
     $q.notify({
-        message: 'Are you sure you want to delete this policy?',
+        message: t('trainConfirmDeletePolicy'),
         color: 'negative',
         icon: 'warning',
         position: 'top',
         timeout: 0, // persistent
         actions: [
             {
-                label: 'Confirm',
+                label: t('confirm'),
                 color: 'white',
                 handler: async () => {
                     try {
@@ -695,13 +701,13 @@ function deletePolicy(policyId) {
                         if (selectedPolicy.value === policyId) {
                             resetPolicyForm();
                         }
-                        Notify.create({ color: 'positive', message: 'Policy deleted successfully!' });
+                        Notify.create({ color: 'positive', message: t('trainPolicyDeleted') });
                     } catch (error) {
-                        Notify.create({ color: 'negative', message: error + ': Failed to delete policy.' });
+                        Notify.create({ color: 'negative', message: t('trainPolicyDeleteFailed', { error }) });
                     }
                 }
             },
-            { label: 'Cancel', color: 'white', handler: () => {} }
+            { label: t('cancel'), color: 'white', handler: () => {} }
         ]
     });
 }
@@ -719,24 +725,24 @@ async function savePolicy() {
             await listPolicies();
             console.log(response);
             selectedPolicy.value = response.data.data.id; // Assuming API returns the new ID
-            Notify.create({ color: 'positive', message: 'Policy created successfully!' });
+            Notify.create({ color: 'positive', message: t('trainPolicyCreated') });
         } catch (error) {
-            Notify.create({ color: 'negative', message: `${error}: Failed to create policy.` });
+            Notify.create({ color: 'negative', message: t('trainPolicyCreateFailed', { error }) });
         }
     } else { // Update existing policy
         try {
             await api.put(`/policy/${payload.id}`, payload);
             await listPolicies();
-            Notify.create({ color: 'positive', message: 'Policy updated successfully!' });
+            Notify.create({ color: 'positive', message: t('trainPolicyUpdated') });
         } catch (error) {
-            Notify.create({ color: 'negative', message: `${error}: Failed to update policy.` });
+            Notify.create({ color: 'negative', message: t('trainPolicyUpdateFailed', { error }) });
         }
     }
 }
 
 async function savePolicyAs() {
     if (!newPolicyName.value) {
-        Notify.create({ color: 'warning', message: 'Please enter a name for the new policy.' });
+        Notify.create({ color: 'warning', message: t('trainPolicyEnterName') });
         return;
     }
     const newPolicy = {
@@ -751,9 +757,9 @@ async function savePolicyAs() {
         selectedPolicy.value = response.data.data.id;
         newPolicyName.value = '';
         showSaveAsDialog.value = false;
-        Notify.create({ color: 'positive', message: 'Policy saved as new entry.' });
+        Notify.create({ color: 'positive', message: t('trainPolicySavedAsNew') });
     } catch (error) {
-        Notify.create({ color: 'negative', message: `${error}: Failed to save policy.` });
+        Notify.create({ color: 'negative', message: t('trainPolicySaveFailed', { error }) });
     }
 }
 
@@ -761,12 +767,12 @@ async function savePolicyAs() {
 // --- Stepper Navigation ---
 function nextStep() {
     if (step.value === 1 && selectedDatasetIds.value.length === 0) {
-        Notify.create({ color: 'negative', message: 'Please select at least one dataset.' });
+        Notify.create({ color: 'negative', message: t('trainSelectAtLeastOneDataset') });
         return;
     }
     if (step.value === 2 && selectedPolicy.value) {
         if (selectedPolicy.value === 'new') {
-            Notify.create({ color: 'negative', message: 'Please save a new policy.' });
+            Notify.create({ color: 'negative', message: t('trainSaveNewPolicyFirst') });
             return;
         }
     }
@@ -778,7 +784,7 @@ function nextStep() {
     }
 
     if (step.value === 2 && !selectedPolicy.value) {
-        Notify.create({ color: 'negative', message: 'Please select a policy.' });
+        Notify.create({ color: 'negative', message: t('trainSelectPolicyFirst') });
         return;
     }
 
@@ -792,20 +798,20 @@ function nextStep() {
     if (step.value < 3) {
         stepper.value.next();
     } else {
-        Notify.create({ color: 'positive', message: 'Training setup complete!' });
+        Notify.create({ color: 'positive', message: t('trainSetupComplete') });
     }
 }
 
 function deleteCheckpoint(checkpointId) {
     $q.notify({
-        message: 'Are you sure you want to delete this checkpoint?',
+        message: t('trainConfirmDeleteCheckpoint'),
         color: 'negative',
         icon: 'warning',
         position: 'top',
         timeout: 0, // persistent
         actions: [
             {
-                label: 'Confirm',
+                label: t('confirm'),
                 color: 'white',
                 handler: async () => {
                     try {
@@ -814,13 +820,13 @@ function deleteCheckpoint(checkpointId) {
                         if (selectedCheckpoint.value === checkpointId) {
                             resetCheckpointForm();
                         }
-                        Notify.create({ color: 'positive', message: 'Checkpoint deleted successfully!' });
+                        Notify.create({ color: 'positive', message: t('trainCheckpointDeleted') });
                     } catch (error) {
-                        Notify.create({ color: 'negative', message: `${error}: Failed to delete checkpoint.` });
+                        Notify.create({ color: 'negative', message: t('trainCheckpointDeleteFailed', { error }) });
                     }
                 }
             },
-            { label: 'Cancel', color: 'white', handler: () => {} }
+            { label: t('cancel'), color: 'white', handler: () => {} }
         ]
     });
 }
@@ -841,13 +847,16 @@ function getTrainingPayload() {
 
 const showTrainingDialog = ref(false);
 const watchingCheckpoint = ref(null);
+const queuePanel = ref(null);
+
 function createCheckpoint() {
     if (serverStatus.value !== 'connected') {
-        Notify.create({ color: 'negative', message: 'Please connect to the training server first.' });
+        Notify.create({ color: 'negative', message: t('trainConnectToServerFirst') });
         return;
     }
 
     const trainingPayload = getTrainingPayload();
+    let createdCheckpointId = null;
     api.post('/checkpoint', {
         task_id: selectedWorkspaceId.value,
         policy_id: selectedPolicy.value,
@@ -856,66 +865,84 @@ function createCheckpoint() {
         name: newCheckpointName.value,
         train_settings: trainingPayload
     }).then((res) => {
-        const checkpointId = res.data.id;
-        getUnfinishedCheckpoint().then(() => {
-            watchCheckpoint(unfinishedCheckpoints.value.find(cp => cp.id === checkpointId));
-            startRemoteTraining(watchingCheckpoint.value.id);
-        });
+        createdCheckpointId = res.data.id;
+        // 큐에 추가 — 이미 다른 학습이 돌고 있으면 자동으로 기다린다.
+        return enqueueTraining(createdCheckpointId);
+    }).then(async () => {
+        // 큐 패널 즉시 갱신 후, 방금 enqueue한 체크포인트의 최신 dict를
+        // 가져와서 학습 다이얼로그를 자동으로 열어준다 (이전 UX 유지).
+        await queuePanel.value?.refresh();
+        try {
+            const cpRes = await api.get(`/checkpoint/${createdCheckpointId}`);
+            if (cpRes?.data?.checkpoint) {
+                watchCheckpoint(cpRes.data.checkpoint);
+            }
+        } catch {
+            // 다이얼로그 자동 오픈 실패는 비치명 — 사용자가 큐 패널에서 클릭 가능.
+        }
     }).catch(error => {
-        Notify.create({ color: 'negative', message: `${error}: Failed to start training: ` });
+        Notify.create({ color: 'negative', message: t('trainStartFailed', { error }) });
     }).finally(() => {
         listCheckpoints();
     });
 }
 
-function startRemoteTraining(checkpoint_id) {
-    const callbackUrl = `${window.location.protocol}//${window.location.hostname}:5000/api/remote-train/receive-model`;
-    api.post('/remote-train/start', {
+function enqueueTraining(checkpoint_id) {
+    return api.post('/train/queue', {
         server_url: remoteServerUrl.value,
         checkpoint_id: checkpoint_id,
-        callback_url: callbackUrl,
     }).catch(error => {
-        Notify.create({ color: 'negative', message: `Error starting remote training: ${error}` });
+        Notify.create({ color: 'negative', message: t('trainRemoteStartFailed', { error }) });
+        throw error;
     });
 }
 
-const trainingCheckpoint = computed(() => {
-    if (!unfinishedCheckpoints.value.length) return {};
-    return unfinishedCheckpoints.value.find(cp => cp.status === 'training') || unfinishedCheckpoints.value.at();
-});
-
-const isTraining = computed(() => {
-    return processStore.processIds.includes('train_task')
-})
-
+// 시청 중인 체크포인트가 현재 running 상태인지 — TrainingDialog의 stop 버튼
+// 활성/비활성 결정 + 그래프/progress 영역 v-if에 사용.
+// status 필드만 보면 단순하고 reactive에도 안전.
 const watchingIsTraining = computed(() => {
-    return watchingCheckpoint.value && trainingCheckpoint.value && watchingCheckpoint.value.id === trainingCheckpoint.value.id && isTraining.value;
-}); 
-
-const unfinishedCheckpoints = ref([]);
-function getUnfinishedCheckpoint() {
-    return api.get(`/checkpoints`, {
-        params: {
-            where: `status,!=,finished`,
-        }
-    }).then(response => {
-        unfinishedCheckpoints.value = response.data.checkpoints
-    })
-}
+    return watchingCheckpoint.value?.status === 'running';
+});
 
 function watchCheckpoint(checkpoint) {
     watchingCheckpoint.value = checkpoint;
     showTrainingDialog.value = true;
 }
 
+// 큐 패널의 snapshot이 갱신될 때, 다이얼로그가 열려 있는 체크포인트의 fresh
+// dict로 watchingCheckpoint를 동기화. status가 queued→running→finished 등으로
+// 바뀌어도 다이얼로그 UI(progress/그래프 영역)와 버튼 라벨이 즉시 따라간다.
+// 종료 상태에서 active 큐에 없으면 백엔드에 직접 GET해서 최신 status 반영.
+watch(
+    () => queuePanel.value?.queue,
+    async (queue) => {
+        if (!queue || !watchingCheckpoint.value) return;
+        const id = watchingCheckpoint.value.id;
+        const fresh =
+            (queue.running && queue.running.id === id && queue.running) ||
+            (queue.queued || []).find((c) => c.id === id) ||
+            (queue.recent || []).find((c) => c.id === id);
+        if (fresh) {
+            watchingCheckpoint.value = fresh;
+            return;
+        }
+        // active/recent 어디에도 없는데 다이얼로그는 열려 있는 상황 — 종료된 지
+        // 오래되어 recent에서 밀려난 케이스. 직접 fetch해서 status를 갱신.
+        try {
+            const res = await api.get(`/checkpoint/${id}`);
+            if (res?.data?.checkpoint) {
+                watchingCheckpoint.value = res.data.checkpoint;
+            }
+        } catch {
+            // 삭제된 경우 등 — 다이얼로그는 그대로 두고 사용자가 닫게 한다.
+        }
+    },
+    { deep: true },
+);
+
 function unwatchCheckpoint() {
     watchingCheckpoint.value = null;
     showTrainingDialog.value = false;
-}
-
-function removeTrainingCheckpoint() {
-    unfinishedCheckpoints.value = unfinishedCheckpoints.value.filter(cp => cp.id !== watchingCheckpoint.value?.id);
-    unwatchCheckpoint();
 }
 
 const isPolicyFormChanged = computed(() => {
@@ -942,25 +969,10 @@ onMounted(async () => {
     // await listCheckpoints();
     // await getUnfinishedCheckpoint();
     // const taskResponse = await api.get(`/tasks/${selectedWorkspaceId.value}`);
-    socket.on('stop_process', (data) => {
-        if (data.id === 'train_task') {
-            api.get(`/checkpoint/${trainingCheckpoint.value.id}/:check_create_successed`).then(response => {
-                if (response.data.check_create_successed) {
-                    Notify.create({ color: 'positive', message: 'Training completed successfully.' });
-                } else {
-                    Notify.create({ color: 'negative', message: 'Training failed.' });
-                }
-                removeTrainingCheckpoint()
-            }).catch(error => {
-                Notify.create({ color: 'negative', message: `Error stopping training: ${error}` });
-            });
-        }
-    });
-
-    socket.on('start_process', (data) => {
-        if (data.id === 'train_task') {
-            getUnfinishedCheckpoint()
-        }
+    // 학습 큐 변경은 TrainingQueuePanel이 직접 'train_queue_changed' 이벤트를 listen해
+    // 자체 갱신한다. 여기서는 학습 종료 시 가벼운 알림만 처리.
+    socket.on('train_queue_changed', () => {
+        listCheckpoints();
     });
 
     // if (isTraining.value) {

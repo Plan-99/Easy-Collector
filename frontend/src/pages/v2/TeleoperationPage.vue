@@ -8,8 +8,10 @@
             </div>
         </div>
 
+        <TutorialHint class="q-mb-md" :text="$t('tutorialTeleopIntro')" />
+
         <div class="row q-col-gutter-md">
-            <div class="col-6 col-sm-4 col-md-3 col-lg-2" v-for="assembly in assembliesWithRobots" :key="assembly.id">
+            <div class="col-6 col-sm-4 col-md-3 col-lg-2" v-for="(assembly, idx) in assembliesWithRobots" :key="assembly.id">
                 <q-card
                     class="q-pa-md bg-secondary border-rounded border-white text-white cursor-pointer"
                     :class="{ 'border-primary': watchingAssembly && watchingAssembly.id === assembly.id }"
@@ -43,6 +45,12 @@
                             <q-tooltip>{{ hasLeader(assembly) ? $t('teleopModeLeaderOnTip') : $t('teleopModeLeaderOffTip') }}</q-tooltip>
                         </q-icon>
                     </q-card-section>
+                    <TutorialHint
+                        v-if="idx === 0"
+                        step="1"
+                        class="q-mt-sm"
+                        :text="$t('tutorialTeleopAssemblyCard')"
+                    />
                 </q-card>
             </div>
         </div>
@@ -75,6 +83,7 @@ import { api } from 'src/boot/axios'
 import BottomTerminal from 'src/components/v2/BottomTerminal.vue'
 import TeleSettingDialog from 'src/components/v2/TeleSettingDialog.vue'
 import TeleopConsole from 'src/components/v2/TeleopConsole.vue'
+import TutorialHint from 'src/components/v2/TutorialHint.vue'
 import { useRobot } from 'src/composables/useRobot'
 
 const assemblies = ref([])

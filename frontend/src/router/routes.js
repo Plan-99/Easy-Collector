@@ -3,7 +3,7 @@ const routes = [
     path: '/',
     component: () => import('layouts/v2/MainLayout.vue'),
     children: [
-      { path: '', component: () => import('pages/v2/IndexPage.vue') },
+      { path: '', redirect: '/sensors' },
       { path: 'sensors', component: () => import('src/pages/v2/SensorPage.vue') },
       { path: 'robots/management', component: () => import('src/pages/v2/RobotPage.vue') },
       { path: 'robots/assemble', component: () => import('src/pages/v2/AssemblePage.vue') },

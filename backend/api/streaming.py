@@ -20,6 +20,7 @@ from av import VideoFrame
 # --- 전역 변수 ---
 pcs = set()
 stream_config = {}
+stream_tracks = {}  # stream_id → GRPCImageStreamTrack (config 업데이트 라우팅용)
 
 
 class GRPCImageStreamTrack(VideoStreamTrack):
@@ -56,19 +57,23 @@ class GRPCImageStreamTrack(VideoStreamTrack):
                 if not self._running:
                     break
 
-                # JPEG → OpenCV BGR
-                np_arr = np.frombuffer(image_frame.jpeg_data, np.uint8)
-                cv_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-                if cv_image is None:
-                    continue
+                try:
+                    # JPEG → OpenCV BGR
+                    np_arr = np.frombuffer(image_frame.jpeg_data, np.uint8)
+                    cv_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+                    if cv_image is None:
+                        continue
 
-                # Apply config (crop, rotate, resize)
-                cv_image = self._apply_config(cv_image)
+                    # Apply config (crop, rotate, resize)
+                    cv_image = self._apply_config(cv_image)
 
-                self.frame = VideoFrame.from_ndarray(cv_image, format="bgr24")
+                    self.frame = VideoFrame.from_ndarray(cv_image, format="bgr24")
+                except Exception as e:
+                    # 잘못된 config 등 일시 오류로 전체 스트림이 죽지 않도록 프레임 단위로 격리
+                    print(f"[GRPCStream] {self.stream_id} frame error: {e}")
         except Exception as e:
             if self._running:
-                print(f"[GRPCStream] {self.stream_id} error: {e}")
+                print(f"[GRPCStream] {self.stream_id} stream error: {e}")
 
     def _apply_config(self, cv_image):
         """crop, rotate, resize 적용."""
@@ -93,8 +98,10 @@ class GRPCImageStreamTrack(VideoStreamTrack):
             cv_image = cv2.rotate(cv_image, rotation_map[angle])
 
         # Resize
-        if config.get('resize'):
-            target_size = config['resize']
+        target_size = config.get('resize')
+        if (target_size and len(target_size) == 2
+                and isinstance(target_size[0], int) and isinstance(target_size[1], int)
+                and target_size[0] > 0 and target_size[1] > 0):
             cv_image = cv2.resize(cv_image, (target_size[0], target_size[1]))
 
         return cv_image
@@ -181,6 +188,7 @@ async def offer(request):
             await pc.close()
             pcs.discard(pc)
             stream_config.pop(stream_id, None)
+            stream_tracks.pop(stream_id, None)
 
     try:
         await pc.setRemoteDescription(RTCSessionDescription(sdp=params["sdp"], type=params["type"]))
@@ -192,6 +200,7 @@ async def offer(request):
             msg_type=msg_type,
             stream_id=stream_id,
         )
+        stream_tracks[stream_id] = video_track
         if config:
             video_track.update_config(config)
         pc.addTrack(video_track)
@@ -255,6 +264,12 @@ async def add_config(request):
     config = params.get('config', {})
     if stream_id in stream_config:
         stream_config[stream_id].update(config)
+    track = stream_tracks.get(stream_id)
+    if track is not None:
+        track.update_config(config)
+        print(f"[Streaming] add_config stream_id={stream_id} config={config} merged={track._config}")
+    else:
+        print(f"[Streaming] add_config stream_id={stream_id} NO TRACK (known_ids={list(stream_tracks.keys())})")
     return web.json_response({"status": "success"})
 
 

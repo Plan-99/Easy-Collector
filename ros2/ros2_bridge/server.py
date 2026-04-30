@@ -44,7 +44,7 @@ def serve():
     vive_servicer = ViveServiceServicer(node, agent_servicer)
     uncertainty_servicer = UncertaintyServiceServicer(node)
     streaming_servicer = StreamingServiceServicer(node)
-    obs_servicer = ObsServiceServicer(ros_executor)
+    obs_servicer = ObsServiceServicer(node)
 
     # gRPC 서버 설정
     server = grpc.server(

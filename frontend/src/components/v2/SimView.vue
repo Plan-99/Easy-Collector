@@ -7,10 +7,10 @@
         dense flat size="sm" icon="play_arrow" color="green"
         @click="startSim" :loading="starting"
       >
-        <q-tooltip>시뮬레이션 시작</q-tooltip>
+        <q-tooltip>{{ $t('simStartTooltip') }}</q-tooltip>
       </q-btn>
       <q-btn v-else dense flat size="sm" icon="stop" color="red" @click="stopSim">
-        <q-tooltip>정지</q-tooltip>
+        <q-tooltip>{{ $t('simStopTooltip') }}</q-tooltip>
       </q-btn>
       <q-separator vertical />
       <q-btn dense flat icon="rotate_left" size="sm" color="white" @click="orbitYaw(-15)" />
@@ -29,7 +29,7 @@
         style="width: 100%; height: 100%; object-fit: contain;"
       />
       <div v-if="!simRunning && !starting" class="absolute-center text-grey-6 text-caption">
-        시뮬레이션을 시작하세요
+        {{ $t('simStartHint') }}
       </div>
     </div>
   </div>

@@ -16,7 +16,7 @@
       style="position: absolute; bottom: 8px; right: 8px; z-index: 1;"
       @click.stop="gradcamOn = !gradcamOn"
     >
-      <q-tooltip>Grad-CAM</q-tooltip>
+      <q-tooltip>{{ $t('gradcamTooltip') }}</q-tooltip>
     </q-btn>
     <q-inner-loading :showing="props.loading">
     </q-inner-loading>
@@ -106,8 +106,13 @@ watch(() => props.resize, (newResize, oldResize) => {
   if (newResize[0] === oldResize[0] && newResize[1] === oldResize[1]) {
     return;
   }
+  // [w, undefined] 같이 한 축이 비어있는 transient는 backend cv2.resize를 깨뜨리므로 무시
+  if (!Array.isArray(newResize) || newResize.length !== 2 ||
+      typeof newResize[0] !== 'number' || typeof newResize[1] !== 'number') {
+    return;
+  }
   addConfig(stream_id, {
-    resize: newResize.length ? newResize : null,
+    resize: newResize,
     cropped_area: props.cropped_area.length ? props.cropped_area : null,
     rotate: props.rotate,
   });

@@ -123,19 +123,46 @@
 
 .docs-article table {
   width: 100%;
-  border-collapse: collapse;
-  margin: 1rem 0 1.5rem;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 1.25rem 0 1.75rem;
   font-size: 0.92rem;
-}
-.docs-article th,
-.docs-article td {
+  background: rgba(255, 255, 255, 0.015);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  padding: 0.5rem 0.75rem;
-  text-align: left;
+  border-radius: 10px;
+  overflow: hidden;
+  display: block;
+  overflow-x: auto;
+}
+.docs-article thead {
+  background: rgba(99, 102, 241, 0.08);
 }
 .docs-article th {
-  background: rgba(255, 255, 255, 0.04);
   font-weight: 600;
+  color: #fff;
+  padding: 0.65rem 0.9rem;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  white-space: nowrap;
+}
+.docs-article td {
+  padding: 0.55rem 0.9rem;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  vertical-align: top;
+  color: var(--color-surface-300);
+}
+.docs-article tbody tr:last-child td {
+  border-bottom: 0;
+}
+.docs-article tbody tr:nth-child(even) td {
+  background: rgba(255, 255, 255, 0.02);
+}
+.docs-article tbody tr:hover td {
+  background: rgba(99, 102, 241, 0.05);
+}
+.docs-article td strong,
+.docs-article th strong {
   color: #fff;
 }
 

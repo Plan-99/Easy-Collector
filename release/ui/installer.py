@@ -48,7 +48,9 @@ def run_setup_wizard(self: "MainWindow") -> bool:
     if self.is_installed():
         return True
 
-    dlg = QDialog(self)
+    # 부모 없이 독립 창으로 띄워 floating pill 이동/리사이즈에 종속되지 않게 한다.
+    dlg = QDialog()
+    dlg.setWindowFlags(dlg.windowFlags() | Qt.Window)
     dlg.setWindowTitle("Easy Trainer Installer")
     dlg.resize(1200, 780)
 

@@ -4,11 +4,12 @@ import torch
 import numpy as np
 from backend.utils.image_parser import fetch_image_with_config
 from backend.policies.utils import VISION_BACKBONE_MAP, process_image
+from backend.configs.global_configs import get_checkpoint_dir
 
 
 class EmbeddingHelper:
     def __init__(self, checkpoint_id):
-        self.policy = ACTPolicy.from_pretrained(f"/root/src/backend/checkpoints/{checkpoint_id}")
+        self.policy = ACTPolicy.from_pretrained(get_checkpoint_dir(checkpoint_id))
         self.sensors = ["sensor_1", "sensor_2"]  # Example sensor IDs
         self.robots = ["robot_4"]  # Example robot IDs
         self.action_batch_size = 10

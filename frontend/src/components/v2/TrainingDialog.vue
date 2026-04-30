@@ -12,8 +12,9 @@
       </q-card-section>
       <q-card-section>
         <div class="text-center">
-            <q-btn color="negative" label="Stop Training" @click="stopTraining" v-if="isTraining" />
-            <q-btn color="primary" label="Cancel Training" @click="cancelTraing" v-else />
+            <q-btn color="negative" :label="$t('trainStopBtn')" @click="stopTraining" v-if="isTraining" />
+            <q-btn color="positive" :label="$t('trainCompletedBtn')" @click="$emit('update:modelValue', false)" v-else-if="isTerminal" />
+            <q-btn color="primary" :label="$t('trainCancelBtn')" @click="cancelTraing" v-else />
         </div>
       </q-card-section>
 
@@ -46,7 +47,7 @@
 </template>
 
 <script setup>
-import { defineEmits, defineProps, onMounted, ref, shallowRef, onUnmounted, watch } from 'vue';
+import { defineEmits, defineProps, computed, onMounted, ref, shallowRef, onUnmounted, watch } from 'vue';
 // import { useTraining } from 'src/composables/useTraining';
 import ProcessConsole from 'src/components/v2/ProcessConsole.vue';
 import { Line } from 'vue-chartjs';
@@ -54,6 +55,9 @@ import { Notify } from 'quasar';
 import { api } from 'src/boot/axios';
 import { useSocket } from 'src/composables/useSocket';
 import CheckpointInfo from './CheckpointInfo.vue';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 import {
   Chart as ChartJS,
@@ -82,16 +86,23 @@ const props = defineProps({
 
 const { socket } = useSocket();
 
+// 종료 상태(finished/failed/canceled)에서는 다이얼로그가 남아 있고 닫기 전용
+// "학습 완료" 버튼만 노출 — 사용자가 결과를 확인한 뒤 직접 닫는다.
+const isTerminal = computed(() => {
+    const s = props.checkpoint?.status;
+    return s === 'finished' || s === 'failed' || s === 'canceled';
+});
+
 const trainingProgress = ref(0);
 const data = shallowRef({
     labels: [],
     datasets: [{
-        label: 'Train Loss',
+        label: t('trainLossTrain'),
         backgroundColor: 'rgba(192, 0, 192, 1)',
         borderColor: 'rgba(192, 0, 192, 1)',
         data: [],
     }, {
-        label: 'Validate Loss',
+        label: t('trainLossValidate'),
         backgroundColor: 'rgba(192, 192, 0, 1)',
         borderColor: 'rgba(192, 192, 0, 1)',
         data: []
@@ -159,22 +170,26 @@ const onLogTrainTask = (logData) => {
 
 async function stopTraining() {
     if (!props.isTraining) return;
+    // 새 큐 라우트: DELETE /api/train/queue/<id> — 실행 중이면 stop 신호.
+    // 백엔드는 'stopping' 응답 후 runner가 빠져나오면 status=canceled로 마감.
+    // 다이얼로그는 즉시 닫고 큐 패널이 변화 추적하도록 한다.
     try {
-        await api.post('/remote-train/stop', { checkpoint_id: props.checkpoint.id });
+        await api.delete(`/train/queue/${props.checkpoint.id}`);
+        emit('update:modelValue', false);
+        emit('cpRemoved', props.checkpoint.id);
     } catch (error) {
-        Notify.create({ color: 'negative', message: `${error}: Failed to stop training.` });
+        Notify.create({ color: 'negative', message: t('trainStopFailed', { error }) });
     }
 }
 
 function cancelTraing() {
     if (props.isTraining) return;
-    api.post('/remote-train/cancel', {
-        checkpoint_id: props.checkpoint.id
-    }).then(() => {
+    // 새 큐 라우트: DELETE /api/train/queue/<id> — 큐 대기 중이면 즉시 canceled.
+    api.delete(`/train/queue/${props.checkpoint.id}`).then(() => {
         emit('update:modelValue', false);
         emit('cpRemoved', props.checkpoint.id);
     }).catch((error) => {
-        Notify.create({ color: 'negative', message: `${error}: Failed to cancel training.` });
+        Notify.create({ color: 'negative', message: t('trainCancelFailed', { error }) });
     })
 }
 

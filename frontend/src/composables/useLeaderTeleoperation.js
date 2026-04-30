@@ -2,6 +2,7 @@
 import { onUnmounted, computed } from 'vue';
 import { api } from 'boot/axios';
 import { useQuasar } from 'quasar';
+import { t } from 'boot/i18n';
 import { useProcessStore } from 'src/stores/processStore';
 
 const processStore = useProcessStore();
@@ -24,7 +25,7 @@ export function useLeaderTeleoperation() {
         $q.notify({
           color: 'negative',
           position: 'top',
-          message: 'Failed to stop leader teleoperation',
+          message: t('teleopFailedToStop'),
           icon: 'report_problem'
         });
       });

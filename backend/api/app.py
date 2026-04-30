@@ -26,10 +26,13 @@ from .routes.sim import sim_bp
 from .routes.robot_pose import robot_pose_bp
 from .routes.remote_train import remote_train_bp
 from .routes.tutorial import tutorial_bp
+from .routes.remote_train import run_training_job
 
 from ..bridge.client import get_bridge_client
 from ..bridge.remote_agent import RemoteAgent
 from .ros2_log_streamer import ROS2LogStreamer
+from .topic_watcher import TopicWatcher
+from .training_scheduler import TrainingScheduler
 
 import usb.core
 import usb.util
@@ -68,6 +71,15 @@ pm = ProcessManager(socketio, debug=debug)  # 프로세스 관리 객체 생성
 
 bridge_client = get_bridge_client()
 node = None  # ROS2 node는 ROS2 컨테이너에서 관리
+
+# Topic watcher — 1Hz로 ros2_bridge에 ListTopics 호출하여 변경 시 'topics_changed' 발행.
+# main()에서 bridge_client.wait_for_ready 후 start() 호출.
+topic_watcher = TopicWatcher(socketio, bridge_client)
+
+# Training scheduler — 학습 큐의 단일 진실원천. main()에서 start().
+# Runner는 routes.remote_train.run_training_job — pure 실행자.
+training_scheduler = TrainingScheduler(socketio, runner_fn=run_training_job)
+app.training_scheduler = training_scheduler
 
 app.register_blueprint(sensor_bp, url_prefix='/api')
 app.register_blueprint(robot_bp, url_prefix='/api')
@@ -185,13 +197,16 @@ def list_topics():
 @app.route('/api/stop_process', methods=['POST'])
 def stop_process():
     data = request.json
-    if pm.processes.get(data['name']) is None:
+    entry = pm.processes.get(data['name'])
+    if entry is None:
         return {
             'status': 'error',
             'message': f"Process '{data['name']}' not found."
         }, 404
-    
-    if pm.processes[data['name']] == 'function':
+
+    # 기존 코드가 `entry == 'function'`으로 비교하던 자리에 실제 type 필드를 검사.
+    # entry는 {'type': 'function'|'subprocess', 'obj': ...} 형태.
+    if entry.get('type') == 'function':
         pm.stop_function(data['name'])
     else:
         pm.stop_process(data['name'])
@@ -209,6 +224,11 @@ def stop_process():
 def handle_connect():
     print('Client connected!')
     emit('response', {'data': '서버에 연결되었습니다!'})
+    # Topic snapshot을 즉시 보내서 클라이언트가 첫 push 이벤트 기다리지 않도록.
+    try:
+        emit('topics_changed', {'topics': topic_watcher.get_snapshot()})
+    except Exception as e:
+        print(f"[connect] failed to send topic snapshot: {e}")
 
 # 'disconnect' 이벤트: 클라이언트 연결이 끊어졌을 때
 @socketio.on('disconnect')
@@ -278,6 +298,15 @@ def main():
     from ..database.migrate import migrate
     migrate()
 
+    # Tutorial robot/sensor rows are seeded eagerly at boot so the UI shows
+    # them from the very first render — independent of whether the sim is
+    # currently running.
+    try:
+        from .routes.tutorial import _ensure_tutorial_rows
+        _ensure_tutorial_rows()
+    except Exception as e:
+        print(f"[WARN] Tutorial seeding skipped: {e}")
+
     app.node = node  # 호환성 유지 (None)
     app.bridge_client = bridge_client  # gRPC bridge 클라이언트
     app.pm = pm  # Flask 앱에 프로세스 관리 객체 할당
@@ -291,6 +320,14 @@ def main():
         # ROS2 컨테이너 로그 스트리밍 시작
         ros2_log_streamer = ROS2LogStreamer(socketio)
         ros2_log_streamer.start()
+
+        # Topic watcher 시작 — bridge가 ready 된 다음에 시작해야 첫 ListTopics가 성공.
+        topic_watcher.start()
+        print("TopicWatcher started (1Hz, emits 'topics_changed' on diff)")
+
+        # Training scheduler 시작 — 학습 큐 워커. enqueue 시 자동으로 깨어남.
+        training_scheduler.start()
+        print("TrainingScheduler started (single worker, FIFO queue)")
 
         # WebRTC streaming 서버 시작 (port 5002, 별도 스레드)
         from .streaming import start_streaming_server

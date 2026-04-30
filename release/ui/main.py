@@ -6,7 +6,7 @@ import sys
 from app_context import QApplication, QMessageBox, QTimer, _window_icon, load_config, resolve_project_root
 from installer import run_setup_wizard
 from launcher import MainWindow
-from service import RuntimeServiceMixin, docker_compose_available, ensure_signed_in
+from service import RuntimeServiceMixin, docker_compose_available, ensure_signed_in, grant_local_x11_access
 from update import CONFIG_UPGRADE_KEY
 
 _APP_STYLE = """
@@ -164,6 +164,11 @@ def main() -> int:
     if not docker_compose_available():
         QMessageBox.critical(None, "오류", "Docker가 설치되어 있지 않거나 PATH에 없습니다.")
         return 1
+
+    # Docker 컨테이너 내부 root가 호스트 X 서버에 붙을 수 있도록 ACL 추가.
+    # MuJoCo viewer / RViz 등 native GUI를 띄우는 컨테이너 사이드 도구가 동작하려면
+    # 필수. headless / DISPLAY 미설정 환경에서는 no-op.
+    grant_local_x11_access()
 
     win = MainWindow()
     if not run_setup_wizard(win):

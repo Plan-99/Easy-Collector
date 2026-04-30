@@ -8,6 +8,7 @@
                     <q-btn size="md" icon="close" flat round @click="$emit('hide')" v-close-popup></q-btn>
                 </q-card-section>
                 <q-separator color="white"></q-separator>
+                <TutorialHint class="q-mt-md" :text="$t('tutorialTeleopDialogIntro')" />
                 <q-tabs
                     v-model="teleSettingTab"
                     class="text-grey"
@@ -22,7 +23,7 @@
                 </q-tabs>
                 <q-tab-panels v-model="teleSettingTab" animated>
                     <q-tab-panel name="general" class="bg-secondary">
-                        <div class="text-body text-grey-4 q-mb-md">{{ $t('teleopGeneralDescription') }}</div>
+                        <TutorialHint class="q-mb-md" :text="$t('tutorialTeleopDialogGeneral')" />
                         <div v-for="robot in generalRobots" :key="robot.id" class="border-white border-rounded q-pa-md q-mb-md">
                             <div class="row items-center q-mb-sm">
                                 <div class="text-bold text-primary">{{ robot.name }}</div>
@@ -44,7 +45,7 @@
                                         dense
                                         outlined
                                         dark
-                                        @update:model-value="saveGeneralSetting"
+                                        @change="saveGeneralSetting"
                                     />
                                 </div>
                             </div>
@@ -55,7 +56,7 @@
                     </q-tab-panel>
 
                     <q-tab-panel name="keyboard" class="bg-secondary">
-                        <div class="text-body text-grey-4 q-mb-md">{{ $t('teleopKeyboardDescription') }}</div>
+                        <TutorialHint class="q-mb-md" :text="$t('tutorialTeleopDialogKeyboard')" />
                         <div class="row q-col-gutter-sm q-mb-md">
                             <div class="col-3">
                                 <q-input
@@ -66,7 +67,7 @@
                                     dense
                                     outlined
                                     dark
-                                    @update:model-value="saveKeyboardSetting"
+                                    @change="saveKeyboardSetting"
                                 />
                             </div>
                             <div class="col-9 q-pt-sm text-caption text-grey-5">{{ $t('teleopKeyboardDeltaHint') }}</div>
@@ -94,7 +95,7 @@
                                             dense outlined dark borderless
                                             input-class="text-right"
                                             style="max-width: 70px;"
-                                            @update:model-value="saveKeyboardSetting"
+                                            @change="saveKeyboardSetting"
                                         />
                                     </td>
                                 </tr>
@@ -125,7 +126,7 @@
                                                 dense outlined dark borderless
                                                 input-class="text-right"
                                                 style="max-width: 70px;"
-                                                @update:model-value="saveKeyboardSetting"
+                                                @change="saveKeyboardSetting"
                                             />
                                         </td>
                                     </tr>
@@ -137,7 +138,9 @@
                         </div>
                     </q-tab-panel>
 
-                    <q-tab-panel name="leader" class="row q-col-gutter-x-md bg-secondary" style="min-height: 600px;">
+                    <q-tab-panel name="leader" class="bg-secondary">
+                        <TutorialHint class="q-mb-md" :text="$t('tutorialTeleopDialogLeader')" />
+                        <div class="row q-col-gutter-x-md" style="min-height: 600px;">
                         <div class="col-5 column">
                             <div class="row q-col-gutter-sm q-mb-sm">
                                 <div class="col" v-for="robot in generalRobots" :key="robot.id">
@@ -183,13 +186,12 @@
                             >
                                 <q-step
                                     :name="1"
-                                    title="Origin Setting"
+                                    :title="$t('teleopLeaderStepOriginTitle')"
                                     :done="leaderSettingStep > 1"
                                     :header-nav="leaderSettingStep > 1"
                                 >
                                     <div>
-                                        The origin of the leader robot's motor must be calibrated. 
-                                        Manually adjust the leader robot so its pose matches the worker robot's pose, then press the save button to store the position.
+                                        {{ $t('teleopLeaderStepOriginBody1') }}
                                     </div>
                                     <div>
                                         <!-- <q-btn
@@ -234,7 +236,7 @@
                                                         <q-badge color="grey-7" floating class="cursor-pointer" @click="removeDxlFromJointMap(i)">x</q-badge>
                                                     </template>
                                                 </q-input>
-                                                <q-checkbox size="xs" dark v-model="j.is_gripper" val="xs" label="Tool Joint" />
+                                                <q-checkbox size="xs" dark v-model="j.is_gripper" val="xs" :label="$t('teleopLeaderToolJoint')" />
                                             </div>
                                         </div>
                                     </div>
@@ -254,26 +256,26 @@
                                                 style=" cursor: move;"
                                             >
                                             </q-input>
-                                            <q-btn size="xs" dense label="Set as Gripper" flat icon="add" color="primary" @click="dxlSetAsGripper(j)" />
+                                            <q-btn size="xs" dense :label="$t('teleopLeaderSetAsGripper')" flat icon="add" color="primary" @click="dxlSetAsGripper(j)" />
                                         </div>
                                     </div>
                                     <q-stepper-navigation>
-                                        <q-btn @click="() => { leaderSettingStep = 2 }" color="primary" outline label="Save & Go Next" :disable="leaderSettingForm.joint_map.filter((e) => !e.dxs_id && !e.port).length > 0" />
+                                        <q-btn @click="() => { leaderSettingStep = 2 }" color="primary" outline :label="$t('teleopLeaderSaveAndNext')" :disable="leaderSettingForm.joint_map.filter((e) => !e.dxs_id && !e.port).length > 0" />
                                     </q-stepper-navigation>
                                 </q-step>
 
                                 <q-step
                                     :name="2"
-                                    title="Gripper Setting"
+                                    :title="$t('teleopLeaderStepGripperTitle')"
                                     :done="leaderSettingStep > 2"
                                     :header-nav="leaderSettingStep > 2"
                                 >
-                                    Open and close your leader robot's gripper and press the button below to save the gripper position.
+                                    {{ $t('teleopLeaderStepGripperBody') }}
                                     <div class="row q-col-gutter-sm q-mt-md" v-for="(joint, id) in leaderSettingForm.joint_map.filter((e) => e.is_gripper)" :key="id">
                                         <div class="col-6" v-for="i in [0, 1]" :key="i">
                                             <q-input
                                                 v-model.number="joint.gripper_dxl_range[i]"
-                                                :label="`${i === 0 ? 'Open' : 'Close'} Position`"
+                                                :label="i === 0 ? $t('teleopLeaderOpenPosition') : $t('teleopLeaderClosePosition')"
                                                 type="number"
                                                 dense
                                                 outlined
@@ -286,30 +288,29 @@
                                                         :outline="!joint.gripper_dxl_range_saved[i]"
                                                         size="sm"
                                                         @click="() => { joint.gripper_dxl_range_saved[i] = !joint.gripper_dxl_range_saved[i]; }"
-                                                    >Save</q-btn>
+                                                    >{{ $t('teleopLeaderSaveBtn') }}</q-btn>
                                                 </template>
                                             </q-input>
                                         </div>
                                     </div>
                                     <q-stepper-navigation>
-                                        <q-btn @click="() => { leaderSettingStep = 3; saveLeaderSetting() }" color="primary" outline label="Go Next" :disable="!leaderSettingForm.joint_map.filter((e) => e.is_gripper && e.gripper_dxl_range_saved[0] && e.gripper_dxl_range_saved[1]).length > 0" />
-                                        <q-btn flat @click="leaderSettingStep = 1" color="primary" label="Back" class="q-ml-sm" />
+                                        <q-btn @click="() => { leaderSettingStep = 3; saveLeaderSetting() }" color="primary" outline :label="$t('teleopLeaderGoNext')" :disable="!leaderSettingForm.joint_map.filter((e) => e.is_gripper && e.gripper_dxl_range_saved[0] && e.gripper_dxl_range_saved[1]).length > 0" />
+                                        <q-btn flat @click="leaderSettingStep = 1" color="primary" :label="$t('teleopLeaderBack')" class="q-ml-sm" />
                                     </q-stepper-navigation>
                                 </q-step>
 
                                 <q-step
                                     :name="3"
-                                    title="Joint Direction Setting"
+                                    :title="$t('teleopLeaderStepDirectionTitle')"
                                     :header-nav="leaderSettingStep > 3"
                                     :done="leaderSettingStep > 3"
                                 >
-                                    You can set the joint direction of the leader robot's motors here.
-                                    Please start teleoperation and map the direction of leader robot's motors to the worker robot's motors.
+                                    {{ $t('teleopLeaderStepDirectionBody1') }}
                                     <div>
                                         <q-btn
                                             v-if="!leaderTeleStarted"
                                             color="positive"
-                                            label="Start Teleoperation"
+                                            :label="$t('teleopLeaderStartTele')"
                                             @click="startLeaderTele(assembly.id, 'start_leader_robot')"
                                             class="full-width q-mt-md"
                                             outline
@@ -317,7 +318,7 @@
                                         <q-btn
                                             v-else
                                             color="orange-8"
-                                            label="Stop Teleoperation"
+                                            :label="$t('teleopLeaderStopTele')"
                                             @click="stopLeaderTele()"
                                             class="full-width q-mt-md"
                                             outline
@@ -336,27 +337,26 @@
                                         </div>
                                         <div class="col-12 q-mt-md border-white border-rounded q-pa-md">
                                             <div>
-                                                Check the joint of the robot which moves in the opposite direction of the leader's joint.
+                                                {{ $t('teleopLeaderStepDirectionBody2') }}
                                             </div>
                                         </div>
                                     </div>
                                     <q-stepper-navigation>
-                                        <q-btn outline @click="() => { leaderSettingStep = 4 }" color="primary" label="Go Next" />
-                                        <q-btn flat @click="leaderSettingStep = 2" color="primary" label="Back" class="q-ml-sm" />
+                                        <q-btn outline @click="() => { leaderSettingStep = 4 }" color="primary" :label="$t('teleopLeaderGoNext')" />
+                                        <q-btn flat @click="leaderSettingStep = 2" color="primary" :label="$t('teleopLeaderBack')" class="q-ml-sm" />
                                     </q-stepper-navigation>
                                 </q-step>
                                 <q-step
                                     :name="4"
-                                    title="Motion Filter Settings"
+                                    :title="$t('teleopLeaderStepFilterTitle')"
                                     :header-nav="leaderSettingStep > 4"
                                 >
-                                    Tune teleoperation responsiveness. Higher EMA = smoother but laggier.
-                                    Larger Max step / Publish rate = faster response but rougher motion.
+                                    {{ $t('teleopLeaderStepFilterBody') }}
                                     <div>
                                         <q-btn
                                             v-if="!leaderTeleStarted"
                                             color="primary"
-                                            label="Start Teleoperation"
+                                            :label="$t('teleopLeaderStartTele')"
                                             @click="startLeaderTele(assembly.id, 'start_leader_robot')"
                                             class="full-width q-mt-md"
                                             outline
@@ -364,7 +364,7 @@
                                         <q-btn
                                             v-else
                                             color="orange-8"
-                                            label="Stop Teleoperation"
+                                            :label="$t('teleopLeaderStopTele')"
                                             @click="stopLeaderTele()"
                                             class="full-width q-mt-md"
                                             outline
@@ -375,7 +375,7 @@
                                             <q-input
                                                 v-model.number="leaderSettingForm.ema"
                                                 @update:model-value="saveLeaderSetting"
-                                                label="EMA filter (0~1)"
+                                                :label="$t('teleopLeaderEmaLabel')"
                                                 type="number"
                                                 step="0.05"
                                                 dense
@@ -387,7 +387,7 @@
                                             <q-input
                                                 v-model.number="leaderSettingForm.max_step_rad"
                                                 @update:model-value="saveLeaderSetting"
-                                                label="Max step (rad/tick)"
+                                                :label="$t('teleopLeaderMaxStepLabel')"
                                                 type="number"
                                                 step="0.001"
                                                 dense
@@ -399,7 +399,7 @@
                                             <q-input
                                                 v-model.number="leaderSettingForm.publish_rate"
                                                 @update:model-value="saveLeaderSetting"
-                                                label="Publish rate (Hz)"
+                                                :label="$t('teleopLeaderPublishRateLabel')"
                                                 type="number"
                                                 step="10"
                                                 dense
@@ -409,17 +409,18 @@
                                         </div>
                                     </div>
                                     <q-stepper-navigation align="right">
-                                        <q-btn @click="$emit('hide', leaderSettingForm)" color="primary" outline label="Finish" />
+                                        <q-btn @click="$emit('hide', leaderSettingForm)" color="primary" outline :label="$t('teleopLeaderFinish')" />
                                     </q-stepper-navigation>
                                 </q-step>
                                 
 
                             </q-stepper>
                         </div>
+                        </div>
                     </q-tab-panel>
 
                     <q-tab-panel name="keyboard">
-                        <div class="text-h6">Keyboard Teleoperation will be supported soon.</div>
+                        <div class="text-h6">{{ $t('teleopLeaderKeyboardComing') }}</div>
                     </q-tab-panel>
                 </q-tab-panels>
             </q-card-section>
@@ -431,6 +432,7 @@
 import { ref, reactive, onMounted, onUnmounted, defineProps, computed } from 'vue';
 import { useSocket } from 'src/composables/useSocket';
 import ProcessConsole from './ProcessConsole.vue';
+import TutorialHint from 'src/components/v2/TutorialHint.vue';
 import { useROS } from 'src/composables/useROS';
 import { useLeaderTeleoperation } from 'src/composables/useLeaderTeleoperation';
 import { api } from 'src/boot/axios';

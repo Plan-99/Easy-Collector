@@ -1,20 +1,44 @@
+import { watch } from 'vue';
 import { api } from 'boot/axios';
+import { useTopicStore } from 'src/stores/topicStore';
 
-export function useSensor(sensor, sensorOnCallback=() => {}) {
+/**
+ * Sensor composable — push 모델 기반.
+ *
+ * `topicStore.isPublished(sensor.read_topic)`을 watch해서 sensor.status를
+ * 자동으로 'on'/'off'로 동기화. start/stop 버튼은 driver spawn/kill만 담당.
+ *
+ * 호환성: `checkSensorTopic`은 no-op stub로 유지.
+ */
+export function useSensor(sensor, sensorOnCallback = () => {}) {
+  const topicStore = useTopicStore();
 
-  let sensorTopicChecker = null;
+  sensor.status = sensor.status || 'off';
 
-  checkSensorTopic(1);
+  watch(
+    () => topicStore.isPublished(sensor.read_topic),
+    (isPublished, wasPublished) => {
+      if (isPublished && !wasPublished) {
+        sensor.status = 'on';
+        try {
+          sensorOnCallback();
+        } catch (e) {
+          console.error('sensorOnCallback error:', e);
+        }
+      } else if (!isPublished && wasPublished) {
+        sensor.status = 'off';
+      }
+    },
+    { immediate: true },
+  );
 
   function status() {
-    return sensor.status
+    return sensor.status;
   }
 
   function startSensor() {
     sensor.status = 'loading';
-    return api.post('/sensor:start', sensor).then(() => {
-      checkSensorTopic();
-    }).catch((error) => {
+    return api.post('/sensor:start', sensor).catch((error) => {
       console.error('Error starting sensor:', error);
       sensor.status = 'off';
     });
@@ -30,31 +54,8 @@ export function useSensor(sensor, sensorOnCallback=() => {}) {
     });
   }
 
-  function checkSensorTopic(maxSteps = 20) {
-    if (sensorTopicChecker) {
-      clearInterval(sensorTopicChecker);
-    }
-    let steps = 0;
-    sensorTopicChecker = setInterval(() => {
-      api.get(`/topics`)
-      .then((res) => {
-        const isPublished = Boolean(res.data.topics.find(topic => topic.name === sensor.read_topic));
-        if (isPublished) {
-          sensor.status = 'on';
-          sensorOnCallback();
-          clearInterval(sensorTopicChecker);
-        }
-      })
-      .catch(error => {
-        console.error('Error setting up WebRTC:', error);
-      });
-      steps++;
-      if (steps > maxSteps) {
-        clearInterval(sensorTopicChecker);
-        sensor.status = 'off';
-        stopSensor();
-      }
-    }, 1000);
+  function checkSensorTopic() {
+    /* no-op: topicStore가 push 받아 자동으로 상태 동기화 */
   }
 
   return {

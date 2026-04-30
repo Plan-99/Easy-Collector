@@ -10,12 +10,11 @@ import traceback
 import requests
 from flask import Blueprint, current_app, request
 
-from ...configs.global_configs import DATASET_DIR
+from ...configs.global_configs import DATASET_DIR, get_checkpoint_dir
 from ...database.models.checkpoint_model import Checkpoint as CheckpointModel
 
 remote_train_bp = Blueprint('remote_train', __name__)
 
-CHECKPOINT_DIR = '/root/src/backend/checkpoints'
 PROCESS_ID = 'train_task'
 
 
@@ -26,6 +25,33 @@ def _normalize_url(url: str) -> str:
     if not url.startswith(('http://', 'https://')):
         url = 'http://' + url
     return url
+
+
+REMOTE_DEFAULT_URL = 'http://easytrainer.training_server.com'
+LOCAL_DEFAULT_URL = 'http://localhost:5100'
+
+
+@remote_train_bp.route('/remote-train/default-url', methods=['GET'])
+def remote_train_default_url():
+    """Decide the default training-server URL for the frontend.
+
+    런처가 같은 호스트에 training_server 컨테이너를 띄워뒀으면 로컬 URL을
+    추천하고, 그렇지 않으면 공용 원격 서버 URL을 기본값으로 돌려준다.
+    Backend는 host network 모드로 돌기 때문에 127.0.0.1:5100이 곧 launcher가
+    띄운 컨테이너에 도달.
+    """
+    import socket
+    local_running = False
+    try:
+        with socket.create_connection(('127.0.0.1', 5100), timeout=0.5):
+            local_running = True
+    except OSError:
+        local_running = False
+    return {
+        'status': 'success',
+        'local_running': local_running,
+        'default_url': LOCAL_DEFAULT_URL if local_running else REMOTE_DEFAULT_URL,
+    }, 200
 
 
 @remote_train_bp.route('/remote-train/health', methods=['POST'])
@@ -42,64 +68,109 @@ def remote_train_health():
         return {'status': 'error', 'message': str(e)}, 502
 
 
-@remote_train_bp.route('/remote-train/start', methods=['POST'])
-def remote_train_start():
+@remote_train_bp.route('/train/queue', methods=['POST'])
+def train_queue_enqueue():
+    """체크포인트를 학습 큐에 추가. status가 active(queued/running)이면 no-op."""
     data = request.json or {}
     server_url = _normalize_url(data.get('server_url', ''))
     checkpoint_id = data.get('checkpoint_id')
     callback_url = data.get('callback_url', '')
 
-    if not server_url or not checkpoint_id:
+    if not server_url or checkpoint_id is None:
         return {'status': 'error', 'message': 'server_url and checkpoint_id required'}, 400
 
-    if PROCESS_ID in current_app.pm.processes:
-        return {'status': 'error', 'message': 'Training already running'}, 409
-
-    current_app.pm.start_function(
-        name=PROCESS_ID,
-        func=_remote_training_workflow,
-        server_url=server_url,
-        checkpoint_id=checkpoint_id,
-        callback_url=callback_url,
-        socketio_instance=current_app.pm.socketio,
-    )
-
+    scheduler = current_app.training_scheduler
+    enqueued = scheduler.enqueue(int(checkpoint_id), server_url, callback_url)
     return {
         'status': 'success',
-        'message': 'Remote training started',
-        'process_id': PROCESS_ID,
+        'enqueued': enqueued,
         'checkpoint_id': checkpoint_id,
     }, 200
 
 
-@remote_train_bp.route('/remote-train/stop', methods=['POST'])
-def remote_train_stop():
-    """Stop the currently running training (local watcher + remote job)."""
-    from ...database.models.checkpoint_model import Checkpoint as CheckpointModel
+@remote_train_bp.route('/train/queue/<int:checkpoint_id>', methods=['DELETE'])
+def train_queue_cancel(checkpoint_id):
+    """큐에서 제거 또는 실행 중이면 stop 신호.
 
-    # Directly notify training_server first so the worker process dies quickly,
-    # without waiting for the backend's polling loop to forward the stop.
-    task = current_app.pm.processes.get(PROCESS_ID)
-    if task and task.get('type') == 'function':
-        ctl = task.get('obj') or {}
-        server_url = ctl.get('server_url')
-        job_id = ctl.get('job_id')
-        if server_url and job_id:
+    응답의 'result':
+      - 'canceled': 큐 대기 중이었음, 즉시 status=canceled
+      - 'stopping': 실행 중이었음, stop 신호 전달 (실제 종료는 스케줄러가 처리)
+      - 'not_found': 존재하지 않거나 이미 종료된 상태
+    """
+    scheduler = current_app.training_scheduler
+    result = scheduler.cancel(int(checkpoint_id))
+
+    # 'not_found'는 두 가지 경우:
+    #   (a) 정말로 row가 없음 — 진짜 404
+    #   (b) row는 있는데 이미 finished/failed/canceled 상태 — 사용자가 dialog
+    #       에서 "cancel" 누른 의도는 보통 "이 항목을 큐 패널에서 치우자"이므로
+    #       idempotent하게 soft-delete + disk 정리 후 200으로 응답한다.
+    if result == 'not_found':
+        from ...database.models.checkpoint_model import Checkpoint as CheckpointModel
+        ckpt = CheckpointModel.find(int(checkpoint_id))
+        if ckpt is None:
+            return {'status': 'error', 'result': 'not_found'}, 404
+        try:
+            ckpt.delete_instance()
+        except Exception as e:
+            print(f'[train/queue cancel] DB soft-delete failed for ckpt {checkpoint_id}: {e}')
+        ckpt_dir = get_checkpoint_dir(checkpoint_id)
+        if os.path.isdir(ckpt_dir):
             try:
-                requests.post(f'{server_url}/api/train/stop/{job_id}', timeout=10)
+                shutil.rmtree(ckpt_dir)
+            except Exception as e:
+                print(f'[train/queue cancel] rmtree failed for {ckpt_dir}: {e}')
+        return {'status': 'success', 'result': 'removed',
+                'checkpoint_id': checkpoint_id}, 200
+
+    # 부분 다운로드된 checkpoint 디렉토리 정리는 cancel 시점에 즉시.
+    # (실행 중 → stopping의 경우, runner가 stop_event를 보고 빠져나오면 추가
+    # cleanup이 필요하지만 그 시점엔 Scheduler가 status=canceled로 마감하므로
+    # 다음 listing에서 자연스럽게 제외된다.)
+    if result == 'canceled':
+        ckpt_dir = get_checkpoint_dir(checkpoint_id)
+        if os.path.isdir(ckpt_dir):
+            try:
+                shutil.rmtree(ckpt_dir)
+            except Exception as e:
+                print(f'[train/queue cancel] rmtree failed for {ckpt_dir}: {e}')
+
+    return {'status': 'success', 'result': result, 'checkpoint_id': checkpoint_id}, 200
+
+
+@remote_train_bp.route('/train/queue', methods=['GET'])
+def train_queue_list():
+    """현재 큐 스냅샷. {running, queued[], recent[]}."""
+    scheduler = current_app.training_scheduler
+    return {'status': 'success', **scheduler.snapshot()}, 200
+
+
+# ---------------------------------------------------------------------------
+# Legacy aliases — 기존 프론트엔드 호출처 호환용. 새 큐 라우트로 라우팅.
+# (당분간 유지, 다음 단계에 프론트엔드에서 직접 큐 라우트로 이전.)
+# ---------------------------------------------------------------------------
+@remote_train_bp.route('/remote-train/start', methods=['POST'])
+def remote_train_start_legacy():
+    return train_queue_enqueue()
+
+
+@remote_train_bp.route('/remote-train/stop', methods=['POST'])
+def remote_train_stop_legacy():
+    """과거 동작과 가장 가까운 동작: 현재 실행 중인 체크포인트를 cancel."""
+    from ...database.models.checkpoint_model import Checkpoint as CheckpointModel
+    scheduler = current_app.training_scheduler
+    snap = scheduler.snapshot()
+    running = snap.get('running')
+    if running and running.get('id') is not None:
+        scheduler.cancel(int(running['id']))
+        # legacy: 진행 중이던 체크포인트 row도 soft-delete.
+        ckpt = CheckpointModel.find(int(running['id']))
+        if ckpt is not None:
+            try:
+                ckpt.delete_instance()
             except Exception:
                 pass
-
-    # Mark the training checkpoint as failed & remove it
-    running = CheckpointModel.select().where(
-        CheckpointModel.status == 'training',
-        CheckpointModel.deleted_at.is_null(),
-    ).first()
-    if running:
-        running.delete_instance()
-
-    current_app.pm.stop_function(PROCESS_ID)
-    return {'status': 'success', 'message': 'Training stopped'}, 200
+    return {'status': 'success', 'message': 'Stop signal sent (legacy alias)'}, 200
 
 
 @remote_train_bp.route('/remote-train/cancel', methods=['POST'])
@@ -129,7 +200,7 @@ def remote_train_receive_model():
     if checkpoint_id is None:
         return {'status': 'error', 'message': 'invalid job_id'}, 400
 
-    ckpt_dir = os.path.join(CHECKPOINT_DIR, str(checkpoint_id))
+    ckpt_dir = get_checkpoint_dir(checkpoint_id)
     os.makedirs(ckpt_dir, exist_ok=True)
 
     with tempfile.NamedTemporaryFile(suffix='.tar.gz', delete=False) as tmp:
@@ -246,7 +317,7 @@ def _tar_datasets(dataset_ids, tar_path):
 
 
 def _tar_checkpoint(checkpoint_id, tar_path):
-    ckpt_dir = os.path.join(CHECKPOINT_DIR, str(checkpoint_id))
+    ckpt_dir = get_checkpoint_dir(checkpoint_id)
     if not os.path.isdir(ckpt_dir):
         raise FileNotFoundError(f'Checkpoint directory not found: {ckpt_dir}')
     with tarfile.open(tar_path, 'w:gz') as tar:
@@ -254,9 +325,20 @@ def _tar_checkpoint(checkpoint_id, tar_path):
 
 
 def _download_and_install_model(server_url, job_id, checkpoint_id):
-    """Pull the trained model from training_server and extract into the local checkpoint dir."""
-    ckpt_dir = os.path.join(CHECKPOINT_DIR, str(checkpoint_id))
+    """Pull the trained model from training_server and extract into the local checkpoint dir.
+
+    로컬 training_server는 backend와 같은 host volume(/opt/easytrainer/training_data)
+    을 공유하고 동일한 <machine_id>/<checkpoint_id>/ 경로에 직접 저장하므로,
+    이미 모델 파일이 있으면 HTTP 다운로드/재추출을 건너뛴다 (큰 모델은 GB 단위라
+    같은 디스크 위에서 tar→post→untar를 반복하는 게 명백한 낭비).
+    """
+    ckpt_dir = get_checkpoint_dir(checkpoint_id)
     os.makedirs(ckpt_dir, exist_ok=True)
+
+    # 학습 산출물의 핵심 파일이 이미 같은 자리에 있으면 로컬 학습으로 간주.
+    # config.json은 모든 policy 타입이 공통으로 떨궈주는 sentinel.
+    if os.path.exists(os.path.join(ckpt_dir, 'config.json')):
+        return
 
     with tempfile.NamedTemporaryFile(suffix='.tar.gz', delete=False) as tmp:
         tmp_path = tmp.name
@@ -279,36 +361,40 @@ def _download_and_install_model(server_url, job_id, checkpoint_id):
             pass
 
 
-def _remote_training_workflow(server_url, checkpoint_id, callback_url,
-                               socketio_instance, task_control):
-    """Background workflow: upload dataset → start → poll status → mark finished."""
+def run_training_job(checkpoint, server_url, callback_url,
+                      stop_event, socketio_instance):
+    """Pure execution function: dataset upload → start → poll → download model.
+
+    Status 전이는 절대 건드리지 않는다 — TrainingScheduler가 호출 전후로
+    queued→running, running→{finished,failed,canceled}를 일괄 관리.
+
+    Args:
+        checkpoint: Checkpoint ORM row
+        server_url: training_server base URL (already normalized)
+        callback_url: optional, currently unused (server pushes via download API)
+        stop_event: threading.Event — set 시 즉시 정리하고 'canceled' 반환
+        socketio_instance: 로그 emit용
+
+    Returns:
+        'finished' | 'failed' | 'canceled'
+    """
     from ...utils.machine_id import machine_id as _machine_id_fn
     machine_id = _machine_id_fn()
+    checkpoint_id = checkpoint.id
     job_id = f'{machine_id[:8]}_ckpt_{checkpoint_id}'
     log_id = PROCESS_ID
 
-    # Expose endpoint info to the stop route so it can directly notify
-    # training_server without waiting for the polling loop.
-    task_control['server_url'] = server_url
-    task_control['job_id'] = job_id
-
-    checkpoint = CheckpointModel.find(checkpoint_id)
-    if checkpoint is None:
-        _emit_log(socketio_instance, log_id, f'[ERROR] Checkpoint {checkpoint_id} not found', 'error')
-        return
-
     try:
-        checkpoint.update({'status': 'training'})
-
         config = _build_train_config(checkpoint)
         dataset_ids = list(config['dataset_info'].keys())
         if not dataset_ids:
             _emit_log(socketio_instance, log_id, '[ERROR] No datasets assigned to checkpoint', 'error')
-            checkpoint.update({'status': 'failed'})
-            return
+            return CheckpointModel.STATUS_FAILED
         if len(dataset_ids) > 1:
-            raise NotImplementedError(
-                'Multi-dataset training on the remote server is not implemented yet.')
+            _emit_log(socketio_instance, log_id,
+                      '[ERROR] Multi-dataset training on the remote server is not implemented yet.',
+                      'error')
+            return CheckpointModel.STATUS_FAILED
         dataset_id = dataset_ids[0]
 
         # 1) Upload dataset bundle (stored at datasets/<machine_id>/<dataset_id>/)
@@ -384,14 +470,13 @@ def _remote_training_workflow(server_url, checkpoint_id, callback_url,
         last_progress = -1.0
         last_log_cursor = 0
         while True:
-            if task_control.get('stop'):
+            if stop_event.is_set():
                 _emit_log(socketio_instance, log_id, 'Stop requested. Notifying remote server...', 'warning')
                 try:
                     requests.post(f'{server_url}/api/train/stop/{job_id}', timeout=10)
                 except Exception:
                     pass
-                checkpoint.update({'status': 'failed'})
-                return
+                return CheckpointModel.STATUS_CANCELED
 
             # Pull new log lines and forward to the frontend.
             try:
@@ -437,29 +522,23 @@ def _remote_training_workflow(server_url, checkpoint_id, callback_url,
                 _emit_log(socketio_instance, log_id, '[SUCCESS] Training finished. Downloading model...', 'success')
                 try:
                     _download_and_install_model(server_url, job_id, checkpoint_id)
-                    checkpoint.update({'status': 'finished'})
                     _emit_log(socketio_instance, log_id, '[SUCCESS] Model installed.', 'success')
+                    return CheckpointModel.STATUS_FINISHED
                 except Exception as e:
                     traceback.print_exc()
                     _emit_log(socketio_instance, log_id, f'[ERROR] Model download failed: {e}', 'error')
-                    checkpoint.update({'status': 'failed'})
-                return
+                    return CheckpointModel.STATUS_FAILED
             if status == 'failed':
                 err = job.get('error', 'unknown')
                 _emit_log(socketio_instance, log_id, f'[ERROR] Training failed: {err}', 'error')
-                checkpoint.update({'status': 'failed'})
-                return
+                return CheckpointModel.STATUS_FAILED
             if status == 'stopped':
                 _emit_log(socketio_instance, log_id, 'Training stopped.', 'warning')
-                checkpoint.update({'status': 'failed'})
-                return
+                return CheckpointModel.STATUS_CANCELED
 
             time.sleep(2)
 
     except Exception as e:
         traceback.print_exc()
         _emit_log(socketio_instance, log_id, f'[ERROR] {e}', 'error')
-        try:
-            checkpoint.update({'status': 'failed'})
-        except Exception:
-            pass
+        return CheckpointModel.STATUS_FAILED

@@ -25,6 +25,12 @@ model User {
   privacyAcceptedAt DateTime?
   refundAcceptedAt  DateTime?
 
+  // Optional password (bcrypt hash). Set later from dashboard so the user
+  // can sign in with email + password in addition to Google OAuth. Sign-up
+  // is still Google-only; this just adds an alt sign-in path for the same
+  // already-verified email.
+  passwordHash String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

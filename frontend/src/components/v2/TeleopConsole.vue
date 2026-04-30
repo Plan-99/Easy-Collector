@@ -2,6 +2,7 @@
     <div class="row q-col-gutter-md teleop-console">
         <div class="col-auto column q-gutter-y-sm" style="min-width: 260px;">
             <!-- Robot ON buttons (per-robot) -->
+            <TutorialHint step="2" :text="$t('tutorialTeleopRobotOn')" />
             <div class="row no-wrap robot-buttons-row">
                 <q-btn
                     v-for="robot in assemblyRobots"
@@ -18,6 +19,7 @@
             </div>
 
             <!-- Method select -->
+            <TutorialHint step="3" :text="$t('tutorialTeleopMethod')" />
             <q-select
                 v-model="teleopMethod"
                 :options="methodOptions"
@@ -30,6 +32,7 @@
             />
 
             <!-- Start / Stop -->
+            <TutorialHint step="4" :text="$t('tutorialTeleopStart')" />
             <q-btn
                 v-if="!teleopActive"
                 color="primary"
@@ -82,6 +85,7 @@ import { useI18n } from 'vue-i18n'
 import { useLeaderTeleoperation } from 'src/composables/useLeaderTeleoperation'
 import { useProcessStore } from 'src/stores/processStore'
 import { DEFAULT_KEYBOARD_SETTINGS, AXIS_TO_EE_INDEX, normalizeEventKey, displayKey } from 'src/configs/teleopDefaults'
+import TutorialHint from 'src/components/v2/TutorialHint.vue'
 
 const props = defineProps({
     assembly: { type: Object, required: true },
@@ -210,14 +214,14 @@ function keyboardHandler(event) {
     if (tag === 'input' || tag === 'textarea') return
 
     const map = keyboardSetting.value.axis_map || {}
-    const stepSize = Number(keyboardSetting.value.step_size) || 0.0005
+    const stepSize = Number(keyboardSetting.value.step_size) || 0.003
 
     if (event.key === ' ' || event.key === 'Space') {
         activeArms.value.forEach((robot) => {
             const len = robot.tool_inner ? 7 : 6
             sendDelta(robot, Array(len).fill(0))
         })
-        pushLog('STOP (space) — all arms')
+        pushLog(t('teleopLogStopAllArms'))
         event.preventDefault()
         return
     }
@@ -239,30 +243,37 @@ function keyboardHandler(event) {
     const eeDelta = Array(len).fill(0)
     eeDelta[idx] = stepSize * (Number(entry.scale) || 1) * (Number(entry.sign) || 1)
     sendDelta(robot, eeDelta)
-    pushLog(`${side}/${robot.name}: ${displayKey(normKey)} → ${entry.axis}${entry.sign > 0 ? '+' : '-'} delta=${eeDelta[idx].toFixed(5)}`)
+    pushLog(t('teleopLogKeyDelta', {
+        side,
+        name: robot.name,
+        key: displayKey(normKey),
+        axis: entry.axis,
+        sign: entry.sign > 0 ? '+' : '-',
+        delta: eeDelta[idx].toFixed(5),
+    }))
     event.preventDefault()
 }
 
 function sendDelta(robot, eeDelta) {
     if (!robot.handler || !robot.handler.moveRobotEEDelta) {
-        pushLog(`${robot.name}: handler missing — start the robot first`, 'error')
+        pushLog(t('teleopLogHandlerMissing', { name: robot.name }), 'error')
         return
     }
     try {
         robot.handler.moveRobotEEDelta({ ee: eeDelta })
     } catch (e) {
-        pushLog(`${robot.name}: send error ${e.message}`, 'error')
+        pushLog(t('teleopLogSendError', { name: robot.name, error: e.message }), 'error')
     }
 }
 
 function startKeyboardTeleop() {
     if (keyboardActive.value) return
     if (activeArms.value.length === 0) {
-        pushLog('No arms in assembly', 'error')
+        pushLog(t('teleopLogNoArms'), 'error')
         return
     }
     keyboardActive.value = true
-    pushLog(`Keyboard teleop started — ${activeArms.value.map((r) => r.name).join(' + ')}`)
+    pushLog(t('teleopLogKeyboardStarted', { arms: activeArms.value.map((r) => r.name).join(' + ') }))
     window.addEventListener('keydown', keyboardHandler)
 }
 
@@ -270,11 +281,11 @@ function stopKeyboardTeleop() {
     if (!keyboardActive.value) return
     keyboardActive.value = false
     window.removeEventListener('keydown', keyboardHandler)
-    pushLog('Keyboard teleop stopped')
+    pushLog(t('teleopLogKeyboardStopped'))
 }
 
 function startLeaderTeleop() {
-    pushLog('Starting leader teleop…')
+    pushLog(t('teleopLogStartingLeader'))
     startLeaderTele(props.assembly.id, 'leader_teleoperation')
 }
 

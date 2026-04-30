@@ -13,17 +13,17 @@
 
         <div class="row q-col-gutter-md">
             <div class="col-6 col-sm-4 col-md-3 col-lg-2" v-for="robot in robots" :key="robot.id">
-                <q-card class="q-pa-md bg-secondary border-rounded border-white text-white" :class="watchingRobot && watchingRobot.status === 'on' && robot.id === watchingRobot.id ? 'border-primary' : ''">
+                <q-card class="q-pa-md bg-secondary border-rounded border-white text-white full-height" :class="watchingRobot && watchingRobot.status === 'on' && robot.id === watchingRobot.id ? 'border-primary' : ''">
                     <q-menu context-menu>
                         <q-list bordered separator>
                             <q-item clickable v-ripple v-close-popup @click="openEditRobotForm(robot)">
-                                <q-item-section>Edit Robot</q-item-section>
+                                <q-item-section>{{ $t('robotContextEdit') }}</q-item-section>
                                 <q-item-section side>
                                     <q-icon name="edit" size="xs" />
                                 </q-item-section>
                             </q-item>
                             <q-item clickable v-ripple class="text-negative" @click="deleteRobot(robot)">
-                                <q-item-section>Hide Robot</q-item-section>
+                                <q-item-section>{{ $t('robotContextHide') }}</q-item-section>
                                 <q-item-section side>
                                     <q-icon color="negative" name="visibility" size="xs" />
                                 </q-item-section>
@@ -38,10 +38,10 @@
                         <div class="text-grey-6 text-caption">{{ robot.type }}</div>
                     </q-card-section>
                     <q-card-section class="q-pa-none q-mt-sm row" v-if="robot.type !== 'custom'">
-                        <div class="text-primary text-caption" v-if="robot.status === 'on'">ONLINE</div>
-                        <div class="text-orange text-caption" v-else-if="robot.status === 'loading'">LOADING</div>
-                        <div class="text-negative text-caption" v-else-if="robot.status === 'error'">ERROR</div>
-                        <div class="text-grey-7 text-caption" v-else>OFFLINE</div>
+                        <div class="text-primary text-caption" v-if="robot.status === 'on'">{{ $t('statusOnline') }}</div>
+                        <div class="text-orange text-caption" v-else-if="robot.status === 'loading'">{{ $t('statusLoading') }}</div>
+                        <div class="text-negative text-caption" v-else-if="robot.status === 'error'">{{ $t('statusError') }}</div>
+                        <div class="text-grey-7 text-caption" v-else>{{ $t('statusOffline') }}</div>
                         <q-space></q-space>
                         <q-toggle
                             :model-value="robot.status === 'on'"
@@ -51,10 +51,10 @@
                         />
                     </q-card-section>
                     <q-card-section class="q-pa-none q-mt-sm row" v-else>
-                        <div class="text-primary text-caption" v-if="robot.status === 'on'">TOPIC ON</div>
-                        <div class="text-negative text-caption" v-else-if="robot.status === 'error'">ERROR</div>
-                        <div class="text-grey-7 text-caption" v-else-if="robot.status === 'off'">TOPIC OFF</div>
-                        <div class="text-grey-7 text-caption" v-else>LOADING</div>
+                        <div class="text-primary text-caption" v-if="robot.status === 'on'">{{ $t('topicOn') }}</div>
+                        <div class="text-negative text-caption" v-else-if="robot.status === 'error'">{{ $t('statusError') }}</div>
+                        <div class="text-grey-7 text-caption" v-else-if="robot.status === 'off'">{{ $t('topicOff') }}</div>
+                        <div class="text-grey-7 text-caption" v-else>{{ $t('statusLoading') }}</div>
                     </q-card-section>
                     <TutorialHint
                         v-if="tutorial.running && tutorial.robotId === robot.id"
@@ -75,7 +75,7 @@
                     </q-card-section>
                 </q-card>
             </div>
-            <div class="col-6 col-sm-4 col-md-3  col-lg-2" style="min-height: 220px;" >
+            <div class="col-6 col-sm-4 col-md-3  col-lg-2" :style="!robots.length ? 'min-height: 220px;' : ''" >
                 <q-btn color="white" class="full-height full-width border-rounded" outline size="lg" icon="add" @click="openAddSensorForm"></q-btn>
                 <TutorialHint step="2" class="q-mt-sm" :text="$t('tutorialRobotAdd')" />
             </div>
@@ -145,17 +145,17 @@
                             class="q-ml-sm text-white"
                             size="xs"
                             dark
-                            label="Tool Joint"
+                            :label="$t('robotToolJoint')"
                             v-if="robotForm.find((e) => e.key === 'role').value !== 'tool'"
                         ></q-checkbox>
                     </div>
-                    
+
                     <div class="col-3">
                         <q-btn
                             dense
                             outline
                             color="primary"
-                            label="+ Add Joint"
+                            :label="$t('robotAddJoint')"
                             class="full-width full-height"
                             @click="addJoint"
                         ></q-btn>
@@ -202,10 +202,10 @@
                     type="textarea"
                     rows="10"
                     class="q-mb-md q-mt-xs"
-                    placeholder='{"urdf_path": "/path/to/robot.urdf", "urdf_package_dir": "/path/to/package/", "ik_setting": {"joints_to_lock": [], "ee_definitions": [["ee", "joint_6", null]]}}'
+                    :placeholder="$t('robotIkPlaceholder')"
                     :error="ikJsonError !== ''"
                     :error-message="ikJsonError"
-                    hint="Leave empty to disable IK"
+                    :hint="$t('robotIkHint')"
                     style="font-family: monospace;"
                 />
             </template>
@@ -234,8 +234,10 @@ import FormDialog from 'src/components/v2/FormDialog.vue';
 import RobotPendant from 'src/components/v2/RobotPendant.vue';
 import TutorialHint from 'src/components/v2/TutorialHint.vue';
 import { useTutorialStore } from 'src/stores/tutorialStore.js';
+import { useI18n } from 'vue-i18n';
 // import SimView from 'src/components/v2/SimView.vue'; // 시뮬레이션 안정화 후 활성화
 
+const { t } = useI18n();
 const { socket } = useSocket();
 const { leaderTeleStarted, stopLeaderTele } = useLeaderTeleoperation();
 const tutorial = useTutorialStore();
@@ -264,56 +266,56 @@ function getFormRobotInfo(form) {
 
 const robotForm = ref([
     { key: 'id', value: null },
-    { label: 'Robot Name', key: 'name', type: 'text', value: '', default: '' },
-    { label: 'Robot Type', key: 'type', type: 'select', value: '', default: '', options: computed(() => supportingRobots.value.map((robot) => ({
+    { label: t('robotName'), key: 'name', type: 'text', value: '', default: '' },
+    { label: t('robotType'), key: 'type', type: 'select', value: '', default: '', options: computed(() => supportingRobots.value.map((robot) => ({
         label: robot.name + (robot.company ? ` (${robot.company})` : ''),
         value: robot.name
     }))) },
     // Custom fields based on robot type
-    { label: 'CAN Port', key: 'can_port', type: 'text', value: 'can0', default: 'can0', show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('can_port') },
-    { label: 'IP Address', key: 'ip_address', type: 'text', value: '10.0.2.27', default: '10.0.2.27', show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('ip_address') },
-    { label: 'Port', key: 'port', type: 'number', value: 502, default: 502, show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('port') },
-    { label: 'Changer Address', key: 'changer_address', type: 'number', value: 5, default: 5, show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('changer_address') },
-    { label: 'Serial Port', key: 'serial_port', type: 'text', value: '/dev/ttyUSB0', default: '/dev/ttyUSB0', show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('serial_port') },
+    { label: t('robotFieldCanPort'), key: 'can_port', type: 'text', value: 'can0', default: 'can0', show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('can_port') },
+    { label: t('ipAddress'), key: 'ip_address', type: 'text', value: '10.0.2.27', default: '10.0.2.27', show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('ip_address') },
+    { label: t('robotFieldPort'), key: 'port', type: 'number', value: 502, default: 502, show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('port') },
+    { label: t('robotFieldChangerAddress'), key: 'changer_address', type: 'number', value: 5, default: 5, show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('changer_address') },
+    { label: t('robotFieldSerialPort'), key: 'serial_port', type: 'text', value: '/dev/ttyUSB0', default: '/dev/ttyUSB0', show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('serial_port') },
     // { label: 'tool_inner', key: 'tool_inner', type: 'custom', value: computed(() => robotForm.value.find((e) => e.key === 'tool_index').length > 0), default: false, show: () => false },
     // Fields for custom robot
-    { label: 'Role', key: 'role', type: 'select', value: 'single_arm', default: 'dual_arm', 
+    { label: t('robotFieldRole'), key: 'role', type: 'select', value: 'single_arm', default: 'dual_arm',
         options: [
-            { label: 'Single Arm', value: 'single_arm' },
-            { label: 'Dual Arm', value: 'dual_arm' },
-            { label: 'Tool', value: 'tool' },
+            { label: t('robotRoleSingleArm'), value: 'single_arm' },
+            { label: t('robotRoleDualArm'), value: 'dual_arm' },
+            { label: t('robotRoleTool'), value: 'tool' },
         ],
-        show: (form) => form.find((e) => e.key === 'type').value === 'custom' 
+        show: (form) => form.find((e) => e.key === 'type').value === 'custom'
     },
-    { label: 'Simulation', key: 'is_sim', type: 'checkbox', value: false, default: false, show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
-    { label: 'Joint Names', key: 'joint_names', type: 'custom', value: [], default: [] , show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
+    { label: t('robotFieldSimulation'), key: 'is_sim', type: 'checkbox', value: false, default: false, show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
+    { label: t('robotFieldJointNames'), key: 'joint_names', type: 'custom', value: [], default: [] , show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
     { label: '', key: 'tool_index', type: 'custom', value: [], default: [], show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
-    { label: 'Joint Lower Bounds', key: 'joint_lower_bounds', type: 'custom', value: [], default: [] , show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
-    { label: 'Joint Upper Bounds', key: 'joint_upper_bounds', type: 'custom', value: [], default: [] , show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
-    { label: 'Read Topic', key: 'read_topic', type: 'text', value: '', default: '', show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
-    { label: 'Read Topic Message Type', key: 'read_topic_msg', type: 'select', value: '', default: 'sensor_msgs/JointState', 
+    { label: t('robotFieldJointLowerBounds'), key: 'joint_lower_bounds', type: 'custom', value: [], default: [] , show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
+    { label: t('robotFieldJointUpperBounds'), key: 'joint_upper_bounds', type: 'custom', value: [], default: [] , show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
+    { label: t('robotFieldReadTopic'), key: 'read_topic', type: 'text', value: '', default: '', show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
+    { label: t('robotFieldReadTopicMsg'), key: 'read_topic_msg', type: 'select', value: '', default: 'sensor_msgs/JointState',
         options: [
             { label: 'sensor_msgs/JointState', value: 'sensor_msgs/JointState' },
         ],
-        show: (form) => form.find((e) => e.key === 'type').value === 'custom' 
+        show: (form) => form.find((e) => e.key === 'type').value === 'custom'
     },
-    { label: 'Write Type', key: 'write_type', type: 'select', value: '', default: 'topic', 
+    { label: t('robotFieldWriteType'), key: 'write_type', type: 'select', value: '', default: 'topic',
         options: [
             { label: 'Topic', value: 'topic' },
             { label: 'Service', value: 'service' },
             { label: 'Action', value: 'action' },
         ],
-        show: (form) => form.find((e) => e.key === 'type').value === 'custom' 
+        show: (form) => form.find((e) => e.key === 'type').value === 'custom'
     },
-    { label: 'Write Topic', key: 'write_topic', type: 'text', value: '', default: '', show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
-    { label: 'Write Topic Message Type', key: 'write_topic_msg', type: 'select', value: '', default: 'sensor_msgs/JointState',
+    { label: t('robotFieldWriteTopic'), key: 'write_topic', type: 'text', value: '', default: '', show: (form) => form.find((e) => e.key === 'type').value === 'custom' },
+    { label: t('robotFieldWriteTopicMsg'), key: 'write_topic_msg', type: 'select', value: '', default: 'sensor_msgs/JointState',
         options: [
             { label: 'sensor_msgs/JointState', value: 'sensor_msgs/JointState' },
             { label: 'control_msgs/action/GripperCommand', value: 'control_msgs/action/GripperCommand' },
         ],
         show: (form) => form.find((e) => e.key === 'type').value === 'custom'
     },
-    { label: 'IK Settings (JSON)', key: 'ik_json', type: 'custom', value: '', default: '', optional: true,
+    { label: t('robotFieldIkSettings'), key: 'ik_json', type: 'custom', value: '', default: '', optional: true,
         show: (form) => form.find((e) => e.key === 'type').value === 'custom'
     },
 ]);
@@ -329,9 +331,8 @@ function listRobots() {
             robot.loading = false;
             robot.handler = useRobot(robot, () => {
             });
-            if (robot.type === 'custom') {
-                robot.handler.checkRobotTopic();
-            }
+            // Topic visibility는 topicStore가 push로 추적하므로 type별 분기 불필요.
+            // (custom robot의 외부 토픽도 동일 경로로 자동 감지)
             robot.joint_pos = []
             robot.joint_names.forEach((joint, i) => {
                 robot.joint_pos[i] = 0
@@ -391,7 +392,7 @@ function saveRobot(formData) {
         try {
             formData.ik_json = JSON.parse(formData.ik_json)
         } catch {
-            ikJsonError.value = 'Invalid JSON format'
+            ikJsonError.value = t('robotIkInvalidJson')
             showRobotForm.value = true
             return
         }
@@ -412,7 +413,7 @@ function deleteRobot(robot) {
     if (robot.status === 'on') {
         Notify.create({
             color: 'negative',
-            message: 'Turn off the robot first.'
+            message: t('errorTurnOffRobotFirst')
         })
         return;
     }

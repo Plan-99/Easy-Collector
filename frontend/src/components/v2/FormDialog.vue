@@ -84,7 +84,7 @@
                             </q-item>
                         </q-list>
                         <div v-else class="q-pa-md bg-dark text-white text-center border-white">
-                            No {{ data.label }} Available.
+                            {{ $t('formDialogNoOptions', { label: data.label }) }}
                         </div>
                     </q-scroll-area>
                     <q-checkbox
@@ -97,15 +97,19 @@
                     <slot :name="data.key" v-else-if="data.type === 'custom'"></slot>
                 </div>
                 <div class="row flex-center q-mt-xl">
-                    <q-btn :label="cancelButtonLabel" color="white" text-color="dark" class="q-mr-md" @click="isOpen = false" />
-                    <q-btn :label="okButtonLabel" color="positive" unelevated @click="submitForm" />
+                    <q-btn :label="cancelLabel" color="white" text-color="dark" class="q-mr-md" @click="isOpen = false" />
+                    <q-btn :label="okLabel" color="positive" unelevated @click="submitForm" />
                 </div>
             </q-card-section>
         </q-card>
     </q-dialog>
 </template>
 <script setup>
-import { ref, watch } from 'vue';
+import { ref, watch, computed } from 'vue';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
+
 const props = defineProps({
     modelValue: {
         type: Boolean,
@@ -121,17 +125,20 @@ const props = defineProps({
     },
     okButtonLabel: {
         type: String,
-        default: 'OK'
+        default: ''
     },
     cancelButtonLabel: {
         type: String,
-        default: 'Cancel'
+        default: ''
     },
     minWidth: {
         type: String,
         default: '600px'
     }
 });
+
+const okLabel = computed(() => props.okButtonLabel || t('ok'));
+const cancelLabel = computed(() => props.cancelButtonLabel || t('cancel'));
 const emit = defineEmits(['update:modelValue', 'submit']);
 const isOpen = ref(props.modelValue);
 watch(() => props.modelValue, (newVal) => {

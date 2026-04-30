@@ -828,12 +828,15 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             pad = getattr(self, "_right_pad", None)
             if pad is None or not pad.isVisible() or pad.width() <= 0:
                 return None
+            # 순서가 _pad_desc_stacks / _pad_desc_labels 와 1:1로 일치해야
+            # 한 칸씩 어긋나서 위/아래 행이 hover 상태로 잘못 표시되지 않는다.
             boxes = [
-                getattr(self, "pad_box_open_ui", None),
                 getattr(self, "pad_box_sync", None),
                 getattr(self, "pad_box_folder", None),
                 getattr(self, "pad_box_logs", None),
                 getattr(self, "pad_box_settings", None),
+                getattr(self, "pad_box_modules", None),
+                getattr(self, "pad_box_training", None),
                 getattr(self, "pad_box_exit", None),
             ]
             for idx, box in enumerate(boxes):
@@ -980,11 +983,15 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self._set_pad_description_indices(all_indices)
 
     def _pill_button_entry(self, obj) -> tuple[int, QPushButton] | None:
+        # 인덱스 순서가 _pad_desc_stacks / _hovered_pad_box_index 와 1:1로 일치해야
+        # 한 행씩 어긋나서 위/아래 행이 hover된 것처럼 보이지 않는다.
         buttons = [
             getattr(self, "btn_quick_apply", None),
             getattr(self, "btn_folder", None),
             getattr(self, "btn_export", None),
             getattr(self, "btn_logs", None),
+            getattr(self, "btn_modules", None),
+            getattr(self, "btn_training", None),
             getattr(self, "btn_exit", None),
         ]
         for idx, btn in enumerate(buttons):
@@ -3234,7 +3241,9 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         import threading
         import queue as _queue
 
-        dlg = QDialog(self)
+        # 부모를 두지 않아 floating pill 이동/리사이즈에 종속되지 않게 한다.
+        dlg = QDialog()
+        dlg.setWindowFlags(dlg.windowFlags() | Qt.Window)
         dlg.setWindowTitle("학습 서버 관리")
         dlg.resize(680, 620)
         layout = QVBoxLayout(dlg)
@@ -3587,18 +3596,19 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             from modules import get_api_base_url
             from device_auth import get_signed_in_user
 
-            # Pass the launcher's signed-in user id so the checkout page can
-            # detect if the browser is logged in as a different account and
-            # warn before payment.
-            params: dict[str, str] = {}
+            # Open the dashboard's modules tab scrolled to this module so
+            # the user can read the description and pay (or just see the
+            # ✓ 보유 중 status if already owned). The "u" hint lets the page
+            # warn when the browser is logged in as a different account.
+            params: dict[str, str] = {"focus": module_id}
             try:
                 u = get_signed_in_user()
                 if u and u.get("id"):
                     params["u"] = str(u["id"])
             except Exception:
                 pass
-            qs = ("?" + urlencode(params)) if params else ""
-            checkout_url = f"{get_api_base_url()}/checkout/{module_id}{qs}"
+            qs = "?" + urlencode(params)
+            checkout_url = f"{get_api_base_url()}/dashboard/modules{qs}"
             try:
                 webbrowser.open(checkout_url, new=2)
             except Exception:
@@ -3610,8 +3620,8 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             wait_dlg.setMinimumWidth(480)
             wlayout = QVBoxLayout(wait_dlg)
             msg = QLabel(
-                "브라우저에서 결제를 완료해 주세요.\n"
-                "결제가 확인되면 자동으로 설치를 시작합니다.\n\n"
+                "브라우저에서 모듈 페이지가 열렸습니다.\n"
+                "결제가 완료되면 자동으로 설치가 시작됩니다.\n\n"
                 "창이 열리지 않았다면 아래 주소를 복사해 직접 여세요:"
             )
             msg.setWordWrap(True)
@@ -4451,7 +4461,9 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             pass
 
     def open_settings_dialog(self):
-        dlg = QDialog(self)
+        # 부모 없이 독립 창으로 띄워 floating pill에 종속되지 않게 한다.
+        dlg = QDialog()
+        dlg.setWindowFlags(dlg.windowFlags() | Qt.Window)
         dlg.setWindowTitle("설정")
         dlg.resize(380, 260)
         layout = QVBoxLayout(dlg)
@@ -4541,7 +4553,9 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self._arrange_log_windows_side_by_side(dialogs)
 
     def _create_log_dialog(self, title: str, compose_args: list[str]) -> QDialog | None:
-        dlg = QDialog(self)
+        # 부모 없이 독립 창으로 띄워 floating pill에 종속되지 않게 한다.
+        dlg = QDialog()
+        dlg.setWindowFlags(dlg.windowFlags() | Qt.Window)
         dlg.setWindowTitle(title)
         dlg.resize(600, 420)
         log_widget = QTextEdit(dlg)
@@ -4580,7 +4594,9 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         dlg.destroyed.connect(_cleanup)
 
     def _create_ui_log_dialog(self, title: str, log_file: Path) -> QDialog | None:
-        dlg = QDialog(self)
+        # 부모 없이 독립 창으로 띄워 floating pill에 종속되지 않게 한다.
+        dlg = QDialog()
+        dlg.setWindowFlags(dlg.windowFlags() | Qt.Window)
         dlg.setWindowTitle(title)
         dlg.resize(600, 420)
         viewer = QPlainTextEdit(dlg)

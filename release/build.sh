@@ -190,6 +190,24 @@ for pat in "${RSYNC_EXCLUDES[@]}"; do
 done
 rsync -a "${RSYNC_EXCLUDE_ARGS[@]}" "$ROOT_DIR/" "$STAGE${PAYLOAD_DIR}/"
 
+# ros2/ros2_ws/src는 위에서 통째로 제외했지만, 그 안에 들어있는 디렉터리는
+# 전부 "번들 ROS2 패키지"(모듈 아님 — 모듈은 modules/ 트리에 있고 런처가
+# 런타임에 설치한다)이므로, package.xml이 있는 디렉터리만 골라 다시 복사한다.
+# 새 번들 추가 시 이 스크립트 수정 불필요.
+BUNDLED_ROS2_SRC="$ROOT_DIR/ros2/ros2_ws/src"
+if [ -d "$BUNDLED_ROS2_SRC" ]; then
+  while IFS= read -r -d '' pkg_xml; do
+    pkg_dir=$(dirname "$pkg_xml")
+    pkg_name=$(basename "$pkg_dir")
+    install -d "$STAGE${PAYLOAD_DIR}/ros2/ros2_ws/src"
+    rsync -a --exclude '__pycache__' --exclude '*.pyc' \
+      --exclude 'build' --exclude 'install' --exclude 'log' \
+      "$pkg_dir/" \
+      "$STAGE${PAYLOAD_DIR}/ros2/ros2_ws/src/$pkg_name/"
+    echo "[deb] Bundled ROS2 package included: $pkg_name"
+  done < <(find "$BUNDLED_ROS2_SRC" -mindepth 2 -maxdepth 2 -name package.xml -print0)
+fi
+
 # Guard against dpkg-ar 10GB member limit by detecting oversized payload early
 MAX_PAYLOAD_BYTES=${MAX_PAYLOAD_BYTES:-9000000000} # ~9GB safety margin
 PAYLOAD_SIZE=$(du -sb "$STAGE${PAYLOAD_DIR}" | awk '{print $1}')
@@ -217,6 +235,16 @@ for req in "${REQUIRED_PATHS[@]}"; do
     exit 1
   fi
 done
+
+# Bundled ROS2 packages: 소스 트리에 하나라도 있으면 페이로드에도 반드시 들어가야 한다.
+if [ -d "$BUNDLED_ROS2_SRC" ] && \
+   find "$BUNDLED_ROS2_SRC" -mindepth 2 -maxdepth 2 -name package.xml -print -quit | grep -q .; then
+  if ! find "$STAGE${PAYLOAD_DIR}/ros2/ros2_ws/src" -mindepth 2 -maxdepth 2 -name package.xml -print -quit 2>/dev/null | grep -q .; then
+    echo "[deb][ERROR] Source tree contains bundled ROS2 packages but none made it into the payload." >&2
+    echo "[deb][ERROR] Check the bundled-package rsync block above." >&2
+    exit 1
+  fi
+fi
 
 # Launcher wrapper
 cat > "$STAGE/usr/bin/easytrainer-launcher" <<'EOF'
@@ -332,7 +360,7 @@ Priority: optional
 Architecture: ${ARCH}
 Maintainer: EasyTrainer <noreply@example.com>
 ${DEPENDS_LINE}
-Recommends: docker.io, docker-compose-plugin
+Recommends: docker.io, docker-compose-plugin, x11-xserver-utils
 Description: Easy Trainer launcher for the containerized runtime
  Provides a Qt launcher to build/start the Easy Trainer service,
  bundles the current project under /opt/easytrainer/project,

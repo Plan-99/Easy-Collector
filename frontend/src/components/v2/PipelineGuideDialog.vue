@@ -47,14 +47,14 @@
                                 flat
                                 color="white"
                                 @click="step = s.name - 1"
-                                label="이전"
+                                :label="$t('pipelinePrev')"
                                 class="q-mr-sm"
                             />
                             <q-btn
                                 v-if="idx < steps.length - 1"
                                 color="primary"
                                 @click="step = s.name + 1"
-                                label="다음"
+                                :label="$t('pipelineNext')"
                             />
                             <q-btn
                                 v-else

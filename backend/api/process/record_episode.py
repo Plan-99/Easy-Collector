@@ -22,7 +22,8 @@ def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
 
 def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors, task, language_instruction, socketio_instance, task_control, tele_type='leader', ros2_service='', iter=100000, hz=20):
     agents = sorted(agents, key=lambda a: a.id)
-    env = Env(agents=agents, sensors=sensors, virtual_agents=(tele_type == 'vive_only'))
+    tutorial = any((s.get('settings') or {}).get('is_tutorial') for s in (sensors or []))
+    env = Env(agents=agents, sensors=sensors, virtual_agents=(tele_type == 'vive_only'), tutorial=tutorial)
     dataset_dir = f"{DATASET_DIR}/{dataset_id}"
     thread_pool = ThreadPoolExecutor(max_workers=len(agents))
 
@@ -182,14 +183,19 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                 print(f'[NOTICE] Sensor {sensor["id"]} first frame received ({elapsed:.1f}s)')
 
             if tele_type == 'leader':
-                teleop = TeleoperatorModel.where('type', 'leader').where('assembly_id', assembly_id).first()
+                # Peewee 쿼리 — 기존 Orator 스타일(`where('col', val)`)은 더 이상 동작 안 함.
+                teleop = TeleoperatorModel.select().where(
+                    TeleoperatorModel.type == 'leader',
+                    TeleoperatorModel.assembly_id == assembly_id,
+                    TeleoperatorModel.deleted_at.is_null(),
+                ).first()
 
                 if teleop is None:
                     print(f'[ERROR]: No leader robot preset for assembly {assembly_id}')
                     task_control['stop'] = True
                     return
 
-                leader = Leader(node, agents, socketio_instance, teleop.settings)
+                leader = Leader(node, agents, socketio_instance, teleop._settings)
 
                 socketio_instance.start_background_task(
                     target=leader.leader_teleop_workflow,
@@ -217,6 +223,16 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                                 task_control['stop'] = True
                                 return
                         print(f'[NOTICE] Joint commands received from robot {agent.id} ({elapsed:.1f}s)')
+            else:
+                # keyboard: 사용자가 키 누르기 전엔 joint_actions가 None이라 dataset에
+                # 빈 action 배열이 저장되고 replay 시 0벡터로 들어가 로봇이 영점으로 가는
+                # 문제가 있음. 현재 joint_states로 채워 reset 프레임 qaction이 정상값을
+                # 갖게 한다. 이후 사용자가 키를 누르면 move_*_step이 새 값으로 덮어씀.
+                for agent in agents:
+                    if agent.joint_actions is None:
+                        js = agent.get_joint_states()
+                        if js is not None:
+                            agent.joint_actions = list(js)
             for agent in agents:
                 agent.move_lock = False
 
@@ -390,6 +406,14 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                 break
 
     finally:
+        # 0. move_lock 강제 해제 — home pose 이동 중 stop/error로 빠져나간 경우
+        # 이 플래그가 True로 남으면 이후 텔레옵의 move_robot_ee_delta 등 모든
+        # socket handler가 즉시 return해 로봇이 안 움직이는 상태가 된다.
+        for agent in agents:
+            try:
+                agent.move_lock = False
+            except Exception:
+                pass
         # 1. vive teleop 스레드 먼저 정지 (thread_pool.submit 호출 중단)
         if vive is not None:
             vive.destroy()

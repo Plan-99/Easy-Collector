@@ -25,8 +25,11 @@ _SENSOR_QOS = QoSProfile(
 
 
 class ObsServiceServicer(pb_grpc.ObsServiceServicer):
-    def __init__(self, ros_executor):
-        self._executor = ros_executor
+    def __init__(self, node):
+        # 이미 spin 중인 메인 bridge 노드를 공유한다 — 세션마다 새 Node를 만들면
+        # DDS discovery가 제때 매칭되지 못해 publisher가 살아있어도 callback이
+        # 한 번도 fire되지 않는 케이스가 있었다(record_episode timeout 원인).
+        self._node = node
         self._sessions = {}  # session_id -> session dict
         self._next_id = 1
         self._lock = threading.Lock()
@@ -41,12 +44,6 @@ class ObsServiceServicer(pb_grpc.ObsServiceServicer):
             session_id = self._next_id
             self._next_id += 1
 
-        # Create a dedicated ROS2 node for this session's sensor subscriptions.
-        # gRPC threads can't reliably add subscriptions to the main node's executor.
-        from rclpy.node import Node
-        node = Node(f'obs_session_{session_id}')
-        self._executor.add_node(node)
-
         subs = []
         for sensor in sensors:
             sensor_id = sensor['id']
@@ -54,6 +51,9 @@ class ObsServiceServicer(pb_grpc.ObsServiceServicer):
             if sensor.get('read_topic_msg') == 'sensor_msgs/Image':
                 msg_type = Image
             topic = sensor['read_topic']
+            if not topic:
+                print(f"[ObsService] sensor {sensor_id} has empty read_topic, skipping", flush=True)
+                continue
 
             sensor_key = f"sensor_{sensor_id}"
 
@@ -65,7 +65,7 @@ class ObsServiceServicer(pb_grpc.ObsServiceServicer):
                 except Exception as e:
                     print(f"[ObsService] sensor callback error ({key}): {e}", flush=True)
 
-            sub = node.create_subscription(msg_type, topic, _cb, _SENSOR_QOS)
+            sub = self._node.create_subscription(msg_type, topic, _cb, _SENSOR_QOS)
             subs.append(sub)
             print(f"[ObsService] Subscribed: {topic} -> shm/{sensor_key}", flush=True)
 
@@ -73,7 +73,6 @@ class ObsServiceServicer(pb_grpc.ObsServiceServicer):
             self._sessions[session_id] = {
                 'sensors': sensors,
                 'subscriptions': subs,
-                'node': node,
             }
 
         return pb.SensorSessionId(id=session_id)
@@ -85,10 +84,12 @@ class ObsServiceServicer(pb_grpc.ObsServiceServicer):
         if session is None:
             return pb.StatusResponse(success=False, message="Session not found")
 
-        node = session.get('node')
-        if node:
-            self._executor.remove_node(node)
-            node.destroy_node()
+        # 메인 노드에 등록된 subscription을 개별 destroy (노드 자체는 유지).
+        for sub in session.get('subscriptions', []):
+            try:
+                self._node.destroy_subscription(sub)
+            except Exception as e:
+                print(f"[ObsService] destroy_subscription error: {e}", flush=True)
 
         # Clean up shm files for this session's sensors
         for sensor in session.get('sensors', []):
@@ -101,11 +102,9 @@ class ObsServiceServicer(pb_grpc.ObsServiceServicer):
     def destroy_all(self):
         with self._lock:
             for sid, session in self._sessions.items():
-                node = session.get('node')
-                if node:
+                for sub in session.get('subscriptions', []):
                     try:
-                        self._executor.remove_node(node)
-                        node.destroy_node()
+                        self._node.destroy_subscription(sub)
                     except Exception:
                         pass
             self._sessions.clear()
