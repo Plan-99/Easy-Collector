@@ -1,5 +1,5 @@
 <template>
-    <div class="column full-height" style="max-height: 700px;">
+    <div class="column full-height" :style="{ maxHeight: monitorOnly ? null : '700px' }">
         <TutorialHint v-if="!monitorOnly" :text="$t(monitoringHintKey)" class="q-mb-sm" />
         <div class="bg-secondary border-rounded border-white column q-px-sm col">
         <div :class="[monitorOnly ? 'col' : 'col-6', 'row flex felx-center q-col-gutter-x-sm']" v-if="sensors.length > 0">

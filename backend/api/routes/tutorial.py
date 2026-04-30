@@ -15,20 +15,27 @@ Endpoints:
 """
 import json
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 
 from ...bridge.client import get_bridge_client
 from ...bridge.generated import robot_bridge_pb2 as pb
 from ...configs.tutorial_defaults import (
+    TUTORIAL_AGENT_NAME,
     TUTORIAL_LAUNCH_FILE,
     TUTORIAL_LAUNCH_PACKAGE,
     TUTORIAL_LAUNCH_PROCESS_ID,
     TUTORIAL_ROBOT,
     TUTORIAL_SENSORS,
     TUTORIAL_TOPIC_PREFIX,
+    TUTORIAL_WORKSPACE_DEFAULT_SENSOR_CFG,
+    TUTORIAL_WORKSPACE_EPISODE_LEN,
+    TUTORIAL_WORKSPACE_HOMEPOSE,
+    TUTORIAL_WORKSPACE_NAME,
 )
+from ...database.models.assembly_model import Assembly as AssemblyModel
 from ...database.models.robot_model import Robot as RobotModel
 from ...database.models.sensor_model import Sensor as SensorModel
+from ...database.models.task_model import Task as TaskModel
 
 
 tutorial_bp = Blueprint('tutorial', __name__)
@@ -152,7 +159,114 @@ def _ensure_tutorial_rows():
             row.hide = True
             row.save()
 
-    return robot, sensors
+    assembly = _ensure_tutorial_assembly(robot)
+    workspace = _ensure_tutorial_workspace(assembly, robot, sensors)
+
+    return robot, sensors, assembly, workspace
+
+
+def _find_tutorial_assembly():
+    """Look up the tutorial assembly by name (Assembly has no settings col)."""
+    return AssemblyModel.select().where(
+        AssemblyModel.name == TUTORIAL_AGENT_NAME,
+        AssemblyModel.hide == False,  # noqa: E712
+        AssemblyModel.deleted_at.is_null(),
+    ).first()
+
+
+def _ensure_tutorial_assembly(robot):
+    """Idempotently create/repair the tutorial Assembly (single-arm, tutorial_arm).
+
+    `left_arm_id` 는 항상 현재 tutorial_arm robot id로 강제 — robot row가 재생성
+    되었거나 사용자가 다른 로봇을 임시로 슬롯에 끼워둔 경우에도 자동 복구.
+    """
+    assembly = _find_tutorial_assembly()
+    if assembly is None:
+        assembly = AssemblyModel.create(
+            name=TUTORIAL_AGENT_NAME,
+            left_arm_id=robot.id,
+        )
+    elif assembly.left_arm_id != robot.id:
+        assembly.left_arm_id = robot.id
+        assembly.save()
+    return assembly
+
+
+def _find_tutorial_workspace():
+    """Look up the tutorial Task row, identified by `is_tutorial` in settings."""
+    candidates = TaskModel.select().where(TaskModel.deleted_at.is_null())
+    for row in candidates:
+        raw = row.settings
+        if isinstance(raw, str):
+            try:
+                data = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                continue
+        else:
+            data = raw or {}
+        if data.get('is_tutorial'):
+            return row
+    return None
+
+
+def _ensure_tutorial_workspace(assembly, robot, sensors):
+    """Idempotently create/repair the tutorial Task row.
+
+    워크스페이스에는 (1) tutorial_agent assembly, (2) 두 tutorial 카메라,
+    (3) home_pose / 센서 설정 default 가 포함된다. 사용자가 episode_len 등을
+    바꿔뒀다면 그 값은 보존하고, 비어있는 슬롯만 default로 채운다 (assembly,
+    sensor_ids는 단일 진실원천이므로 항상 강제).
+    """
+    workspace = _find_tutorial_workspace()
+    sensor_ids = [s.id for s in sensors]
+    default_sensor_cfg = {
+        str(sid): dict(TUTORIAL_WORKSPACE_DEFAULT_SENSOR_CFG)
+        for sid in sensor_ids
+    }
+    default_robots_cfg = {
+        str(robot.id): {'home_pose': list(TUTORIAL_WORKSPACE_HOMEPOSE)},
+    }
+
+    if workspace is None:
+        settings = {
+            'is_tutorial': True,
+            'robots': default_robots_cfg,
+            'sensors': default_sensor_cfg,
+        }
+        workspace = TaskModel.create(
+            name=TUTORIAL_WORKSPACE_NAME,
+            assembly_id=assembly.id,
+            episode_len=TUTORIAL_WORKSPACE_EPISODE_LEN,
+            sensor_ids=json.dumps(sensor_ids),
+            settings=json.dumps(settings),
+            home_pose=json.dumps({}),
+        )
+        return workspace
+
+    # 기존 row가 있으면 단일 진실원천 키만 강제 동기화
+    workspace.assembly_id = assembly.id
+    workspace.sensor_ids = json.dumps(sensor_ids)
+    if not workspace.episode_len:
+        workspace.episode_len = TUTORIAL_WORKSPACE_EPISODE_LEN
+
+    current = workspace._settings if hasattr(workspace, '_settings') else {}
+    if not isinstance(current, dict):
+        current = {}
+    current['is_tutorial'] = True
+    current.setdefault('robots', {})
+    current.setdefault('sensors', {})
+    # robot 슬롯이 비어 있으면 default home_pose로 채움
+    if str(robot.id) not in current['robots']:
+        current['robots'][str(robot.id)] = {'home_pose': list(TUTORIAL_WORKSPACE_HOMEPOSE)}
+    elif 'home_pose' not in current['robots'][str(robot.id)]:
+        current['robots'][str(robot.id)]['home_pose'] = list(TUTORIAL_WORKSPACE_HOMEPOSE)
+    # 센서 설정도 누락된 slug만 default로 채움
+    for sid in sensor_ids:
+        if str(sid) not in current['sensors']:
+            current['sensors'][str(sid)] = dict(TUTORIAL_WORKSPACE_DEFAULT_SENSOR_CFG)
+    workspace.settings = json.dumps(current)
+    workspace.save()
+    return workspace
 
 
 # ---------------------------------------------------------------------------
@@ -209,25 +323,42 @@ def _topics_active():
 def tutorial_status():
     robot = _find_tutorial_robot()
     sensors = _find_tutorial_sensors()
+    assembly = _find_tutorial_assembly()
+    workspace = _find_tutorial_workspace()
     return jsonify({
         'status': 'success',
         'running': _is_sim_running(),
         'has_topics': _topics_active(),
         'robot_id': robot.id if robot else None,
         'sensor_ids': [s.id for s in sensors],
+        'assembly_id': assembly.id if assembly else None,
+        'workspace_id': workspace.id if workspace else None,
     }), 200
 
 
 @tutorial_bp.route('/tutorial:start', methods=['POST'])
 def tutorial_start():
     """Launch the bundled MuJoCo world. DB rows are guaranteed by app startup,
-    but call _ensure_tutorial_rows() again as a safety net (idempotent)."""
-    robot, sensors = _ensure_tutorial_rows()
+    but call _ensure_tutorial_rows() again as a safety net (idempotent).
 
-    client = get_bridge_client()
+    Optional body:
+        show_viewer (bool): false 로 주면 native viewer 창 없이 headless로 기동
+            (offscreen 카메라는 정상 동작). 자동화/CI 환경에서 사용.
+            누락/null 이면 기존 동작(true) 유지.
+    """
+    robot, sensors, assembly, workspace = _ensure_tutorial_rows()
+
+    body = request.get_json(silent=True) or {}
     args = {
         'topic_prefix': TUTORIAL_TOPIC_PREFIX,
     }
+    if 'show_viewer' in body and body['show_viewer'] is not None:
+        # ros2 launch 의 args 는 CLI 문자열로 직렬화된다 ('show_viewer:=false').
+        # 노드 declare_parameter 가 bool 디폴트라 ROS2 가 'true'/'false' 문자열을
+        # bool 로 coerce 해주므로 소문자 string 형태로 보낸다.
+        args['show_viewer'] = 'true' if bool(body['show_viewer']) else 'false'
+
+    client = get_bridge_client()
     try:
         result = client.driver.StartLaunch(pb.LaunchConfig(
             process_id=TUTORIAL_LAUNCH_PROCESS_ID,
@@ -247,6 +378,8 @@ def tutorial_start():
         'pid': result.pid,
         'robot_id': robot.id,
         'sensor_ids': [s.id for s in sensors],
+        'assembly_id': assembly.id,
+        'workspace_id': workspace.id,
     }), 200
 
 

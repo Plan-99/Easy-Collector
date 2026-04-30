@@ -198,6 +198,13 @@ def start_planner_run(id):
             'errors': errors,
         }, 400
 
+    body = request.json or {}
+    # repeat_count: 양수면 그 횟수만큼 반복, <=0이면 무한 반복 (정지 누를 때까지).
+    try:
+        repeat_count = int(body.get('repeat_count', 1))
+    except (TypeError, ValueError):
+        repeat_count = 1
+
     current_app.pm.start_function(
         name=PLANNER_RUN_PROCESS_NAME,
         func=planner_run,
@@ -205,6 +212,7 @@ def start_planner_run(id):
         workspaces=workspaces,
         app=current_app._get_current_object(),
         socketio_instance=current_app.pm.socketio,
+        repeat_count=repeat_count,
     )
 
     return {

@@ -60,7 +60,7 @@
         </div>
         <div class="col row q-mb-lg" v-else>
             <!-- First Column: Workspace Selection -->
-            <div class="col-2 bg-secondary q-mr-sm border-rounded q-pa-sm">
+            <div class="col-2 bg-secondary q-mr-sm border-rounded q-pa-sm column">
                 <div class="text-h6 text-white q-mb-md">{{ $t('plannerWorkspacesTitle') }}</div>
                 <TutorialHint step="1" class="q-mb-sm" :text="$t('tutorialPlannerWorkspaces')" />
                 <q-btn
@@ -72,7 +72,7 @@
                     :label="$t('plannerAddWorkspaces')"
                     @click="openAddWorkspacesForm"
                 ></q-btn>
-                <q-scroll-area style="height: calc(100% - 100px);">
+                <q-scroll-area class="col">
                     <q-list bordered separator class="border-rounded bg-dark" dark>
                         <q-expansion-item
                             v-for="workspace in selectedWorkspaces"
@@ -160,7 +160,7 @@
                 <TutorialHint step="3" class="q-mb-sm" :text="$t('tutorialPlannerRun')" />
 
                 <!-- Run / Stop bar -->
-                <div class="row items-center q-mb-sm q-gutter-x-sm">
+                <div class="row items-center q-mb-sm">
                     <q-btn
                         v-if="!isRunning"
                         unelevated
@@ -171,7 +171,15 @@
                         class="col"
                         :disable="!blocks.length"
                         @click="startRun"
-                    ></q-btn>
+                    >
+                        <q-badge
+                            @click.stop="repeatActive = !repeatActive"
+                            :color="repeatActive ? 'blue' : 'grey-5'"
+                            floating>
+                            <q-icon name="repeat" size="xs" class="cursor-pointer" />
+                            <q-tooltip>{{ repeatActive ? $t('plannerRepeatOn') : $t('plannerRepeatOff') }}</q-tooltip>
+                        </q-badge>
+                    </q-btn>
                     <q-btn
                         v-else
                         unelevated
@@ -1040,6 +1048,9 @@ function onDragEnd() {
 
 // --- Run / Stop ---
 const isRunning = ref(false);
+// repeat 뱃지 ON이면 정지 버튼을 누를 때까지 plan을 무한 반복.
+const repeatActive = ref(false);
+const currentIteration = ref(0);
 const runningIndex = ref(null);
 const runStatusText = ref('');
 // blockResults: { [block.id]: 'finished' | 'stopped' | 'error' }
@@ -1073,8 +1084,12 @@ function startRun() {
     if (!selectedPlannerId.value) return;
     blockResults.value = {};
     runningIndex.value = null;
+    currentIteration.value = 0;
     runStatusText.value = t('plannerStartingStatus');
-    api.post(`/planner/${selectedPlannerId.value}/:start_run`).then(() => {
+    // repeat ON이면 0(=무한 반복) 전달, OFF면 1(기본 1회 실행).
+    api.post(`/planner/${selectedPlannerId.value}/:start_run`, {
+        repeat_count: repeatActive.value ? 0 : 1,
+    }).then(() => {
         isRunning.value = true;
     }).catch((error) => {
         const data = error.response?.data || {};
@@ -1100,16 +1115,29 @@ function onPlannerRunStart(payload) {
     isRunning.value = true;
     runningIndex.value = null;
     blockResults.value = {};
+    currentIteration.value = 0;
     runStatusText.value = t('plannerRunningStatus', { current: 0, total: payload?.total ?? blocks.value.length });
+}
+
+function onPlannerIterationStart(payload) {
+    currentIteration.value = payload?.iteration || 0;
+    // 새 회차 시작 시 블록 결과 표시 초기화 (UI에서 "한 바퀴" 시각적 분리).
+    blockResults.value = {};
+    runningIndex.value = null;
 }
 
 function onPlannerBlockStart(payload) {
     runningIndex.value = payload?.index ?? null;
-    runStatusText.value = t('plannerRunningStatusDetail', {
+    let text = t('plannerRunningStatusDetail', {
         current: (payload?.index ?? 0) + 1,
         total: payload?.total ?? blocks.value.length,
         name: payload?.name || payload?.type,
     });
+    // repeat ON일 때만 회차 표시.
+    if (repeatActive.value && currentIteration.value > 0) {
+        text += ` · ${t('plannerIterationInfinite', { current: currentIteration.value })}`;
+    }
+    runStatusText.value = text;
 }
 
 function onPlannerBlockEnd(payload) {
@@ -1186,6 +1214,7 @@ onUnmounted(() => {
         }
     });
     socket.off('planner_run_start', onPlannerRunStart);
+    socket.off('planner_iteration_start', onPlannerIterationStart);
     socket.off('planner_block_start', onPlannerBlockStart);
     socket.off('planner_block_end', onPlannerBlockEnd);
     socket.off('planner_run_end', onPlannerRunEnd);
@@ -1203,6 +1232,7 @@ onMounted(async () => {
     loadBlocks();
     loadRunStatus();
     socket.on('planner_run_start', onPlannerRunStart);
+    socket.on('planner_iteration_start', onPlannerIterationStart);
     socket.on('planner_block_start', onPlannerBlockStart);
     socket.on('planner_block_end', onPlannerBlockEnd);
     socket.on('planner_run_end', onPlannerRunEnd);

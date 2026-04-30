@@ -85,3 +85,20 @@ TUTORIAL_SENSORS = [
         },
     },
 ]
+
+
+# Assembly row: tutorial_arm을 single-arm 으로 묶은 "에이전트".
+# Assembly는 settings 컬럼이 없으므로 name으로 식별한다.
+TUTORIAL_AGENT_NAME = 'tutorial_agent'
+
+
+# Task row: tutorial_agent + 두 개의 tutorial 카메라를 가지는 기본 워크스페이스.
+# `is_tutorial` 플래그를 settings에 넣어 robot/sensor와 동일하게 식별 가능하게 한다.
+TUTORIAL_WORKSPACE_NAME = 'tutorial_env'
+TUTORIAL_WORKSPACE_EPISODE_LEN = 200
+TUTORIAL_WORKSPACE_HOMEPOSE = [0.0, 0.5, -0.5, 0.0, 0.5, 0.0, 0.04]
+TUTORIAL_WORKSPACE_DEFAULT_SENSOR_CFG = {
+    'img_size': [320, 240],
+    'cropped_area': [0, 0, 640, 480],
+    'rotate': 0,
+}

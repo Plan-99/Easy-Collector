@@ -262,16 +262,33 @@ _HANDLERS = {
 }
 
 
-def planner_run(plan, workspaces, app, socketio_instance, task_control):
-    """Execute a plan as a sequence of blocks.
+def planner_run(plan, workspaces, app, socketio_instance, task_control,
+                repeat_count=1):
+    """Execute a plan as a sequence of blocks, optionally repeating the whole plan.
 
     plan: list[dict] — block dicts with at least 'type', 'id', plus type-specific keys.
     workspaces: list[dict] — task dicts (with assembly+sensors), used to resolve workspace_id.
+    repeat_count:
+      - >= 1: run the plan that many times in a row
+      - <= 0: run infinitely until stopped by user (treated as "loop forever")
     """
     plan = list(plan or [])
     total = len(plan)
-    print(f'[NOTICE] Planner run started ({total} blocks)')
-    _emit(socketio_instance, 'planner_run_start', {'total': total})
+    # Normalize: <=0 means infinite. We still emit a stable 'total_iterations'
+    # for the UI — None for infinite, the integer otherwise.
+    try:
+        repeat_count = int(repeat_count)
+    except (TypeError, ValueError):
+        repeat_count = 1
+    infinite = repeat_count <= 0
+    total_iterations = None if infinite else repeat_count
+
+    print(f"[NOTICE] Planner run started ({total} blocks, "
+          f"{'infinite loop' if infinite else f'{repeat_count} iteration(s)'})")
+    _emit(socketio_instance, 'planner_run_start', {
+        'total': total,
+        'total_iterations': total_iterations,
+    })
 
     # Preload all checkpoint models to CPU before iterating blocks. This trades
     # an upfront stall (only at plan start) for zero mid-plan ckpt-load latency.
@@ -288,49 +305,80 @@ def planner_run(plan, workspaces, app, socketio_instance, task_control):
     status = 'finished'
     error_message = None
     try:
-        for index, block in enumerate(plan):
+        iteration = 0
+        while infinite or iteration < repeat_count:
             if task_control['stop']:
                 status = 'stopped'
                 break
 
-            handler = _HANDLERS.get(block.get('type'))
-            block_summary = {
-                'index': index,
-                'total': total,
-                'block_id': block.get('id'),
-                'type': block.get('type'),
-                'name': block.get('name'),
-            }
-            _emit(socketio_instance, 'planner_block_start', block_summary)
-            print(f"[NOTICE] [{index + 1}/{total}] {block.get('type')} — {block.get('name')}")
-
-            block_status = 'finished'
-            block_error = None
-            try:
-                if handler is None:
-                    raise RuntimeError(f"unknown block type '{block.get('type')}'")
-                handler(block, ctx, task_control)
-                if task_control['stop']:
-                    block_status = 'stopped'
-            except Exception as e:
-                block_status = 'error'
-                block_error = str(e)
-                print(f"[ERROR] block '{block.get('name')}' failed: {traceback.format_exc()}")
-
-            _emit(socketio_instance, 'planner_block_end', {
-                **block_summary,
-                'status': block_status,
-                'error': block_error,
+            iteration += 1
+            _emit(socketio_instance, 'planner_iteration_start', {
+                'iteration': iteration,
+                'total_iterations': total_iterations,
             })
+            if infinite:
+                print(f"[NOTICE] === Iteration {iteration} (infinite loop) ===")
+            elif repeat_count > 1:
+                print(f"[NOTICE] === Iteration {iteration}/{repeat_count} ===")
 
-            if block_status == 'error':
+            iter_status = 'finished'
+            iter_error = None
+            for index, block in enumerate(plan):
+                if task_control['stop']:
+                    iter_status = 'stopped'
+                    break
+
+                handler = _HANDLERS.get(block.get('type'))
+                block_summary = {
+                    'index': index,
+                    'total': total,
+                    'iteration': iteration,
+                    'total_iterations': total_iterations,
+                    'block_id': block.get('id'),
+                    'type': block.get('type'),
+                    'name': block.get('name'),
+                }
+                _emit(socketio_instance, 'planner_block_start', block_summary)
+                print(f"[NOTICE] [{index + 1}/{total}] {block.get('type')} — {block.get('name')}")
+
+                block_status = 'finished'
+                block_error = None
+                try:
+                    if handler is None:
+                        raise RuntimeError(f"unknown block type '{block.get('type')}'")
+                    handler(block, ctx, task_control)
+                    if task_control['stop']:
+                        block_status = 'stopped'
+                except Exception as e:
+                    block_status = 'error'
+                    block_error = str(e)
+                    print(f"[ERROR] block '{block.get('name')}' failed: {traceback.format_exc()}")
+
+                _emit(socketio_instance, 'planner_block_end', {
+                    **block_summary,
+                    'status': block_status,
+                    'error': block_error,
+                })
+
+                if block_status == 'error':
+                    iter_status = 'error'
+                    iter_error = block_error
+                    break
+                if block_status == 'stopped':
+                    iter_status = 'stopped'
+                    break
+
+            if iter_status == 'error':
                 status = 'error'
-                error_message = block_error
+                error_message = iter_error
                 break
-            if block_status == 'stopped':
+            if iter_status == 'stopped':
                 status = 'stopped'
                 break
+            # 정상 종료된 iteration은 계속 진행 (또는 반복 횟수 끝)
         else:
+            # while loop가 정상 종료(=infinite=False고 모두 마침)된 경우.
+            # while-else는 break가 없을 때만 실행됨.
             status = 'finished'
     finally:
         # Drop the prefetch cache so model parameters can be GC'd promptly.
