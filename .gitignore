@@ -14,3 +14,17 @@ __pycache__/
 ros2/ros2_ws/build/
 ros2/ros2_ws/install/
 ros2/ros2_ws/log/
+
+# 이전 디렉토리 구조 잔재 (origin/integration_2 merge 전 src/backend, src/ui 였음).
+# 현재는 backend/, frontend/로 이동됐고 host의 옛 src/는 그냥 build artifact 잔재.
+# 모두 untracked인데 git status를 무겁게 만들고 stash -u를 거의 동작 불가능하게 만듦.
+/src/
+
+# 외부 SDK — runtime에 install되는 패키지 (Unitree, XR teleop 등). 코드 history에
+# 둘 가치 없음. 필요 시 install 스크립트로 재현.
+/python_pkgs/
+
+# build / dependency artifacts (어디에 만들어지든 무시)
+node_modules/
+.quasar/
+dist/
