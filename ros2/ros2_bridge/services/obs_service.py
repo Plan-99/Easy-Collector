@@ -87,8 +87,28 @@ class ObsServiceServicer(pb_grpc.ObsServiceServicer):
 
         node = session.get('node')
         if node:
-            self._executor.remove_node(node)
-            node.destroy_node()
+            # Order matters: destroy subscriptions BEFORE removing from executor +
+            # destroying the node. This narrows the race window where the executor's
+            # spin loop holds a reference to a subscription that's about to die.
+            # The robust_spin in server.py catches the residual InvalidHandle (if any),
+            # but the explicit subscription teardown here makes the race much less
+            # likely to fire in the first place.
+            try:
+                for sub in session.get('subscriptions', []) or []:
+                    try:
+                        node.destroy_subscription(sub)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            try:
+                self._executor.remove_node(node)
+            except Exception:
+                pass
+            try:
+                node.destroy_node()
+            except Exception:
+                pass
 
         # Clean up shm files for this session's sensors
         for sensor in session.get('sensors', []):

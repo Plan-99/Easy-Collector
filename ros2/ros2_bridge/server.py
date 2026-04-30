@@ -31,10 +31,31 @@ def serve():
     node = Node('easytrainer_ros2_bridge')
     print(f"[ROS2 Bridge] ROS2 node '{node.get_name()}' initialized")
 
-    # ROS2 executor (별도 스레드에서 spin)
+    # ROS2 executor (별도 스레드에서 spin).
+    # NOTE: raw `executor.spin` propagates `rclpy.InvalidHandle` when a node/subscription
+    # is destroyed mid-iteration (race between ObsService.StopSensors → destroy_node and
+    # the executor still holding a reference to a callback waiter). That kills the spin
+    # thread → ALL ROS callbacks stop (StreamingService/AgentService/etc.) → image
+    # streaming dies after the first sensor session ends.
+    # Wrap spin in a loop that catches InvalidHandle and keeps spinning.
     ros_executor = MultiThreadedExecutor()
     ros_executor.add_node(node)
-    spin_thread = threading.Thread(target=ros_executor.spin, daemon=True)
+
+    def _robust_spin():
+        from rclpy._rclpy_pybind11 import InvalidHandle
+        while rclpy.ok():
+            try:
+                ros_executor.spin_once(timeout_sec=0.1)
+            except InvalidHandle:
+                # Race with node/subscription destruction — recoverable.
+                # Next spin_once iteration won't see the dead handle anymore.
+                continue
+            except Exception as e:
+                # Don't kill the streaming service for unrelated transient errors.
+                print(f"[ROS2 Bridge] spin warning: {type(e).__name__}: {e}", flush=True)
+                continue
+
+    spin_thread = threading.Thread(target=_robust_spin, daemon=True)
     spin_thread.start()
 
     # gRPC 서비스 인스턴스 생성
