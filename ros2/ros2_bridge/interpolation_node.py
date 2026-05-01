@@ -41,9 +41,10 @@ class JointInterpolationNode(Node):
         self.declare_parameter('publish_rate', 200.0)
         self.declare_parameter('output_topic', 'joint_states')
         self.declare_parameter('control_mode', 'topic')     # 'topic' or 'sdk'
-        self.declare_parameter('sdk_type', '')               # 'piper', etc.
-        self.declare_parameter('sdk_can_port', 'can0')       # SDK CAN 포트
-        self.declare_parameter('sdk_has_gripper', True)      # SDK 그리퍼 유무
+        self.declare_parameter('sdk_type', '')               # 'piper', 'fairino', etc.
+        self.declare_parameter('sdk_can_port', 'can0')       # SDK CAN 포트 (Piper)
+        self.declare_parameter('sdk_has_gripper', True)      # SDK 그리퍼 유무 (Piper)
+        self.declare_parameter('sdk_ip_address', '')         # SDK IP (Fairino 등 ethernet 로봇)
         self.declare_parameter('read_topic', 'interpolated_joint_cmd')  # SDK 모드: 상태 퍼블리시 토픽
 
         self.publish_rate = self.get_parameter('publish_rate').value
@@ -102,6 +103,7 @@ class JointInterpolationNode(Node):
         sdk_config = {
             'can_port': self.get_parameter('sdk_can_port').value,
             'has_gripper': self.get_parameter('sdk_has_gripper').value,
+            'ip_address': self.get_parameter('sdk_ip_address').value,
         }
         read_topic = self.get_parameter('read_topic').value
 
@@ -180,11 +182,11 @@ class JointInterpolationNode(Node):
         if not self._has_target or self._interp_progress >= 1.0:
             return
 
-        # 2초 이상 명령이 없으면 이전 상태 폐기
-        if self._cmd_time is not None and (time.monotonic() - self._cmd_time) > 2.0:
+        # 0.3초 이상 명령이 없으면 이전 상태 폐기 (텔레옵 중지 시 잔여 동작 방지)
+        if self._cmd_time is not None and (time.monotonic() - self._cmd_time) > 0.3:
             self._has_target = False
             self._cmd_time = None
-            self.get_logger().info('Stale command discarded (>2s idle)')
+            self.get_logger().info('Stale command discarded (>0.3s idle)')
             return
 
         self._interp_progress += self._dt / self._cmd_interval

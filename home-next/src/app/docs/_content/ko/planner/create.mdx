@@ -1,0 +1,57 @@
+---
+title: 플래너 만들기
+description: 새 플래너 생성 · 선택 · 편집 · 삭제.
+section: planner
+order: 2
+sourceRefs:
+  - frontend/src/pages/v2/PlannerPage.vue
+  - backend/api/routes/planner.py
+related:
+  - /docs/planner
+lastVerifiedVersion: 4.1.0
+---
+
+플래너는 워크스페이스나 어셈블리와 마찬가지로 이름이 있는 저장 단위입니다. 한 플래너는 사용할 워크스페이스 목록과 블록 순서(`plan`)를 함께 저장합니다.
+
+<Steps>
+1. **상단의 플래너 선택 드롭다운을 엽니다.**
+
+   <DocsImage
+     src="/docs/planner/create-01-select.png"
+     alt="플래너 선택 드롭다운"
+     status="missing"
+   />
+
+2. **드롭다운 안의 + 새 플래너 만들기 항목을 클릭합니다.**
+
+   생성 다이얼로그가 열립니다.
+
+   <DocsImage
+     src="/docs/planner/create-02-new.png"
+     alt="새 플래너 만들기 항목"
+     status="missing"
+   />
+
+3. **이름을 입력하고 만들기를 누릅니다.**
+
+   생성에 성공하면 새 플래너가 자동으로 선택됩니다.
+
+   <DocsImage
+     src="/docs/planner/create-03-form.png"
+     alt="새 플래너 만들기 다이얼로그"
+     status="missing"
+   />
+
+4. **기존 플래너를 편집하거나 삭제하려면 드롭다운 항목 우측의 아이콘을 사용합니다.**
+
+   - 연필 아이콘 — 이름 변경
+   - 휴지통 아이콘 — 삭제. 화면 하단에 확인 알림이 뜨면 **delete**를 눌러야 실제로 삭제됩니다.
+
+   <DocsImage
+     src="/docs/planner/create-04-edit-delete.png"
+     alt="플래너 항목의 편집/삭제 아이콘"
+     status="missing"
+   />
+</Steps>
+
+플래너를 선택하면 가운데와 우측 패널이 활성화되고 워크스페이스/블록을 편집할 수 있습니다.

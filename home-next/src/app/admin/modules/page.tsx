@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import ModuleRow from "./ModuleRow";
 
+export const dynamic = "force-dynamic";
+
 export default async function AdminModulesPage() {
   const modules = await prisma.module.findMany({
     orderBy: [{ category: "asc" }, { id: "asc" }],

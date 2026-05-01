@@ -601,13 +601,34 @@ const leaderRobotStarted = computed(() => {
 const _existingLeader = props.assembly.teleoperators.find(e => e.type === 'leader')
 const leaderSettingForm = ref(_existingLeader ? _existingLeader.settings : {
     joint_map: [],
-    ema: 0.5,
-    max_step_rad: 0.005,
-    publish_rate: 50,
+    ema: 0.2,
+    max_step_rad: 0.04,
+    publish_rate: 100,
 });
 // 기존 preset에 새 필드가 없으면 기본값으로 채움 (마이그레이션 보조)
-if (leaderSettingForm.value.max_step_rad === undefined) leaderSettingForm.value.max_step_rad = 0.005
-if (leaderSettingForm.value.publish_rate === undefined) leaderSettingForm.value.publish_rate = 50
+if (leaderSettingForm.value.max_step_rad === undefined) leaderSettingForm.value.max_step_rad = 0.04
+if (leaderSettingForm.value.publish_rate === undefined) leaderSettingForm.value.publish_rate = 100
+// agent_origin 필드 마이그레이션: 구버전 preset은 0(=팔로워 home) 으로 간주
+;(leaderSettingForm.value.joint_map || []).forEach((j) => {
+    if (j.agent_origin === undefined || j.agent_origin === null) j.agent_origin = 0
+})
+
+// 캘리브레이션 시점에 팔로워 관절 각도를 읽기 위한 헬퍼.
+// joint_map 항목의 robot_id/joint_name으로 props.assembly에서 해당 로봇을 찾아
+// 현재 jointState[joint_index] 값을 반환한다. 없으면 null.
+function getFollowerJointAngle(joint) {
+    if (!joint || !joint.robot_id || !joint.joint_name) return null
+    for (const key of ['left_arm', 'left_tool', 'right_arm', 'right_tool']) {
+        const r = props.assembly[key]
+        if (r && r.id === joint.robot_id) {
+            const idx = (r.joint_names || []).indexOf(joint.joint_name)
+            if (idx >= 0 && Array.isArray(r.jointState) && r.jointState[idx] !== undefined) {
+                return Number(r.jointState[idx])
+            }
+        }
+    }
+    return null
+}
 
 
 const duplicatedIds = [];
@@ -634,6 +655,7 @@ if (!props.assembly.teleoperators.find(e => e.type === 'leader')) {
                 port: null,
                 dxl_id: null,
                 origin: 0,
+                agent_origin: 0,
                 is_gripper: isGripper,
                 sign: 1,
                 gripper_dxl_range: [0, 0],
@@ -745,9 +767,16 @@ function onDrop (targetJointIndex) {
     }
     dxlArray.value.splice(dxlArray.value.indexOf(draggingDxl.value), 1);
 
-    leaderSettingForm.value.joint_map[targetJointIndex].port = draggingDxl.value.port;
-    leaderSettingForm.value.joint_map[targetJointIndex].dxl_id = draggingDxl.value.dxl_id;
-    leaderSettingForm.value.joint_map[targetJointIndex].origin = draggingDxl.value.origin;
+    const target = leaderSettingForm.value.joint_map[targetJointIndex];
+    target.port = draggingDxl.value.port;
+    target.dxl_id = draggingDxl.value.dxl_id;
+    target.origin = draggingDxl.value.origin;
+    // 드롭 직후 (이 dxl이 매칭된 자세에서) 팔로워의 현재 관절 각도를 함께 캡처.
+    // 그리퍼는 별도 매핑(gripper_dxl_range)을 쓰므로 0으로 두면 OK.
+    if (!target.is_dummy_gripper && !target.is_gripper) {
+        const angle = getFollowerJointAngle(target);
+        if (angle !== null) target.agent_origin = angle;
+    }
     draggingDxl.value = null;
 }
 
@@ -784,7 +813,13 @@ onMounted(() => {
                 if (dxlFound) {
                     dxlFound.origin = position;
                 } else if (dxlInJointMap) {
+                    // 리더 dxl 위치 + 그 순간의 팔로워 관절 각도를 함께 캡처해야
+                    // 사용자가 "리더를 팔로워의 현재 자세에 매칭" 시킨 의미가 보존된다.
                     dxlInJointMap.origin = position;
+                    if (!dxlInJointMap.is_dummy_gripper && !dxlInJointMap.is_gripper) {
+                        const angle = getFollowerJointAngle(dxlInJointMap);
+                        if (angle !== null) dxlInJointMap.agent_origin = angle;
+                    }
                 } else {
                     dxlArray.value.push({
                         port: port,

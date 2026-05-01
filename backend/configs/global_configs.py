@@ -93,6 +93,7 @@ _ALL_ROBOTS = [
         'ik_available': True,
         'custom_fields': ['can_port'],
     },
+    
     {
         'name': 'piper(no gripper)',
         'module_id': 'robot_piper',
@@ -231,11 +232,9 @@ _ALL_ROBOTS = [
         'joint_names': ["j1", "j2", "j3", "j4", "j5", "j6"],
         'joint_lower_bounds': [-3.0543, -4.6251, -2.8274, -4.6251, -3.0543, -3.0543],
         'joint_upper_bounds': [3.0543, 1.4835, 2.8274, 1.4835, 3.0543, 3.0543],
-        'read_topic': '/nonrt_state_data',
-        'read_topic_msg': 'fairino_msgs/msg/RobotNonrtState',
-        'write_type': 'service',
-        'write_topic': '/fairino_remote_command_service',
-        'write_topic_msg': 'fairino_msgs/srv/RemoteCmdInterface',
+        'interpolation': True,
+        'sdk_control': True,
+        'sdk_type': 'fairino',
         'tool_inner': False,
         'tool_index': [],
         'ik_available': True,

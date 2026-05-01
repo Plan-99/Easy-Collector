@@ -11,4 +11,7 @@ def create_sdk_controller(sdk_type: str, config: dict) -> BaseSDKController:
     if sdk_type == 'piper':
         from .piper_controller import PiperSDKController
         return PiperSDKController(config)
+    if sdk_type == 'fairino':
+        from .fairino_controller import FairinoSDKController
+        return FairinoSDKController(config)
     raise ValueError(f"Unknown SDK type: {sdk_type}")

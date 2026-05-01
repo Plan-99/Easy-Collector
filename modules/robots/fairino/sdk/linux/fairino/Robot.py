@@ -2353,10 +2353,15 @@ class RPC():
             socket.setdefaulttimeout(None)
             self.robot = xmlrpc.client.ServerProxy(link)
         
-        # 只有CNDE和XML-RPC都成功才设置is_connect = True
-        if cnde_ok and xmlrpc_ok:
+        # XML-RPC만 성공해도 진행 (CNDE는 상태 데이터 갱신용 - 실패 시 robot_state_pkg
+        # 0으로 유지, ServoJ/UDP/XML-RPC 명령 경로는 영향 없음). 듀얼 IP 환경에서
+        # CNDE가 다른 NIC에 bind되어 외부에서 접근 불가능한 경우를 위한 폴백.
+        if xmlrpc_ok:
             RPC.is_connect = True
-            print("[调试] RPC连接完全成功，is_connect = True")
+            if cnde_ok:
+                print("[调试] RPC连接完全成功 (XML-RPC + CNDE)，is_connect = True")
+            else:
+                print("[调试] RPC连接 (XML-RPC only, CNDE skipped)，is_connect = True")
         else:
             RPC.is_connect = False
             print(f"[调试] RPC连接失败 (CNDE:{cnde_ok}, XML-RPC:{xmlrpc_ok})，is_connect = False")

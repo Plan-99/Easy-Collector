@@ -312,9 +312,42 @@ GUI 흐름 우선. 터미널 명령은 트러블슈팅에서만 다루므로 별
 
 ---
 
+## 12. planner — 플래너
+
+폴더: `public/docs/planner/`
+
+| 페이지 | # | 파일명 | 캡처 대상 |
+|---|---|---|---|
+| Create | - [ ] 01 | `create-01-select.png` | 상단 플래너 선택 드롭다운 펼친 상태 |
+| Create | - [ ] 02 | `create-02-new.png` | 드롭다운 안 "+ 새 플래너 만들기" 항목 |
+| Create | - [ ] 03 | `create-03-form.png` | 새 플래너 만들기 다이얼로그 |
+| Create | - [ ] 04 | `create-04-edit-delete.png` | 플래너 항목 우측 edit/delete 아이콘 |
+| Workspaces | - [ ] 01 | `workspaces-01-add-button.png` | 좌측 패널 "워크스페이스 추가" 버튼 |
+| Workspaces | - [ ] 02 | `workspaces-02-multiselect.png` | 워크스페이스 선택 다이얼로그 (다중 선택) |
+| Workspaces | - [ ] 03 | `workspaces-03-expanded.png` | 워크스페이스 expansion 펼침 — 센서/로봇 토글 |
+| Workspaces | - [ ] 04 | `workspaces-04-remove.png` | 워크스페이스 헤더 X 버튼 |
+| Blocks | - [ ] 01 | `blocks-01-new-button.png` | 가운데 패널 "새 블록" 버튼 |
+| Blocks | - [ ] 02 | `blocks-02-type-select.png` | 블록 종류 select 펼침 (joint_position / checkpoint / timesleep) |
+| Blocks | - [ ] 03 | `blocks-03-name.png` | 블록 이름 입력 필드 |
+| Blocks | - [ ] 04 | `blocks-04-save.png` | 블록 다이얼로그 저장 버튼 |
+| Blocks Joint | - [ ] 01 | `blocks-joint-01-workspace.png` | Joint Position — 워크스페이스 select |
+| Blocks Joint | - [ ] 02 | `blocks-joint-02-pendant.png` | 다이얼로그 안 RobotPendant |
+| Blocks Joint | - [ ] 03 | `blocks-joint-03-apply.png` | 저장된 자세 카드 + 현재 자세 적용 / 이동 버튼 |
+| Blocks Ckpt | - [ ] 01 | `blocks-checkpoint-01-select.png` | Checkpoint — 워크스페이스/체크포인트 select |
+| Blocks Ckpt | - [ ] 02 | `blocks-checkpoint-02-params.png` | Checkpoint 파라미터 (시간/Hz/re_inference_steps) |
+| Blocks Sleep | - [ ] 01 | `blocks-sleep-01-duration.png` | Time Sleep 블록 시간 입력 |
+| Blocks List | - [ ] 01 | `blocks-list-01-row.png` | 블록 행 + 우클릭 컨텍스트 메뉴 |
+| Run | - [ ] 01 | `run-01-start.png` | 가운데 패널 "전체 실행" 버튼 |
+| Run | - [ ] 02 | `run-02-running.png` | 실행 중 — 행 강조(파란 테두리) + 스피너 + 상태 텍스트 |
+| Run | - [ ] 03 | `run-03-monitor.png` | 우측 모니터링 윈도우 — 실행 중 |
+| Run | - [ ] 04 | `run-04-results.png` | 행 우측 결과 아이콘 (check_circle / cancel / error) |
+| Run | - [ ] 05 | `run-05-stop.png` | "중지" 버튼 |
+
+---
+
 ## 진행 요약
 
-총 **약 162장**의 스크린샷이 필요합니다. 빠른 시작(섹션 2)이 44장으로 가장 큰 비중이며, 나머지는 reference에 가깝습니다.
+총 **약 186장**의 스크린샷이 필요합니다. 빠른 시작(섹션 2)이 44장으로 가장 큰 비중이며, 나머지는 reference에 가깝습니다.
 
 캡처 우선순위 권장:
 1. **installation (11장)** — 첫 사용자가 가장 먼저 보는 섹션

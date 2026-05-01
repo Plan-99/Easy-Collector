@@ -66,11 +66,13 @@ class Leader():
         self.is_cleaned_up = False
         
 
-        self.ema = float(teleop_setting.get('ema', 0.0)) # EMA 필터 값
-        # 한 스텝에 허용되는 최대 관절 변위(rad). threshold를 넘으면 clip.
-        self.max_step_rad = float(teleop_setting.get('max_step_rad', 0.005))
+        self.ema = float(teleop_setting.get('ema', 0.2)) # EMA 필터 값 (낮을수록 응답성↑)
+        # 한 스텝에 허용되는 최대 관절 변위(rad). 사실상 비상 안전 한도.
+        # 보간 노드가 200Hz로 부드럽게 처리하므로 leader 쪽에서 누적 클리핑은 lag만 만든다.
+        # 0.3 rad ≈ 17° 점프는 사람이 한 step에 도달 불가능 → 이상값/노이즈만 차단.
+        self.max_step_rad = float(teleop_setting.get('max_step_rad', 0.3))
         # 텔레옵 publish rate (Hz). 보간 노드가 200Hz로 직접 제어하므로 50~200 사이 권장.
-        self.publish_rate = float(teleop_setting.get('publish_rate', 50.0))
+        self.publish_rate = float(teleop_setting.get('publish_rate', 100.0))
 
         self.thread_pool = ThreadPoolExecutor(max_workers=len(self.agents))
 
@@ -78,6 +80,9 @@ class Leader():
 
     def update_joint_map_with_agent_info(self):
         for joint_info in self.joint_map:
+            # 구버전 preset 호환: agent_origin이 없으면 0 (≡ 팔로워 home 자세 기준 캘리브레이션).
+            if 'agent_origin' not in joint_info or joint_info.get('agent_origin') is None:
+                joint_info['agent_origin'] = 0.0
             for agent in self.agents:
                 try:
                     if 'robot_id' in joint_info and agent.id == joint_info['robot_id']:
@@ -147,6 +152,10 @@ class Leader():
 
 
     def get_rad_pos(self, joint):
+        # 캘리브레이션 시점에 저장된 (origin, agent_origin):
+        #   "리더 dxl이 origin일 때, 팔로워 관절은 agent_origin rad 자세였다"
+        # 따라서 현재 리더 dxl_position은 origin 대비 delta_ticks → delta_rad 변환 후
+        # agent_origin을 더해 팔로워 좌표계로 매핑한다.
         # pos = math.fmod((position - self.origin[dxl_id]), 4096)
         pos = (joint['dxl_position'] - joint['origin']) % 4096
         pos = pos / 4096 * 360
@@ -154,11 +163,17 @@ class Leader():
             pos -= 360
         elif pos < -180:
             pos += 360
-        return pos / 360 * 2 * math.pi * joint['sign']
-    
+        delta_rad = pos / 360 * 2 * math.pi * joint['sign']
+        return joint.get('agent_origin', 0.0) + delta_rad
 
-    def rad_to_tick(self, rad, origin, sign):
-        pos_deg = rad * 180.0 / math.pi * sign
+
+    def rad_to_tick(self, rad, origin, sign, agent_origin=0.0):
+        # get_rad_pos의 정확한 역함수.
+        # delta_rad = rad - agent_origin  (팔로워 좌표 → 리더 좌표 차이)
+        delta_rad = rad - agent_origin
+        pos_deg = (delta_rad * 180.0 / math.pi * sign) % 360.0
+        # Python의 % 연산자는 양수 divisor에 대해 항상 [0, divisor) 반환하므로
+        # 추가 음수 보정은 불필요. 안전망으로 한번 더 클램프.
         if pos_deg < 0:
             pos_deg += 360
         pos_steps = pos_deg / 360.0 * 4096.0
@@ -166,42 +181,45 @@ class Leader():
         return int(round(position))
     
 
-    def sync_leader_robot(self):
+    def sync_leader_robot(self, task_control=None):
         self.is_synced = False
         self._sync_done_ports = set()
+        self._sync_failed_ports = set()
         self._torque_release_pending_ports = set(self.dxl_controllers.keys())
         self.read_agent_and_write_to_joint_map()
 
         groups_by_port = self.group_joints_by_port()
 
         def sync_dxl_controller(port, dxl_joints):
-            dxl_controller = self.dxl_controllers[port]
-            for dxl_joint in dxl_joints:
-                if 'is_dummy_gripper' in dxl_joint and dxl_joint['is_dummy_gripper']:
-                    continue
-                dxl_id = dxl_joint['dxl_id']
-                agent_position = dxl_joint['agent_position']
-                pos = self.rad_to_tick(agent_position, dxl_joint['origin'], dxl_joint['sign'])
-                dxl_joint['dxl_goal_position'] = pos
+            try:
+                dxl_controller = self.dxl_controllers[port]
+                for dxl_joint in dxl_joints:
+                    if 'is_dummy_gripper' in dxl_joint and dxl_joint['is_dummy_gripper']:
+                        continue
+                    dxl_id = dxl_joint['dxl_id']
+                    agent_position = dxl_joint['agent_position']
+                    pos = self.rad_to_tick(
+                        agent_position,
+                        dxl_joint['origin'],
+                        dxl_joint['sign'],
+                        dxl_joint.get('agent_origin', 0.0),
+                    )
+                    dxl_joint['dxl_goal_position'] = pos
 
-            
-                
-            # for index, dxl_id in enumerate(self.dxl_ids):
-            #     if dxl_id in self.tools:
-            #         pos.append(follower_pos[index])
-            #     else:
-            #         pos.append(self.rad_to_tick(follower_pos[index], dxl_id))
+                print("Syncing Leader Robot")
+                moved = dxl_controller.move_controller(dxl_joints)
+                if not moved:
+                    raise Exception("move_controller returned False")
 
-            print("Syncing Leader Robot")
-            moved = dxl_controller.move_controller(dxl_joints)
-            if not moved:
-                raise Exception
+                # 홈포즈 도달 후 1초 뒤 sync 완료 처리 → position_pub 즉시 시작.
+                # 토크 해제는 position_pub 루프에서 그리퍼 닫힘 감지 시 수행 (포트 동시 접근 회피).
+                self._sync_done_ports.add(port)
+                print("[NOTICE] Close Gripper to release leader torque.")
+            except Exception as e:
+                # 실패 시에도 _sync_failed_ports에 등록해서 메인 루프가 무한 대기에 빠지지 않도록.
+                print(f"[ERROR] sync_dxl_controller failed for port {port}: {e}")
+                self._sync_failed_ports.add(port)
 
-            # 홈포즈 도달 후 1초 뒤 sync 완료 처리 → position_pub 즉시 시작.
-            # 토크 해제는 position_pub 루프에서 그리퍼 닫힘 감지 시 수행 (포트 동시 접근 회피).
-            self._sync_done_ports.add(port)
-            print("[NOTICE] Close Gripper to release leader torque.")
-        
         for port, joints in groups_by_port.items():
             self.socketio_instance.start_background_task(
                 target=sync_dxl_controller,
@@ -209,14 +227,21 @@ class Leader():
                 dxl_joints=joints
             )
 
-        ## 모든 컨트롤러가 홈포즈 이동 + 1초 대기를 마칠 때까지 대기
-        ## (is_synced는 여기서 세팅하지 않음 — 그리퍼 닫힘 + 토크 해제 후
-        ##  position_pub 루프에서 세팅되어야 녹화 시작 타이밍과 맞음)
+        ## 모든 컨트롤러가 홈포즈 이동 + 1초 대기를 마칠 때까지 대기.
+        ## stop 신호 또는 에러 발생 시 즉시 빠져나와야 워크플로우가 종료 가능.
         expected_ports = set(self.dxl_controllers.keys())
-        while self._sync_done_ports != expected_ports:
+        while (self._sync_done_ports | self._sync_failed_ports) != expected_ports:
+            if task_control is not None and task_control.get('stop', False):
+                print("[SYSTEM] Sync interrupted by stop signal.")
+                return False
             time.sleep(0.05)
 
+        if self._sync_failed_ports:
+            print(f"[ERROR] Sync failed on ports: {self._sync_failed_ports}")
+            return False
+
         print("[SUCCESS] Leader home reached. Waiting for gripper close to start recording.")
+        return True
 
     def get_gripper_pos(self, joint):
         gripper_pos_low = joint['joint_lower_bound']
@@ -428,14 +453,18 @@ class Leader():
         이 함수는 ProcessManager.start_function에 의해 백그라운드에서 실행됩니다.
         """
         print("[SYSTEM] Starting Leader Sync Process...")
-        
-        # 1. 동기화 실행 (내부의 while 루프 덕분에 완료될 때까지 여기서 블로킹됨)
-        self.sync_leader_robot()
 
-        
-        # 만약 중간에 사용자가 중지 버튼을 눌렀다면 체크
+        # 1. 동기화 실행 — task_control을 함께 넘겨서 내부 대기 루프가 stop 신호를
+        #    체크하도록 한다 (sync_dxl_controller가 dxl read 에러로 죽으면 메인이
+        #    무한 대기하던 버그 방지).
+        sync_ok = self.sync_leader_robot(task_control=task_control)
+
+        # 사용자 중지 또는 sync 실패 시 워크플로우 종료
         if task_control['stop']:
             print("[SYSTEM] Workflow stopped by user during sync.")
+            return
+        if not sync_ok:
+            print("[SYSTEM] Sync failed — exiting workflow.")
             return
 
         print("[SUCCESS] Sync completed. Transitioning to Teleoperation...")

@@ -12,13 +12,21 @@ from typing import Optional
 
 from .base import BaseSDKController
 
-# robot_sdk/piper_sdk를 import path에 추가
-_SDK_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'robot_sdk', 'piper_sdk')
-if os.path.isdir(_SDK_PATH):
-    sys.path.insert(0, _SDK_PATH)
-# Docker 컨테이너 내 경로
-elif os.path.isdir('/root/ros2/robot_sdk/piper_sdk'):
-    sys.path.insert(0, '/root/ros2/robot_sdk/piper_sdk')
+# piper SDK를 import path에 추가.
+# 컨테이너에서는 모듈 인스톨러가 /root/robot_sdk/piper_sdk/로 풀어두고,
+# 호스트 dev 트리에서는 modules/robots/piper/sdk/piper_sdk 가 단일 출처(SoT)다.
+# pip install -e 로 site-packages에 link되면 path 추가 없이도 `import piper_sdk`가
+# 동작하지만, link가 누락된 환경(개발 머신·새 컨테이너)을 위해 fallback 경로를 둔다.
+# 모두 setup.py가 있는 디렉토리를 가리켜야 그 안의 piper_sdk/ 패키지를 import할 수 있다.
+_SDK_PATHS = [
+    '/root/robot_sdk/piper',                                              # 컨테이너 마운트 (모듈 install target)
+    os.path.join(os.path.dirname(__file__), '..', '..', '..', 'modules', 'robots', 'piper', 'sdk'),  # dev 트리 (modules SoT)
+    '/opt/easytrainer/project/ros2/robot_sdk/piper',                      # 호스트 영속 경로 (모듈 설치 결과)
+]
+for _p in _SDK_PATHS:
+    if os.path.isdir(_p) and _p not in sys.path:
+        sys.path.insert(0, _p)
+        break
 
 # radian ↔ 0.001° 변환 계수
 _RAD_TO_MILLIDEG = 180.0 / math.pi * 1000.0  # ≈ 57295.78

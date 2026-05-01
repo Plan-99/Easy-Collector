@@ -1,0 +1,165 @@
+---
+title: 블록 구성
+description: Joint Position · Checkpoint · Time Sleep 블록 추가, 편집, 순서 변경.
+section: planner
+order: 4
+sourceRefs:
+  - frontend/src/pages/v2/PlannerPage.vue
+  - backend/api/routes/planner.py
+  - backend/api/process/planner_run.py
+related:
+  - /docs/planner/run
+  - /docs/inference
+lastVerifiedVersion: 4.1.0
+---
+
+플래너의 가운데 패널에서 실행할 블록을 추가하고 순서를 정합니다. 위에서 아래로 순차 실행되며, 각 블록의 결과(완료 · 중지 · 오류)는 실행 후 행 우측에 아이콘으로 표시됩니다.
+
+## 블록 추가하기
+
+<Steps>
+1. **가운데 패널 상단의 새 블록 버튼을 누릅니다.**
+
+   블록 생성 다이얼로그가 열립니다.
+
+   <DocsImage
+     src="/docs/planner/blocks-01-new-button.png"
+     alt="새 블록 버튼"
+     status="missing"
+   />
+
+2. **블록 종류를 선택합니다.**
+
+   세 가지 중 하나를 고를 수 있습니다.
+
+   - **Joint Position** — 워크스페이스 로봇을 저장된 관절 자세로 이동
+   - **Checkpoint** — 학습된 체크포인트로 일정 시간 추론 실행
+   - **Time Sleep** — 지정한 초만큼 대기
+
+   <DocsImage
+     src="/docs/planner/blocks-02-type-select.png"
+     alt="블록 종류 선택"
+     status="missing"
+   />
+
+3. **블록 이름을 입력합니다. (선택)**
+
+   비워 두면 종류와 워크스페이스/체크포인트 이름으로 자동 생성됩니다 (예: `이동 (워크스페이스 A)`, `pick_v3 실행`, `2초 대기`).
+
+   <DocsImage
+     src="/docs/planner/blocks-03-name.png"
+     alt="블록 이름 입력"
+     status="missing"
+   />
+
+4. **블록 종류에 맞는 세부 항목을 채우고 저장을 누릅니다.**
+
+   세부 항목은 아래 종류별 절을 참고하세요.
+
+   <DocsImage
+     src="/docs/planner/blocks-04-save.png"
+     alt="블록 다이얼로그 저장 버튼"
+     status="missing"
+   />
+</Steps>
+
+## Joint Position 블록
+
+지정 워크스페이스의 로봇들을 저장된 관절 자세로 이동시킵니다.
+
+<Steps>
+1. **워크스페이스를 선택합니다.**
+
+   해당 워크스페이스의 어셈블리에 포함된 모든 로봇의 자세를 한 번에 저장합니다.
+
+   <DocsImage
+     src="/docs/planner/blocks-joint-01-workspace.png"
+     alt="Joint Position — 워크스페이스 선택"
+     status="missing"
+   />
+
+2. **로봇 펜던트로 원하는 자세를 만듭니다.**
+
+   워크스페이스에 포함된 각 로봇별로 펜던트가 표시됩니다. 로봇이 켜져 있어야 펜던트가 보이며, 꺼져 있으면 안내 문구가 대신 표시됩니다.
+
+   <DocsImage
+     src="/docs/planner/blocks-joint-02-pendant.png"
+     alt="블록 다이얼로그 안의 로봇 펜던트"
+     status="missing"
+   />
+
+3. **현재 자세 적용 버튼으로 자세를 저장합니다.**
+
+   현재 로봇의 관절값이 저장된 자세 카드(상단 강조 박스)에 표시됩니다. 저장된 자세는 **이동** 버튼으로 미리 검증해 볼 수 있습니다.
+
+   <DocsImage
+     src="/docs/planner/blocks-joint-03-apply.png"
+     alt="현재 자세 적용 / 이동 버튼"
+     status="missing"
+   />
+</Steps>
+
+## Checkpoint 블록
+
+선택한 체크포인트로 워크스페이스에서 실시간 추론을 일정 시간 동안 실행합니다.
+
+<Steps>
+1. **워크스페이스와 체크포인트를 선택합니다.**
+
+   체크포인트 목록은 선택한 워크스페이스에서 학습된 항목으로 자동으로 좁혀집니다.
+
+   <DocsImage
+     src="/docs/planner/blocks-checkpoint-01-select.png"
+     alt="워크스페이스/체크포인트 선택"
+     status="missing"
+   />
+
+2. **시간(초)과 추론 Hz를 입력합니다.**
+
+   - **시간 (초)** — 이 블록이 실행될 시간
+   - **추론 Hz** — 초당 정책을 호출하는 횟수
+   - **re_inference_steps** — 한 번 추론한 액션을 몇 step 동안 재사용할지
+   - **temporal_ensemble_coeff** — `re_inference_steps=1`일 때만 표시. 시간 평활 계수
+
+   <DocsImage
+     src="/docs/planner/blocks-checkpoint-02-params.png"
+     alt="Checkpoint 블록 파라미터"
+     status="missing"
+   />
+</Steps>
+
+<Callout type="info">
+체크포인트 블록 실행 중에도 [추론](/docs/inference)과 동일하게 정책이 자율적으로 로봇을 움직입니다. 안전한 환경에서 시작하고, 이상 동작이 보이면 곧바로 **중지**를 누르세요.
+</Callout>
+
+## Time Sleep 블록
+
+다음 블록까지 지정한 시간만큼 대기합니다. 정책이 끝난 직후 사용자가 결과를 확인하거나 환경을 정리할 시간을 주고 싶을 때 유용합니다.
+
+<Steps>
+1. **시간(초)을 입력하고 저장합니다.**
+
+   0보다 큰 숫자여야 합니다.
+
+   <DocsImage
+     src="/docs/planner/blocks-sleep-01-duration.png"
+     alt="Time Sleep 블록 시간 입력"
+     status="missing"
+   />
+</Steps>
+
+## 블록 관리
+
+추가된 블록은 가운데 패널 목록에 행으로 표시됩니다. 각 행에서 다음 동작을 할 수 있습니다.
+
+- **드래그** — 행을 끌어 위/아래로 옮기면 실행 순서가 바뀝니다. (실행 중에는 비활성화)
+- **우클릭** — 컨텍스트 메뉴로 **상세 보기**, **블록 편집**, **블록 복제**, **블록 삭제** 사용
+- **타이머 배지** — Time Sleep과 Checkpoint 블록은 우측에 `Ns` 형태로 시간이 표시됩니다.
+
+<DocsImage
+  src="/docs/planner/blocks-list-01-row.png"
+  alt="블록 목록 행과 우클릭 메뉴"
+  status="missing"
+/>
+
+블록 좌측의 색 막대는 종류를 색으로 구분합니다 (관절 이동: 파랑, 체크포인트: 보라, 시간 대기: 주황).

@@ -76,11 +76,13 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
                 sdk_type = settings.get('sdk_type', '')
                 can_port = settings.get('can_port', 'can0')
                 has_gripper = rtype not in ('piper_no_gripper',)
+                ip_address = settings.get('ip_address', '')
                 interp_cmd += [
                     '-p', 'control_mode:=sdk',
                     '-p', f'sdk_type:={sdk_type}',
                     '-p', f'sdk_can_port:={can_port}',
                     '-p', f'sdk_has_gripper:={str(has_gripper).lower()}',
+                    '-p', f'sdk_ip_address:={ip_address}',
                     '-p', 'read_topic:=interpolated_joint_cmd',
                 ]
             else:

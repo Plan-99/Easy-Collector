@@ -73,8 +73,10 @@ ROBOT_CONFIGS = {
         },
     },
     'fairino_fr5': {
-        'urdf_path': '/root/ros2_ws/src/frcobot_ros2/fairino_description/urdf/fairino5_v6.urdf',
-        'urdf_package_dir': '/root/ros2_ws/src/frcobot_ros2/fairino_description/',
+        # SDK 제어 (fairino-python-sdk). ROS2 fairino_hardware 노드는 사용하지 않음.
+        # URDF/IK는 모듈 패키지(ros2_ws/src/fairino/fairino_description)에서 로드.
+        'urdf_path': '/root/ros2_ws/src/fairino/fairino_description/urdf/fairino5_v6.urdf',
+        'urdf_package_dir': '/root/ros2_ws/src/fairino/fairino_description/',
         'ik_setting': {
             'joints_to_lock': [],
             'ee_definitions': [('ee', 'j6', np.array([0, 0, 0.1]).T)],
