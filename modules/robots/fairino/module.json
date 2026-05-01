@@ -1,7 +1,7 @@
 {
   "id": "robot_fairino",
   "name": "Fairino",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "category": "robot",
   "description": "Fairino 협동로봇 (fairino-python-sdk 직접 제어)",
   "install": {

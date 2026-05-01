@@ -47,7 +47,7 @@ _FALLBACK_REGISTRY: list[ModuleInfo] = [
     ModuleInfo(id="robot_dynamixel", name="Dynamixel", category="robot", description="Robotis 서보 모터", asset_name="module-robot_dynamixel-{version}.tar.gz"),
     ModuleInfo(id="robot_unitree", name="Unitree", category="robot", description="Unitree 로봇", asset_name="module-robot_unitree-{version}.tar.gz"),
     ModuleInfo(id="robot_jaka", name="Jaka", category="robot", description="Jaka 협동로봇", asset_name="module-robot_jaka-{version}.tar.gz"),
-    ModuleInfo(id="robot_fairino", name="Fairino", category="robot", description="Fairino 협동로봇", asset_name="module-robot_fairino-{version}.tar.gz"),
+    ModuleInfo(id="robot_fairino", name="Fairino", category="robot", description="Fairino 협동로봇 (SDK 직접 제어)", asset_name="module-robot_fairino-{version}.tar.gz"),
     ModuleInfo(id="robot_rbpodo", name="RBPodo", category="robot", description="Rainbow Robotics RBPodo", asset_name="module-robot_rbpodo-{version}.tar.gz"),
     ModuleInfo(id="robot_kinova", name="Kinova Kortex", category="robot", description="Kinova Kortex 로봇", asset_name="module-robot_kinova-{version}.tar.gz"),
     ModuleInfo(id="robot_techman", name="Techman TM", category="robot", description="Techman TM 로봇", asset_name="module-robot_techman-{version}.tar.gz"),
@@ -705,16 +705,19 @@ def _install_robot_sensor_module(tar_path: str, module_id: str) -> None:
             if ros2_target.exists():
                 shutil.rmtree(ros2_target)
 
-            # ros2/src/ 가 있으면 그 안의 패키지들을 module_name/ 아래에 복사
+            # ros2/src/ 가 있으면 그 안의 패키지들을 module_name/ 아래에 복사.
+            # symlinks=True 로 두면 깨진 절대경로 심볼릭 링크(예: fairino libfairino.so
+            # 체인이 빌드 시점 /root/ros2_ws 경로를 가리키는 경우)를 그대로 보존해
+            # follow 시 PermissionError로 설치 자체가 실패하는 문제를 막는다.
             ros2_inner_src = ros2_src / "src"
             if ros2_inner_src.is_dir():
                 ros2_target.mkdir(parents=True, exist_ok=True)
                 for pkg_dir in ros2_inner_src.iterdir():
                     if pkg_dir.is_dir():
-                        shutil.copytree(pkg_dir, ros2_target / pkg_dir.name)
+                        shutil.copytree(pkg_dir, ros2_target / pkg_dir.name, symlinks=True)
             else:
                 # src/ 없으면 ros2/ 전체를 module_name/ 으로 복사
-                shutil.copytree(ros2_src, ros2_target)
+                shutil.copytree(ros2_src, ros2_target, symlinks=True)
 
         # Install sdk/ contents
         sdk_src = module_dir / "sdk"
