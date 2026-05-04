@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>Easy Trainer · 서비스 소개서 (포트원 입점)</title>
+<style>
+  @page { size: A4 portrait; margin: 14mm 14mm; }
+  :root {
+    --indigo: #4f46e5;
+    --indigo-soft: #eef2ff;
+    --emerald: #059669;
+    --amber: #d97706;
+    --slate: #0f172a;
+    --slate-2: #334155;
+    --slate-3: #64748b;
+    --line: #e2e8f0;
+    --bg: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #f1f5f9;
+    color: var(--slate);
+    font-family: "Pretendard", -apple-system, "Apple SD Gothic Neo", "Segoe UI",
+      "Helvetica Neue", Arial, "Noto Sans KR", sans-serif;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page {
+    width: 210mm;
+    min-height: 297mm;
+    margin: 12mm auto;
+    background: var(--bg);
+    padding: 18mm 16mm;
+    box-shadow: 0 8px 30px rgba(15, 23, 42, 0.08);
+    page-break-after: always;
+  }
+  .page:last-child { page-break-after: auto; }
+  @media print {
+    body { background: #fff; }
+    .page { margin: 0; box-shadow: none; padding: 0 4mm; min-height: auto; }
+  }
+  h1 {
+    font-size: 28px;
+    margin: 0 0 8px;
+    letter-spacing: -0.02em;
+  }
+  h2 {
+    font-size: 20px;
+    margin: 0 0 6px;
+    letter-spacing: -0.01em;
+  }
+  h3 {
+    font-size: 15px;
+    margin: 0 0 6px;
+    color: var(--slate-2);
+  }
+  p { margin: 0 0 10px; color: var(--slate-2); font-size: 14px; }
+  small, .small { font-size: 12px; color: var(--slate-3); }
+  ul { margin: 0 0 10px; padding-left: 18px; color: var(--slate-2); font-size: 14px; }
+  li { margin-bottom: 4px; }
+
+  /* Brand header */
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .brand-mark {
+    width: 36px; height: 36px; border-radius: 9px;
+    background: linear-gradient(135deg, #6366f1, #a855f7);
+    color: #fff; font-weight: 800; font-size: 13px;
+    display: flex; align-items: center; justify-content: center;
+    letter-spacing: 0.5px;
+  }
+  .brand-name { font-weight: 800; letter-spacing: -0.01em; font-size: 18px; }
+  .brand-sub { font-size: 12px; color: var(--slate-3); }
+
+  /* Section title bar */
+  .section {
+    margin-top: 18px;
+    padding: 14px 16px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #ffffff;
+  }
+  .section.muted { background: #f8fafc; }
+  .section-title {
+    display: flex; align-items: baseline; gap: 8px;
+    margin-bottom: 12px;
+  }
+  .section-title .num {
+    font-size: 11px; font-weight: 800; letter-spacing: 0.08em;
+    color: var(--indigo); text-transform: uppercase;
+  }
+  .section-title h2 { margin: 0; }
+
+  /* Hero */
+  .hero {
+    padding: 30px 26px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #eef2ff 0%, #faf5ff 100%);
+    border: 1px solid #e0e7ff;
+    margin-bottom: 14px;
+  }
+  .hero h1 { font-size: 32px; line-height: 1.2; margin-bottom: 10px; }
+  .hero .accent {
+    background: linear-gradient(90deg, #6366f1, #a855f7);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .hero p { color: #475569; font-size: 14px; max-width: 540px; }
+  .hero .stats { display: flex; gap: 28px; margin-top: 18px; }
+  .stat strong { display: block; font-size: 24px; font-weight: 800; color: var(--slate); }
+  .stat span { font-size: 12px; color: var(--slate-3); }
+
+  /* Info table */
+  .info-grid {
+    display: grid;
+    grid-template-columns: 130px 1fr 130px 1fr;
+    gap: 0;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+    font-size: 13px;
+  }
+  .info-grid > div { padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  .info-grid > div.k { background: #f8fafc; font-weight: 600; color: var(--slate-2); border-right: 1px solid var(--line); }
+  .info-grid > div:nth-last-child(-n+4) { border-bottom: none; }
+
+  /* BM diagram (numbered steps) */
+  .flow {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 10px;
+    margin-top: 8px;
+  }
+  .flow-step {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px 10px;
+    text-align: center;
+    position: relative;
+  }
+  .flow-step .n {
+    width: 24px; height: 24px; border-radius: 50%;
+    background: var(--indigo); color: #fff; font-size: 12px; font-weight: 700;
+    display: inline-flex; align-items: center; justify-content: center;
+    margin-bottom: 6px;
+  }
+  .flow-step h4 { margin: 0 0 4px; font-size: 13px; color: var(--slate); }
+  .flow-step p { margin: 0; font-size: 11px; color: var(--slate-3); line-height: 1.4; }
+  .flow-step:not(:last-child)::after {
+    content: "→"; position: absolute; right: -10px; top: 50%;
+    transform: translateY(-50%); color: var(--indigo); font-size: 14px; font-weight: 600;
+  }
+
+  /* Payment-flow diagram */
+  .pay-flow {
+    display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px;
+    margin-top: 8px;
+  }
+  .pay-step {
+    background: #f8fafc; border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px; text-align: center;
+    position: relative;
+  }
+  .pay-step strong { display: block; font-size: 13px; color: var(--slate); margin-bottom: 4px; }
+  .pay-step span { font-size: 11px; color: var(--slate-3); line-height: 1.4; display: block; }
+  .pay-step:not(:last-child)::after {
+    content: "▸"; position: absolute; right: -8px; top: 50%;
+    transform: translateY(-50%); color: var(--indigo);
+  }
+
+  /* Settlement */
+  .settle {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+    margin-top: 8px;
+  }
+  .settle div {
+    background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 10px;
+    padding: 12px; text-align: center;
+  }
+  .settle strong { display: block; font-size: 13px; color: #065f46; margin-bottom: 4px; }
+  .settle span { font-size: 11px; color: #047857; }
+
+  /* Module grid */
+  .mods {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+    margin-top: 8px;
+  }
+  .mod {
+    border: 1px solid var(--line); border-radius: 10px; padding: 12px;
+    background: #fff; display: flex; gap: 10px; align-items: center;
+  }
+  .mod img {
+    width: 44px; height: 44px; object-fit: contain;
+    background: #f1f5f9; border-radius: 8px; padding: 4px;
+  }
+  .mod .name { font-size: 13px; font-weight: 600; color: var(--slate); }
+  .mod .price { font-size: 12px; color: var(--slate-3); margin-top: 2px; }
+  .mod .cat {
+    font-size: 10px; color: var(--indigo); background: var(--indigo-soft);
+    padding: 2px 6px; border-radius: 4px; display: inline-block; margin-top: 3px;
+  }
+
+  /* Refund clauses */
+  .refund-card {
+    background: #fffbeb; border: 1px solid #fde68a; border-radius: 10px;
+    padding: 14px 16px; margin-top: 8px;
+  }
+  .refund-card h3 { color: #92400e; margin-bottom: 6px; }
+  .refund-card ul { padding-left: 18px; }
+  .refund-card li { color: #78350f; }
+
+  .legend {
+    display: flex; gap: 14px; margin-top: 8px;
+    font-size: 11px; color: var(--slate-3);
+  }
+  .legend span::before {
+    content: "●"; margin-right: 4px;
+  }
+  .legend .a::before { color: var(--indigo); }
+  .legend .b::before { color: var(--emerald); }
+  .legend .c::before { color: var(--amber); }
+
+  .footer-note {
+    margin-top: 30px; font-size: 11px; color: var(--slate-3);
+    border-top: 1px solid var(--line); padding-top: 8px;
+    display: flex; justify-content: space-between;
+  }
+
+  /* Payment-path screenshot grid */
+  .path-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    margin-top: 8px;
+  }
+  .path-step {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 8px;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+  }
+  .path-step .frame {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: #0f172a;
+    border-radius: 6px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .path-step .frame img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+  .path-step .cap {
+    margin-top: 6px;
+    display: flex;
+    gap: 6px;
+    align-items: baseline;
+  }
+  .path-step .cap .pn {
+    font-size: 10px; font-weight: 800; color: #fff;
+    background: var(--indigo); border-radius: 4px;
+    padding: 2px 6px; flex-shrink: 0;
+  }
+  .path-step .cap .pt { font-size: 11px; color: var(--slate-2); line-height: 1.4; }
+</style>
+</head>
+<body>
+
+<!-- ============ PAGE 1: 서비스 소개 + 업체 정보 ============ -->
+<section class="page">
+  <div class="brand">
+    <div class="brand-mark">ET</div>
+    <div>
+      <div class="brand-name">Easy Trainer</div>
+      <div class="brand-sub">버티컬랩스 주식회사 · easytrainerhome.vercel.app</div>
+    </div>
+  </div>
+
+  <div class="hero">
+    <h1>코드 한 줄 없이,<br /><span class="accent">로봇에게 작업을 가르치세요.</span></h1>
+    <p>Easy Trainer는 로봇 티칭부터 AI 학습, 추론까지 하나의 웹 UI에서 완결하는 로봇 모방학습 플랫폼입니다.
+       데스크톱 런처와 웹 마이페이지, 그리고 유료 모듈 마켓으로 구성됩니다.</p>
+    <div class="stats">
+      <div class="stat"><strong>12+</strong><span>지원 로봇·센서</span></div>
+      <div class="stat"><strong>3</strong><span>AI 정책 (ACT/Diffusion/PI0)</span></div>
+      <div class="stat"><strong>28분</strong><span>설치~첫 학습</span></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title"><span class="num">1) 업체 정보</span><h2>판매자</h2></div>
+    <div class="info-grid">
+      <div class="k">업체명</div><div>버티컬랩스 주식회사 (Vertical Labs Inc.)</div>
+      <div class="k">사업자등록번호</div><div>558-88-03692</div>
+      <div class="k">대표명</div><div>남창주</div>
+      <div class="k">담당자명</div><div>정해찬</div>
+      <div class="k">담당자 이메일</div><div>hcjung@vertic-ai.com</div>
+      <div class="k">담당자 연락처</div><div>010-8743-9486</div>
+      <div class="k">고객센터 번호</div><div>02-964-0730</div>
+      <div class="k">서비스명</div><div>Easy Trainer</div>
+      <div class="k">사이트 URL</div><div>https://easytrainerhome.vercel.app</div>
+      <div class="k">서비스 개시일</div><div>2026-05 (예정)</div>
+      <div class="k">판매품목</div><div>로봇·센서·확장 기능 모듈 (디지털 콘텐츠)</div>
+      <div class="k">객단가</div><div>₩50,000 ~ ₩500,000</div>
+      <div class="k">TEST ID</div><div>chan993166@gmail.com</div>
+      <div class="k">TEST PW</div><div>test123!</div>
+    </div>
+    <p style="margin-top:10px" class="small">
+      * 판매되는 디지털 콘텐츠(소프트웨어 모듈)는 1회 결제 시 영구 보유되며, 사용자 계정에 자동으로 부여됩니다.
+    </p>
+  </div>
+
+  <div class="footer-note">
+    <span>버티컬랩스 주식회사 · 사업자등록번호 558-88-03692</span>
+    <span>1 / 5</span>
+  </div>
+</section>
+
+<!-- ============ PAGE 2: BM + 결제 프로세스 ============ -->
+<section class="page">
+  <div class="section">
+    <div class="section-title"><span class="num">2-1) Business Model</span><h2>매출 발생 구조</h2></div>
+    <p>회원은 무료로 가입하여 데스크톱 런처를 사용할 수 있고, 더 다양한 로봇·센서를 연결하려면
+       마이페이지의 <strong>모듈 카탈로그</strong>에서 유료 모듈을 결제합니다.
+       결제 즉시 사용자 계정에 모듈이 영구 등록되어 어느 PC에서든 다시 설치할 수 있습니다.</p>
+
+    <div class="flow">
+      <div class="flow-step">
+        <div class="n">1</div><h4>회원 가입</h4>
+        <p>Google OAuth 로그인 (무료)</p>
+      </div>
+      <div class="flow-step">
+        <div class="n">2</div><h4>런처 다운로드</h4>
+        <p>.deb 패키지 설치 후 PC 등록</p>
+      </div>
+      <div class="flow-step">
+        <div class="n">3</div><h4>모듈 카탈로그 열람</h4>
+        <p>웹 마이페이지 또는 런처</p>
+      </div>
+      <div class="flow-step">
+        <div class="n">4</div><h4>유료 모듈 결제</h4>
+        <p>1회 결제 · 영구 보유</p>
+      </div>
+      <div class="flow-step">
+        <div class="n">5</div><h4>모듈 다운로드·사용</h4>
+        <p>런처에서 자동 설치</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title"><span class="num">2-2) 결제 프로세스</span><h2>사용자 결제 → 콘텐츠 제공</h2></div>
+    <div class="pay-flow">
+      <div class="pay-step">
+        <strong>① 결제 요청</strong>
+        <span>웹 카탈로그의 모듈 카드에서 "결제하기" 클릭</span>
+      </div>
+      <div class="pay-step">
+        <strong>② PG 결제창</strong>
+        <span>한국결제네트웍스 PG 결제창 호출 (포트원 SDK)</span>
+      </div>
+      <div class="pay-step">
+        <strong>③ 사용자 결제</strong>
+        <span>카드 / 카카오페이 / 네이버페이 / 토스페이</span>
+      </div>
+      <div class="pay-step">
+        <strong>④ 콘텐츠 제공</strong>
+        <span>서버 검증 후 사용자 계정에 모듈 권한 부여</span>
+      </div>
+    </div>
+    <p class="small" style="margin-top:8px">
+      서버는 결제 완료 후 PortOne API로 결제 내역을 재조회하여 금액·상태를 검증한 뒤 권한을 부여합니다.
+      웹훅 또한 별도로 검증되어 멱등하게 처리됩니다.
+    </p>
+  </div>
+
+  <div class="section">
+    <div class="section-title"><span class="num">2-3) 정산 프로세스</span><h2>PG → 회사 계좌</h2></div>
+    <div class="settle">
+      <div>
+        <strong>한국결제네트웍스</strong>
+        <span>가맹점별 계약된 정산 주기에 따라 매출 집계</span>
+      </div>
+      <div>
+        <strong>주기 정산</strong>
+        <span>PG사 정책 (예: 결제일 + N영업일)</span>
+      </div>
+      <div>
+        <strong>회사 계좌 입금</strong>
+        <span>버티컬랩스 주식회사 법인 계좌</span>
+      </div>
+    </div>
+    <p class="small" style="margin-top:8px">
+      디지털 콘텐츠 특성상 별도 배송·재고가 없어, 결제 완료 즉시 회원 계정에 자동 부여됩니다.
+      환불은 아래 환불 약관에 따라 처리됩니다.
+    </p>
+  </div>
+
+  <div class="footer-note">
+    <span>Easy Trainer · 결제 / 정산 프로세스</span>
+    <span>2 / 5</span>
+  </div>
+</section>
+
+<!-- ============ PAGE 3: 결제 경로 (실제 화면) ============ -->
+<section class="page">
+  <div class="section">
+    <div class="section-title"><span class="num">3) 결제 경로</span><h2>로그인 ~ 결제 완료까지 실제 화면</h2></div>
+    <p>아래는 실제 사이트에서 사용자가 로그인 후 모듈을 결제하기까지의 흐름입니다.
+       각 화면은 https://easytrainerhome.vercel.app 에서 직접 확인할 수 있습니다.</p>
+    <div class="path-grid">
+      <div class="path-step">
+        <div class="frame"><img src="/portone/payments/step01.png" alt="메인 페이지" /></div>
+        <div class="cap"><span class="pn">1</span><span class="pt">메인 페이지에서 우측 상단 "시작하기" 클릭 후 로그인 화면으로 이동</span></div>
+      </div>
+      <div class="path-step">
+        <div class="frame"><img src="/portone/payments/step02.png" alt="로그인" /></div>
+        <div class="cap"><span class="pn">2</span><span class="pt">Google 또는 이메일·비밀번호 로그인 (TEST ID: chan993166@gmail.com / TEST PW: test123!)</span></div>
+      </div>
+      <div class="path-step">
+        <div class="frame"><img src="/portone/payments/step03.png" alt="내 정보" /></div>
+        <div class="cap"><span class="pn">3</span><span class="pt">로그인 후 마이페이지(내 정보) 진입 → 상단 "모듈" 탭 클릭</span></div>
+      </div>
+      <div class="path-step">
+        <div class="frame"><img src="/portone/payments/step04.png" alt="모듈 카탈로그 (로봇)" /></div>
+        <div class="cap"><span class="pn">4</span><span class="pt">모듈 카탈로그에서 로봇·센서·확장 기능 카테고리별 모듈 열람</span></div>
+      </div>
+      <div class="path-step">
+        <div class="frame"><img src="/portone/payments/step05.png" alt="센서 모듈 - 결제하기" /></div>
+        <div class="cap"><span class="pn">5</span><span class="pt">유료 모듈(예: Intel RealSense ₩100) 옆 "결제하기" 버튼 클릭</span></div>
+      </div>
+      <div class="path-step">
+        <div class="frame"><img src="/portone/payments/step06.png" alt="결제 페이지" /></div>
+        <div class="cap"><span class="pn">6</span><span class="pt">결제 페이지에서 모듈 정보·가격 확인 후 "결제하기" 클릭 (이용약관·환불정책 동의 포함)</span></div>
+      </div>
+      <div class="path-step">
+        <div class="frame"><img src="/portone/payments/step07.png" alt="한국결제네트웍스 결제창" /></div>
+        <div class="cap"><span class="pn">7</span><span class="pt">한국결제네트웍스(포트원) 결제창에서 카드/카카오페이/토스/네이버페이 등 결제 수단 선택 후 결제 완료 → 모듈 자동 부여</span></div>
+      </div>
+      <div class="path-step" style="border-style: dashed; background: #f8fafc;">
+        <div class="frame" style="background:#f1f5f9; color:#94a3b8; font-size: 11px;">결제 완료 후<br/>마이페이지 → 결제 내역에서 환불 가능 (7일 이내)</div>
+        <div class="cap"><span class="pn">+</span><span class="pt">결제 후 7일 이내, 모듈을 다운로드하지 않은 경우 환불 가능 (자세한 조건은 환불 약관 페이지 참고)</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer-note">
+    <span>Easy Trainer · 결제 경로 (TEST 계정으로 재현 가능)</span>
+    <span>3 / 5</span>
+  </div>
+</section>
+
+<!-- ============ PAGE 4: 판매 품목 ============ -->
+<section class="page">
+  <div class="section">
+    <div class="section-title"><span class="num">3) 판매 품목</span><h2>모듈 카탈로그 (예시)</h2></div>
+    <p>모듈은 카테고리별로 로봇 / 센서 / 확장 기능으로 구분됩니다. 가격은 모듈별로 상이하며,
+       관리자가 설정한 가격이 마이페이지 카탈로그에 표시됩니다.</p>
+
+    <h3 style="margin-top:14px;">로봇 모듈</h3>
+    <div class="mods">
+      <div class="mod">
+        <img src="/modules/piper.png" alt="Piper" />
+        <div>
+          <div class="name">Agilex Piper</div>
+          <div class="cat">robot</div>
+          <div class="price">₩100,000 ~ ₩200,000</div>
+        </div>
+      </div>
+      <div class="mod">
+        <img src="/modules/unitree.png" alt="Unitree" />
+        <div>
+          <div class="name">Unitree</div>
+          <div class="cat">robot</div>
+          <div class="price">₩100,000 ~ ₩300,000</div>
+        </div>
+      </div>
+      <div class="mod">
+        <img src="/modules/kinova.png" alt="Kinova" />
+        <div>
+          <div class="name">Kinova Kortex</div>
+          <div class="cat">robot</div>
+          <div class="price">₩200,000 ~ ₩400,000</div>
+        </div>
+      </div>
+      <div class="mod">
+        <img src="/modules/rainbow.png" alt="Rainbow" />
+        <div>
+          <div class="name">Rainbow RBPodo</div>
+          <div class="cat">robot</div>
+          <div class="price">₩200,000 ~ ₩400,000</div>
+        </div>
+      </div>
+      <div class="mod">
+        <img src="/modules/robotiq.png" alt="Robotiq" />
+        <div>
+          <div class="name">Robotiq Gripper</div>
+          <div class="cat">gripper</div>
+          <div class="price">₩50,000 ~ ₩150,000</div>
+        </div>
+      </div>
+      <div class="mod">
+        <img src="/modules/onrobot.png" alt="OnRobot" />
+        <div>
+          <div class="name">OnRobot Gripper</div>
+          <div class="cat">gripper</div>
+          <div class="price">₩50,000 ~ ₩150,000</div>
+        </div>
+      </div>
+    </div>
+
+    <h3 style="margin-top:14px;">센서 모듈</h3>
+    <div class="mods">
+      <div class="mod">
+        <img src="/modules/webcam.png" alt="Webcam" />
+        <div>
+          <div class="name">USB Webcam</div>
+          <div class="cat">sensor</div>
+          <div class="price">₩50,000</div>
+        </div>
+      </div>
+      <div class="mod">
+        <img src="/modules/realsense.png" alt="RealSense" />
+        <div>
+          <div class="name">Intel RealSense</div>
+          <div class="cat">sensor</div>
+          <div class="price">₩100,000 ~ ₩200,000</div>
+        </div>
+      </div>
+      <div class="mod">
+        <img src="/modules/custom.png" alt="Generic" />
+        <div>
+          <div class="name">Generic / Custom</div>
+          <div class="cat">extension</div>
+          <div class="price">₩50,000 ~</div>
+        </div>
+      </div>
+    </div>
+
+    <p class="small" style="margin-top:14px">
+      * 위 가격은 예시이며, 실 판매 가격은 관리자 페이지에서 설정합니다.
+      판매 품목은 디지털 콘텐츠(소프트웨어 모듈)로 결제 즉시 사용자 계정에 영구 등록됩니다.
+    </p>
+  </div>
+
+  <div class="footer-note">
+    <span>Easy Trainer · 판매 품목</span>
+    <span>4 / 5</span>
+  </div>
+</section>
+
+<!-- ============ PAGE 4: 환불 약관 ============ -->
+<section class="page">
+  <div class="section">
+    <div class="section-title"><span class="num">4) 환불 약관</span><h2>청약 철회 및 환불 정책</h2></div>
+    <p>본 약관은 Easy Trainer에서 판매되는 유료 모듈(디지털 콘텐츠)의 청약 철회 및 환불에 관한 사항을 규정합니다.
+       전자상거래 등에서의 소비자보호에 관한 법률(이하 "전자상거래법")을 준수합니다.</p>
+
+    <div class="refund-card">
+      <h3>1. 청약 철회 가능 조건 (전자상거래법 제17조)</h3>
+      <ul>
+        <li>회원은 결제일로부터 <strong>7일 이내</strong>에 청약을 철회하고 전액 환불을 요청할 수 있습니다.</li>
+        <li>단, 다음의 경우 청약 철회가 제한됩니다.
+          <ul>
+            <li>모듈을 다운로드하여 설치한 경우</li>
+            <li>모듈에 포함된 디지털 콘텐츠를 사용한 경우</li>
+          </ul>
+        </li>
+        <li>(전자상거래 등에서의 소비자보호에 관한 법률 시행령 제21조에 따른 디지털 콘텐츠 예외 적용)</li>
+      </ul>
+    </div>
+
+    <div class="refund-card">
+      <h3>2. 환불 요청 절차</h3>
+      <ul>
+        <li>마이페이지 → 결제 내역 → "환불" 버튼 클릭 (결제일 7일 이내 자동 처리)</li>
+        <li>또는 hcjung@vertic-ai.com 으로 결제 정보(주문번호, 결제일)와 환불 사유 전달</li>
+        <li>회사는 영업일 기준 <strong>3일 이내</strong> 환불 가능 여부를 회신합니다.</li>
+        <li>환불 승인 시 결제 수단으로 영업일 기준 <strong>3~5일 내</strong> 환급됩니다(카드사 정책에 따라 1주 이상 소요될 수 있음).</li>
+      </ul>
+    </div>
+
+    <div class="refund-card">
+      <h3>3. 환불 처리 절차 (서비스 결함 시)</h3>
+      <ul>
+        <li>모듈에 명시된 기능이 작동하지 않는 경우</li>
+        <li>회사 측 시스템 장애로 정상 사용이 7일 이상 불가한 경우</li>
+        <li>위 조건에 해당하는 경우, 다운로드/사용 여부와 관계없이 회사 검토 후 환불 가능</li>
+      </ul>
+    </div>
+
+    <div class="refund-card">
+      <h3>4. 환불 불가 조건</h3>
+      <ul>
+        <li>고객의 단순 변심이나 사용법 미숙으로 인한 환불 요청</li>
+        <li>제공된 디지털 콘텐츠가 약관에 명시된 제한 사항 내에서 정상적으로 작동하는 경우</li>
+        <li>모듈 다운로드 또는 설치 후 (디지털 콘텐츠 청약철회 예외)</li>
+      </ul>
+    </div>
+
+    <div class="refund-card">
+      <h3>5. 환불 약관 변경 및 공지</h3>
+      <ul>
+        <li>회사는 환불 약관을 변경할 수 있으며, 변경된 약관은 적용일자 및 변경 사유를 명시하여 공식 웹사이트(easytrainerhome.vercel.app) 푸터의 "환불 정책" 메뉴를 통해 공지합니다.</li>
+        <li>변경된 약관은 공지된 적용일자부터 효력이 발생합니다.</li>
+      </ul>
+    </div>
+
+    <p class="small" style="margin-top:10px">
+      위 환불 약관은 Easy Trainer 웹사이트 푸터의 "환불 정책" 모달과 모든 결제 페이지에서 노출되며,
+      구매 전 사용자가 확인 가능한 위치에 비치됩니다.
+    </p>
+  </div>
+
+  <div class="footer-note">
+    <span>버티컬랩스 주식회사 · 환불 약관 · 시행일 2026-04-28</span>
+    <span>5 / 5</span>
+  </div>
+</section>
+
+</body>
+</html>

@@ -4,11 +4,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import Footer from "@/components/Footer";
 import CheckoutClient from "./CheckoutClient";
-import {
-  PORTONE_STORE_ID,
-  PORTONE_CHANNEL_KEY,
-  PORTONE_CHANNEL_KEY_KAKAOPAY,
-} from "@/lib/portone";
+import { PORTONE_STORE_ID, PORTONE_CHANNEL_KEY } from "@/lib/portone";
 
 export const dynamic = "force-dynamic";
 
@@ -210,7 +206,6 @@ export default async function CheckoutPage({
           customerId={session.user.id.slice(0, 20)}
           storeId={PORTONE_STORE_ID}
           channelKey={PORTONE_CHANNEL_KEY}
-          channelKeyKakaoPay={PORTONE_CHANNEL_KEY_KAKAOPAY || PORTONE_CHANNEL_KEY}
         />
       )}
 

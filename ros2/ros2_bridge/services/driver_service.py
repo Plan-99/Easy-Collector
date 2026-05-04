@@ -63,34 +63,10 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
 
         # 보간 노드 시작: interpolation=True인 로봇
         if settings.get('interpolation'):
-            interp_id = f'interp_{robot_id}'
-            self._stop(interp_id)
-            ns = f'ec_robot_{robot_id}'
-            interp_cmd = [
-                'python3', '-m', 'ros2_bridge.interpolation_node',
-                '--ros-args', '-r', f'__ns:=/{ns}',
-            ]
-
-            if settings.get('sdk_control'):
-                # SDK 모드: 보간 노드가 SDK로 직접 제어 + 상태 읽기
-                sdk_type = settings.get('sdk_type', '')
-                can_port = settings.get('can_port', 'can0')
-                has_gripper = rtype not in ('piper_no_gripper',)
-                ip_address = settings.get('ip_address', '')
-                interp_cmd += [
-                    '-p', 'control_mode:=sdk',
-                    '-p', f'sdk_type:={sdk_type}',
-                    '-p', f'sdk_can_port:={can_port}',
-                    '-p', f'sdk_has_gripper:={str(has_gripper).lower()}',
-                    '-p', f'sdk_ip_address:={ip_address}',
-                    '-p', 'read_topic:=interpolated_joint_cmd',
-                ]
-            else:
-                # 토픽 모드: 보간 결과를 write_topic으로 퍼블리시
-                write_topic = settings.get('write_topic', '/joint_states').rsplit('/', 1)[-1]
-                interp_cmd += ['-p', f'output_topic:={write_topic}']
-
-            self._start_subprocess(interp_id, interp_cmd, log_name=process_id)
+            self._spawn_interpolation_node_for_builtin(
+                robot_id=robot_id, rtype=rtype, settings=settings,
+                log_name=process_id,
+            )
 
         # JAKA servo enable
         if company == 'JAKA':
@@ -171,6 +147,103 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
         return pb.DriverStatus(success=True, message='Launch started', pid=proc.pid)
 
     def StopLaunch(self, request, context):
+        self._stop(request.name)
+        return pb.StatusResponse(success=True, message='Stopped')
+
+    # ------------------------------------------------------------------
+    # Interpolation Node (custom robots)
+    # ------------------------------------------------------------------
+    def _interp_process_id(self, robot_id):
+        return f'interp_{robot_id}'
+
+    def _build_interpolation_cmd(self, robot_id, extra_params):
+        """interpolation_node 기동 argv 공통 빌더.
+
+        ns = /ec_robot_<id>. agent.py 가 같은 ns 의 ec_joint_cmd 로 명령을 보내고
+        보간 결과는 extra_params['output_topic'] 로 퍼블리시된다.
+        """
+        ns = f'ec_robot_{robot_id}'
+        cmd = [
+            'python3', '-m', 'ros2_bridge.interpolation_node',
+            '--ros-args', '-r', f'__ns:=/{ns}',
+        ]
+        for k, v in extra_params.items():
+            if v is None or v == '':
+                continue
+            cmd += ['-p', f'{k}:={v}']
+        return cmd
+
+    def _spawn_interpolation_node_for_builtin(self, robot_id, rtype, settings, log_name):
+        """빌트인 로봇용 interpolation_node 기동 (StartRobotDriver 내부에서 호출).
+
+        SDK 모드 / 토픽 모드를 settings 로부터 자동 분기. 빌트인 로봇은 launch
+        패키지가 동일 namespace 안에서 read_topic 을 expose 하므로 output_topic
+        은 마지막 segment(=상대 경로) 로 충분하다.
+        """
+        interp_id = self._interp_process_id(robot_id)
+        self._stop(interp_id)
+
+        if settings.get('sdk_control'):
+            sdk_type = settings.get('sdk_type', '')
+            can_port = settings.get('can_port', 'can0')
+            has_gripper = rtype not in ('piper_no_gripper',)
+            ip_address = settings.get('ip_address', '')
+            params = {
+                'control_mode': 'sdk',
+                'sdk_type': sdk_type,
+                'sdk_can_port': can_port,
+                'sdk_has_gripper': str(has_gripper).lower(),
+                # ethernet 기반 SDK 로봇(Fairino 등)을 위해 ip_address 도 같이 전달.
+                # interpolation_node 의 _build_interpolation_cmd 가 빈 문자열은
+                # 자동으로 skip 하므로 CAN 전용 로봇(Piper)에서는 no-op.
+                'sdk_ip_address': ip_address,
+                'read_topic': 'interpolated_joint_cmd',
+            }
+        else:
+            write_topic = settings.get('write_topic', '/joint_states').rsplit('/', 1)[-1]
+            params = {'output_topic': write_topic}
+
+        cmd = self._build_interpolation_cmd(robot_id, params)
+        return self._start_subprocess(interp_id, cmd, log_name=log_name)
+
+    def StartInterpolation(self, request, context):
+        """Custom 로봇용 standalone 보간 노드 기동.
+
+        빌트인 로봇은 StartRobotDriver 가 자체 ros2 launch 와 함께 묶어서
+        뜨우지만, type='custom' 로봇은 외부 토픽만 소비하므로 그 경로를 거치지
+        않는다. 이 RPC 가 그 빈 자리를 메운다.
+
+        agent.py 는 /ec_robot_<id>/ec_joint_cmd 로 명령을 보내고, 이 노드가
+        보간하여 사용자의 output_topic (절대경로 가능) 에 publish.
+        """
+        robot_id = request.robot_id
+        if robot_id <= 0:
+            return pb.DriverStatus(success=False, message='robot_id is required')
+
+        output_topic = request.output_topic or ''
+        msg_type = request.output_msg_type or 'sensor_msgs/JointState'
+
+        params = {
+            'output_topic': output_topic,
+            'output_msg_type': msg_type,
+            'control_mode': 'topic',
+        }
+        if request.publish_rate and request.publish_rate > 0:
+            params['publish_rate'] = request.publish_rate
+
+        interp_id = self._interp_process_id(robot_id)
+        cmd = self._build_interpolation_cmd(robot_id, params)
+        proc = self._start_subprocess(interp_id, cmd, log_name=interp_id)
+        if proc is None:
+            return pb.DriverStatus(success=False, message='Failed to start interpolation node')
+        return pb.DriverStatus(success=True, message='Interpolation node started', pid=proc.pid)
+
+    def StopInterpolation(self, request, context):
+        """Stop the interpolation node started by StartInterpolation.
+
+        request.name 은 'interp_<robot_id>' 형식. 호출자는 robot_id 만 알면
+        규칙에 따라 process_id 를 만들어 전달한다 (proto 호환을 위해 ProcessId
+        재사용)."""
         self._stop(request.name)
         return pb.StatusResponse(success=True, message='Stopped')
 

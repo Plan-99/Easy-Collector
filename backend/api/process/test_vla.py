@@ -7,7 +7,9 @@ import cv2
 from einops import rearrange
 from ...utils.image_parser import fetch_image_with_config
 
-from ...env.env import Env
+# test_vla 는 legacy 코드 (signature 깨진 상태) — 실제 호출되면 어차피 에러나지만,
+# import 만 통과시키기 위해 RemoteEnv 로 alias. 동작 검증은 안 됨.
+from ...bridge.remote_env import RemoteEnv as Env
 
 from lerobot.configs.types import PolicyFeature, FeatureType
 

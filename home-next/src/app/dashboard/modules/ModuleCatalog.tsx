@@ -19,6 +19,25 @@ function formatKrw(amountKrw: number) {
   }).format(amountKrw);
 }
 
+// Static module-id → image mapping. Files live under home-next/public/modules/.
+// Modules without a specific image fall back to a category placeholder.
+const MODULE_IMAGE: Record<string, string> = {
+  robot_piper: "/modules/piper.png",
+  robot_unitree: "/modules/unitree.png",
+  robot_rbpodo: "/modules/rainbow.png",
+  robot_kinova: "/modules/kinova.png",
+  gripper_robotiq: "/modules/robotiq.png",
+  gripper_onrobot: "/modules/onrobot.png",
+  gripper_generic: "/modules/custom.png",
+  custom_interfaces: "/modules/custom.png",
+  sensor_webcam: "/modules/webcam.png",
+  sensor_realsense: "/modules/realsense.png",
+};
+
+function moduleImage(m: Module): string | null {
+  return MODULE_IMAGE[m.id] || null;
+}
+
 export default function ModuleCatalog({
   modules,
   ownedModuleIds,
@@ -95,6 +114,7 @@ export default function ModuleCatalog({
                 const owned = ownedSet.has(m.id);
                 const isFree = m.priceKrw === 0;
                 const isFocused = m.id === focusedId;
+                const imgSrc = moduleImage(m);
                 return (
                   <div
                     key={m.id}
@@ -105,6 +125,20 @@ export default function ModuleCatalog({
                   >
                     <div className="bezel-inner p-6">
                       <div className="flex items-start gap-4">
+                        <div className="shrink-0 w-20 h-20 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden">
+                          {imgSrc ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={imgSrc}
+                              alt={m.name}
+                              className="w-full h-full object-contain p-2"
+                            />
+                          ) : (
+                            <span className="text-surface-600 text-[10px] uppercase tracking-wider">
+                              {m.category}
+                            </span>
+                          )}
+                        </div>
                         <div className="min-w-0 flex-1">
                           <p className="font-semibold text-surface-100">{m.name}</p>
                           <p className="text-surface-500 text-xs mt-0.5">{m.id}</p>

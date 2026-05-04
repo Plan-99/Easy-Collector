@@ -1,9 +1,9 @@
 import { auth, signOut } from "@/auth";
-import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import Footer from "@/components/Footer";
 import DashboardTabs from "./DashboardTabs";
+import { getDashboardUser, isOnboarded } from "@/lib/dashboard-user";
 
 export const dynamic = "force-dynamic";
 
@@ -15,25 +15,10 @@ export default async function DashboardLayout({
   const session = await auth();
   if (!session?.user?.id) redirect("/auth/signin");
 
-  const me = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: {
-      organization: true,
-      department: true,
-      jobRole: true,
-      termsAcceptedAt: true,
-      privacyAcceptedAt: true,
-      refundAcceptedAt: true,
-    },
-  });
-  const onboarded =
-    !!me?.organization &&
-    !!me.department &&
-    !!me.jobRole &&
-    !!me.termsAcceptedAt &&
-    !!me.privacyAcceptedAt &&
-    !!me.refundAcceptedAt;
-  if (!onboarded) redirect("/onboarding?next=/dashboard");
+  // Cached: this fetch is shared with /dashboard/page.tsx via React cache()
+  // so the layout + page combo runs a single Neon query per navigation.
+  const me = await getDashboardUser(session.user.id);
+  if (!isOnboarded(me)) redirect("/onboarding?next=/dashboard");
 
   return (
     <div className="min-h-dvh bg-surface-950 pt-16 flex flex-col">

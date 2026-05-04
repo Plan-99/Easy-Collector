@@ -25,7 +25,7 @@ def read_dataset(node, episode_path, socketio_instance, sid, task_control, move_
     capture_env = None
     env = None
     if move_robot:
-        from ...env.env import Env
+        from ...bridge.remote_env import RemoteEnv as Env
         tutorial = any((s.get('settings') or {}).get('is_tutorial') for s in (sensors or []))
         env = Env(agents=agents, sensors=sensors, tutorial=tutorial)
         if capture_dataset_id is not None:

@@ -76,6 +76,7 @@ export default {
   robotFieldWriteType: 'Write Type',
   robotFieldWriteTopic: 'Write Topic',
   robotFieldWriteTopicMsg: 'Write Topic Message Type',
+  robotFieldInterpolation: 'Use command interpolation (200 Hz)',
   robotFieldIkSettings: 'IK Settings (JSON)',
   robotRoleSingleArm: 'Single Arm',
   robotRoleDualArm: 'Dual Arm',

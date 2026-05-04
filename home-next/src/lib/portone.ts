@@ -56,8 +56,10 @@ export async function verifyPortoneWebhook(
 
 // Build a unique paymentId for a (user, module) attempt. PortOne requires
 // uniqueness — once a paymentId is PAID it can't be reused.
+// Some PGs reject any non-alphanumeric character (including '_' and '-'),
+// so we stick to [a-zA-Z0-9].
 export function buildPaymentId(prefix = "pay") {
   const ts = Date.now().toString(36);
   const rand = Math.random().toString(36).slice(2, 10);
-  return `${prefix}_${ts}_${rand}`;
+  return `${prefix}${ts}${rand}`;
 }

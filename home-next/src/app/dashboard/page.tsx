@@ -1,9 +1,9 @@
 import { auth } from "@/auth";
-import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import UnbindDeviceButton from "./UnbindDeviceButton";
 import RefundButton from "./RefundButton";
 import PasswordCard from "./PasswordCard";
+import { getDashboardUser } from "@/lib/dashboard-user";
 
 const REFUND_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -35,18 +35,7 @@ export default async function DashboardPage() {
   const session = await auth();
   if (!session?.user?.id) redirect("/auth/signin");
 
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    include: {
-      devices: { orderBy: { lastSeenAt: "desc" } },
-      entitlements: {
-        include: { module: true },
-        orderBy: { grantedAt: "desc" },
-      },
-      payments: { orderBy: { createdAt: "desc" }, take: 20 },
-      billingKeys: { where: { active: true }, orderBy: { createdAt: "desc" } },
-    },
-  });
+  const user = await getDashboardUser(session.user.id);
   if (!user) redirect("/auth/signin");
 
   const activeDevices = user.devices.filter(d => d.active);

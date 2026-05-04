@@ -47,6 +47,14 @@ class ImageBridgeWriter:
             f.write(header + data)
             f.flush()
 
+    def has_frame(self, sensor_key: str) -> bool:
+        """sensor_key 에 대해 적어도 한 번이라도 write() 가 호출됐는지.
+        EnvService.WaitForImages 가 모든 센서 첫 프레임 도착 여부 확인용으로 사용.
+        파일 핸들 dict 에 entry 가 있으면 최소 1번은 write 됐음을 의미.
+        """
+        with self._lock:
+            return sensor_key in self._files
+
     def remove(self, sensor_key: str):
         """Remove a single sensor's shm file."""
         with self._lock:

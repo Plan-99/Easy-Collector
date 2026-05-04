@@ -25,7 +25,7 @@ from ...fiper.shared_utils.utility_functions import get_required_tensors, set_se
 from ...fiper.shared_utils.embedding_helper import EmbeddingHelper
 
 
-from ...env.env import Env as RemoteEnv
+from ...bridge.remote_env import RemoteEnv
 from ...bridge.remote_agent import RemoteAgent
 
 import numpy as np

@@ -66,6 +66,18 @@ message LaunchConfig {
   string args_json = 4;        // JSON object of launch args, e.g. {"topic_prefix": "/tutorial"}
 }
 
+// Standalone interpolation_node for custom (type='custom') robots.
+// 빌트인 로봇은 StartRobotDriver 안에서 자체 ros2 launch 와 함께 자동 기동되지만,
+// custom 로봇은 외부 ROS2 토픽만 소비하므로 해당 경로를 거치지 않는다.
+// 이 RPC 로 interpolation_node 만 별도 기동해 ec_joint_cmd → output_topic 보간
+// 퍼블리시 사이클을 추가한다.
+message InterpolationConfig {
+  int32 robot_id = 1;          // 네임스페이스 = ec_robot_<robot_id>, process_id = interp_<robot_id>
+  string output_topic = 2;     // 사용자의 write_topic (절대경로 지원: '/' 시작)
+  string output_msg_type = 3;  // 'sensor_msgs/JointState' 또는 'std_msgs/Float64MultiArray'
+  double publish_rate = 4;     // optional; 0 이면 노드 default(200Hz)
+}
+
 service DriverService {
   rpc StartRobotDriver(DriverConfig) returns (DriverStatus);
   rpc StopRobotDriver(ProcessId) returns (StatusResponse);
@@ -73,6 +85,8 @@ service DriverService {
   rpc StopSensorDriver(ProcessId) returns (StatusResponse);
   rpc StartLaunch(LaunchConfig) returns (DriverStatus);
   rpc StopLaunch(ProcessId) returns (StatusResponse);
+  rpc StartInterpolation(InterpolationConfig) returns (DriverStatus);
+  rpc StopInterpolation(ProcessId) returns (StatusResponse);
   rpc ListProcesses(Empty) returns (ProcessList);
   rpc ListTopics(Empty) returns (TopicList);
 }
@@ -192,10 +206,20 @@ message EnvConfig {
   string sensors_json = 2;
   string language_instruction = 3;
   bool virtual_agents = 4;
+  // Tutorial 모드: Reset 시 mujoco 시뮬레이터의 movable objects(큐브 등)를
+  // 시작 위치로 자동 리셋 (/tutorial/reset_world 서비스 호출).
+  bool tutorial = 5;
 }
 
 message EnvId {
   int32 id = 1;
+}
+
+// 모든 센서가 첫 프레임을 발행할 때까지 대기. record_episode/checkpoint_test
+// 가 sensor 토픽이 아직 안 올라온 상태에서 record loop 진입을 막기 위해 사용.
+message WaitForImagesRequest {
+  int32 env_id = 1;
+  double timeout = 2;  // seconds; 0 또는 음수면 default 5s
 }
 
 message ImageData {
@@ -223,6 +247,7 @@ service EnvService {
   rpc GetObservation(EnvId) returns (Observation);
   rpc Reset(EnvId) returns (Observation);
   rpc RecordStep(EnvId) returns (Observation);
+  rpc WaitForImages(WaitForImagesRequest) returns (StatusResponse);
 }
 
 // ============================================================

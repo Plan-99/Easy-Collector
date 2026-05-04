@@ -76,6 +76,7 @@ export default {
   robotFieldWriteType: '쓰기 타입',
   robotFieldWriteTopic: '쓰기 토픽',
   robotFieldWriteTopicMsg: '쓰기 토픽 메시지 타입',
+  robotFieldInterpolation: '명령 보간 사용 (200Hz)',
   robotFieldIkSettings: 'IK 설정 (JSON)',
   robotRoleSingleArm: '단일 팔',
   robotRoleDualArm: '양팔',

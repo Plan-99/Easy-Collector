@@ -1,6 +1,6 @@
 from tqdm import tqdm
 import os
-from ...env.env import Env
+from ...bridge.remote_env import RemoteEnv as Env
 from ...configs.global_configs import DATASET_DIR
 from .leader_teleoperation import Leader
 from ...utils.image_parser import fetch_image_with_config

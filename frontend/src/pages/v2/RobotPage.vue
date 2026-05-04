@@ -311,9 +311,17 @@ const robotForm = ref([
     { label: t('robotFieldWriteTopicMsg'), key: 'write_topic_msg', type: 'select', value: '', default: 'sensor_msgs/JointState',
         options: [
             { label: 'sensor_msgs/JointState', value: 'sensor_msgs/JointState' },
+            { label: 'std_msgs/Float64MultiArray', value: 'std_msgs/Float64MultiArray' },
             { label: 'control_msgs/action/GripperCommand', value: 'control_msgs/action/GripperCommand' },
         ],
         show: (form) => form.find((e) => e.key === 'type').value === 'custom'
+    },
+    // 보간 옵션: 켜면 robot:start 시 standalone interpolation_node 가 떠서
+    // ec_joint_cmd → write_topic 사이를 200Hz 로 부드럽게 출력. write_type='topic'
+    // 이고 write_topic_msg 가 JointState/Float64MultiArray 일 때만 의미 있음.
+    { label: t('robotFieldInterpolation'), key: 'interpolation', type: 'checkbox', value: false, default: false,
+        show: (form) => form.find((e) => e.key === 'type').value === 'custom'
+                        && form.find((e) => e.key === 'write_type').value === 'topic'
     },
     { label: t('robotFieldIkSettings'), key: 'ik_json', type: 'custom', value: '', default: '', optional: true,
         show: (form) => form.find((e) => e.key === 'type').value === 'custom'

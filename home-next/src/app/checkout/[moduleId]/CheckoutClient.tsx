@@ -11,22 +11,18 @@ type Props = {
   buyerName: string;
   customerId: string; // truncated to ≤20 chars by server (PG limit)
   storeId: string;
-  channelKey: string; // default channel (Galaxia)
-  channelKeyKakaoPay: string; // KakaoPay-dedicated channel (falls back to channelKey if unset)
+  channelKey: string; // PG channel — handles all payment methods inside its UI
 };
 
 type Phase = "idle" | "initiating" | "paying" | "verifying" | "done" | "error";
-type PayMethod = "CARD" | "KAKAOPAY";
 
 export default function CheckoutClient(props: Props) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
-  const [method, setMethod] = useState<PayMethod>("CARD");
 
-  // After a REDIRECTION-mode payment (KakaoPay), we land back here with
-  // ?paymentId=…&code=…. Auto-verify on mount so the user sees the success
-  // screen without clicking again. Strip the query so a refresh doesn't
-  // re-trigger the flow.
+  // After a REDIRECTION-mode payment we land back here with ?paymentId=…&code=….
+  // Auto-verify on mount so the user sees the success screen without clicking
+  // again. Strip the query so a refresh doesn't re-trigger the flow.
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
@@ -82,42 +78,29 @@ export default function CheckoutClient(props: Props) {
       };
 
       setPhase("paying");
-      // SDK type union has a quirk requiring the alipayPlus key — cast to keep
-      // the intended shape compact. Runtime ignores extras.
-      const channelKey = method === "KAKAOPAY" ? props.channelKeyKakaoPay : props.channelKey;
-      const baseRequest = {
+      // Single PG channel (한국결제네트웍스) — its UI lists card + 카카오페이/
+      // 네이버페이/토스페이 as tabs, so we just call CARD and let the user
+      // pick inside.
+      const paymentRequest = {
         storeId: props.storeId,
-        channelKey,
+        channelKey: props.channelKey,
         paymentId,
         orderName,
         totalAmount: amountKrw,
         currency: "CURRENCY_KRW",
+        payMethod: "CARD",
         customer: {
           customerId: props.customerId,
           email: props.buyerEmail || undefined,
           fullName: props.buyerName || undefined,
         },
         customData: { moduleId: props.moduleId },
+        windowType: { mobile: "REDIRECTION" },
+        redirectUrl:
+          typeof window !== "undefined"
+            ? `${window.location.origin}/checkout/${encodeURIComponent(props.moduleId)}?paymentId=${encodeURIComponent(paymentId)}`
+            : undefined,
       };
-      // KakaoPay-dedicated channel only supports IFRAME on PC and
-      // REDIRECTION on mobile (POPUP/REDIRECTION on PC are rejected by the
-      // PG). For mobile we provide a redirectUrl that lands back here with
-      // paymentId — the mount-time effect auto-verifies. For PC we let the
-      // SDK's IFRAME promise resolve and add a manual dark backdrop, since
-      // the SDK's overlay is transparent and bleeds our page through.
-      const paymentRequest =
-        method === "KAKAOPAY"
-          ? {
-              ...baseRequest,
-              payMethod: "EASY_PAY",
-              easyPay: { easyPayProvider: "EASY_PAY_PROVIDER_KAKAOPAY" },
-              windowType: { mobile: "REDIRECTION" },
-              redirectUrl:
-                typeof window !== "undefined"
-                  ? `${window.location.origin}/checkout/${encodeURIComponent(props.moduleId)}?paymentId=${encodeURIComponent(paymentId)}`
-                  : undefined,
-            }
-          : { ...baseRequest, payMethod: "CARD" };
       const result = await PortOne.requestPayment(
         paymentRequest as unknown as Parameters<typeof PortOne.requestPayment>[0]
       );
@@ -172,35 +155,9 @@ export default function CheckoutClient(props: Props) {
   }
 
   const busy = phase === "initiating" || phase === "paying" || phase === "verifying";
-  const showKakaoBackdrop = method === "KAKAOPAY" && phase === "paying";
 
   return (
     <div className="space-y-4">
-      {showKakaoBackdrop && (
-        <div
-          aria-hidden
-          className="fixed inset-0 z-[90] bg-black/70 backdrop-blur-sm pointer-events-none"
-        />
-      )}
-      <fieldset className="grid grid-cols-2 gap-2" disabled={busy}>
-        <legend className="sr-only">결제 수단 선택</legend>
-        <PayMethodOption
-          label="카드"
-          desc="신용·체크카드"
-          value="CARD"
-          selected={method === "CARD"}
-          onSelect={() => setMethod("CARD")}
-        />
-        <PayMethodOption
-          label="카카오페이"
-          desc="간편결제"
-          value="KAKAOPAY"
-          selected={method === "KAKAOPAY"}
-          onSelect={() => setMethod("KAKAOPAY")}
-          accent="kakao"
-        />
-      </fieldset>
-
       {error && (
         <p className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
           {error}
@@ -212,60 +169,15 @@ export default function CheckoutClient(props: Props) {
         disabled={busy}
         className="w-full py-3.5 rounded-full bg-gradient-to-r from-indigo-500 to-purple-500 text-white font-semibold text-sm shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40 spring-transition disabled:opacity-50 disabled:cursor-wait cursor-pointer"
       >
-        {phase === "idle" && (method === "KAKAOPAY" ? "카카오페이로 결제" : "카드로 결제")}
+        {phase === "idle" && "결제하기"}
         {phase === "initiating" && "결제 준비 중…"}
         {phase === "paying" && "결제 진행 중…"}
         {phase === "verifying" && "결제 확인 중…"}
         {phase === "error" && "다시 시도"}
       </button>
+      <p className="text-xs text-surface-500 text-center">
+        결제창에서 카드·카카오페이·네이버페이 등 원하는 수단을 선택할 수 있습니다.
+      </p>
     </div>
-  );
-}
-
-function PayMethodOption({
-  label,
-  desc,
-  value,
-  selected,
-  onSelect,
-  accent,
-}: {
-  label: string;
-  desc: string;
-  value: PayMethod;
-  selected: boolean;
-  onSelect: () => void;
-  accent?: "kakao";
-}) {
-  const accentBg =
-    accent === "kakao"
-      ? "from-yellow-300/40 to-yellow-200/20 border-yellow-300/50"
-      : "from-indigo-500/40 to-purple-500/20 border-indigo-400/50";
-  return (
-    <label
-      className={`relative cursor-pointer rounded-xl border p-4 spring-transition ${
-        selected
-          ? `bg-gradient-to-b ${accentBg}`
-          : "border-white/10 bg-surface-900/50 hover:border-white/20"
-      }`}
-    >
-      <input
-        type="radio"
-        name="payMethod"
-        value={value}
-        checked={selected}
-        onChange={onSelect}
-        className="sr-only"
-      />
-      <div className="flex items-center gap-2">
-        <span
-          className={`w-4 h-4 rounded-full border ${
-            selected ? "border-white bg-white" : "border-surface-500"
-          }`}
-        />
-        <span className="font-semibold text-sm">{label}</span>
-      </div>
-      <p className="mt-1.5 text-xs text-surface-400 ml-6">{desc}</p>
-    </label>
   );
 }

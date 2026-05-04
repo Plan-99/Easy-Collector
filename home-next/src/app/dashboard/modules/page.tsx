@@ -2,6 +2,7 @@ import { auth, signOut } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import ModuleCatalog from "./ModuleCatalog";
+import { getDashboardUser } from "@/lib/dashboard-user";
 
 const CATEGORY_LABELS: Record<string, string> = {
   robot: "로봇",
@@ -54,7 +55,9 @@ export default async function DashboardModulesPage({
     );
   }
 
-  const [allModules, entitlements] = await Promise.all([
+  // entitlements come from the layout's cached fetch — zero DB roundtrip.
+  // Modules catalog still needs its own query.
+  const [allModules, me] = await Promise.all([
     prisma.module.findMany({
       where: { active: true, category: { in: VISIBLE_CATEGORIES } },
       orderBy: [{ category: "asc" }, { id: "asc" }],
@@ -66,13 +69,10 @@ export default async function DashboardModulesPage({
         priceKrw: true,
       },
     }),
-    prisma.entitlement.findMany({
-      where: { userId: session.user.id },
-      select: { moduleId: true, paymentId: true },
-    }),
+    getDashboardUser(session.user.id),
   ]);
 
-  const ownedSet = new Set(entitlements.map(e => e.moduleId));
+  const ownedSet = new Set((me?.entitlements || []).map(e => e.moduleId));
 
   return (
     <ModuleCatalog

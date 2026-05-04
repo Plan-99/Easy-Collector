@@ -23,7 +23,7 @@ export default async function Home() {
       <section className="hero-mesh relative min-h-dvh flex items-center justify-center pt-16" id="hero">
         <div className="max-w-7xl mx-auto px-6 text-center">
           <div className="reveal inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 mb-10">
-            <span className="text-sm font-medium text-indigo-300">Imitation Learning Platform</span>
+            <span className="text-sm font-medium text-indigo-300">로봇 AI 학습 플랫폼</span>
           </div>
 
           <h1 className="reveal font-[var(--font-display)] font-extrabold text-5xl md:text-7xl lg:text-8xl tracking-tight leading-[1.08] mb-8">
@@ -240,7 +240,7 @@ export default async function Home() {
             <p className="text-surface-400 text-lg">Free 플랜으로 시작하고, 무제한 플랜으로 여러 PC에서 활용하세요.</p>
           </div>
 
-          <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+          <div className="grid md:grid-cols-2 gap-6 max-w-3xl mx-auto">
             {/* Free */}
             <div className="reveal reveal-delay-1 bezel-card group hover:-translate-y-2 spring-transition">
               <div className="bezel-inner p-8 md:p-10 flex flex-col h-full">
@@ -261,50 +261,30 @@ export default async function Home() {
               </div>
             </div>
 
-            {/* Unlimited (recommended) */}
+            {/* Business */}
             <div className="reveal reveal-delay-2 relative group hover:-translate-y-2 spring-transition">
               <div className="absolute -inset-px rounded-[21px] bg-gradient-to-b from-indigo-500/40 to-purple-500/20 pointer-events-none" />
               <div className="bezel-card relative">
                 <div className="bezel-inner p-8 md:p-10 flex flex-col h-full">
                   <div className="flex items-center gap-3 mb-6">
-                    <p className="text-sm font-semibold text-indigo-400 uppercase tracking-wider">Unlimited</p>
+                    <p className="text-sm font-semibold text-indigo-400 uppercase tracking-wider">Business</p>
                     <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 text-xs font-semibold">추천</span>
                   </div>
                   <div className="mb-8">
-                    <span className="font-[var(--font-display)] font-extrabold text-5xl tracking-tight">출시 기념 무료</span>
+                    <span className="font-[var(--font-display)] font-extrabold text-5xl tracking-tight">Custom</span>
                   </div>
                   <ul className="space-y-3 mb-10 flex-1">
                     <li className="flex items-center gap-3 text-surface-300 text-[0.94rem]"><span className="text-emerald-400 flex-shrink-0">✓</span>무제한 PC 등록</li>
                     <li className="flex items-center gap-3 text-surface-300 text-[0.94rem]"><span className="text-emerald-400 flex-shrink-0">✓</span>모든 정책 (ACT, Diffusion, PI0)</li>
                     <li className="flex items-center gap-3 text-surface-300 text-[0.94rem]"><span className="text-emerald-400 flex-shrink-0">✓</span>원격 학습 서버 지원</li>
-                    <li className="flex items-center gap-3 text-surface-300 text-[0.94rem]"><span className="text-emerald-400 flex-shrink-0">✓</span>LoRA / Mixed Precision</li>
-                    <li className="flex items-center gap-3 text-surface-300 text-[0.94rem]"><span className="text-emerald-400 flex-shrink-0">✓</span>이메일 지원</li>
+                    <li className="flex items-center gap-3 text-surface-300 text-[0.94rem]"><span className="text-emerald-400 flex-shrink-0">✓</span>전담 기술 지원</li>
+                    <li className="flex items-center gap-3 text-surface-300 text-[0.94rem]"><span className="text-emerald-400 flex-shrink-0">✓</span>온프레미스 배포</li>
                   </ul>
-                  <Link href="/auth/signin" className="btn-pill justify-center bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-500/20 hover:shadow-indigo-500/35 hover:-translate-y-0.5 text-sm">
-                    가입하고 시작하기
+                  <a href="mailto:hcjung@vertic-ai.com" className="btn-pill justify-center bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-500/20 hover:shadow-indigo-500/35 hover:-translate-y-0.5 text-sm">
+                    문의하기
                     <span className="icon-circle bg-white/20">→</span>
-                  </Link>
+                  </a>
                 </div>
-              </div>
-            </div>
-
-            {/* Business */}
-            <div className="reveal reveal-delay-3 bezel-card group hover:-translate-y-2 spring-transition">
-              <div className="bezel-inner p-8 md:p-10 flex flex-col h-full">
-                <p className="text-sm font-semibold text-amber-400 uppercase tracking-wider mb-6">Business</p>
-                <div className="mb-8">
-                  <span className="font-[var(--font-display)] font-extrabold text-5xl tracking-tight">Custom</span>
-                </div>
-                <ul className="space-y-3 mb-10 flex-1">
-                  <li className="flex items-center gap-3 text-surface-300 text-[0.94rem]"><span className="text-emerald-400 flex-shrink-0">✓</span>Unlimited 플랜의 모든 기능</li>
-                  <li className="flex items-center gap-3 text-surface-300 text-[0.94rem]"><span className="text-emerald-400 flex-shrink-0">✓</span>전담 기술 지원</li>
-                  <li className="flex items-center gap-3 text-surface-300 text-[0.94rem]"><span className="text-emerald-400 flex-shrink-0">✓</span>온프레미스 배포</li>
-                  <li className="flex items-center gap-3 text-surface-300 text-[0.94rem]"><span className="text-emerald-400 flex-shrink-0">✓</span>커스텀 모듈 개발</li>
-                  <li className="flex items-center gap-3 text-surface-300 text-[0.94rem]"><span className="text-emerald-400 flex-shrink-0">✓</span>SLA 협의</li>
-                </ul>
-                <a href="mailto:contact@vertic-ai.com" className="w-full py-3.5 rounded-full bg-white/5 border border-white/10 font-semibold text-sm hover:bg-white/10 spring-transition text-center block">
-                  문의하기
-                </a>
               </div>
             </div>
           </div>

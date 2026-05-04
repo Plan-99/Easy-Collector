@@ -21,6 +21,7 @@ from .services.vive_service import ViveServiceServicer
 from .services.uncertainty_service import UncertaintyServiceServicer
 from .services.streaming_service import StreamingServiceServicer
 from .services.obs_service import ObsServiceServicer
+from .services.env_service import EnvServiceServicer
 
 GRPC_PORT = 50051
 
@@ -66,6 +67,10 @@ def serve():
     uncertainty_servicer = UncertaintyServiceServicer(node)
     streaming_servicer = StreamingServiceServicer(node)
     obs_servicer = ObsServiceServicer(node)
+    env_servicer = EnvServiceServicer(node, agent_servicer)
+    # ObsService 가 sensor 토픽을 shm 으로 쏟아내고, EnvService 의
+    # WaitForImages 가 같은 ImageBridgeWriter 로 frame 도착 여부를 검사한다.
+    env_servicer.set_image_bridge(obs_servicer.image_bridge)
 
     # gRPC 서버 설정
     server = grpc.server(
@@ -82,6 +87,7 @@ def serve():
     pb_grpc.add_UncertaintyServiceServicer_to_server(uncertainty_servicer, server)
     pb_grpc.add_StreamingServiceServicer_to_server(streaming_servicer, server)
     pb_grpc.add_ObsServiceServicer_to_server(obs_servicer, server)
+    pb_grpc.add_EnvServiceServicer_to_server(env_servicer, server)
 
     server.add_insecure_port(f'[::]:{GRPC_PORT}')
     server.start()

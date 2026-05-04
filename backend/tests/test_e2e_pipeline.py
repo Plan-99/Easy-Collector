@@ -175,6 +175,49 @@ def subscribe_robot(api: Backend, robot_id):
         raise StageError(f'subscribe_robot failed: {res}')
 
 
+def update_robot_interpolation(api: Backend, robot, enable):
+    """custom 로봇의 settings.interpolation 을 토글하기 위한 PUT /robot/<id>.
+
+    백엔드 update_robot 라우트는 custom 분기에서 폼의 모든 필드를 다시 받으므로,
+    현재 dict 의 모든 핵심 필드를 그대로 다시 전송한다.
+    """
+    payload = {
+        'name': robot.get('name'),
+        'type': robot.get('type'),
+        'role': robot.get('role'),
+        'interpolation': bool(enable),
+        'read_topic': robot.get('read_topic'),
+        'read_topic_msg': robot.get('read_topic_msg'),
+        'write_type': robot.get('write_type'),
+        'write_topic': robot.get('write_topic'),
+        'write_topic_msg': robot.get('write_topic_msg'),
+        'joint_names': robot.get('joint_names') or [],
+        'joint_lower_bounds': robot.get('joint_lower_bounds') or [],
+        'joint_upper_bounds': robot.get('joint_upper_bounds') or [],
+        'tool_index': robot.get('tool_index') or [],
+    }
+    res = api.put(f'/robot/{robot["id"]}', json=payload)
+    if res.get('status') != 'success':
+        raise StageError(f'update_robot interpolation toggle failed: {res}')
+
+
+def start_robot_driver(api: Backend, robot):
+    """custom 로봇의 robot:start 를 호출. interpolation=True 면 backend 가
+    StartInterpolation RPC 로 standalone interpolation_node 를 띄운다.
+
+    custom + interpolation=False 인 경우는 단순 success 응답으로 no-op."""
+    payload = {
+        'id': robot['id'],
+        'type': robot['type'],
+        'company': robot.get('company') or '',
+        'process_id': f'robot_{robot["id"]}',
+        'settings': {},  # backend 가 DB row 에서 다시 hydrate
+    }
+    res = api.post('/robot:start', json=payload)
+    if res.get('status') != 'success':
+        raise StageError(f'/robot:start failed: {res}')
+
+
 def fetch_workspace_payload(api: Backend, workspace_id):
     """record_episode 가 기대하는 task/robots/sensors 를 한 번에 묶어서 돌려준다."""
     res = api.get(f'/tasks/{workspace_id}')
@@ -568,7 +611,8 @@ def run_planner(api: Backend, backend_url, workspace, robot, checkpoint_id,
     sio.connect(backend_url, wait=True, transports=['websocket', 'polling'])
 
     try:
-        start_res = api.post(f'/planner/{planner_id}/:start_run')
+        # 빈 body 라도 json={} 를 명시해야 Flask 가 415 안 냄.
+        start_res = api.post(f'/planner/{planner_id}/:start_run', json={})
         if start_res.get('status') != 'success':
             raise StageError(f'start_run failed: {start_res}')
 
@@ -587,7 +631,7 @@ def run_planner(api: Backend, backend_url, workspace, robot, checkpoint_id,
         if not end_event.is_set():
             # 타임아웃 — 정리 차원에서 stop 호출
             try:
-                api.post(f'/planner/{planner_id}/:stop_run')
+                api.post(f'/planner/{planner_id}/:stop_run', json={})
             except Exception:
                 pass
             raise StageError(f'planner did not finish within {wait_timeout}s '
@@ -644,6 +688,24 @@ def run_inference(api: Backend, checkpoint_id, workspace, robot, run_seconds=15)
 # Entry point
 # ---------------------------------------------------------------------------
 
+def _teardown_robot(api: Backend, robot_id):
+    """/robot:stop 호출 — interpolation_node 가 떠 있으면 같이 정리됨.
+    backend가 응답 못해도 치명적이지 않음 (backend가 죽으면 robot 프로세스도
+    같이 죽음).
+    """
+    if not robot_id:
+        return
+    print('\n=== [TEARDOWN] stop robot driver ...', flush=True)
+    try:
+        res = api.post('/robot:stop', json={
+            'id': robot_id, 'process_id': f'robot_{robot_id}',
+        }, timeout=15)
+        print(f'  /robot:stop -> {res}')
+    except Exception as e:  # noqa: BLE001
+        print(f'  [WARN] /robot:stop raised: {e}')
+    print('=== [TEARDOWN robot done]', flush=True)
+
+
 def _teardown_headless_sim(api: Backend):
     """--headless-sim 으로 띄운 mujoco sim을 stop. 어떤 단계 실패에도 finally
     로부터 호출되므로 backend health 자체가 실패해서 sim이 안 떴을 수도 있다.
@@ -695,6 +757,22 @@ def _run_pipeline(api: Backend, args):
                              f'got {len(workspace["sensors"])}')
 
     robot = workspace['assembly']['robots'][0]
+
+    # interpolation 옵션 처리: PUT 으로 settings.interpolation 토글 후 /robot:start
+    # 호출. /robot:start 는 custom 로봇에 대해 interpolation=True 면 standalone
+    # interpolation_node 를 띄운다 (StartInterpolation RPC).
+    if args.enable_interpolation is not None:
+        with stage(f'set robot interpolation={args.enable_interpolation}'):
+            update_robot_interpolation(api, robot, args.enable_interpolation)
+            # 토글 후 workspace fetch 다시 (interpolation 값이 robot dict에 반영됨)
+            workspace = fetch_workspace_payload(api, workspace_id)
+            robot = workspace['assembly']['robots'][0]
+
+    with stage(f'/robot:start id={robot["id"]} '
+               f'(interpolation={robot.get("interpolation")})'):
+        start_robot_driver(api, robot)
+        # interpolation_node 가 떴다면 첫 메시지 perm matching 시간 잠깐
+        time.sleep(1.0)
 
     dataset_id = None
     with stage('create dataset'):
@@ -787,12 +865,29 @@ def main():
                         help='mujoco viewer 창 없이 sim 기동 (headless). 종료 시 sim도 stop.')
     parser.add_argument('--keep-sim', action='store_true',
                         help='--headless-sim 이어도 종료 시 sim 을 stop 하지 않음 (디버깅용)')
+    parser.add_argument('--enable-interpolation', dest='enable_interpolation',
+                        action='store_true', default=None,
+                        help='custom 로봇 interpolation 활성화 → standalone interpolation_node 기동')
+    parser.add_argument('--disable-interpolation', dest='enable_interpolation',
+                        action='store_false',
+                        help='custom 로봇 interpolation 비활성화 (기본 상태로 강제)')
     args = parser.parse_args()
 
     api = Backend(args.backend)
+    started_robot_id = None
     try:
+        # tutorial_status 로 robot_id 를 미리 확보 — 실패해도 무시. 종료 시
+        # _teardown_robot 으로 robot:start 가 띄운 interp_node 까지 정리하기 위함.
+        try:
+            st = api.get('/tutorial/status', timeout=5)
+            started_robot_id = st.get('robot_id')
+        except Exception:
+            pass
         _run_pipeline(api, args)
     finally:
+        # robot driver(+interp_node) 정리. /robot:start 가 호출되지 않았어도
+        # idempotent (없는 process 는 bridge 가 조용히 무시).
+        _teardown_robot(api, started_robot_id)
         # --headless-sim 으로 띄운 sim 은 자동화 종료 후 정리한다.
         # 명시적으로 viewer 모드로 띄웠거나 사용자가 띄워둔 채 디버깅 중일 수
         # 있는 경우(=> --headless-sim 미지정)에는 건드리지 않는다.

@@ -64,6 +64,16 @@ class DriverServiceStub(object):
                 request_serializer=robot__bridge__pb2.ProcessId.SerializeToString,
                 response_deserializer=robot__bridge__pb2.StatusResponse.FromString,
                 _registered_method=True)
+        self.StartInterpolation = channel.unary_unary(
+                '/easytrainer.DriverService/StartInterpolation',
+                request_serializer=robot__bridge__pb2.InterpolationConfig.SerializeToString,
+                response_deserializer=robot__bridge__pb2.DriverStatus.FromString,
+                _registered_method=True)
+        self.StopInterpolation = channel.unary_unary(
+                '/easytrainer.DriverService/StopInterpolation',
+                request_serializer=robot__bridge__pb2.ProcessId.SerializeToString,
+                response_deserializer=robot__bridge__pb2.StatusResponse.FromString,
+                _registered_method=True)
         self.ListProcesses = channel.unary_unary(
                 '/easytrainer.DriverService/ListProcesses',
                 request_serializer=robot__bridge__pb2.Empty.SerializeToString,
@@ -115,6 +125,18 @@ class DriverServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def StartInterpolation(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def StopInterpolation(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def ListProcesses(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -157,6 +179,16 @@ def add_DriverServiceServicer_to_server(servicer, server):
             ),
             'StopLaunch': grpc.unary_unary_rpc_method_handler(
                     servicer.StopLaunch,
+                    request_deserializer=robot__bridge__pb2.ProcessId.FromString,
+                    response_serializer=robot__bridge__pb2.StatusResponse.SerializeToString,
+            ),
+            'StartInterpolation': grpc.unary_unary_rpc_method_handler(
+                    servicer.StartInterpolation,
+                    request_deserializer=robot__bridge__pb2.InterpolationConfig.FromString,
+                    response_serializer=robot__bridge__pb2.DriverStatus.SerializeToString,
+            ),
+            'StopInterpolation': grpc.unary_unary_rpc_method_handler(
+                    servicer.StopInterpolation,
                     request_deserializer=robot__bridge__pb2.ProcessId.FromString,
                     response_serializer=robot__bridge__pb2.StatusResponse.SerializeToString,
             ),
@@ -331,6 +363,60 @@ class DriverService(object):
             request,
             target,
             '/easytrainer.DriverService/StopLaunch',
+            robot__bridge__pb2.ProcessId.SerializeToString,
+            robot__bridge__pb2.StatusResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StartInterpolation(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/easytrainer.DriverService/StartInterpolation',
+            robot__bridge__pb2.InterpolationConfig.SerializeToString,
+            robot__bridge__pb2.DriverStatus.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StopInterpolation(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/easytrainer.DriverService/StopInterpolation',
             robot__bridge__pb2.ProcessId.SerializeToString,
             robot__bridge__pb2.StatusResponse.FromString,
             options,
@@ -1156,6 +1242,11 @@ class EnvServiceStub(object):
                 request_serializer=robot__bridge__pb2.EnvId.SerializeToString,
                 response_deserializer=robot__bridge__pb2.Observation.FromString,
                 _registered_method=True)
+        self.WaitForImages = channel.unary_unary(
+                '/easytrainer.EnvService/WaitForImages',
+                request_serializer=robot__bridge__pb2.WaitForImagesRequest.SerializeToString,
+                response_deserializer=robot__bridge__pb2.StatusResponse.FromString,
+                _registered_method=True)
 
 
 class EnvServiceServicer(object):
@@ -1191,6 +1282,12 @@ class EnvServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def WaitForImages(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_EnvServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -1218,6 +1315,11 @@ def add_EnvServiceServicer_to_server(servicer, server):
                     servicer.RecordStep,
                     request_deserializer=robot__bridge__pb2.EnvId.FromString,
                     response_serializer=robot__bridge__pb2.Observation.SerializeToString,
+            ),
+            'WaitForImages': grpc.unary_unary_rpc_method_handler(
+                    servicer.WaitForImages,
+                    request_deserializer=robot__bridge__pb2.WaitForImagesRequest.FromString,
+                    response_serializer=robot__bridge__pb2.StatusResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -1355,6 +1457,33 @@ class EnvService(object):
             '/easytrainer.EnvService/RecordStep',
             robot__bridge__pb2.EnvId.SerializeToString,
             robot__bridge__pb2.Observation.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def WaitForImages(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/easytrainer.EnvService/WaitForImages',
+            robot__bridge__pb2.WaitForImagesRequest.SerializeToString,
+            robot__bridge__pb2.StatusResponse.FromString,
             options,
             channel_credentials,
             insecure,

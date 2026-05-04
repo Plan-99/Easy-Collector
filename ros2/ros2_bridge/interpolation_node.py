@@ -40,6 +40,9 @@ class JointInterpolationNode(Node):
         # Parameters
         self.declare_parameter('publish_rate', 200.0)
         self.declare_parameter('output_topic', 'joint_states')
+        # 'sensor_msgs/JointState' (default) or 'std_msgs/Float64MultiArray'.
+        # Float64MultiArray 는 position 값만 .data 배열에 그대로 publish.
+        self.declare_parameter('output_msg_type', 'sensor_msgs/JointState')
         self.declare_parameter('control_mode', 'topic')     # 'topic' or 'sdk'
         self.declare_parameter('sdk_type', '')               # 'piper', 'fairino', etc.
         self.declare_parameter('sdk_can_port', 'can0')       # SDK CAN 포트 (Piper)
@@ -49,6 +52,7 @@ class JointInterpolationNode(Node):
 
         self.publish_rate = self.get_parameter('publish_rate').value
         self.output_topic = self.get_parameter('output_topic').value
+        self.output_msg_type = self.get_parameter('output_msg_type').value
         self.control_mode = self.get_parameter('control_mode').value
         self._dt = 1.0 / self.publish_rate
 
@@ -91,8 +95,22 @@ class JointInterpolationNode(Node):
         )
 
     def _init_topic_mode(self):
-        """토픽 출력 모드 초기화."""
-        self._pub = self.create_publisher(JointState, self.output_topic, 10)
+        """토픽 출력 모드 초기화. msg_type 에 따라 publisher 와 직렬화 함수가 달라진다.
+
+        지원 타입:
+          - sensor_msgs/JointState           — name + position(+velocity)
+          - std_msgs/Float64MultiArray       — position 만 .data 배열
+          - trajectory_msgs/JointTrajectory  — joint_names + 단일 point(positions, dt=0)
+        """
+        if self.output_msg_type == 'std_msgs/Float64MultiArray':
+            from std_msgs.msg import Float64MultiArray
+            self._pub_msg_cls = Float64MultiArray
+        elif self.output_msg_type == 'trajectory_msgs/JointTrajectory':
+            from trajectory_msgs.msg import JointTrajectory
+            self._pub_msg_cls = JointTrajectory
+        else:
+            self._pub_msg_cls = JointState
+        self._pub = self.create_publisher(self._pub_msg_cls, self.output_topic, 10)
         self._state_pub = None
 
     def _init_sdk_mode(self):
@@ -169,13 +187,7 @@ class JointInterpolationNode(Node):
             if self._sdk_controller is not None:
                 self._sdk_controller.write_joints(target.tolist(), names)
         else:
-            out = JointState()
-            if names:
-                out.name = names
-            out.position = target.tolist()
-            if vel:
-                out.velocity = vel
-            self._pub.publish(out)
+            self._publish_topic(target.tolist(), names, vel)
 
     def _timer_callback(self):
         """고주파 타이머: 선형 보간으로 목표 추종."""
@@ -202,13 +214,51 @@ class JointInterpolationNode(Node):
 
     def _output_topic(self):
         """보간 결과를 ROS2 토픽으로 퍼블리시."""
-        msg = JointState()
-        if self._target_names:
-            msg.name = self._target_names
-        msg.position = self._current_pos.tolist()
-        if self._target_vel:
-            msg.velocity = self._target_vel
-        self._pub.publish(msg)
+        self._publish_topic(
+            self._current_pos.tolist(),
+            self._target_names,
+            self._target_vel,
+        )
+
+    def _publish_topic(self, positions, names, vel):
+        """msg_type 에 맞춰 직렬화하고 publish.
+
+        지원 타입별:
+          - JointState                       : name + position(+velocity)
+          - Float64MultiArray                : .data = positions
+          - JointTrajectory                  : joint_names + 단일 point(time_from_start=0)
+        """
+        cls_name = self._pub_msg_cls.__name__
+        if cls_name == 'JointState':
+            msg = JointState()
+            if names:
+                msg.name = names
+            msg.position = positions
+            if vel:
+                msg.velocity = vel
+            self._pub.publish(msg)
+        elif cls_name == 'JointTrajectory':
+            # ros2_control / MoveIt 류 컨트롤러용. trajectory 컨트롤러가 자체
+            # 보간을 하므로, 보간된 1-point trajectory 를 200Hz 로 흘려보내면
+            # 사실상 매번 마지막 point 로 점프 — 우리의 outer 보간이 그대로
+            # 실로봇으로 전달된다.
+            from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+            from builtin_interfaces.msg import Duration
+            msg = JointTrajectory()
+            if names:
+                msg.joint_names = names
+            point = JointTrajectoryPoint()
+            point.positions = list(positions)
+            if vel:
+                point.velocities = list(vel)
+            point.time_from_start = Duration(sec=0, nanosec=0)
+            msg.points = [point]
+            self._pub.publish(msg)
+        else:
+            # Float64MultiArray: position 만 .data 배열로 (rbpodo 등에서 사용)
+            msg = self._pub_msg_cls()
+            msg.data = list(positions)
+            self._pub.publish(msg)
 
     def _output_sdk(self):
         """보간 결과를 SDK로 직접 전송."""

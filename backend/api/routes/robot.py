@@ -96,6 +96,38 @@ def start_robot():
             socketio.emit('task_log', {'id': process_id, 'message': msg, 'type': log_type})
 
     if type == 'custom':
+        # custom 로봇은 외부 ROS2 토픽만 소비하므로 robot driver 는 띄우지
+        # 않지만, settings.interpolation=True 면 interpolation_node 만 별도로
+        # 띄워서 ec_joint_cmd → write_topic 사이에 보간을 끼워넣는다.
+        if settings.get('interpolation'):
+            write_topic = settings.get('write_topic') or ''
+            write_topic_msg = settings.get('write_topic_msg') or 'sensor_msgs/JointState'
+            if not write_topic:
+                _log('interpolation 활성화 실패: write_topic 이 비어있음', 'error')
+                return {
+                    'status': 'error',
+                    'message': 'interpolation 을 켜려면 write_topic 이 필요합니다.',
+                }, 400
+            try:
+                client = get_bridge_client()
+                result = client.driver.StartInterpolation(pb.InterpolationConfig(
+                    robot_id=int(id),
+                    output_topic=write_topic,
+                    output_msg_type=write_topic_msg,
+                    publish_rate=0.0,  # 0 → 노드 default(200Hz)
+                ))
+            except Exception as e:
+                _log(f'StartInterpolation 호출 실패: {e}', 'error')
+                return {'status': 'error', 'message': f'Bridge call failed: {e}'}, 500
+            if not result.success:
+                _log(f'interpolation_node 기동 실패: {result.message}', 'error')
+                return {'status': 'error', 'message': result.message}, 500
+            _log(f'interpolation_node started (pid={result.pid}) → {write_topic}')
+            return {
+                'status': 'success',
+                'message': 'Custom robot ready (interpolation enabled)',
+                'pid': result.pid,
+            }, 200
         return {'status': 'success', 'message': 'Custom robot uses external topic'}, 200
 
     _log(f'Starting robot driver: {type} ({company})')
@@ -128,6 +160,13 @@ def stop_robot():
 
     client = get_bridge_client()
     client.driver.StopRobotDriver(pb.ProcessId(name=process_id))
+    # Custom 로봇용 standalone interpolation_node 정리. 빌트인 로봇은
+    # StopRobotDriver 가 내부적으로 같은 이름으로 _stop 을 호출하므로 중복은
+    # idempotent (없는 process_id 면 no-op).
+    try:
+        client.driver.StopInterpolation(pb.ProcessId(name=f'interp_{robot_id}'))
+    except Exception as e:
+        print(f'[WARN] StopInterpolation failed for robot {robot_id}: {e}')
 
     current_app.pm.stop_process('leader_teleoperation')
     current_app.pm.stop_function('subscribe_robot_' + str(robot_id))
@@ -162,6 +201,9 @@ def create_robot():
             'joint_upper_bounds': request.json.get('joint_upper_bounds', []),
             'tool_index': request.json.get('tool_index', []),
             'tool_inner': len(request.json.get('tool_index', [])) > 0,
+            # Optional: 보간 켜면 robot:start 시 standalone interpolation_node 가
+            # ec_joint_cmd 를 받아 write_topic 으로 부드럽게 publish.
+            'interpolation': bool(request.json.get('interpolation', False)),
         }
         _apply_ik_settings(request.json, settings)
 
@@ -204,7 +246,11 @@ def update_robot(id):
 
     settings = robot._settings if robot._settings else {}
     if type == 'custom':
-        settings = {
+        # 기존 settings 의 마커성 필드 (is_tutorial 등 운영 메타) 를 보존하기 위해
+        # 기존 dict 위에 폼 입력값을 머지한다 — 통째로 덮어쓰면 시드 메타가 사라져
+        # tutorial 행이 일반 custom 처럼 취급되는 사고가 난다.
+        settings = dict(settings) if isinstance(settings, dict) else {}
+        settings.update({
             'role': request.json.get('role', ''),
             'read_topic': request.json.get('read_topic', ''),
             'read_topic_msg': request.json.get('read_topic_msg', ''),
@@ -216,7 +262,8 @@ def update_robot(id):
             'joint_upper_bounds': request.json.get('joint_upper_bounds', []),
             'tool_index': request.json.get('tool_index', []),
             'tool_inner': len(request.json.get('tool_index', [])) > 0,
-        }
+            'interpolation': bool(request.json.get('interpolation', settings.get('interpolation', False))),
+        })
         _apply_ik_settings(request.json, settings)
 
     custom_fields = ['can_port', 'ip_address', 'port', 'changer_address', 'serial_port']

@@ -8,8 +8,8 @@ export const COMPANY = {
   businessNumber: "558-88-03692", // 사업자등록번호
   ecommerceNumber: "", // 통신판매업신고번호
   address: "서울특별시 마포구 백범로 35 TE 415호",
-  phone: "010-8557-5562",
-  email: "contact@vertic-ai.com",
+  phone: "02-964-0730",
+  email: "hcjung@vertic-ai.com",
   websiteUrl: "https://easytrainerhome.vercel.app",
 } as const;
 

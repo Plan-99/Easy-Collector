@@ -94,6 +94,18 @@ class LaunchConfig(_message.Message):
     args_json: str
     def __init__(self, process_id: _Optional[str] = ..., package: _Optional[str] = ..., launch_file: _Optional[str] = ..., args_json: _Optional[str] = ...) -> None: ...
 
+class InterpolationConfig(_message.Message):
+    __slots__ = ("robot_id", "output_topic", "output_msg_type", "publish_rate")
+    ROBOT_ID_FIELD_NUMBER: _ClassVar[int]
+    OUTPUT_TOPIC_FIELD_NUMBER: _ClassVar[int]
+    OUTPUT_MSG_TYPE_FIELD_NUMBER: _ClassVar[int]
+    PUBLISH_RATE_FIELD_NUMBER: _ClassVar[int]
+    robot_id: int
+    output_topic: str
+    output_msg_type: str
+    publish_rate: float
+    def __init__(self, robot_id: _Optional[int] = ..., output_topic: _Optional[str] = ..., output_msg_type: _Optional[str] = ..., publish_rate: _Optional[float] = ...) -> None: ...
+
 class RobotConfig(_message.Message):
     __slots__ = ("robot_json",)
     ROBOT_JSON_FIELD_NUMBER: _ClassVar[int]
@@ -201,22 +213,32 @@ class FetchJointMapRequest(_message.Message):
     def __init__(self, agent_id: _Optional[int] = ..., joint_map_json: _Optional[str] = ...) -> None: ...
 
 class EnvConfig(_message.Message):
-    __slots__ = ("agent_ids", "sensors_json", "language_instruction", "virtual_agents")
+    __slots__ = ("agent_ids", "sensors_json", "language_instruction", "virtual_agents", "tutorial")
     AGENT_IDS_FIELD_NUMBER: _ClassVar[int]
     SENSORS_JSON_FIELD_NUMBER: _ClassVar[int]
     LANGUAGE_INSTRUCTION_FIELD_NUMBER: _ClassVar[int]
     VIRTUAL_AGENTS_FIELD_NUMBER: _ClassVar[int]
+    TUTORIAL_FIELD_NUMBER: _ClassVar[int]
     agent_ids: _containers.RepeatedScalarFieldContainer[int]
     sensors_json: str
     language_instruction: str
     virtual_agents: bool
-    def __init__(self, agent_ids: _Optional[_Iterable[int]] = ..., sensors_json: _Optional[str] = ..., language_instruction: _Optional[str] = ..., virtual_agents: bool = ...) -> None: ...
+    tutorial: bool
+    def __init__(self, agent_ids: _Optional[_Iterable[int]] = ..., sensors_json: _Optional[str] = ..., language_instruction: _Optional[str] = ..., virtual_agents: bool = ..., tutorial: bool = ...) -> None: ...
 
 class EnvId(_message.Message):
     __slots__ = ("id",)
     ID_FIELD_NUMBER: _ClassVar[int]
     id: int
     def __init__(self, id: _Optional[int] = ...) -> None: ...
+
+class WaitForImagesRequest(_message.Message):
+    __slots__ = ("env_id", "timeout")
+    ENV_ID_FIELD_NUMBER: _ClassVar[int]
+    TIMEOUT_FIELD_NUMBER: _ClassVar[int]
+    env_id: int
+    timeout: float
+    def __init__(self, env_id: _Optional[int] = ..., timeout: _Optional[float] = ...) -> None: ...
 
 class ImageData(_message.Message):
     __slots__ = ("sensor_key", "width", "height", "channels", "shm_name", "data")

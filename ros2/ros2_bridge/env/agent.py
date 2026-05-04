@@ -255,6 +255,19 @@ class Agent:
             self.move_joint_step_by_action(action, velocity_arg)
         
     def move_joint_step_by_topic(self, action, vel_arg=None):
+        # 보간 ON 일 때는 출력 msg_type 과 무관하게 ec_joint_cmd(JointState) 로
+        # 한 번에 통일해 흘려보낸다 — interp_node 가 200Hz 보간 후 사용자
+        # write_topic_msg 형식에 맞춰 변환/발행한다. write_topic 으로 직접 쏘는
+        # 경로는 보간 OFF 일 때만 사용.
+        if self._interp_pub is not None:
+            from sensor_msgs.msg import JointState as JointStateMsg
+            interp_msg = JointStateMsg()
+            interp_msg.name = self.joint_names
+            interp_msg.position = list(action)
+            interp_msg.velocity = [0.0] * self.joint_len
+            self._interp_pub.publish(interp_msg)
+            return
+
         if self.write_topic_msg == 'std_msgs/Float64MultiArray':
             self.write_topic_msg_data.data = action
             self.move_robot_pub.publish(self.write_topic_msg_data)
@@ -263,9 +276,7 @@ class Agent:
             self.write_topic_msg_data.position = action
             self.write_topic_msg_data.velocity = [0.0] * self.joint_len
             self.write_topic_msg_data.velocity[-1] = 100
-            # 보간 노드가 있으면 ec_joint_cmd로, 없으면 write_topic으로 직접
-            pub = self._interp_pub if self._interp_pub is not None else self.move_robot_pub
-            pub.publish(self.write_topic_msg_data)
+            self.move_robot_pub.publish(self.write_topic_msg_data)
         elif self.write_topic_msg == 'trajectory_msgs/JointTrajectory':
             self.write_topic_msg_data.joint_names = self.joint_names
             self.joint_trajectory_point.positions = action

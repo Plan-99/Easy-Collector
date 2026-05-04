@@ -3650,7 +3650,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                     pass
             copy_btn.clicked.connect(_copy_url)
 
-            cancel_btn = QPushButton("취소")
+            cancel_btn = QPushButton("닫기")
             wlayout.addWidget(cancel_btn)
 
             timer = QTimer(wait_dlg)
