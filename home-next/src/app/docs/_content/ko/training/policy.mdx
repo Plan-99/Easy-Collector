@@ -31,37 +31,25 @@ Step 2에서는 어떤 **정책 (policy)**을 학습할지 결정합니다.
    <DocsImage
      src="/docs/training/policy-02-create-new.png"
      alt="Create New Policy 폼"
-     status="missing"
    />
 
-3. **Policy Type을 선택합니다.**
+3. **Policy Type을 선택하면 타입별 파라미터 폼이 표시됩니다.**
 
    - **ACT** — 가장 빠르고 안정적. 처음 학습하기 좋음
    - **Diffusion** — 다양한 동작 분포 학습에 강함. 학습/추론 둘 다 느림
    - **PI0** — 멀티모달 입력 처리에 강함. 큰 데이터셋이 필요
 
-4. **타입별 파라미터 폼이 표시됩니다.**
+   ACT/Diffusion 등에서는 **pretrained_backbone_weights** 항목으로 ImageNet pretrained 가중치를 시작점으로 쓸지 결정할 수 있습니다.
 
    <DocsImage
-     src="/docs/training/policy-03-act-params.png"
-     alt="ACT 파라미터 폼"
-     status="missing"
+     src="/docs/training/policy-03-params.png"
+     alt="정책 파라미터 폼 — 타입별 하이퍼파라미터 + pretrained_backbone_weights"
    />
 
-5. **(ACT/Diffusion 등) pretrained_backbone_weights를 선택할 수 있습니다.**
-
-   ImageNet pretrained 가중치를 시작점으로 쓸지 결정합니다.
+4. **이름을 입력하고 Save 또는 Save As로 저장합니다.**
 
    <DocsImage
-     src="/docs/training/policy-04-pretrained.png"
-     alt="pretrained_backbone_weights 셀렉트"
-     status="missing"
-   />
-
-6. **이름을 입력하고 Save 또는 Save As로 저장합니다.**
-
-   <DocsImage
-     src="/docs/training/policy-05-save-as.png"
+     src="/docs/training/policy-04-save-as.png"
      alt="Save Policy As 다이얼로그"
      status="missing"
    />

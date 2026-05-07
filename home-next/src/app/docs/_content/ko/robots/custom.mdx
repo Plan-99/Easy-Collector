@@ -26,31 +26,13 @@ lastVerifiedVersion: 0.0.0
    - **Dual Arm** — 양팔 로봇 한 몸체
    - **Tool** — 그리퍼, 진공흡착 등 엔드이펙터
 
-   <DocsImage
-     src="/docs/robots/custom-01-role.png"
-     alt="RobotForm — Role select"
-     status="missing"
-   />
-
 3. **Joint Names를 입력합니다.**
 
    `/joint_states` 토픽에 나오는 이름과 정확히 일치해야 합니다. **Tool Joint** 체크박스로 그리퍼 조인트를 따로 표시합니다.
 
-   <DocsImage
-     src="/docs/robots/custom-02-joints.png"
-     alt="Joint Names 그리드 + Tool Joint 체크박스"
-     status="missing"
-   />
-
 4. **각 조인트의 Lower / Upper Bound를 입력합니다.**
 
    IK가 발산하지 않도록 안전한 범위를 입력합니다. 단위는 라디안.
-
-   <DocsImage
-     src="/docs/robots/custom-03-bounds.png"
-     alt="Joint Lower / Upper Bounds"
-     status="missing"
-   />
 
 5. **Read Topic / Write Type / Write Topic을 설정합니다.**
 
@@ -59,19 +41,13 @@ lastVerifiedVersion: 0.0.0
    - **Write Topic** — 액션 제어 토픽
    - **Write Topic Message Type** — `sensor_msgs/JointState` 또는 `control_msgs/action/GripperCommand`
 
-   <DocsImage
-     src="/docs/robots/custom-04-topics.png"
-     alt="Read / Write 토픽 설정"
-     status="missing"
-   />
-
 6. **(선택) IK Settings (JSON)을 입력합니다.**
 
    placeholder의 예시 JSON을 참고해 URDF 경로, base/end-effector link, IK solver 옵션 등을 채웁니다. 비워두면 IK가 비활성화됩니다.
 
    <DocsImage
-     src="/docs/robots/custom-05-ik-json.png"
-     alt="IK Settings JSON textarea"
+     src="/docs/robots/custom-01-form.png"
+     alt="Custom RobotForm — Role / Joint Names / Bounds / Read·Write 토픽 / IK Settings JSON 한 화면"
      status="missing"
    />
 
@@ -80,7 +56,7 @@ lastVerifiedVersion: 0.0.0
    custom 로봇은 ON/OFF 토글 대신 **TOPIC ON / TOPIC OFF**로 표시됩니다. 외부 드라이버가 토픽을 발행 중이면 자동으로 TOPIC ON이 됩니다.
 
    <DocsImage
-     src="/docs/robots/custom-06-online.png"
+     src="/docs/robots/custom-02-online.png"
      alt="Custom 로봇 TOPIC ON"
      status="missing"
    />

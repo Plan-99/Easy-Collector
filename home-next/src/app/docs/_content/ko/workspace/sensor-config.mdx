@@ -10,47 +10,20 @@ lastVerifiedVersion: 0.0.0
 
 센서를 추가한 뒤 카드를 클릭하면 우측 본문에 config 패널이 열립니다.
 
-## Crop
+## Crop & Rotation
 
-작업 영역에 직접 관련 없는 부분(천장, 책상 가장자리 등)을 잘라내면 학습이 안정됩니다.
+작업 영역에 직접 관련 없는 부분(천장, 책상 가장자리 등)을 잘라내면 학습이 안정됩니다. 카메라가 거꾸로 달려 있다면 같은 패널의 Rotation에서 90/180/270도 회전을 적용합니다.
 
 <Steps>
-1. **crop 캔버스에서 마우스로 드래그해 영역을 정합니다.**
+1. **crop 캔버스에서 마우스로 드래그해 영역을 정하고, 필요하면 Rotation을 선택합니다.**
 
-   파란색 사각형이 잘려서 학습에 들어갈 영역입니다.
-
-   <DocsImage
-     src="/docs/workspace/sensor-cfg-01-crop-canvas.png"
-     alt="crop 캔버스 + 마우스 드래그"
-     status="missing"
-   />
-
-2. **(선택) Cropped Area의 x1, y1, x2, y2를 직접 입력해 미세 조정합니다.**
+   파란색 사각형이 잘려서 학습에 들어갈 영역입니다. 필요하면 Cropped Area의 x1, y1, x2, y2를 직접 입력해 미세 조정하거나 Reset crop으로 전체 화면으로 되돌릴 수 있습니다.
 
    <DocsImage
-     src="/docs/workspace/sensor-cfg-02-coords.png"
-     alt="x1/y1/x2/y2 직접 입력"
-     status="missing"
-   />
-
-3. **(선택) Reset crop 버튼으로 전체 화면으로 되돌릴 수 있습니다.**
-
-   <DocsImage
-     src="/docs/workspace/sensor-cfg-04-reset.png"
-     alt="Reset crop 버튼"
-     status="missing"
+     src="/docs/workspace/sensor-cfg-01-crop.png"
+     alt="Crop 패널 — 캔버스 드래그 + x1/y1/x2/y2 입력 + Reset crop + Rotation select"
    />
 </Steps>
-
-## Rotation
-
-카메라가 거꾸로 달려 있다면 90/180/270도 회전을 적용합니다.
-
-<DocsImage
-  src="/docs/workspace/sensor-cfg-03-rotation.png"
-  alt="Rotation select"
-  status="missing"
-/>
 
 <Callout type="warning">
 crop이나 rotation을 변경하면 **이미 수집된 에피소드와의 호환성이 깨질 수 있습니다.** 데이터셋이 남아있는 워크스페이스에서는 가능하면 변경하지 마세요.

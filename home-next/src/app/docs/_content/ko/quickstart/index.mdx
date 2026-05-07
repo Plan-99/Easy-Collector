@@ -18,10 +18,12 @@ sourceRefs:
   - frontend/src/components/v2/RobotPendant.vue
   - frontend/src/components/v2/TeleopConsole.vue
   - frontend/src/components/v2/TrainingDialog.vue
+  - frontend/src/pages/v2/PlannerPage.vue
 related:
   - /docs/installation
   - /docs/workspace/create
   - /docs/training/policy
+  - /docs/planner
 lastVerifiedVersion: 0.0.0
 ---
 
@@ -477,9 +479,53 @@ ACT 기본 파라미터로 10 에피소드 학습은 보통 **수 분~10여 분*
    />
 </Steps>
 
+## 10. 플래너로 묶어 실행하기
+
+마지막으로, 방금 만든 체크포인트를 [플래너](/docs/planner)에 넣어 **시작 자세 이동 → 추론 → 대기**를 한 번에 실행해 봅니다. 정책이 끝나는 시점이 매번 다른 작업도 한 줄짜리 플랜으로 자동화할 수 있습니다.
+
+<Steps>
+1. **사이드바에서 Planner로 이동하고 상단 드롭다운 → + Create New Planner를 누릅니다.**
+
+   이름을 입력하고 CREATE를 누르면 빈 플래너가 생성됩니다.
+
+   <DocsImage
+     src="/docs/planner/create-02-new.png"
+     alt="새 플래너 만들기 다이얼로그"
+   />
+
+2. **좌측 패널의 + ADD WORKSPACES 버튼으로 6단계에서 만든 워크스페이스를 추가합니다.**
+
+   <DocsImage
+     src="/docs/planner/workspaces-02-multiselect.png"
+     alt="워크스페이스 다중 선택 다이얼로그"
+   />
+
+3. **가운데 패널의 새 블록 버튼으로 블록을 3개 추가합니다.**
+
+   - **Joint Position** — 시작 자세로 이동 (워크스페이스 선택 후 펜던트로 자세를 만들고 **현재 자세 적용**으로 저장)
+   - **Checkpoint** — 9단계에서 만든 체크포인트 선택 + 시간(예: 10초) + Hz 입력
+   - **Time Sleep** — 1–2초 대기
+
+   <DocsImage
+     src="/docs/planner/blocks-list-01-row.png"
+     alt="블록 목록 — Joint Position / Checkpoint / Time Sleep 3개 행"
+   />
+
+4. **가운데 패널 상단의 전체 실행(녹색 play) 버튼을 누릅니다.**
+
+   사전 검증을 통과하면 첫 블록부터 차례대로 실행됩니다. 이상하면 곧바로 **중지**를 누르세요.
+
+   <DocsImage
+     src="/docs/planner/run.png"
+     alt="플랜 실행 중 — 좌측 진행 상태 + 우측 모니터링 윈도우"
+   />
+</Steps>
+
+자세한 사용법은 [플래너 개요](/docs/planner) → [플래너 생성 / 워크스페이스 추가](/docs/planner/create-and-workspaces) → [블록 추가 / 플랜 실행](/docs/planner/blocks-and-run) 순서로 참고하세요.
+
 ---
 
-여기까지 완료하면 **데이터 수집 → 학습 → 추론**이라는 imitation learning의 한 사이클을 모두 경험한 것입니다.
+여기까지 완료하면 **데이터 수집 → 학습 → 추론 → 플래너**라는 Easy Trainer의 한 사이클을 모두 경험한 것입니다.
 
 다음으로 가볼 곳:
 

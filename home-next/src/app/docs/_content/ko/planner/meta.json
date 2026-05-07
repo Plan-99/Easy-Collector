@@ -1,5 +1,5 @@
 {
   "title": "플래너",
   "order": 12,
-  "items": ["create", "workspaces", "blocks", "run"]
+  "items": ["create-and-workspaces", "blocks-and-run"]
 }

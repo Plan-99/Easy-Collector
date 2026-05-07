@@ -37,23 +37,13 @@ lastVerifiedVersion: 0.0.0
      status="missing"
    />
 
-3. **(미설치 상태에서) 설치 버튼을 누릅니다.**
+3. **(미설치 상태에서) 설치 버튼을 누른 뒤 실행 버튼을 누릅니다.**
 
-   GitHub Releases에서 `training-server-v<버전>.tar.gz`를 다운로드하고 압축을 해제합니다.
-
-   <DocsImage
-     src="/docs/training/server-03-install.png"
-     alt="설치 진행 로그"
-     status="missing"
-   />
-
-4. **실행 버튼을 누르면 백엔드가 학습 서버 모드로 재생성됩니다.**
-
-   상태가 **🟢 실행 중**으로 바뀌고 로그가 흐르면 정상.
+   설치 단계에서 GitHub Releases에서 `training-server-v<버전>.tar.gz`를 다운로드하고 압축을 해제합니다. 실행 버튼을 누르면 백엔드가 학습 서버 모드로 재생성되며, 상태가 **🟢 실행 중**으로 바뀌고 로그가 흐르면 정상.
 
    <DocsImage
-     src="/docs/training/server-04-running.png"
-     alt="실행 중 상태 + 로그"
+     src="/docs/training/server-03-install-run.png"
+     alt="설치 / 실행 버튼 + 진행 로그 + 실행 중 상태"
      status="missing"
    />
 </Steps>
@@ -61,25 +51,16 @@ lastVerifiedVersion: 0.0.0
 ## 운영자 UI에 연결
 
 <Steps>
-1. **Train 페이지의 Step 3에서 Training Server URL을 입력합니다.**
+1. **Train 페이지의 Step 3에서 Training Server URL을 입력하고 옆 버튼으로 헬스체크합니다.**
 
    - 같은 PC: `http://localhost:5100`
    - 별도 서버: `http://<server-ip>:5100`
 
-   <DocsImage
-     src="/docs/training/server-05-frontend-url.png"
-     alt="Training Server URL 입력"
-     status="missing"
-   />
-
-2. **URL 옆 버튼으로 헬스체크합니다.**
-
    체크 마크(positive) + **GPU Available** 배지가 보이면 정상.
 
    <DocsImage
-     src="/docs/training/server-06-health-ok.png"
-     alt="health check OK + GPU Available"
-     status="missing"
+     src="/docs/training/server-04-frontend.png"
+     alt="Training Server URL 입력 + 헬스체크 OK + GPU Available 배지"
    />
 </Steps>
 

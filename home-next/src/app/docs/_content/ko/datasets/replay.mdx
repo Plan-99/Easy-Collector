@@ -20,41 +20,25 @@ lastVerifiedVersion: 0.0.0
      status="missing"
    />
 
-2. **MonitoringWindow에 replay 헤더가 나타납니다.**
-
-   <DocsImage
-     src="/docs/datasets/replay-02-header.png"
-     alt="replay 헤더"
-     status="missing"
-   />
-
-3. **Replay Action Type을 고릅니다.**
+2. **MonitoringWindow에 replay 헤더가 나타나면 Replay Action Type을 고르고, 필요하면 Capture Episode를 켭니다.**
 
    - **qaction** — 저장된 관절 명령을 그대로 재생
    - **ee_delta_action** — EE 델타로 변환해 재생 (워크스페이스의 IK 설정과 결합 가능성 검증에 유용)
 
+   Capture Episode 체크박스를 켜고 Target Dataset을 지정하면 재생되는 동작이 새 데이터셋에 다시 저장됩니다. 모든 센서가 ON이어야 활성화됩니다.
+
    <DocsImage
-     src="/docs/datasets/replay-03-action-type.png"
-     alt="qaction vs ee_delta_action 라디오"
+     src="/docs/datasets/replay-02-replay-panel.png"
+     alt="Replay 헤더 — Action Type(qaction/ee_delta_action) + Capture Episode + Target Dataset"
      status="missing"
    />
 
-4. **(선택) Capture Episode 체크박스를 켜고 Target Dataset을 지정합니다.**
-
-   재생되는 동작이 새 데이터셋에 다시 저장됩니다. 모든 센서가 ON이어야 활성화됩니다.
-
-   <DocsImage
-     src="/docs/datasets/replay-04-capture.png"
-     alt="Capture Episode 체크박스 + Target Dataset"
-     status="missing"
-   />
-
-5. **Hz를 입력하고 Play를 누릅니다.**
+3. **Hz를 입력하고 Play를 누릅니다.**
 
    캡처 모드일 때는 진행률 progress bar가 표시됩니다.
 
    <DocsImage
-     src="/docs/datasets/replay-05-progress.png"
+     src="/docs/datasets/replay-03-progress.png"
      alt="Capturing X% progress"
      status="missing"
    />

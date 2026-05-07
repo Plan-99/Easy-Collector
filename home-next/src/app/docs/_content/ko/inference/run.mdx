@@ -9,46 +9,26 @@ lastVerifiedVersion: 0.0.0
 ---
 
 <Steps>
-1. **체크포인트 선택 후 MonitoringWindow에 inference 헤더가 나타납니다.**
-
-   <DocsImage
-     src="/docs/inference/run-01-header.png"
-     alt="MonitoringWindow inference 헤더"
-     status="missing"
-   />
+1. **체크포인트 선택 후 MonitoringWindow에 inference 헤더가 나타납니다. Start Inference를 누르면 추론이 시작되고, 이상하면 Stop을 누릅니다.**
 
    - **Hz** — 추론 주기. 보통 30 Hz로 시작
    - **🏠 배지** — 추론 시작 시 Home Pose로 갈지 (파란색=ON, 회색=OFF)
-   - **Start Inference** — 빨간색 play 버튼
-
-2. **Start Inference를 누르면 정책이 실시간 추론을 시작합니다.**
-
-   매 프레임마다 (이미지 + 관절 상태)를 받아 다음 액션을 추론하고 로봇에 보냅니다.
+   - **Start Inference** — 빨간색 play 버튼. 누르면 매 프레임마다 (이미지 + 관절 상태)를 받아 다음 액션을 추론하고 로봇에 보냅니다.
 
    <DocsImage
-     src="/docs/inference/run-02-running.png"
-     alt="추론 중 화면"
-     status="missing"
+     src="/docs/inference/run-01-monitoring.png"
+     alt="MonitoringWindow inference — Hz / Home 배지 / Start·Stop 버튼 + 추론 중 카메라 뷰"
    />
 
-3. **상단 두 배지로 추론 품질을 모니터링합니다.**
+2. **상단 두 배지로 추론 품질을 모니터링합니다.**
 
    <DocsImage
-     src="/docs/inference/run-03-succeed-ood.png"
+     src="/docs/inference/run-02-succeed-ood.png"
      alt="Succeed / OOD 배지 zoom"
-     status="missing"
    />
 
    - **Succeed** — 0.7 이상이면 녹색. 학습된 성공 분포와 닮은 정도
    - **OOD** — 1.0 초과면 빨강(주황은 경계). 분포 이탈 정도
-
-4. **이상하거나 위험해 보이면 Stop을 누릅니다.**
-
-   <DocsImage
-     src="/docs/inference/run-04-stop.png"
-     alt="Stop 버튼"
-     status="missing"
-   />
 </Steps>
 
 ## reinference 주기
