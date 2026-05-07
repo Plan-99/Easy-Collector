@@ -6,6 +6,7 @@
     "modules",
     "sensors",
     "robots",
+    "assembly",
     "teleoperation",
     "workspace",
     "data-collection",

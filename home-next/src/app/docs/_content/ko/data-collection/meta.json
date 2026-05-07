@@ -1,5 +1,5 @@
 {
   "title": "데이터 수집",
-  "order": 8,
+  "order": 9,
   "items": ["teleop-mode", "home-pose-return", "record-flow", "buttons"]
 }

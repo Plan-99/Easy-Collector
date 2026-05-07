@@ -1,5 +1,5 @@
 {
   "title": "텔레오퍼레이션",
-  "order": 6,
-  "items": ["assembly", "end-effector", "keyboard", "leader-robot", "testing"]
+  "order": 7,
+  "items": ["end-effector", "keyboard", "leader-robot", "testing"]
 }

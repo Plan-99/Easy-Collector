@@ -76,7 +76,6 @@ export default {
   robotFieldWriteType: '쓰기 타입',
   robotFieldWriteTopic: '쓰기 토픽',
   robotFieldWriteTopicMsg: '쓰기 토픽 메시지 타입',
-  robotFieldInterpolation: '명령 보간 사용 (200Hz)',
   robotFieldIkSettings: 'IK 설정 (JSON)',
   robotRoleSingleArm: '단일 팔',
   robotRoleDualArm: '양팔',
@@ -411,7 +410,7 @@ export default {
   teleopLeaderBack: '뒤로',
   teleopLeaderFinish: '완료',
   teleopLeaderToolJoint: '도구 관절',
-  teleopLeaderSetAsGripper: '그리퍼로 지정',
+  teleopLeaderSetAsGripper: 'Toggle Joint로 지정',
   teleopLeaderOpenPosition: '열림 위치',
   teleopLeaderClosePosition: '닫힘 위치',
   teleopLeaderSaveBtn: '저장',
@@ -523,7 +522,7 @@ export default {
   tutorialTeleopDialogKeyboard:
     '키보드 조작을 입맛에 맞게 바꿔요. 어떤 키가 어느 축에 매핑되는지, 한 번에 얼마나 움직이는지를 정할 수 있어요. 너무 만져버렸으면 Reset to Defaults로 되돌리세요.',
   tutorialTeleopDialogLeader:
-    '리더 로봇(Easy Controller) 설정이에요. 리더 관절을 팔로워 관절 위로 끌어다 놓아 매핑하고, 원점 자세를 잡고, 필요하면 관절별로 부호(sign)를 바꿔 방향을 뒤집을 수 있습니다.',
+    '리더 로봇(Easy Controller) 설정이에요. 리더 관절을 팔로워 관절 위로 끌어다 놓아 매핑한 뒤, 리더를 팔로워와 같은 자세로 맞춘 상태에서 원점을 설정하세요(팔로워가 home 포즈일 필요는 없어요. 두 로봇 자세만 일치하면 됩니다). 필요하면 관절별로 부호(sign)를 바꿔 방향을 뒤집을 수 있어요.',
 
   tutorialWorkspaceIntro:
     '워크스페이스는 하나의 작업(예: 컵 옮기기)을 위한 모든 것을 모아두는 곳이에요. 사용할 카메라/로봇, 모은 데이터, 학습 결과를 한 곳에서 관리합니다. 위 드롭다운에서 워크스페이스를 먼저 골라주세요.',

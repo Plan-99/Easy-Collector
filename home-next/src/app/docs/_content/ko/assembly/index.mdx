@@ -1,0 +1,119 @@
+---
+title: Assembly 구성
+description: 등록된 로봇들을 좌·우 팔과 그리퍼 슬롯에 끼워 하나의 가상 로봇(Agent)으로 묶는 단계.
+section: assembly
+order: 1
+sourceRefs:
+  - frontend/src/pages/v2/AssemblePage.vue
+  - frontend/src/components/v2/AssemblyForm.vue
+related:
+  - /docs/robots
+  - /docs/teleoperation
+  - /docs/workspace
+lastVerifiedVersion: 0.0.0
+---
+
+Assembly는 [Robots → Management](/docs/robots)에 등록된 여러 로봇을 **하나의 가상 로봇(Agent)**으로 묶는 단계입니다. 등록된 로봇 자체는 "이 팔이 어떤 시리얼·어떤 IP·몇 자유도냐" 같은 하드웨어 단위 정의에 가깝고, Assembly는 그 부품들을 조합해 **"이 작업에서는 이 팔과 저 그리퍼를 한 몸처럼 쓰겠다"**라고 선언하는 일이에요.
+
+이후의 모든 단계 — [텔레오퍼레이션](/docs/teleoperation) · [워크스페이스](/docs/workspace) · [데이터 수집](/docs/data-collection) · [학습](/docs/training) · [추론](/docs/inference) — 는 모두 이 Assembly 단위로 진행됩니다. 워크스페이스도 항상 한 Assembly에 묶여요.
+
+## 왜 Assembly가 필요한가
+
+서로 다른 회사에서 만든 팔과 그리퍼를 같이 써도, 정책(policy) 입장에서는 **하나의 큰 로봇**이어야 합니다. 관절각·EE 자세·그리퍼 명령이 한 묶음의 관측·액션 벡터로 들어가야 학습이 의미가 있기 때문이에요.
+
+Assembly는 이 "한 묶음"을 사용자가 직접 정의하게 해 줍니다.
+
+- **단일 팔 작업** — 팔 한 대만 슬롯에 꽂으면 그대로 끝.
+- **양팔 작업** — 같은 모델 두 대를 left / right 슬롯에 각각 꽂으면 양팔 Agent가 됩니다. 두 팔이 꼭 같은 회사·같은 모델일 필요는 없어요. 좌측에 Piper, 우측에 Fairino 식으로 **이종 조합**도 가능합니다.
+- **외부 그리퍼 결합** — 팔에는 자체 그리퍼가 없어도 됩니다. 별도로 등록한 [Custom Robot](/docs/robots/custom)(예: 시중 전동 그리퍼, 자체 제작 손)을 tool 슬롯에 끼우면 그 팔의 그리퍼처럼 동작해요. 학습 시에는 팔 관절 + 그리퍼 명령이 하나의 액션으로 합쳐집니다.
+- **팔 + 내장 그리퍼 일체형** — Piper처럼 그리퍼가 팔에 일체로 붙어있는 모델은 한 번의 클릭으로 arm + tool 슬롯이 동시에 채워집니다.
+
+## 4개의 슬롯
+
+Assembly는 항상 다음 네 슬롯으로 구성돼요.
+
+| 슬롯 | 역할 | 비어 있어도 되나? |
+|---|---|---|
+| **left_arm** | 좌측 팔 | 우측 팔만 쓸 거면 비워도 됨 |
+| **right_arm** | 우측 팔 | 좌측 팔만 쓸 거면 비워도 됨 |
+| **left_tool** | 좌측 팔의 그리퍼/도구 | 그리퍼 없는 팔이면 비움 |
+| **right_tool** | 우측 팔의 그리퍼/도구 | 그리퍼 없는 팔이면 비움 |
+
+원하는 조합 그대로 4개 슬롯에 부품을 끼우면 그게 곧 Assembly입니다.
+
+### 흔한 구성 예시
+
+| 사용 사례 | left_arm | left_tool | right_arm | right_tool |
+|---|---|---|---|---|
+| 단일 팔 + 내장 그리퍼 (Piper) | piper_main | (자동) | — | — |
+| 단일 팔 + 외부 그리퍼 | fairino_main | custom_gripper | — | — |
+| 양팔 (동일 모델) | piper_left | (자동) | piper_right | (자동) |
+| 양팔 (이종 + 외부 그리퍼) | fairino_left | custom_gripper_l | piper_right | (자동) |
+
+## 로봇의 Role
+
+[로봇 추가](/docs/robots) 단계에서 각 로봇에 부여한 **Role**이 Assembly에서 어느 슬롯에 들어갈 수 있는지를 결정합니다.
+
+| Role | 가능 슬롯 | 예 |
+|---|---|---|
+| **single_arm** | left_arm 또는 right_arm | Piper, Fairino, Jaka 같은 6/7-DoF 매니퓰레이터 |
+| **tool** | left_tool 또는 right_tool | 별도 등록된 그리퍼 (Custom Robot으로 등록한 외부 그리퍼) |
+| **dual_arm** | 4개 슬롯을 한 번에 | 이미 양팔이 한 컨트롤러에 묶여 있는 통합형 (예: Unitree H1 manipulator) |
+
+<Callout type="info">
+**`tool_inner` 표시가 켜진 single_arm**(예: Piper)은 팔 자체에 그리퍼가 일체로 달려 있다는 뜻이에요. 이 로봇을 left_arm 슬롯에 넣으면 left_tool 슬롯도 같은 로봇으로 자동 채워집니다. 별도의 tool 로봇을 추가로 끼울 필요가 없어요.
+</Callout>
+
+## 구성하기
+
+<Steps>
+1. **Robots → Assemble로 이동하고 하단의 New 탭을 엽니다.**
+
+   좌측 캔버스에는 Assembly 구성 결과가 시각적으로 표시되고, 우측 패널에는 등록된 로봇 카드가 나열됩니다.
+
+   <DocsImage
+     src="/docs/assembly/01-form.png"
+     alt="AssemblyForm — 좌측 Canvas + 우측 로봇 카드 패널"
+   />
+
+2. **우측 패널의 로봇 카드를 클릭해 슬롯을 고릅니다.**
+
+   카드를 클릭하면 그 로봇의 Role에 따라 다음 버튼이 나타납니다.
+
+   - **single_arm** → `Left` / `Right` (어느 팔로 쓸지)
+   - **tool** → `Left` / `Right` (어느 팔의 그리퍼로 쓸지)
+   - **dual_arm** → 한 번 클릭으로 4개 슬롯 모두 점유
+
+   누르는 즉시 좌측 캔버스에 반영됩니다. 잘못 끼웠다면 캔버스의 X로 빼고 다시 시도하세요.
+
+3. **양팔이라면 같은 방식으로 반대편에도 팔을 끼웁니다.**
+
+   같은 모델 두 대를 양팔로 쓸 수도 있고, 다른 회사 팔을 좌·우에 섞어도 됩니다. 시스템은 두 팔의 관측을 그대로 나란히 묶어서 한 Agent로 다룹니다.
+
+4. **외부 그리퍼가 있다면 tool 카드를 클릭해 같은 쪽 슬롯에 끼웁니다.**
+
+   `tool_inner`가 아닌 팔(자체 그리퍼가 없는 매니퓰레이터)에 외부 그리퍼를 결합할 때 쓰는 절차예요. 예를 들어 좌측 팔에 외부 그리퍼를 붙이고 싶으면, 팔 카드의 `Left`를 누른 뒤 그리퍼 카드의 `Left`를 누르면 됩니다.
+
+5. **Assembly 이름을 입력하고 Save를 누릅니다.**
+
+   여기서 정한 이름이 이후 텔레오퍼레이션·워크스페이스 화면에서 그대로 보입니다. 작업/구성을 알아볼 수 있는 이름(`bimanual_piper`, `fairino_with_custom_gripper` 등)을 권장해요.
+</Steps>
+
+<Callout type="tip">
+한 로봇은 여러 Assembly에 동시에 들어갈 수 있어요. 같은 하드웨어 세트로 다른 작업 구성을 자주 바꾸는 경우(예: 테이블 위 작업용 / 선반 위 작업용)에 작업별로 Assembly를 만들어 두면 편합니다.
+</Callout>
+
+## 등록 후 어떻게 쓰이나
+
+Assembly가 만들어지면 시스템은 그 안의 로봇들을 다음과 같이 묶어 다룹니다.
+
+- **관측(observation)** — 모든 슬롯의 관절각·EE 자세·이미지가 일정한 순서로 합쳐져 정책 입력이 됩니다.
+- **액션(action)** — 슬롯별 명령이 같은 순서로 합쳐진 단일 액션 벡터로 출력되며, 시스템이 슬롯별로 분배해 각 로봇에 전달합니다.
+- **텔레오퍼레이션** — 키보드·Easy Controller 모두 Assembly 단위로 켜집니다. 양팔이면 두 팔이 동시에 움직이고, 외부 그리퍼는 팔의 일부처럼 같이 따라옵니다.
+- **데이터셋** — 한 에피소드의 모든 프레임은 Assembly의 관측·액션 벡터 형태로 저장돼요. 즉 같은 Assembly로 모은 데이터끼리만 학습이 호환됩니다.
+
+이 일관성 덕분에 정책은 "팔이 두 대인지, 그리퍼가 외부인지" 신경 쓸 필요 없이 **하나의 로봇**을 학습한다고 가정하고 동작합니다.
+
+## 다음 단계
+
+Assembly가 만들어졌다면 [텔레오퍼레이션](/docs/teleoperation)으로 넘어가 EE 오프셋·키보드·Easy Controller를 설정하고 실제로 움직여 보세요. 그 다음 [워크스페이스 만들기](/docs/workspace/create)에서 이 Assembly를 골라 시연 데이터 수집을 시작합니다.

@@ -175,37 +175,9 @@ def subscribe_robot(api: Backend, robot_id):
         raise StageError(f'subscribe_robot failed: {res}')
 
 
-def update_robot_interpolation(api: Backend, robot, enable):
-    """custom 로봇의 settings.interpolation 을 토글하기 위한 PUT /robot/<id>.
-
-    백엔드 update_robot 라우트는 custom 분기에서 폼의 모든 필드를 다시 받으므로,
-    현재 dict 의 모든 핵심 필드를 그대로 다시 전송한다.
-    """
-    payload = {
-        'name': robot.get('name'),
-        'type': robot.get('type'),
-        'role': robot.get('role'),
-        'interpolation': bool(enable),
-        'read_topic': robot.get('read_topic'),
-        'read_topic_msg': robot.get('read_topic_msg'),
-        'write_type': robot.get('write_type'),
-        'write_topic': robot.get('write_topic'),
-        'write_topic_msg': robot.get('write_topic_msg'),
-        'joint_names': robot.get('joint_names') or [],
-        'joint_lower_bounds': robot.get('joint_lower_bounds') or [],
-        'joint_upper_bounds': robot.get('joint_upper_bounds') or [],
-        'tool_index': robot.get('tool_index') or [],
-    }
-    res = api.put(f'/robot/{robot["id"]}', json=payload)
-    if res.get('status') != 'success':
-        raise StageError(f'update_robot interpolation toggle failed: {res}')
-
-
 def start_robot_driver(api: Backend, robot):
-    """custom 로봇의 robot:start 를 호출. interpolation=True 면 backend 가
-    StartInterpolation RPC 로 standalone interpolation_node 를 띄운다.
-
-    custom + interpolation=False 인 경우는 단순 success 응답으로 no-op."""
+    """custom 로봇의 robot:start 호출. custom 은 외부 토픽만 소비하므로 단순
+    success 응답으로 no-op (built-in robot 만 driver 가 실제로 뜬다)."""
     payload = {
         'id': robot['id'],
         'type': robot['type'],
@@ -689,9 +661,8 @@ def run_inference(api: Backend, checkpoint_id, workspace, robot, run_seconds=15)
 # ---------------------------------------------------------------------------
 
 def _teardown_robot(api: Backend, robot_id):
-    """/robot:stop 호출 — interpolation_node 가 떠 있으면 같이 정리됨.
-    backend가 응답 못해도 치명적이지 않음 (backend가 죽으면 robot 프로세스도
-    같이 죽음).
+    """/robot:stop 호출. backend 가 응답 못해도 치명적이지 않음 (backend 가 죽으면
+    robot 프로세스도 같이 죽음).
     """
     if not robot_id:
         return
@@ -758,20 +729,8 @@ def _run_pipeline(api: Backend, args):
 
     robot = workspace['assembly']['robots'][0]
 
-    # interpolation 옵션 처리: PUT 으로 settings.interpolation 토글 후 /robot:start
-    # 호출. /robot:start 는 custom 로봇에 대해 interpolation=True 면 standalone
-    # interpolation_node 를 띄운다 (StartInterpolation RPC).
-    if args.enable_interpolation is not None:
-        with stage(f'set robot interpolation={args.enable_interpolation}'):
-            update_robot_interpolation(api, robot, args.enable_interpolation)
-            # 토글 후 workspace fetch 다시 (interpolation 값이 robot dict에 반영됨)
-            workspace = fetch_workspace_payload(api, workspace_id)
-            robot = workspace['assembly']['robots'][0]
-
-    with stage(f'/robot:start id={robot["id"]} '
-               f'(interpolation={robot.get("interpolation")})'):
+    with stage(f'/robot:start id={robot["id"]}'):
         start_robot_driver(api, robot)
-        # interpolation_node 가 떴다면 첫 메시지 perm matching 시간 잠깐
         time.sleep(1.0)
 
     dataset_id = None
@@ -865,12 +824,6 @@ def main():
                         help='mujoco viewer 창 없이 sim 기동 (headless). 종료 시 sim도 stop.')
     parser.add_argument('--keep-sim', action='store_true',
                         help='--headless-sim 이어도 종료 시 sim 을 stop 하지 않음 (디버깅용)')
-    parser.add_argument('--enable-interpolation', dest='enable_interpolation',
-                        action='store_true', default=None,
-                        help='custom 로봇 interpolation 활성화 → standalone interpolation_node 기동')
-    parser.add_argument('--disable-interpolation', dest='enable_interpolation',
-                        action='store_false',
-                        help='custom 로봇 interpolation 비활성화 (기본 상태로 강제)')
     args = parser.parse_args()
 
     api = Backend(args.backend)

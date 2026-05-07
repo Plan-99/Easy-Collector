@@ -316,13 +316,8 @@ const robotForm = ref([
         ],
         show: (form) => form.find((e) => e.key === 'type').value === 'custom'
     },
-    // 보간 옵션: 켜면 robot:start 시 standalone interpolation_node 가 떠서
-    // ec_joint_cmd → write_topic 사이를 200Hz 로 부드럽게 출력. write_type='topic'
-    // 이고 write_topic_msg 가 JointState/Float64MultiArray 일 때만 의미 있음.
-    { label: t('robotFieldInterpolation'), key: 'interpolation', type: 'checkbox', value: false, default: false,
-        show: (form) => form.find((e) => e.key === 'type').value === 'custom'
-                        && form.find((e) => e.key === 'write_type').value === 'topic'
-    },
+    // custom robot 은 외부 ROS2 노드가 자체적으로 명령 토픽을 처리한다는 전제이므로
+    // interpolation_node 를 끼워넣지 않는다. 평활화가 필요하면 외부 노드에서 처리.
     { label: t('robotFieldIkSettings'), key: 'ik_json', type: 'custom', value: '', default: '', optional: true,
         show: (form) => form.find((e) => e.key === 'type').value === 'custom'
     },

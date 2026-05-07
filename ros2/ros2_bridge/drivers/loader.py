@@ -40,6 +40,24 @@ def _modules_root() -> str:
     return candidates[0]
 
 
+def _maybe_builtin_topic_driver(robot: dict, node) -> Optional[RobotDriver]:
+    """write_topic 만 있고 별도 driver entrypoint 가 없는 robot 을 위한
+    built-in fallback. 튜토리얼 robot 처럼 외부 ROS2 노드가 명령 토픽을 듣고
+    있을 때 사용된다.
+    """
+    settings = robot.get('settings', {}) or {}
+    write_topic = settings.get('write_topic') or robot.get('write_topic')
+    if not write_topic or node is None:
+        return None
+    try:
+        from .topic_pub import TopicJointStateDriver
+        return TopicJointStateDriver(node, robot, {})
+    except Exception as e:
+        print(f"[driver_loader] builtin topic driver init failed for "
+              f"{robot.get('name')}: {e}")
+        return None
+
+
 def load_driver(robot: dict, node=None) -> Optional[RobotDriver]:
     """robot dict (`driver` 필드 포함) 에서 entrypoint 를 읽어 driver 를 로드.
 
@@ -58,17 +76,21 @@ def load_driver(robot: dict, node=None) -> Optional[RobotDriver]:
                    else None)
     # 호환: 이전 로직은 driver 필드를 _flatten 으로 풀어 top-level 에 넣었다.
     # 그 경우 robot.get('kind'), robot.get('entrypoint') 를 직접 본다.
-    if driver_meta is None:
-        if not robot.get('entrypoint'):
-            return None
+    if driver_meta is None and robot.get('entrypoint'):
         driver_meta = {
             'kind': robot.get('kind') or 'custom',
             'entrypoint': robot.get('entrypoint'),
             'config': robot.get('driver_config') or {},
         }
 
+    # entrypoint 가 없으면 built-in topic-publish fallback 시도. interpolation
+    # 을 안 쓰는데 write_topic 만 있는 단순 custom robot (튜토리얼, 외부 sim
+    # 노드 등) 을 위해.
+    if driver_meta is None or not driver_meta.get('entrypoint'):
+        return _maybe_builtin_topic_driver(robot, node)
+
     if (driver_meta.get('kind') or '') != 'custom':
-        return None
+        return _maybe_builtin_topic_driver(robot, node)
     entrypoint = driver_meta.get('entrypoint') or ''
     if ':' not in entrypoint:
         print(f"[driver_loader] invalid entrypoint '{entrypoint}' — "

@@ -2,7 +2,7 @@
 
 `SCREENSHOTS.md`에서 아직 `[ ]` 상태인 슬롯만 추려낸 작업용 체크리스트입니다. 위에서 아래로 진행하면 첫 사용자 동선 그대로 따라가는 순서가 됩니다.
 
-총 **96장 중 51장 완료, 45장 미캡처** (남은 분량 — modules 8, sensors 6, robots 5, teleoperation 6, workspace 4, data-collection 5, datasets 9, training 8, inference 2, planner 4). installation/quickstart는 모두 캡처되어 있고, planner의 checkpoint/run 슬롯은 통합 컷으로 이미 채워져 있습니다.
+총 **96장 중 54장 완료, 42장 미캡처** (남은 분량 — modules 8, sensors 6, robots 5, teleoperation 6, workspace 1, data-collection 5, datasets 9, training 8, inference 2, planner 4). installation/quickstart는 모두 캡처되어 있고, planner의 checkpoint/run 슬롯은 통합 컷으로 이미 채워져 있습니다.
 
 캡처할 때마다 해당 줄 앞에 `[x]`로 체크해 주세요. 그 후 `SCREENSHOTS.md` 본 표에도 동일하게 체크하면 됩니다.
 
@@ -151,13 +151,13 @@
 
 ---
 
-## 7. workspace — 워크스페이스 (4장)
+## 7. workspace — 워크스페이스 (1장)
 
 폴더: `public/docs/workspace/`
 
-- [ ] `create-03-edit-delete.png` — edit / delete 버튼
-- [ ] `robots-02-list.png` — Assembly 내부 로봇 리스트
-- [ ] `dataset-01-add.png` — Add Dataset Folder 버튼
+- [x] `create-03-edit-delete.png` — edit / delete 버튼
+- [x] `robots-02-list.png` — Assembly 내부 로봇 리스트
+- [x] `dataset-01-add.png` — Add Dataset Folder 버튼
 - [ ] `dataset-04-incompatible.png` — metadata remap 워닝
 
 ---

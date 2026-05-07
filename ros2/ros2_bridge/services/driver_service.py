@@ -304,14 +304,12 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
         return self._start_subprocess(interp_id, cmd, log_name=log_name)
 
     def StartInterpolation(self, request, context):
-        """Custom 로봇용 standalone 보간 노드 기동.
+        """[DEPRECATED] Custom 로봇용 standalone 보간 노드 기동.
 
-        빌트인 로봇은 StartRobotDriver 가 자체 ros2 launch 와 함께 묶어서
-        뜨우지만, type='custom' 로봇은 외부 토픽만 소비하므로 그 경로를 거치지
-        않는다. 이 RPC 가 그 빈 자리를 메운다.
-
-        agent.py 는 /ec_robot_<id>/ec_joint_cmd 로 명령을 보내고, 이 노드가
-        보간하여 사용자의 output_topic (절대경로 가능) 에 publish.
+        custom robot 은 외부 ROS2 노드가 명령 처리를 모두 책임지는 게 정책으로
+        정리되면서 더 이상 backend 에서 호출하지 않는다. proto 호환을 위해 RPC
+        는 남겨두지만 새 코드는 사용하지 말 것 — 다음 cycle 에서 제거 예정.
+        StopInterpolation 도 같이 사라진다.
         """
         robot_id = request.robot_id
         if robot_id <= 0:
@@ -336,11 +334,10 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
         return pb.DriverStatus(success=True, message='Interpolation node started', pid=proc.pid)
 
     def StopInterpolation(self, request, context):
-        """Stop the interpolation node started by StartInterpolation.
+        """[DEPRECATED] Stop the interpolation node started by StartInterpolation.
 
-        request.name 은 'interp_<robot_id>' 형식. 호출자는 robot_id 만 알면
-        규칙에 따라 process_id 를 만들어 전달한다 (proto 호환을 위해 ProcessId
-        재사용)."""
+        StartInterpolation 과 함께 deprecated. 구버전에서 띄워둔 잔존 프로세스
+        cleanup 을 위해 :stop 경로에서 idempotent 호출만 유지한다."""
         self._stop(request.name)
         return pb.StatusResponse(success=True, message='Stopped')
 

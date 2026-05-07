@@ -468,6 +468,7 @@
             ></q-btn>
             <episode-viewer
                 :path="`${selectedDatasetId}/${selectedEpisode.name}`"
+                :total-frames="selectedEpisodeFrames"
                 :disable-seek="isReplaying"
             ></episode-viewer>
         </div>
@@ -573,6 +574,24 @@ const selectedEpisode = defineModel('selectedEpisode', {
 });
 const replayActionType = ref('qaction');
 const isReplaying = ref(false);
+const selectedEpisodeFrames = ref(0);
+
+watch(
+    () => [selectedDatasetId.value, selectedEpisode.value?.name],
+    ([dsId, epName]) => {
+        if (!dsId || !epName) {
+            selectedEpisodeFrames.value = 0;
+            return;
+        }
+        api.get(`/dataset/${dsId}/${epName}/:get_data`).then((res) => {
+            selectedEpisodeFrames.value = res.data?.episode?.num_frames || 0;
+        }).catch((error) => {
+            console.error('Error fetching episode frame count:', error);
+            selectedEpisodeFrames.value = 0;
+        });
+    },
+    { immediate: true },
+);
 const checkpoint = computed(() => {
     return props.checkpoints?.find(c => c.id === selectedCheckpointId.value);
 });

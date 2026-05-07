@@ -20,7 +20,7 @@ lastVerifiedVersion: 0.0.0
 
 2. **(Home Pose ON일 때) 로봇이 Home Pose로 이동 → 수집이 시작되어 progress bar + SUCCESS / DONE / STOP 버튼이 나타나고, Episode Length 도달 또는 DONE 버튼으로 한 에피소드를 마무리합니다.**
 
-   "Moving to Home Pose" 스피너가 표시되는 동안에는 키보드/리더 입력이 무시됩니다. 이후 사람이 텔레오퍼레이션으로 작업을 시연하면 매 프레임이 자동 저장됩니다.
+   "Moving to Home Pose" 스피너가 표시되는 동안에는 키보드/Easy Controller 입력이 무시됩니다. Easy Controller는 이 시점에 워커 자세에 동기화되며, 그리퍼 동작으로 제어권을 인계받은 뒤([절차](/docs/teleoperation/testing)) 사람이 시연을 시작하면 매 프레임이 자동 저장됩니다. 입력한 [자연어 지시](/docs/data-collection/teleop-mode#2-자연어-지시-language-instruction)는 이 에피소드의 모든 프레임과 함께 데이터셋에 기록됩니다.
 
    <DocsImage
      src="/docs/data-collection/record-02-moving.png"

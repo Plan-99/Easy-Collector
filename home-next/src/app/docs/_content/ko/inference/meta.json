@@ -1,5 +1,5 @@
 {
   "title": "추론",
-  "order": 11,
+  "order": 12,
   "items": ["select-checkpoint", "run"]
 }

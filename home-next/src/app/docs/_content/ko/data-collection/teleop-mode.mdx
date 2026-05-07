@@ -1,61 +1,76 @@
 ---
-title: 텔레오퍼레이션 모드 선택
-description: 데이터 수집 시 사용할 텔레오퍼레이션 입력 방식 선택.
+title: 수집 시작 설정
+description: REC 버튼을 누르기 전에 채워야 하는 데이터셋·자연어 지시·텔레오퍼레이션 모드·수집 Hz 설정.
 section: data-collection
 order: 2
 sourceRefs:
   - frontend/src/components/v2/MonitoringWindow.vue
+  - backend/api/process/record_episode.py
 lastVerifiedVersion: 0.0.0
 ---
 
-MonitoringWindow의 셋업 행에서 **Teleoperation Type**을 고를 수 있습니다.
-
-<Steps>
-1. **Teleop Type 셀렉트를 펼칩니다.**
-
-   <DocsImage
-     src="/docs/data-collection/mode-01-select.png"
-     alt="Teleop Type select 펼침"
-     status="missing"
-   />
-
-2. **상황에 맞는 모드를 선택합니다.**
-
-   | 모드 | 입력 | 추가 입력 필드 |
-   |------|------|--------------|
-   | `keyboard` | 키보드 | Step Size |
-   | `leader_robot` | Dynamixel 리더 팔 | — |
-   | `vive` | VIVE 컨트롤러 | — |
-   | `vive_external` | 외부 VIVE 노드 | — |
-   | `motion_planning` | 자동 경로 생성 | ROS2 Service 설정 (⚙️) |
-</Steps>
-
-## 모드별 추가 입력
-
-### keyboard
-
-Step Size 입력칸이 나타납니다. 기본값 `0.005`m.
+워크스페이스의 MonitoringWindow 상단에는 REC 버튼을 누르기 전에 채워야 할 입력들이 한 줄로 늘어서 있어요. 왼쪽부터 순서대로 채우면 됩니다.
 
 <DocsImage
-  src="/docs/data-collection/mode-02-keyboard.png"
-  alt="keyboard 모드 — Step Size"
-  status="missing"
+  src="/docs/data-collection/teleop-01-row.png"
+  alt="MonitoringWindow 상단 입력 한 줄 — 데이터셋 / 자연어 지시 / 텔레오퍼레이션 타입(Keyboard) / REC 버튼"
 />
 
-### leader_robot
+## 1. 데이터셋 선택
 
-별도 입력 없이 [Leader Robot 세팅](/docs/teleoperation/leader-robot)에서 한 캘리브레이션이 사용됩니다.
+쌓아둘 데이터셋을 골라야 REC가 활성화됩니다. 워크스페이스에 등록된 [데이터셋 폴더](/docs/workspace/dataset-folder)들이 드롭다운에 표시됩니다. 비어 있으면 먼저 데이터셋을 만들어 주세요.
 
-<DocsImage
-  src="/docs/data-collection/mode-03-leader.png"
-  alt="leader_robot 모드"
-  status="missing"
-/>
+## 2. 자연어 지시 (Language Instruction)
 
-### motion_planning
+데이터셋 옆 입력 칸에는 이 에피소드의 자연어 지시(language prompt)를 입력합니다. 예: `pick up the red cup and place it on the plate`.
 
-⚙️ 버튼이 나타나 ROS2 Service 다이얼로그를 열 수 있습니다. 거기서 사용할 ROS 2 서비스 이름과 입력값을 지정합니다.
+- **VLA / PI0.5 같은 언어 조건부 정책**에서 입력 텍스트로 그대로 사용돼요. 작업이 같더라도 표현을 다양하게 적어두면 정책이 텍스트에 더 강건해집니다.
+- **비워 둬도 됩니다.** 빈 문자열로 저장되며, 학습/추론 시에는 백엔드가 워크스페이스(task) 이름으로 자동 대체합니다.
+- 한 에피소드 단위로 저장되므로, 시연마다 살짝 다르게 적어도 됩니다.
 
-<Callout type="info">
-새 모드를 사용하려면 [Teleoperation 테스트](/docs/teleoperation/testing)에서 먼저 동작을 확인하는 것이 좋습니다.
+<Callout type="tip">
+정책이 언어 입력을 받지 않는 종류(ACT, Diffusion 등)라면 이 칸은 무시해도 학습에 영향이 없습니다. 나중에 VLA 계열로 갈 가능성이 있다면 미리 적어두는 것이 안전합니다.
 </Callout>
+
+## 3. 텔레오퍼레이션 모드 (Teleop Type)
+
+수집 시 사람이 어떤 입력 장치로 로봇을 움직일지 선택합니다.
+
+| 모드 | 상태 | 입력 장치 | 비고 |
+|---|---|---|---|
+| **Easy Controller** | ✅ 사용 가능 | Dynamixel 마스터-슬레이브 팔 (구 "리더 로봇") | 가장 자연스러운 시연. [Easy Controller 캘리브레이션](/docs/teleoperation/leader-robot)을 먼저 끝내야 함 |
+| **Keyboard** | ✅ 사용 가능 | 키보드 | 추가 장비 불필요. EE를 한 번에 한 축씩 step size만큼 이동 |
+| **External** | 🚧 준비 중 | 외부 ROS 토픽으로 직접 명령을 받는 모드 | 다음 릴리즈에서 활성화 예정 |
+| **Vive** | 🚧 준비 중 | HTC VIVE 컨트롤러 트래커 | 다음 릴리즈에서 활성화 예정 |
+| **External + Motion Planning** | 🚧 준비 중 | 외부 모션 플래닝 ROS2 서비스 호출 | 다음 릴리즈에서 활성화 예정 |
+
+<Callout type="warning">
+드롭다운에는 준비 중인 모드도 함께 보일 수 있어요. 위 표에 ✅ 표시된 두 모드(Easy Controller / Keyboard)만 안정적으로 동작합니다.
+</Callout>
+
+### Easy Controller 모드
+
+별도 입력 항목 없이, [Easy Controller 캘리브레이션](/docs/teleoperation/leader-robot)에서 저장한 origin / sign / EMA 등이 그대로 쓰입니다. REC 직후 Easy Controller가 워커 자세에 동기화된 뒤 사용자에게 제어권이 인계됩니다(자세한 인계 절차는 [텔레오퍼레이션 테스트](/docs/teleoperation/testing) 페이지의 callout 참고).
+
+### Keyboard 모드
+
+Keyboard 모드를 고르면 수집 도중 좌측에 **Step Size** 입력 칸이 나타납니다.
+
+- 한 번 키 입력에 EE가 움직일 거리(미터). 기본값 `0.005` (5 mm).
+- 키 매핑은 [키보드 텔레오퍼레이션](/docs/teleoperation/keyboard) 페이지에서 미리 정합니다.
+
+## 4. 수집 Hz
+
+Easy Controller / External / Vive / Motion Planning 모드를 고르면 모드 옆에 **Hz** 입력 칸이 나타납니다 (Keyboard 모드에서는 보이지 않음).
+
+- 초당 몇 번 (이미지 + 관절 + 액션) 한 세트를 데이터셋에 적재할지.
+- 기본값은 20 Hz. 학습할 정책의 추론 Hz와 맞추는 것이 좋습니다.
+- Hz를 너무 올리면 디스크/메모리 부하가 커지고, 너무 낮추면 빠른 동작이 거칠게 기록됩니다.
+
+## 5. (Motion Planning만) ROS2 Service 설정
+
+External + Motion Planning 모드를 고르면 ⚙️ 버튼이 나타나 ROS2 Service 다이얼로그를 열 수 있습니다. 사용할 서비스 이름·타입·요청 JSON을 거기서 지정합니다. (이 모드는 현재 준비 중이므로 일반 사용자는 볼 일이 거의 없습니다.)
+
+## 다음 단계
+
+수집 시작 설정이 끝났다면 옆의 🏠 토글이 켜져 있는지 확인하고([Home Pose 귀환 여부](/docs/data-collection/home-pose-return)) REC 버튼을 누르세요. 이후 흐름은 [수집 흐름](/docs/data-collection/record-flow)에서 다룹니다.

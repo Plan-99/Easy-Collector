@@ -291,7 +291,25 @@ class Robot(SoftDeleteModel):
         if default_pose:
             data['homepose'] = default_pose._get_pose()
         # Default ee_definitions (frontend General teleop tab 표시용).
-        # module_loader 가 manifest 의 ik.ee_definitions 섹션에서 직접 읽음.
+        # 빌트인/모듈 로봇: manifest 의 ik.ee_definitions 에서 읽음.
+        # custom 로봇 (튜토리얼 포함): settings.ik_setting.ee_definitions 에서 읽음 —
+        # 이쪽은 [name, parent, offset] tuple/list 포맷이므로 dict 로 정규화한다.
         from ...configs.module_loader import get_default_ee_definitions
-        data['default_ee_definitions'] = get_default_ee_definitions(self.type)
+        defs = get_default_ee_definitions(self.type)
+        if not defs and self.type == 'custom':
+            ik_setting = (self._settings.get('ik_setting') or {})
+            for ed in (ik_setting.get('ee_definitions') or []):
+                if isinstance(ed, dict):
+                    defs.append({
+                        'name': ed.get('name'),
+                        'parent': ed.get('parent'),
+                        'offset': ed.get('offset'),
+                    })
+                elif isinstance(ed, (list, tuple)) and len(ed) >= 2:
+                    defs.append({
+                        'name': ed[0],
+                        'parent': ed[1],
+                        'offset': ed[2] if len(ed) > 2 else None,
+                    })
+        data['default_ee_definitions'] = defs
         return data

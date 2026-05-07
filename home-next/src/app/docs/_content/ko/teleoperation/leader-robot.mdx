@@ -1,6 +1,6 @@
 ---
-title: Leader Robot 세팅
-description: 마스터-슬레이브 텔레오퍼레이션을 위한 리더 로봇(Dynamixel) 캘리브레이션.
+title: Easy Controller 세팅
+description: Dynamixel 모터로 만든 리더 팔(Easy Controller)을 슬레이브(워커) 로봇과 매핑·캘리브레이션하는 전체 과정.
 section: teleoperation
 order: 5
 sourceRefs:
@@ -8,35 +8,201 @@ sourceRefs:
 lastVerifiedVersion: 0.0.0
 ---
 
-Leader Robot 모드는 사람이 **리더 팔**을 직접 잡고 움직이면 **팔로워 팔**(실제 로봇)이 같은 자세를 따라 움직이는 방식입니다.
-Dynamixel 모터로 만든 저관성 팔을 리더로 사용합니다.
+Easy Controller 모드는 사람이 **리더 팔(leader)** 을 직접 잡고 움직이면 그 자세를 그대로 따라가도록 **워커 팔(follower, 실제 로봇)** 을 제어하는 방식입니다. 키보드보다 자연스러운 동작을 만들기 좋아 양손 협조나 미세 조작에 적합합니다.
 
-## 세팅 절차
+## 리더 팔이란?
+
+리더 팔은 보통 가벼운 3D 프린팅 프레임에 **Dynamixel** 시리즈 스마트 서보(예: XL330, XL430)를 워커 팔과 동일한 자유도(DoF)·형상으로 배치해 만든 마스터 디바이스입니다.
+
+- **Dynamixel 모터** — Robotis사의 시리얼 버스 기반 스마트 서보. 각 모터는 1바이트 ID(0\~252)와 baudrate를 가지며, 한 줄의 시리얼 라인에 여러 개를 데이지체인으로 연결합니다.
+- **U2D2 / OpenRB 등 인터페이스 보드** — Dynamixel 버스를 USB(`/dev/ttyUSB0`, `/dev/ttyUSB1`...)로 변환합니다. 한 포트당 한 줄(=한 팔)이 일반적입니다.
+- **별도 12 V 전원** — 모터에는 USB가 아니라 12 V 어댑터로 전원이 공급되어야 합니다. 전원이 없으면 모터가 검출되지 않습니다.
+
+리더 팔의 각 관절은 워커 팔의 같은 관절에 1:1로 대응되며, 사람이 리더를 움직일 때 측정된 각도가 워커의 목표 각도로 흘러갑니다.
+
+## 사전 준비
 
 <Steps>
-1. **Teleoperation 페이지 → 카드 ⚙️ → Leader Robot 탭으로 이동한 뒤 좌측의 Start Leader Robot을 누릅니다.**
+1. **리더 팔 프레임을 안전한 위치에 둡니다.**
 
-   리더 팔이 USB로 연결되어 있고 전원이 들어와야 합니다. ProcessConsole에 Dynamixel 모터가 발견되는 로그가 찍힙니다.
+   리더는 토크가 거의 없어 사람이 자유롭게 움직이지만, 시작 직후에는 워커가 리더 자세를 향해 빠르게 따라갑니다. 워커 주변에 사람·물체가 없는지 먼저 확인하세요.
+
+2. **U2D2/OpenRB를 PC에 USB로 연결하고, 12 V 어댑터를 모터 버스에 연결합니다.**
+
+   `ls /dev/ttyUSB*`로 포트가 보이는지 확인합니다. 보이지 않으면 `dialout` 그룹 권한이나 어댑터 케이블을 점검하세요.
+
+3. **워커 로봇을 먼저 ON 시킵니다.**
+
+   Easy Controller 탭은 좌측에서 워커 로봇을 켜기 전까지는 우측 Stepper가 잠겨 있습니다.
+</Steps>
+
+## 다이얼로그 열기
+
+<Steps>
+1. **Teleoperation 페이지 → Assembly 카드의 ⚙️ → Easy Controller 탭으로 이동합니다.**
 
    <DocsImage
      src="/docs/teleoperation/leader-01-tab.png"
-     alt="Leader Robot 탭 — 좌측 Start Leader Robot 버튼 + 우측 Stepper"
-     status="missing"
+     alt="텔레오퍼레이션 설정 다이얼로그 — Easy Controller 탭. 좌측에 워커 로봇 ON 토글과 'Easy Controller 시작' 버튼, 우측에 원점 설정 Stepper"
    />
 
-2. **우측 Stepper의 Origin Setting 단계에서 검출된 DXL 모터를 슬레이브 로봇의 조인트로 드래그하여 매핑합니다.**
+2. **좌측 상단의 워커 로봇 버튼을 눌러 모두 ON으로 만듭니다.**
 
-   각 슬롯에는 Robot 이름·Joint 이름·Origin 값·ttyUSB 포트가 표시됩니다. 그리퍼 모터는 **Set as Gripper** 버튼으로 따로 지정합니다.
+   Assembly에 묶인 모든 팔이 초록색이 되어야 우측 Stepper가 활성화됩니다.
+
+3. **좌측의 Start Easy Controller를 누릅니다.**
+
+   Easy Controller 프로세스가 시작되고, 아래 ProcessConsole에 검출된 Dynamixel 모터의 ID·port·current position이 로그로 찍힙니다. 모터가 검출되지 않으면 12 V 전원, USB 케이블, baudrate(기본 1 Mbps)를 차례로 점검하세요. 검출된 모터는 Stepper 1단계 하단의 **DXL 카드**(`ID xx (/dev/ttyUSBx)`) 영역에 자동으로 나열됩니다.
+</Steps>
+
+## Step 1 — 원점 설정 (Origin Setting)
+
+<Steps>
+1. **워커 로봇과 리더 팔을 같은 자세로 맞춥니다.**
+
+   두 로봇이 **같은 자세**이기만 하면 됩니다 — 워커가 꼭 home pose(모든 관절각 0)일 필요는 없습니다. 워커를 보고 사람이 리더 팔을 손으로 같은 모양으로 맞춰 놓으면, 그 시점의 워커 관절각이 그대로 리더 모터의 원점에 매핑됩니다. 워커는 토크 ON이어야 자세가 흔들리지 않고 비교가 안정적입니다.
+
+2. **Stepper 상단의 슬레이브 조인트 슬롯을 봅니다.**
+
+   각 슬롯에는 워커의 `Robot 이름`과 `Joint 이름`(예: `piper_left.joint1`)이 표시되어 있습니다. 슬롯은 워커 팔의 자유도 수만큼 비어 있습니다.
+
+3. **하단의 DXL 카드를 슬레이브 조인트 슬롯으로 드래그&드롭합니다.**
+
+   드롭하면 그 모터의 현재 각도가 슬롯의 **Origin** 값으로 들어갑니다. 이 값은 "리더 모터가 이 위치일 때 워커는 현재 자세"라는 기준점이라, 이후 리더가 움직이면 그만큼의 차이가 워커의 관절 변화로 전달됩니다. 잘못 매핑했다면 슬롯의 X로 분리한 뒤 다시 드래그하세요.
+
+4. **포트가 다르게 잡혔다면 슬롯의 ttyUSB 버튼을 클릭해 순환합니다.**
+
+   ttyUSBx 버튼을 한 번 누를 때마다 0→1→2→3→4→0으로 바뀝니다. 부팅 순서에 따라 포트가 섞이는 환경에서는 udev 규칙으로 고정하는 것이 안전합니다.
 
    <DocsImage
      src="/docs/teleoperation/leader-02-origin-mapping.png"
-     alt="Origin Setting — DXL ID/port/origin 카드를 슬레이브 조인트 슬롯으로 드래그 + Set as Gripper 버튼"
-     status="missing"
+     alt="Step 1 원점 설정 — joint1~joint6 + gripper 슬롯에 DXL 카드(ID/현재값/ttyUSB)가 매핑된 모습. gripper 슬롯의 도구 관절 체크박스가 켜져 있고 하단에 '저장 후 다음' 버튼"
    />
 
-3. **Stepper의 Next로 다음 단계(스케일 조정 등)를 진행하고 Finish.**
+5. **모든 매핑이 끝나면 Save & Go Next를 눌러 다음 단계로 갑니다.**
+</Steps>
+
+### Step 1 보강 — Toggle Joint (구 Set as Gripper)
+
+리더 팔에는 사람이 손으로 쥐는 위치에 보통 추가 모터가 하나 더 달려 있습니다. 이 모터의 역할은 워커 쪽 구성에 따라 달라집니다.
+
+| 워커 측 상황 | Toggle Joint 모터의 역할 |
+|----|----|
+| 워커에 그리퍼가 있다 | **워커 그리퍼 관절로 직접 매핑됩니다.** 리더 손잡이를 열고 닫는 정도가 워커 그리퍼의 열림/닫힘 정도로 그대로 전달돼요. (Step 2에서 저장하는 Open/Close 위치가 이 매핑의 양 끝점이 됩니다.) |
+| 워커에 그리퍼가 없다 | 워커 관절에는 들어가지 않고, **텔레옵 일시정지 트리거**로만 쓰입니다. (자세한 동작은 아래 Step 2 callout 참고) |
+
+어느 경우든 일반 관절 슬롯에 드롭하지 말고, 해당 DXL 카드의 **Set as Toggle Joint** 버튼을 눌러 토글 전용 슬롯으로 등록하세요. 그래야 다음 Step 2에서 Open/Close 위치를 저장하는 화면이 열립니다.
+
+<Steps>
+1. **그리퍼/토글 용도의 DXL 카드를 찾습니다.**
+
+   리더 팔에서 손잡이에 달린 모터(`ID`로 식별)를 확인하세요.
+
+2. **그 카드의 Set as Toggle Joint 버튼을 누릅니다.**
+
+   카드가 일반 슬레이브 슬롯이 아니라 **toggle joint 슬롯**으로 옮겨갑니다 (내부적으로 `is_gripper=true`).
+
+3. **워커에 실제 그리퍼가 있다면 도구 관절(Tool Joint) 체크박스도 사용할 수 있습니다.**
+
+   각 슬레이브 조인트 슬롯에는 `Tool Joint` 체크박스가 있어, 워커 팔의 마지막 관절을 그리퍼로 표시할 수도 있습니다. 워커가 일반 6-DoF 팔이라면 체크하지 않습니다.
+</Steps>
+
+<Callout type="info">
+**왜 이름이 Gripper에서 Toggle Joint로 바뀌었나요?** 그리퍼가 없는 워커에서도 같은 모터가 텔레옵 ON/OFF 트리거로 쓰이기 때문에, "그리퍼"보다 "Toggle Joint"가 실제 역할에 더 맞습니다.
+</Callout>
+
+## Step 2 — 그리퍼 / 토글 위치 저장 (Gripper Setting)
+
+이 단계는 **Step 1에서 Toggle Joint로 등록한 모터마다** 표시됩니다. 토글 모터가 0개라면 이 화면에는 입력 필드가 없습니다.
+
+<Steps>
+1. **리더 손잡이를 끝까지 엽니다.**
+
+2. **Open Position 필드 옆의 Save 버튼을 누릅니다.**
+
+   현재 모터 각도가 "열림 위치"로 저장됩니다.
+
+3. **리더 손잡이를 끝까지 닫습니다.**
+
+4. **Close Position 필드 옆의 Save 버튼을 누릅니다.**
+
+   "닫힘 위치"로 저장됩니다.
+
+5. **두 위치가 모두 저장되면 Go Next 버튼이 활성화됩니다.**
+
+   <DocsImage
+     src="/docs/teleoperation/leader-03-gripper-range.png"
+     alt="Step 2 그리퍼 설정 — 열림 위치 / 닫힘 위치 입력 필드와 각각의 저장 버튼"
+   />
+</Steps>
+
+<Callout type="info">
+**저장한 Open/Close 위치는 어떻게 쓰이나요?**
+
+- **워커에 그리퍼가 있는 경우** — Open ↔ Close 위치가 워커 그리퍼의 "완전히 열림" ↔ "완전히 닫힘" 값으로 그대로 매핑됩니다. 즉 리더 손잡이를 살짝 열면 워커 그리퍼도 그만큼 살짝 열리고, 끝까지 닫으면 워커도 끝까지 닫혀요.
+- **워커에 그리퍼가 없는 경우(토글 용도)** — Open 위치가 텔레옵 정지/재개의 기준점이 됩니다. 사람이 리더 손잡이를 **저장된 Open 위치보다 더 많이 열면** 텔레옵이 일시정지 되어 워커가 멈추고, 다시 손잡이를 **저장된 Open 위치까지 닫으면** 텔레옵이 재개되어 워커가 리더를 다시 따라가기 시작합니다. (Close 위치는 동작 범위의 반대쪽 끝을 정의하는 용도일 뿐, 토글 트리거에는 직접 쓰이지 않아요.)
+</Callout>
+
+## Step 3 — 관절 방향 설정 (Direction Setting)
+
+리더와 워커는 같은 형상이라도 모터를 반대로 끼웠거나 좌우 대칭으로 만들어 놓아 회전 방향이 반대인 관절이 흔히 있습니다. 이 단계에서 텔레옵을 켠 채 직접 움직여 보고 부호를 뒤집어 줍니다.
+
+<Steps>
+1. **상단의 Start Teleoperation 버튼을 누릅니다.**
+
+   워커가 현재 리더 자세를 따라가기 시작합니다. 버튼은 주황색 Stop Teleoperation으로 바뀝니다.
+
+2. **리더의 한 관절만 살살 움직여 봅니다.**
+
+   예: 리더 1번 관절을 시계방향으로 돌렸을 때 워커도 시계방향으로 도는지 확인.
+
+3. **반대 방향으로 움직이는 관절은 토글 스위치를 켭니다.**
+
+   각 관절 옆 토글은 부호(`sign`) 1 ↔ −1을 바꿉니다. 토글이 켜진 관절은 부호가 반전됩니다.
+
+4. **모든 관절을 한 번씩 검증한 뒤 Stop Teleoperation으로 멈추고 Go Next.**
+
+   <DocsImage
+     src="/docs/teleoperation/leader-04-direction.png"
+     alt="Step 3 관절 방향 설정 — '텔레오퍼레이션 중지' 버튼이 켜진 상태에서 joint1~joint6, gripper 각각의 방향 토글 (joint3 토글이 켜져 있음)"
+   />
 </Steps>
 
 <Callout type="warning">
-ttyUSB 포트는 부팅 순서에 따라 바뀔 수 있습니다. 매핑 후 ttyUSB 버튼을 클릭해 다른 포트로 순환할 수 있으니, 매번 확인하거나 udev 규칙으로 고정하세요.
+이 단계는 워커가 실제로 움직이는 첫 단계입니다. 책상 가장자리·사람·다른 로봇과 충돌하지 않는 자세에서 시작하세요. 한 관절씩 천천히, 큰 각도로 움직이지 마세요.
 </Callout>
+
+## Step 4 — 모션 필터 설정 (Filter Setting)
+
+워커가 리더를 너무 거칠게 따라가거나 너무 느리게 따라가면 여기서 조정합니다.
+
+<Steps>
+1. **Start Teleoperation으로 다시 텔레옵을 켭니다.**
+
+2. **세 개의 입력 값을 조정하면서 워커의 반응을 확인합니다.**
+
+   | 항목 | 의미 | 크게 하면 | 작게 하면 |
+   |---|---|---|---|
+   | **EMA filter (0~1)** | 지수 이동 평균 가중치. 직전 명령을 얼마나 끌고 가는지 | 부드럽지만 지연 ↑ | 빠르지만 거칠어짐 |
+   | **Max step (rad/tick)** | 한 publish tick에서 허용할 각도 변화량 상한 | 큰 동작도 빠르게 따라감 | 점프를 차단해 안전 ↑ |
+   | **Publish rate (Hz)** | 워커에게 명령을 보내는 주기 | 반응성 ↑, 부하 ↑ | 부드러움 ↑, 지연 ↑ |
+
+3. **만족스러우면 Stop Teleoperation으로 끄고 Finish를 눌러 다이얼로그를 닫습니다.**
+
+   <DocsImage
+     src="/docs/teleoperation/leader-05-filter.png"
+     alt="Step 4 모션 필터 설정 — EMA 필터(0.2) / 최대 스텝(0.04 rad/tick) / 퍼블리시 주기(100 Hz) 입력 필드와 '완료' 버튼"
+   />
+</Steps>
+
+<Callout type="tip">
+초기값(EMA 0.3, Max step 0.04 rad/tick, Publish rate 100 Hz)에서 시작해 EMA를 0.05 단위로 올리고 내리며 감을 잡으세요. 시연(데이터 수집)에서는 약간 더 부드러운 값(EMA 0.4~0.5)이 학습에 안정적입니다.
+</Callout>
+
+## 트러블슈팅
+
+- **모터가 검출되지 않습니다.** 12 V 어댑터가 켜져 있는지, U2D2가 잘 꽂혀 있는지, `ls /dev/ttyUSB*`로 포트가 보이는지 확인하세요. baudrate가 다른 모터(57600 등)는 R+ Manager로 1 Mbps로 통일하는 것이 편합니다.
+- **ttyUSB 포트가 매번 다르게 잡힙니다.** udev rule로 시리얼 번호별로 고정 alias(`/dev/dxl_left`, `/dev/dxl_right`)를 만드세요. 또는 슬롯의 ttyUSB 버튼으로 매번 순환시켜 맞춥니다.
+- **워커가 시작 직후 갑자기 점프합니다.** Step 1의 Origin이 안 맞은 것입니다. 리더와 워커를 같은 자세로 다시 맞추고 Origin을 다시 잡으세요. Step 4의 Max step을 잠시 작게 줄이는 것도 안전합니다.
+- **워커가 리더와 반대로 움직입니다.** Step 3의 토글이 누락된 관절입니다. 해당 관절 토글을 켜세요.
+- **Toggle Joint 모터가 워커에 영향을 주지 않습니다.** 정상입니다. 워커에 그리퍼가 없으면 Toggle Joint는 텔레옵 활성/비활성 트리거로만 쓰입니다.

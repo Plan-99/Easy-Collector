@@ -76,7 +76,6 @@ export default {
   robotFieldWriteType: 'Write Type',
   robotFieldWriteTopic: 'Write Topic',
   robotFieldWriteTopicMsg: 'Write Topic Message Type',
-  robotFieldInterpolation: 'Use command interpolation (200 Hz)',
   robotFieldIkSettings: 'IK Settings (JSON)',
   robotRoleSingleArm: 'Single Arm',
   robotRoleDualArm: 'Dual Arm',
@@ -411,7 +410,7 @@ export default {
   teleopLeaderBack: 'Back',
   teleopLeaderFinish: 'Finish',
   teleopLeaderToolJoint: 'Tool Joint',
-  teleopLeaderSetAsGripper: 'Set as Gripper',
+  teleopLeaderSetAsGripper: 'Set as Toggle Joint',
   teleopLeaderOpenPosition: 'Open Position',
   teleopLeaderClosePosition: 'Close Position',
   teleopLeaderSaveBtn: 'Save',
@@ -523,7 +522,7 @@ export default {
   tutorialTeleopDialogKeyboard:
     "Customize keyboard control: change which keys map to which axis and how big each step is. Use Reset to Defaults if you've over-tweaked it.",
   tutorialTeleopDialogLeader:
-    'Set up a leader robot (Easy Controller). Drag a leader joint onto a follower joint to map them, set the origin pose, and pick a sign per joint to flip direction if needed.',
+    "Set up a leader robot (Easy Controller). Drag a leader joint onto a follower joint to map them, then move the leader to match the follower's current pose and set the origin (the follower doesn't need to be at home — any pose works as long as both robots match). Pick a sign per joint to flip direction if needed.",
 
   tutorialWorkspaceIntro:
     'A workspace gathers everything for one task (e.g., moving a cup): cameras, robots, collected data, and trained models. Pick one from the dropdown above first.',

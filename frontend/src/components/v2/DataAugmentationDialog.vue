@@ -246,6 +246,8 @@
                             <episode-viewer
                                 v-if="dataset && augmentationPreviewFile"
                                 :path="`${dataset.id}/${augmentationPreviewFile.name}`"
+                                :total-frames="previewTotalFrames"
+                                :disable-seek="processing"
                                 class="full-width full-height q-gutter-x-sm"
                                 style="width: 100%; height: 100%;"
                                 image-class="border-rounded border-white"
@@ -352,12 +354,27 @@ function augmentDataset() {
 }
 
 const augmentationPreviewFile = ref(null);
+const previewTotalFrames = ref(0);
+
+function loadPreviewFrameCount() {
+    if (!props.dataset || !augmentationPreviewFile.value) {
+        previewTotalFrames.value = 0;
+        return;
+    }
+    api.get(`/dataset/${props.dataset.id}/${augmentationPreviewFile.value.name}/:get_data`).then((res) => {
+        previewTotalFrames.value = res.data?.episode?.num_frames || 0;
+    }).catch((error) => {
+        console.error('Error fetching preview frame count:', error);
+        previewTotalFrames.value = 0;
+    });
+}
 
 function startDialog() {
     form.value.name = props.dataset ? props.dataset.name + '_' + new Date().toISOString() : '';
     if (props.dataset) {
         api.get(`/datasets/${props.dataset.id}/:get_one`).then((res) => {
             augmentationPreviewFile.value = res.data.file; // Assuming the first file is the one to preview
+            loadPreviewFrameCount();
         }).catch((error) => {
             console.error('Error fetching dataset for preview:', error);
         });

@@ -121,7 +121,10 @@ class Agent:
 
         from sensor_msgs.msg import JointState as JointStateMsg
 
-        interpolation_on = bool(robot.get('interpolation'))
+        # custom robot 은 외부 ROS2 노드가 명령 처리/평활화를 책임지는 게 정책.
+        # 우리 쪽 interpolation_node 는 끼우지 않으므로 interpolation 플래그가
+        # 켜져 있어도 무시한다 (구버전 DB 행 호환).
+        interpolation_on = bool(robot.get('interpolation')) and self.robot_type != 'custom'
 
         if interpolation_on:
             interp_topic = f'{ns}/ec_joint_cmd'

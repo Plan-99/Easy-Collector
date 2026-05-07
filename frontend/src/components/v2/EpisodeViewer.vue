@@ -25,7 +25,6 @@
                 dense
                 color="white"
                 :icon="playbackIcon"
-                :disable="disableSeek"
                 @click="onTogglePlayback"
             />
             <q-slider
@@ -136,7 +135,6 @@ function fetchFrame(path, index) {
 }
 
 function onTogglePlayback() {
-    if (props.disableSeek) return;
     if (finished.value) {
         startReading(props.path, 0);
         return;

@@ -186,6 +186,11 @@ class Leader():
         self._sync_done_ports = set()
         self._sync_failed_ports = set()
         self._torque_release_pending_ports = set(self.dxl_controllers.keys())
+        # 시작 시점에 그리퍼가 이미 닫혀 있으면 토크를 그대로 풀어버리지 않고
+        # "한 번 열었다 닫기" 동작을 요구한다 (사람이 의식적으로 제어권을 가져가도록).
+        # 포트별로 사용자가 그리퍼를 연 적이 있는지 추적.
+        self._gripper_open_observed = {port: False for port in self.dxl_controllers}
+        self._gripper_initial_close_logged = {port: False for port in self.dxl_controllers}
         self.read_agent_and_write_to_joint_map()
 
         groups_by_port = self.group_joints_by_port()
@@ -214,7 +219,7 @@ class Leader():
                 # 홈포즈 도달 후 1초 뒤 sync 완료 처리 → position_pub 즉시 시작.
                 # 토크 해제는 position_pub 루프에서 그리퍼 닫힘 감지 시 수행 (포트 동시 접근 회피).
                 self._sync_done_ports.add(port)
-                print("[NOTICE] Close Gripper to release leader torque.")
+                print("[NOTICE] Sync done. Waiting for gripper open/close gesture to release leader torque.")
             except Exception as e:
                 # 실패 시에도 _sync_failed_ports에 등록해서 메인 루프가 무한 대기에 빠지지 않도록.
                 print(f"[ERROR] sync_dxl_controller failed for port {port}: {e}")
@@ -240,7 +245,7 @@ class Leader():
             print(f"[ERROR] Sync failed on ports: {self._sync_failed_ports}")
             return False
 
-        print("[SUCCESS] Leader home reached. Waiting for gripper close to start recording.")
+        print("[SUCCESS] Leader home reached. Move gripper to release torque (open then close if currently closed).")
         return True
 
     def get_gripper_pos(self, joint):
@@ -344,7 +349,9 @@ class Leader():
 
 
 
-                # 초기 토크 해제: 사용자가 그리퍼를 닫으면 리더 토크를 해제한다.
+                # 초기 토크 해제: 시작 시점에 그리퍼가 이미 닫혀 있으면 사용자가
+                # 의식적으로 한 번 열었다가 다시 닫는 동작을 해야 토크가 풀린다.
+                # (이미 열려 있으면 닫기만 해도 풀림 — 기존 동작과 동일)
                 # (joint_map의 dxl_position은 _read_dxl_loop에서 갱신되므로 포트 동시 접근 없음)
                 if self._torque_release_pending_ports:
                     for port in list(self._torque_release_pending_ports):
@@ -355,31 +362,60 @@ class Leader():
                             self._torque_release_pending_ports.discard(port)
                             print(f"[NOTICE] No gripper on {port}; torque released.", flush=True)
                             continue
+
+                        # 모든 그리퍼의 닫힘/열림 상태를 한 번에 확인
                         all_closed = True
+                        any_open = False
+                        all_read = True
                         for gripper_dxl_id in dxl_controller.gripper_dxl_ids:
                             gj = self.get_joint_by_dxl_id(port, gripper_dxl_id)
                             if gj is None or 'dxl_position' not in gj:
-                                all_closed = False
+                                all_read = False
                                 break
                             gpos = gj['dxl_position']
                             grange = gj['gripper_dxl_range']
                             # 캘리브레이션 오차를 감안해 50% 지점을 threshold로 사용.
                             mid = (grange[0] + grange[1]) / 2.0
                             if grange[0] < grange[1]:
-                                if gpos < mid:
-                                    all_closed = False
-                                    break
+                                is_closed = gpos >= mid
                             else:
-                                if gpos > mid:
-                                    all_closed = False
-                                    break
-                        if all_closed:
+                                is_closed = gpos <= mid
+                            if not is_closed:
+                                all_closed = False
+                                any_open = True
+
+                        if not all_read:
+                            continue
+
+                        # 사용자가 그리퍼를 한 번이라도 연 것을 관측하면 기록
+                        if any_open and not self._gripper_open_observed[port]:
+                            self._gripper_open_observed[port] = True
+                            print(
+                                f"[NOTICE] Leader gripper opened on port {port}. "
+                                f"Close it again to take control.",
+                                flush=True,
+                            )
+
+                        if all_closed and not self._gripper_open_observed[port]:
+                            # 시작 시점에 이미 닫혀 있는 케이스 — 토크 해제하지 않고 사용자 동작 대기
+                            if not self._gripper_initial_close_logged[port]:
+                                self._gripper_initial_close_logged[port] = True
+                                print(
+                                    f"[NOTICE] Leader gripper on port {port} is currently closed. "
+                                    f"Open it once and close again to take control.",
+                                    flush=True,
+                                )
+                            continue
+
+                        if all_closed and self._gripper_open_observed[port]:
+                            # 열었다가 닫는 사이클 완료 → 토크 해제
                             dxl_controller.remove_torque()
                             self._torque_release_pending_ports.discard(port)
                             print(f"[NOTICE] Leader torque released on port {port}.", flush=True)
+
                     if not self._torque_release_pending_ports:
                         self.is_synced = True
-                        print("[NOTICE] All leader grippers closed. Recording can start.", flush=True)
+                        print("[NOTICE] All leader grippers ready. Recording can start.", flush=True)
 
                 # 그리퍼를 벌리면 정지하도록 하는 코드--------------
                 should_pause = [False] * len(self.dxl_controllers)

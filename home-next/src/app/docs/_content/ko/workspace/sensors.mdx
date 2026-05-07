@@ -11,18 +11,10 @@ lastVerifiedVersion: 0.0.0
 워크스페이스에 추가된 센서만 데이터 수집 시 기록됩니다. 일반적으로 작업 영역을 보는 카메라 1–3대 정도를 추가합니다.
 
 <Steps>
-1. **setting 탭 → Sensor Setting expansion을 펼치고 Common Width / Common Height를 설정합니다.**
-
-   여러 센서 해상도가 다르더라도, 학습 입력은 모두 이 공통 해상도로 리사이즈됩니다.
-
-2. **+ Add Sensor를 누르고 등록된 센서 중 하나를 선택합니다.**
+1. **setting 탭 → Sensor Setting expansion에서 + Add Sensor를 누르고 등록할 센서를 모두 선택합니다.**
 
    <DocsImage
      src="/docs/workspace/sensors-01-expansion.png"
-     alt="Sensor Setting expansion — Common Resolution 입력 + Add Sensor 버튼 + Add Sensor 선택 폼"
+     alt="Sensor Setting expansion — + Add Sensor 버튼 + 센서 다중 선택 폼"
    />
 </Steps>
-
-<Callout type="info">
-일반적으로 224×224 또는 336×336이 정책 학습에 무난합니다. 더 큰 해상도는 메모리·연산 비용이 빠르게 증가합니다.
-</Callout>

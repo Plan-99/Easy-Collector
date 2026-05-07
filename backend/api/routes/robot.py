@@ -96,38 +96,10 @@ def start_robot():
             socketio.emit('task_log', {'id': process_id, 'message': msg, 'type': log_type})
 
     if type == 'custom':
-        # custom 로봇은 외부 ROS2 토픽만 소비하므로 robot driver 는 띄우지
-        # 않지만, settings.interpolation=True 면 interpolation_node 만 별도로
-        # 띄워서 ec_joint_cmd → write_topic 사이에 보간을 끼워넣는다.
-        if settings.get('interpolation'):
-            write_topic = settings.get('write_topic') or ''
-            write_topic_msg = settings.get('write_topic_msg') or 'sensor_msgs/JointState'
-            if not write_topic:
-                _log('interpolation 활성화 실패: write_topic 이 비어있음', 'error')
-                return {
-                    'status': 'error',
-                    'message': 'interpolation 을 켜려면 write_topic 이 필요합니다.',
-                }, 400
-            try:
-                client = get_bridge_client()
-                result = client.driver.StartInterpolation(pb.InterpolationConfig(
-                    robot_id=int(id),
-                    output_topic=write_topic,
-                    output_msg_type=write_topic_msg,
-                    publish_rate=0.0,  # 0 → 노드 default(200Hz)
-                ))
-            except Exception as e:
-                _log(f'StartInterpolation 호출 실패: {e}', 'error')
-                return {'status': 'error', 'message': f'Bridge call failed: {e}'}, 500
-            if not result.success:
-                _log(f'interpolation_node 기동 실패: {result.message}', 'error')
-                return {'status': 'error', 'message': result.message}, 500
-            _log(f'interpolation_node started (pid={result.pid}) → {write_topic}')
-            return {
-                'status': 'success',
-                'message': 'Custom robot ready (interpolation enabled)',
-                'pid': result.pid,
-            }, 200
+        # custom 로봇은 외부 ROS2 노드가 명령 토픽 처리/평활화를 모두 책임진다.
+        # 우리 쪽 interpolation_node 는 끼워넣지 않는다 — agent.move_joint_step
+        # 이 settings.write_topic 으로 직접 publish 하는 built-in topic driver 만
+        # 동작한다.
         return {'status': 'success', 'message': 'Custom robot uses external topic'}, 200
 
     _log(f'Starting robot driver: {type} ({company})')

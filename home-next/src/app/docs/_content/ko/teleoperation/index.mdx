@@ -1,46 +1,56 @@
 ---
 title: 텔레오퍼레이션
-description: Assembly 구성부터 키보드/리더 로봇 제어까지 텔레오퍼레이션 전 흐름.
+description: Teleoperation 탭에서 Assembly별로 EE 오프셋·키보드·Easy Controller를 설정하고 실제로 움직여 검증.
 section: teleoperation
 order: 1
 sourceRefs:
-  - frontend/src/pages/v2/AssemblePage.vue
   - frontend/src/pages/v2/TeleoperationPage.vue
   - frontend/src/components/v2/TeleSettingDialog.vue
   - frontend/src/components/v2/TeleopConsole.vue
-  - frontend/src/components/v2/AssemblyForm.vue
 related:
-  - /docs/robots
+  - /docs/assembly
   - /docs/data-collection
 lastVerifiedVersion: 0.0.0
 ---
 
 텔레오퍼레이션은 사람이 로봇을 직접 조작해 시연(demonstration) 데이터를 만드는 과정입니다.
-Easy Trainer는 4가지 입력 모드를 지원합니다.
+**Robots → Teleoperation 탭**은 [Assembly 구성](/docs/assembly) 화면과는 별개로, Assembly가 한 번 만들어진 뒤 그 단위로 진행합니다.
 
-## 모드 비교
+## Teleoperation 탭 구성
 
-| 모드 | 입력 장치 | 적합한 작업 | 학습 적합도 |
-|------|----------|-----------|-----------|
-| **Keyboard** | 키보드 | 정밀한 위치 조정, 디버깅 | 단순 동작에 ⭕ |
-| **Leader Robot** | 마스터-슬레이브 팔 (Dynamixel) | 양손 협조 동작, 미세 조작 | 가장 자연스러움 ⭕⭕ |
-| **VIVE** | HTC VIVE 컨트롤러 | 3D 공간 포즈 조작 | 중간 ⭕ |
-| **Motion Planning** | 자동 경로 생성 | 반복 작업, 합성 데이터 | 보조용 |
+화면에는 등록된 Assembly가 카드로 나열됩니다. 각 카드는 다음을 보여줍니다.
 
-## 5단계 진행 순서
+- 좌상단 ⚙️ 버튼 — Assembly별 텔레오퍼레이션 설정(TeleSettingDialog)
+- 슬롯 표시 — left_arm / left_tool / right_arm / right_tool에 매핑된 로봇 이름
+- 모드 아이콘 — 키보드는 항상 ✅, 게임패드(Easy Controller) 아이콘은 해당 Assembly에 Easy Controller가 등록되어 있으면 초록색
 
-1. [Assembly](/docs/teleoperation/assembly) — 좌/우 팔, 그리퍼를 한 단위로 묶기
-2. [End-Effector 세팅](/docs/teleoperation/end-effector) — EE 오프셋 보정
-3. [키보드](/docs/teleoperation/keyboard) — 키 매핑·step size 설정
-4. [Leader Robot](/docs/teleoperation/leader-robot) — 리더 팔 캘리브레이션 (선택)
-5. [테스트](/docs/teleoperation/testing) — 실제로 움직여 검증
+카드를 클릭하면 하단에 **TeleopConsole**이 열려 실제로 Keyboard / Easy Controller 모드를 켜고 끌 수 있습니다.
+
+## 입력 모드
+
+| 모드 | 상태 | 입력 장치 | 적합한 작업 | 학습 적합도 |
+|------|------|----------|-----------|-----------|
+| **Keyboard** | ✅ 사용 가능 | 키보드 | 정밀한 위치 조정, 디버깅 | 단순 동작에 ⭕ |
+| **Easy Controller** | ✅ 사용 가능 | 마스터-슬레이브 팔 (Dynamixel 기반 리더 로봇) | 양손 협조 동작, 미세 조작 | 가장 자연스러움 ⭕⭕ |
+| **External / Vive / External + Motion Planning** | 🚧 준비 중 | 외부 토픽 / VIVE 트래커 / 모션 플래닝 서비스 | — | — |
+
+<Callout type="info">
+**Easy Controller**는 Dynamixel 기반 마스터-슬레이브(리더-팔로워) 마스터 디바이스의 사용자 명칭입니다. 코드 내부에서는 여전히 `leader` 모드로 표기되며, 캘리브레이션 단계에서도 "리더/팔로워" 용어가 함께 등장할 수 있어요.
+</Callout>
+
+## 진행 순서
+
+1. [End-Effector 세팅](/docs/teleoperation/end-effector) — 카드 ⚙️ → General 탭에서 EE 오프셋 보정
+2. [키보드](/docs/teleoperation/keyboard) — 카드 ⚙️ → Keyboard 탭에서 키 매핑·step size 설정
+3. [Easy Controller](/docs/teleoperation/leader-robot) — 카드 ⚙️ → Easy Controller 탭에서 리더 팔 캘리브레이션 (선택)
+4. [테스트](/docs/teleoperation/testing) — 카드를 클릭해 TeleopConsole에서 실제로 움직여 검증
 
 ## 처음 시작한다면
 
 <Callout type="tip">
-처음에는 **키보드만으로 시작**하는 것을 권장합니다. EE offset과 키 매핑 검증이 끝난 뒤 Leader Robot 캘리브레이션으로 넘어가도 늦지 않습니다.
+처음에는 **키보드만으로 시작**하는 것을 권장합니다. EE offset과 키 매핑 검증이 끝난 뒤 Easy Controller 캘리브레이션으로 넘어가도 늦지 않습니다.
 </Callout>
 
 ## 다음 단계
 
-텔레오퍼레이션 테스트가 끝났다면 [데이터 수집](/docs/data-collection)으로 시연을 시작하세요. 모든 모드는 [데이터 수집의 Teleop Type](/docs/data-collection/teleop-mode)에서 다시 선택할 수 있습니다.
+텔레오퍼레이션 테스트가 끝났다면 [데이터 수집](/docs/data-collection)으로 시연을 시작하세요. Easy Controller / Keyboard 모드는 [데이터 수집의 수집 시작 설정](/docs/data-collection/teleop-mode)에서 다시 선택할 수 있습니다.

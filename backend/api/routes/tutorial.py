@@ -115,9 +115,19 @@ def _ensure_tutorial_rows():
     else:
         current = _settings_dict(robot)
         # Authoritative keys: 단일 진실원천(tutorial_defaults.py)이 항상 이김.
-        # 특히 is_sim은 record_episode의 home pose 이동 분기를 결정하므로 누락되면
-        # 매우 느린 step-by-step 이동이 발생 — 항상 강제 반영해야 한다.
-        for k in ('is_sim', 'is_tutorial'):
+        # is_sim은 record_episode의 home pose 이동 분기를 결정. read_topic 등
+        # ROS 토픽 매핑은 비어있으면 useRobot 의 topicStore.isPublished('') 가
+        # 항상 false 라 "토픽 OFF" 로 잘못 표시된다 — sim 토픽 이름이 바뀌어도
+        # 자동 복구되도록 항상 default 로 덮어쓴다.
+        AUTHORITATIVE_KEYS = (
+            'is_sim', 'is_tutorial', 'role',
+            'read_topic', 'read_topic_msg',
+            'write_type', 'write_topic', 'write_topic_msg',
+            'joint_names', 'joint_lower_bounds', 'joint_upper_bounds',
+            'tool_index', 'tool_inner', 'interpolation',
+            'urdf_path', 'urdf_package_dir', 'ik_setting',
+        )
+        for k in AUTHORITATIVE_KEYS:
             if k in TUTORIAL_ROBOT['settings']:
                 current[k] = TUTORIAL_ROBOT['settings'][k]
         # 그 외 새로 추가된 default 키는 머지(기존 사용자 편집 보존)
@@ -125,6 +135,20 @@ def _ensure_tutorial_rows():
             current.setdefault(k, v)
         robot.settings = json.dumps(current)
         robot.save()
+
+    # Hide stale tutorial_arm-named rows that don't carry the is_tutorial flag
+    # (e.g. very old seeded rows from before is_tutorial existed). 그대로 두면
+    # robots 목록에 중복으로 나타나 사용자가 잘못된 행 (settings 비어있는 옛날
+    # 행) 을 클릭해 IK 가 없다고 표시되는 사고가 난다.
+    stale = RobotModel.select().where(
+        RobotModel.name == TUTORIAL_ROBOT['name'],
+        RobotModel.id != robot.id,
+        RobotModel.hide == False,  # noqa: E712
+        RobotModel.deleted_at.is_null(),
+    )
+    for row in stale:
+        row.hide = True
+        row.save()
 
     sensors = []
     expected_slugs = {s['settings']['tutorial_camera_slug'] for s in TUTORIAL_SENSORS}

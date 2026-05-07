@@ -194,14 +194,14 @@ GUI 흐름 우선. 터미널 명령은 트러블슈팅에서만 다루므로 별
 |---|---|---|---|
 | Create | - [x] 01 | `create-01-select.png` | 워크스페이스 select dropdown |
 | Create | - [x] 02 | `create-02-form.png` | 생성 폼 다이얼로그 |
-| Create | - [ ] 03 | `create-03-edit-delete.png` | edit / delete 버튼 |
+| Create | - [x] 03 | `create-03-edit-delete.png` | edit / delete 버튼 |
 | Sensors | - [x] 01 | `sensors-01-expansion.png` | Sensor Setting expansion — Common Width/Height + Add Sensor 버튼 + 선택 폼 |
 | Sensor Config | - [x] 01 | `sensor-cfg-01-crop.png` | Crop 패널 — 캔버스 드래그 + x1/y1/x2/y2 입력 + Reset crop + Rotation select |
 | Robots | - [x] 01 | `robots-01-assembly-select.png` | Robot Assembly select |
-| Robots | - [ ] 02 | `robots-02-list.png` | Assembly 내부 로봇 리스트 |
+| Robots | - [x] 02 | `robots-02-list.png` | Assembly 내부 로봇 리스트 |
 | Home Pose | - [x] 01 | `home-01-section.png` | Home Pose 섹션 — 관절값 입력 칸 + sync / save 버튼 |
 | Episode | - [x] 01 | `episode-01-task-setting.png` | Task Setting — Episode Length |
-| Dataset | - [ ] 01 | `dataset-01-add.png` | Add Dataset Folder 버튼 |
+| Dataset | - [x] 01 | `dataset-01-add.png` | Add Dataset Folder 버튼 |
 | Dataset | - [x] 02 | `dataset-02-form.png` | Dataset 생성 폼 |
 | Dataset | - [x] 03 | `dataset-03-list.png` | 데이터셋 목록 expansion |
 | Dataset | - [ ] 04 | `dataset-04-incompatible.png` | metadata remap 워닝 |

@@ -1,6 +1,6 @@
 ---
 title: 센서 설정 (resize · crop · rotation)
-description: 센서별 crop 영역과 회전을 설정해 학습 입력을 정리.
+description: 학습 입력으로 들어가기 전에 적용되는 세 가지 센서 화면 전처리를 설정합니다.
 section: workspace
 order: 4
 sourceRefs:
@@ -8,22 +8,30 @@ sourceRefs:
 lastVerifiedVersion: 0.0.0
 ---
 
-센서를 추가한 뒤 카드를 클릭하면 우측 본문에 config 패널이 열립니다.
+센서를 추가한 뒤 카드를 클릭하면 우측 본문에 config 패널이 열립니다. 이 패널에서 학습 입력으로 들어가기 전에 적용할 **resize · crop · rotation** 세 가지 전처리를 모두 설정할 수 있습니다. 아래 스크린샷 한 장이 세 항목 모두를 포함합니다.
 
-## Crop & Rotation
+<DocsImage
+  src="/docs/workspace/sensor-cfg-01-crop.png"
+  alt="센서 config 패널 — Crop 캔버스 + Cropped Area(x1/y1/x2/y2) + Reset crop + Rotation select + Common Resolution 입력"
+/>
 
-작업 영역에 직접 관련 없는 부분(천장, 책상 가장자리 등)을 잘라내면 학습이 안정됩니다. 카메라가 거꾸로 달려 있다면 같은 패널의 Rotation에서 90/180/270도 회전을 적용합니다.
+## Resize
 
-<Steps>
-1. **crop 캔버스에서 마우스로 드래그해 영역을 정하고, 필요하면 Rotation을 선택합니다.**
+학습 입력으로 들어갈 때 모든 센서 화면을 **Common Width / Common Height**(상위 Sensor Setting expansion에서 설정)로 리사이즈합니다. 센서마다 원본 해상도가 달라도 학습 시점에는 모두 같은 크기로 통일됩니다.
 
-   파란색 사각형이 잘려서 학습에 들어갈 영역입니다. 필요하면 Cropped Area의 x1, y1, x2, y2를 직접 입력해 미세 조정하거나 Reset crop으로 전체 화면으로 되돌릴 수 있습니다.
+<Callout type="info">
+일반적으로 224×224 또는 336×336이 정책 학습에 무난합니다. 더 큰 해상도는 메모리·연산 비용이 빠르게 증가합니다.
+</Callout>
 
-   <DocsImage
-     src="/docs/workspace/sensor-cfg-01-crop.png"
-     alt="Crop 패널 — 캔버스 드래그 + x1/y1/x2/y2 입력 + Reset crop + Rotation select"
-   />
-</Steps>
+## Crop
+
+작업 영역에 직접 관련 없는 부분(천장, 책상 가장자리 등)을 잘라내면 학습이 안정됩니다.
+
+crop 캔버스에서 마우스로 드래그해 영역을 정합니다. 파란색 사각형이 학습에 들어갈 영역입니다. 필요하면 Cropped Area의 x1, y1, x2, y2를 직접 입력해 미세 조정하거나 **Reset crop**으로 전체 화면으로 되돌릴 수 있습니다.
+
+## Rotation
+
+카메라가 거꾸로 또는 옆으로 달려 있다면 같은 config 패널의 **Rotation** select에서 90/180/270도 회전을 선택해 입력 화면 방향을 바로잡습니다.
 
 <Callout type="warning">
 crop이나 rotation을 변경하면 **이미 수집된 에피소드와의 호환성이 깨질 수 있습니다.** 데이터셋이 남아있는 워크스페이스에서는 가능하면 변경하지 마세요.

@@ -1,6 +1,6 @@
 ---
 title: 텔레오퍼레이션 테스트
-description: 키보드 / 리더 로봇 모드를 실제로 켜서 동작을 확인.
+description: 키보드 / Easy Controller 모드를 실제로 켜서 동작을 확인.
 section: teleoperation
 order: 6
 sourceRefs:
@@ -20,8 +20,7 @@ lastVerifiedVersion: 0.0.0
 
    <DocsImage
      src="/docs/teleoperation/testing-01-console.png"
-     alt="TeleopConsole 초기 상태"
-     status="missing"
+     alt="Assembly 탭이 활성화된 TeleopConsole — 워커 로봇 ON 토글, 조작 방식 드롭다운(Easy Controller 선택), '텔레오퍼레이션 시작' 버튼"
    />
 
 2. **Start Keyboard Teleop을 누른 뒤 콘솔 영역을 클릭해 포커스를 두고 매핑된 키를 누릅니다.**
@@ -33,9 +32,18 @@ lastVerifiedVersion: 0.0.0
      alt="Start Keyboard Teleop 활성 — 좌측 키보드 로그 + 우측 리더 로그"
    />
 
-3. **(선택) Leader Robot이 설정되어 있다면 Start Leader Teleop도 눌러 보세요.**
+3. **(선택) Easy Controller가 설정되어 있다면 Start Easy Controller Teleop도 눌러 보세요.**
 
    사람이 리더 팔을 움직이면 슬레이브가 같이 움직입니다.
+
+   <Callout type="info">
+   **시작 직후 그리퍼 동작 — 제어권 인계 절차**
+
+   Easy Controller 텔레옵이 켜지면 리더 모터에 토크가 걸린 상태로 워커 자세에 동기화됩니다. 사용자가 리더를 자유롭게 움직이려면 토크가 풀려야 하고, 그 신호로 **그리퍼 닫기**가 사용됩니다.
+
+   - **그리퍼가 시작 시 열려 있던 경우** — 한 번 닫으면 토크가 풀리고 제어권이 인계됩니다.
+   - **그리퍼가 시작 시 이미 닫혀 있던 경우** — 사용자가 모르는 사이에 제어권이 넘어가는 것을 막기 위해, 한 번 **열었다가 다시 닫아야** 토크가 풀립니다. ProcessConsole 로그에 `Leader gripper ... is currently closed. Open it once and close again to take control.` 안내가 뜹니다.
+   </Callout>
 </Steps>
 
 <Callout type="info">
