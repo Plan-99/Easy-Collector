@@ -1,8 +1,13 @@
-from flask import Blueprint, request, current_app
+from flask import Blueprint, request, current_app, send_file, abort
 from ...database.models.dataset_model import Dataset as DatasetModel
 from ...configs.global_configs import DATASET_DIR
 import os
 import shutil
+import re
+import base64
+import cv2
+import numpy as np
+import pyarrow.parquet as pq
 from ..process.read_dataset import read_dataset, add_config
 from ..process.record_episode import record_episode
 from ..process.augment_dataset import augment_dataset
@@ -11,6 +16,9 @@ from ..process.downsample_dataset import downsample_dataset
 from ...utils.lerobot_io import (
     get_episodes_as_file_list, get_dataset_metadata, get_dataset_info,
     delete_episode as lerobot_delete_episode, list_episodes,
+    set_episode_language, trim_episode, copy_episode_to,
+    PARQUET_PATH_TEMPLATE, INFO_PATH, TASKS_PATH, EPISODES_PATH,
+    _read_json, _read_jsonl,
 )
 
 dataset_bp = Blueprint('dataset_bp', __name__)
@@ -259,13 +267,19 @@ def _rename_dirs_safe(parent_dir, name_map):
 @dataset_bp.route('/dataset/<id>/<episode_name>/:start_read_dataset', methods=['POST'])
 def start_read_dataset(id, episode_name):
     episode_path = os.path.join(DATASET_DIR, id, episode_name)
+    body = request.json or {}
+    try:
+        start_frame = int(body.get('start_frame') or 0)
+    except (TypeError, ValueError):
+        start_frame = 0
     current_app.pm.start_function(
         func=read_dataset,
         node=current_app.node,
         name=f"read_dataset_{id}_{episode_name}",
         episode_path=episode_path,
         socketio_instance=current_app.pm.socketio,
-        sid=request.json.get('sid', None),
+        sid=body.get('sid', None),
+        start_frame=start_frame,
     ),
     return {'status': 'success', 'message': 'Episode reading process started'}, 200
 
@@ -407,6 +421,304 @@ def merge_datasets():
     merge_dataset(source_dataset, target_datasets)
 
     return {'status': 'success', 'message': 'Dataset merged successfully'}, 200
+
+def _resolve_episode_index(episode_ref):
+    """Accept 'episode_000003', 'episode_3', or '3' and return int."""
+    s = str(episode_ref).replace('.hdf5', '')
+    s = s.replace('episode_', '')
+    return int(s)
+
+
+@dataset_bp.route('/dataset/<id>/<episode_ref>/:get_data', methods=['GET'])
+def get_episode_data(id, episode_ref):
+    """Return raw episode data for graph plotting / scrubbing.
+
+    Loads parquet only (no image decoding) and returns numeric arrays plus
+    feature names so the UI can build per-channel plots.
+    """
+    folder_path = os.path.join(DATASET_DIR, id)
+    if not os.path.isdir(folder_path):
+        return {'status': 'error', 'message': 'Dataset not found'}, 404
+
+    info = get_dataset_info(folder_path)
+    if info is None:
+        return {'status': 'error', 'message': 'Dataset info not found'}, 404
+
+    try:
+        episode_index = _resolve_episode_index(episode_ref)
+    except Exception:
+        return {'status': 'error', 'message': 'Invalid episode'}, 400
+
+    chunk = episode_index // info["chunks_size"]
+    parquet_path = os.path.join(
+        folder_path, PARQUET_PATH_TEMPLATE.format(chunk=chunk, ep=episode_index)
+    )
+    if not os.path.exists(parquet_path):
+        return {'status': 'error', 'message': 'Episode not found'}, 404
+
+    df = pq.read_table(parquet_path).to_pandas()
+    num_frames = len(df)
+    features = info.get('features', {})
+
+    out = {
+        'episode_index': episode_index,
+        'num_frames': num_frames,
+        'fps': info.get('fps', 20),
+    }
+
+    # Numeric channels — frontend graphs build datasets from these.
+    numeric_keys = [
+        'observation.state', 'action', 'observation.qvel', 'observation.qeffort',
+        'observation.eepos', 'observation.ee_delta', 'action.ee_delta',
+    ]
+    channels = {}
+    for key in numeric_keys:
+        if key not in features or key not in df.columns:
+            continue
+        arr = np.array(df[key].tolist(), dtype=np.float32)
+        names = features[key].get('names') or [f'{key}_{i}' for i in range(arr.shape[1])]
+        channels[key] = {
+            'data': arr.tolist(),
+            'names': list(names),
+        }
+    out['channels'] = channels
+
+    # Sensor list (video features)
+    sensors = []
+    for k, f in features.items():
+        if f.get('dtype') == 'video' and k.startswith('observation.images.'):
+            sensors.append(k.replace('observation.images.', ''))
+    out['sensors'] = sorted(sensors)
+
+    # Language instruction
+    out['language_instruction'] = ''
+    if num_frames > 0 and 'task_index' in df.columns:
+        task_index = int(df['task_index'].iloc[0])
+        for t in _read_jsonl(os.path.join(folder_path, TASKS_PATH)):
+            if t.get('task_index') == task_index:
+                out['language_instruction'] = t.get('task', '')
+                break
+
+    return {'status': 'success', 'episode': out}, 200
+
+
+@dataset_bp.route('/dataset/<id>/<episode_ref>/:frame', methods=['GET'])
+def get_episode_frame(id, episode_ref):
+    """Return a single frame (all sensors) at the given index as base64 JPEG.
+
+    Used by the EpisodeViewer slider to seek without restarting the streaming
+    process.
+    """
+    folder_path = os.path.join(DATASET_DIR, id)
+    if not os.path.isdir(folder_path):
+        return {'status': 'error', 'message': 'Dataset not found'}, 404
+
+    info = get_dataset_info(folder_path)
+    if info is None:
+        return {'status': 'error', 'message': 'Dataset info not found'}, 404
+
+    try:
+        episode_index = _resolve_episode_index(episode_ref)
+    except Exception:
+        return {'status': 'error', 'message': 'Invalid episode'}, 400
+
+    try:
+        frame_index = int(request.args.get('index', 0))
+    except (TypeError, ValueError):
+        return {'status': 'error', 'message': 'Invalid frame index'}, 400
+
+    chunk = episode_index // info['chunks_size']
+    features = info.get('features', {})
+
+    images = {}
+    for k, f in features.items():
+        if not k.startswith('observation.images.'):
+            continue
+        sensor_name = k.replace('observation.images.', '')
+        if f.get('dtype') == 'video':
+            video_path = os.path.join(
+                folder_path, 'videos', f'chunk-{chunk:03d}', k,
+                f'episode_{episode_index:06d}.mp4',
+            )
+            if not os.path.exists(video_path):
+                continue
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                continue
+            cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, frame_index))
+            ok, frame = cap.read()
+            cap.release()
+            if not ok or frame is None:
+                continue
+            ok2, buf = cv2.imencode('.jpg', frame)
+            if not ok2:
+                continue
+            images[sensor_name] = (
+                'data:image/jpeg;base64,' + base64.b64encode(buf).decode('utf-8')
+            )
+
+    return {'status': 'success', 'frame_index': frame_index, 'images': images}, 200
+
+
+@dataset_bp.route('/dataset/<id>/<episode_ref>/:video', methods=['GET'])
+def get_episode_video(id, episode_ref):
+    """Stream the mp4 file for a given sensor of the episode."""
+    folder_path = os.path.join(DATASET_DIR, id)
+    if not os.path.isdir(folder_path):
+        return abort(404)
+
+    info = get_dataset_info(folder_path)
+    if info is None:
+        return abort(404)
+
+    try:
+        episode_index = _resolve_episode_index(episode_ref)
+    except Exception:
+        return abort(400)
+
+    sensor = request.args.get('sensor')
+    if not sensor:
+        return abort(400)
+
+    chunk = episode_index // info['chunks_size']
+    feature_key = f'observation.images.{sensor}'
+    video_path = os.path.join(
+        folder_path, 'videos', f'chunk-{chunk:03d}', feature_key,
+        f'episode_{episode_index:06d}.mp4'
+    )
+    if not os.path.exists(video_path):
+        return abort(404)
+    return send_file(video_path, mimetype='video/mp4', conditional=True)
+
+
+@dataset_bp.route('/dataset/<id>/<episode_ref>/:set_language', methods=['POST'])
+def set_episode_language_route(id, episode_ref):
+    folder_path = os.path.join(DATASET_DIR, id)
+    if not os.path.isdir(folder_path):
+        return {'status': 'error', 'message': 'Dataset not found'}, 404
+    try:
+        episode_index = _resolve_episode_index(episode_ref)
+    except Exception:
+        return {'status': 'error', 'message': 'Invalid episode'}, 400
+    language = (request.json or {}).get('language_instruction', '')
+    try:
+        set_episode_language(folder_path, episode_index, language)
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}, 500
+    return {'status': 'success', 'message': 'Language updated'}, 200
+
+
+@dataset_bp.route('/dataset/<id>/<episode_ref>/:trim', methods=['POST'])
+def trim_episode_route(id, episode_ref):
+    folder_path = os.path.join(DATASET_DIR, id)
+    if not os.path.isdir(folder_path):
+        return {'status': 'error', 'message': 'Dataset not found'}, 404
+    try:
+        episode_index = _resolve_episode_index(episode_ref)
+    except Exception:
+        return {'status': 'error', 'message': 'Invalid episode'}, 400
+    data = request.json or {}
+    start = int(data.get('start', 0))
+    end = int(data.get('end', -1))
+    try:
+        trim_episode(folder_path, episode_index, start, end)
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}, 500
+    return {'status': 'success', 'message': 'Episode trimmed'}, 200
+
+
+@dataset_bp.route('/dataset/<id>/:batch_delete', methods=['POST'])
+def batch_delete_episodes(id):
+    folder_path = os.path.join(DATASET_DIR, id)
+    if not os.path.isdir(folder_path):
+        return {'status': 'error', 'message': 'Dataset not found'}, 404
+    indices = (request.json or {}).get('episode_indices', []) or []
+    parsed = []
+    for ref in indices:
+        try:
+            parsed.append(_resolve_episode_index(ref))
+        except Exception:
+            continue
+    # Delete in descending order so subsequent indices remain valid in metadata files.
+    for idx in sorted(set(parsed), reverse=True):
+        try:
+            lerobot_delete_episode(folder_path, idx)
+        except Exception as e:
+            print(f'[batch_delete] failed idx={idx}: {e}')
+    return {'status': 'success', 'deleted': len(parsed)}, 200
+
+
+@dataset_bp.route('/dataset/:batch_copy', methods=['POST'])
+def batch_copy_episodes():
+    """Copy a list of episodes from source dataset to target dataset."""
+    data = request.json or {}
+    src_id = str(data.get('source_dataset_id'))
+    dst_id = str(data.get('target_dataset_id'))
+    indices = data.get('episode_indices', []) or []
+
+    if not src_id or not dst_id:
+        return {'status': 'error', 'message': 'source/target dataset_id required'}, 400
+
+    src_dir = os.path.join(DATASET_DIR, src_id)
+    dst_dir = os.path.join(DATASET_DIR, dst_id)
+    if not os.path.isdir(src_dir) or not os.path.isdir(dst_dir):
+        return {'status': 'error', 'message': 'Dataset not found'}, 404
+
+    new_indices = []
+    for ref in indices:
+        try:
+            src_idx = _resolve_episode_index(ref)
+            new_idx = copy_episode_to(src_dir, src_idx, dst_dir)
+            new_indices.append(new_idx)
+        except Exception as e:
+            print(f'[batch_copy] failed src_idx={ref}: {e}')
+    return {'status': 'success', 'new_indices': new_indices}, 200
+
+
+@dataset_bp.route('/dataset/:batch_move', methods=['POST'])
+def batch_move_episodes():
+    """Move episodes from source to target (copy then delete from source)."""
+    data = request.json or {}
+    src_id = str(data.get('source_dataset_id'))
+    dst_id = str(data.get('target_dataset_id'))
+    indices = data.get('episode_indices', []) or []
+
+    if not src_id or not dst_id:
+        return {'status': 'error', 'message': 'source/target dataset_id required'}, 400
+
+    src_dir = os.path.join(DATASET_DIR, src_id)
+    dst_dir = os.path.join(DATASET_DIR, dst_id)
+    if not os.path.isdir(src_dir) or not os.path.isdir(dst_dir):
+        return {'status': 'error', 'message': 'Dataset not found'}, 404
+
+    moved = []
+    parsed = []
+    for ref in indices:
+        try:
+            parsed.append(_resolve_episode_index(ref))
+        except Exception:
+            continue
+    parsed = sorted(set(parsed))
+
+    # Copy first (preserves all sources even if a later copy fails)
+    successful_src = []
+    for src_idx in parsed:
+        try:
+            new_idx = copy_episode_to(src_dir, src_idx, dst_dir)
+            moved.append({'src': src_idx, 'dst': new_idx})
+            successful_src.append(src_idx)
+        except Exception as e:
+            print(f'[batch_move] copy failed src_idx={src_idx}: {e}')
+
+    # Delete from source in descending order
+    for src_idx in sorted(successful_src, reverse=True):
+        try:
+            lerobot_delete_episode(src_dir, src_idx)
+        except Exception as e:
+            print(f'[batch_move] delete failed src_idx={src_idx}: {e}')
+
+    return {'status': 'success', 'moved': moved}, 200
+
 
 @dataset_bp.route('/dataset/<id>/downsample', methods=['POST'])
 def downsample_dataset_route(id):

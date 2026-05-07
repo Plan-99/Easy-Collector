@@ -983,3 +983,278 @@ def _decode_video_frames(video_path):
     except Exception as e:
         print(f"[ERROR] Failed to decode video {video_path}: {e}")
     return frames
+
+
+# ─── Episode mutation: language / trim / copy ───────────────────────────────
+
+def _ensure_task_index(dataset_dir, language_instruction):
+    """Lookup or append a task entry; returns task_index."""
+    tasks_path = os.path.join(dataset_dir, TASKS_PATH)
+    tasks = _read_jsonl(tasks_path)
+    task_str = language_instruction or ""
+    for t_entry in tasks:
+        if t_entry.get("task") == task_str:
+            return t_entry["task_index"]
+    new_index = len(tasks)
+    _append_jsonl({"task_index": new_index, "task": task_str}, tasks_path)
+    info_path = os.path.join(dataset_dir, INFO_PATH)
+    info = _read_json(info_path)
+    info["total_tasks"] = max(info.get("total_tasks", 0), new_index + 1)
+    _write_json(info, info_path)
+    return new_index
+
+
+def _video_path(dataset_dir, feature_key, chunk, episode_index):
+    return os.path.join(
+        dataset_dir, "videos", f"chunk-{chunk:03d}", feature_key,
+        f"episode_{episode_index:06d}.mp4",
+    )
+
+
+def _parquet_path(dataset_dir, chunk, episode_index):
+    return os.path.join(
+        dataset_dir,
+        PARQUET_PATH_TEMPLATE.format(chunk=chunk, ep=episode_index),
+    )
+
+
+def set_episode_language(dataset_dir, episode_index, language_instruction):
+    """Update the language_instruction (task_index) of an existing episode."""
+    info = _read_json(os.path.join(dataset_dir, INFO_PATH))
+    chunk = episode_index // info["chunks_size"]
+    parquet_path = _parquet_path(dataset_dir, chunk, episode_index)
+    if not os.path.exists(parquet_path):
+        raise FileNotFoundError(f"Episode parquet not found: {parquet_path}")
+
+    new_task_index = _ensure_task_index(dataset_dir, language_instruction)
+
+    table = pq.read_table(parquet_path)
+    df = table.to_pandas()
+    df["task_index"] = np.full(len(df), new_task_index, dtype=np.int64)
+    pq.write_table(pa.Table.from_pandas(df), parquet_path)
+
+    # Update episodes.jsonl tasks list
+    episodes = _read_jsonl(os.path.join(dataset_dir, EPISODES_PATH))
+    for ep in episodes:
+        if ep.get("episode_index") == episode_index:
+            ep["tasks"] = [language_instruction or ""]
+            break
+    _write_jsonl(episodes, os.path.join(dataset_dir, EPISODES_PATH))
+
+
+def trim_episode(dataset_dir, episode_index, start, end):
+    """Trim an episode in place to the [start, end) frame range.
+
+    start/end are inclusive/exclusive frame indices. Updates parquet, mp4 videos,
+    episode stats, and dataset-level totals. start must be >= 0 and < end <= length.
+    """
+    info_path = os.path.join(dataset_dir, INFO_PATH)
+    info = _read_json(info_path)
+    chunk = episode_index // info["chunks_size"]
+    parquet_path = _parquet_path(dataset_dir, chunk, episode_index)
+    if not os.path.exists(parquet_path):
+        raise FileNotFoundError(f"Episode parquet not found: {parquet_path}")
+
+    table = pq.read_table(parquet_path)
+    df = table.to_pandas()
+    n = len(df)
+    start = max(0, int(start))
+    end = min(n, int(end))
+    if start >= end:
+        raise ValueError(f"Invalid trim range: start={start}, end={end}, length={n}")
+
+    new_n = end - start
+    df = df.iloc[start:end].reset_index(drop=True)
+    df["frame_index"] = np.arange(new_n, dtype=np.int64)
+    fps = info.get("fps", 20)
+    df["timestamp"] = (np.arange(new_n) / float(fps)).astype(np.float32)
+    pq.write_table(pa.Table.from_pandas(df), parquet_path)
+
+    # Re-encode trimmed videos
+    features = info.get("features", {})
+    video_keys = [k for k, f in features.items() if f.get("dtype") == "video"]
+    for feature_key in video_keys:
+        video_path = _video_path(dataset_dir, feature_key, chunk, episode_index)
+        if not os.path.exists(video_path):
+            continue
+        frames = _decode_video_frames(video_path)
+        trimmed = frames[start:end]
+        if not trimmed:
+            continue
+        # Write PNGs and re-encode
+        tmp_dir = os.path.join(dataset_dir, "_tmp_trim", feature_key, f"episode_{episode_index:06d}")
+        if os.path.exists(tmp_dir):
+            shutil.rmtree(tmp_dir)
+        os.makedirs(tmp_dir, exist_ok=True)
+        for i, fr in enumerate(trimmed):
+            Image.fromarray(fr).save(os.path.join(tmp_dir, f"frame-{i:06d}.png"))
+        from lerobot.datasets.video_utils import encode_video_frames
+        os.remove(video_path)
+        encode_video_frames(
+            imgs_dir=tmp_dir,
+            video_path=video_path,
+            fps=fps,
+            vcodec="h264",
+            pix_fmt="yuv420p",
+            g=2,
+            crf=30,
+            overwrite=True,
+        )
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+    tmp_root = os.path.join(dataset_dir, "_tmp_trim")
+    if os.path.isdir(tmp_root):
+        shutil.rmtree(tmp_root, ignore_errors=True)
+
+    # Update episodes.jsonl length
+    episodes = _read_jsonl(os.path.join(dataset_dir, EPISODES_PATH))
+    old_length = 0
+    for ep in episodes:
+        if ep.get("episode_index") == episode_index:
+            old_length = ep.get("length", 0)
+            ep["length"] = new_n
+            break
+    _write_jsonl(episodes, os.path.join(dataset_dir, EPISODES_PATH))
+
+    # Recompute episode stats
+    stats_entries = _read_jsonl(os.path.join(dataset_dir, EPISODES_STATS_PATH))
+    new_stats = _compute_episode_stats(df, features, new_n)
+    for entry in stats_entries:
+        if entry.get("episode_index") == episode_index:
+            entry["stats"] = new_stats
+            break
+    _write_jsonl(stats_entries, os.path.join(dataset_dir, EPISODES_STATS_PATH))
+
+    # Update info totals
+    info["total_frames"] = info.get("total_frames", 0) - (old_length - new_n)
+    _write_json(info, info_path)
+
+
+def _compute_episode_stats(df, features, num_frames):
+    """Recompute per-episode stats over the parquet df."""
+    stats = {}
+    numeric_keys = [
+        "observation.state", "action", "observation.qvel", "observation.qeffort",
+        "observation.eepos", "observation.ee_delta", "action.ee_delta",
+    ]
+    for key in numeric_keys:
+        if key not in features or key not in df.columns:
+            continue
+        arr = np.array(df[key].tolist(), dtype=np.float32)
+        if arr.size == 0:
+            continue
+        stats[key] = {
+            "min": np.min(arr, axis=0).tolist(),
+            "max": np.max(arr, axis=0).tolist(),
+            "mean": np.mean(arr, axis=0).tolist(),
+            "std": np.std(arr, axis=0).tolist(),
+            "count": int(num_frames),
+        }
+    return stats
+
+
+def copy_episode_to(src_dir, src_index, dst_dir, language_override=None):
+    """Copy a single episode from src_dir to dst_dir, returning the new episode_index.
+
+    Source and destination must share the same feature schema (same robot/sensor IDs).
+    If they differ, the function raises ValueError. The destination dataset is created
+    on the fly if missing — but only when the source has at least one feature schema.
+    """
+    src_info = _read_json(os.path.join(src_dir, INFO_PATH))
+    src_chunk = src_index // src_info["chunks_size"]
+    src_parquet = _parquet_path(src_dir, src_chunk, src_index)
+    if not os.path.exists(src_parquet):
+        raise FileNotFoundError(f"Source episode not found: {src_parquet}")
+
+    dst_info_path = os.path.join(dst_dir, INFO_PATH)
+    if not os.path.exists(dst_info_path):
+        # Bootstrap dst with src's info (features, fps)
+        os.makedirs(dst_dir, exist_ok=True)
+        bootstrap = dict(src_info)
+        bootstrap.update({
+            "total_episodes": 0, "total_frames": 0, "total_chunks": 0,
+            "total_videos": 0, "total_tasks": 0, "splits": {"train": "0:0"},
+        })
+        _write_json(bootstrap, dst_info_path)
+        for p in [EPISODES_PATH, TASKS_PATH, EPISODES_STATS_PATH]:
+            fpath = os.path.join(dst_dir, p)
+            os.makedirs(os.path.dirname(fpath), exist_ok=True)
+            if not os.path.exists(fpath):
+                open(fpath, "w").close()
+
+    dst_info = _read_json(dst_info_path)
+
+    src_features = src_info.get("features", {})
+    dst_features = dst_info.get("features", {})
+    if dst_features and set(src_features.keys()) != set(dst_features.keys()):
+        raise ValueError(
+            "Cannot copy episode — feature schemas differ between source and target dataset"
+        )
+
+    new_index = dst_info["total_episodes"]
+    new_chunk = new_index // dst_info["chunks_size"]
+    new_parquet = _parquet_path(dst_dir, new_chunk, new_index)
+    os.makedirs(os.path.dirname(new_parquet), exist_ok=True)
+
+    # Read source parquet, rewrite indices
+    table = pq.read_table(src_parquet)
+    df = table.to_pandas()
+    num_frames = len(df)
+
+    # Resolve language instruction (use override or look up from source tasks)
+    if language_override is None:
+        src_tasks = _read_jsonl(os.path.join(src_dir, TASKS_PATH))
+        src_task_index = int(df["task_index"].iloc[0]) if num_frames else 0
+        language_override = ""
+        for t in src_tasks:
+            if t.get("task_index") == src_task_index:
+                language_override = t.get("task", "")
+                break
+
+    new_task_index = _ensure_task_index(dst_dir, language_override)
+    new_global_start = dst_info.get("total_frames", 0)
+
+    df["episode_index"] = np.full(num_frames, new_index, dtype=np.int64)
+    df["frame_index"] = np.arange(num_frames, dtype=np.int64)
+    df["index"] = np.arange(new_global_start, new_global_start + num_frames, dtype=np.int64)
+    df["task_index"] = np.full(num_frames, new_task_index, dtype=np.int64)
+    pq.write_table(pa.Table.from_pandas(df), new_parquet)
+
+    # Copy mp4 video files
+    num_videos = 0
+    for key, feat in src_features.items():
+        if feat.get("dtype") != "video":
+            continue
+        src_video = _video_path(src_dir, key, src_chunk, src_index)
+        if not os.path.exists(src_video):
+            continue
+        dst_video = _video_path(dst_dir, key, new_chunk, new_index)
+        os.makedirs(os.path.dirname(dst_video), exist_ok=True)
+        shutil.copy2(src_video, dst_video)
+        num_videos += 1
+
+    # Recompute stats and append
+    stats = _compute_episode_stats(df, src_features, num_frames)
+    _append_jsonl(
+        {"episode_index": new_index, "stats": stats},
+        os.path.join(dst_dir, EPISODES_STATS_PATH),
+    )
+    _append_jsonl(
+        {"episode_index": new_index, "length": num_frames, "tasks": [language_override or ""]},
+        os.path.join(dst_dir, EPISODES_PATH),
+    )
+
+    # If destination didn't have features yet, persist them now (bootstrap path)
+    if not dst_features:
+        dst_info["features"] = src_features
+        if "action_key" in src_info and "action_key" not in dst_info:
+            dst_info["action_key"] = src_info["action_key"]
+        if "fps" not in dst_info:
+            dst_info["fps"] = src_info.get("fps", 20)
+
+    dst_info["total_episodes"] = new_index + 1
+    dst_info["total_frames"] = new_global_start + num_frames
+    dst_info["total_chunks"] = new_chunk + 1
+    dst_info["total_videos"] = dst_info.get("total_videos", 0) + num_videos
+    dst_info["splits"] = {"train": f"0:{new_index + 1}"}
+    _write_json(dst_info, dst_info_path)
+    return new_index

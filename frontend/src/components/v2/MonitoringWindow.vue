@@ -466,9 +466,10 @@
                 color="white"
                 v-if="status === 'pending'"
             ></q-btn>
-            <hdf5-viewer
+            <episode-viewer
                 :path="`${selectedDatasetId}/${selectedEpisode.name}`"
-            ></hdf5-viewer>
+                :disable-seek="isReplaying"
+            ></episode-viewer>
         </div>
         <!-- Inference Settings Dialog -->
         <form-dialog
@@ -514,7 +515,7 @@ import { api } from 'src/boot/axios';
 import ProcessConsole from './ProcessConsole.vue';
 import { useSocket } from 'src/composables/useSocket.js';
 import WebRtcVideo from './WebRtcVideo.vue';
-import Hdf5Viewer from 'src/components/v2/Hdf5Viewer.vue';
+import EpisodeViewer from 'src/components/v2/EpisodeViewer.vue';
 import FormDialog from './FormDialog.vue';
 import { DEFAULT_KEYBOARD_SETTINGS, AXIS_TO_EE_INDEX, normalizeEventKey } from 'src/configs/teleopDefaults';
 import TutorialHint from './TutorialHint.vue';
@@ -571,6 +572,7 @@ const selectedEpisode = defineModel('selectedEpisode', {
     default: {}
 });
 const replayActionType = ref('qaction');
+const isReplaying = ref(false);
 const checkpoint = computed(() => {
     return props.checkpoints?.find(c => c.id === selectedCheckpointId.value);
 });
@@ -986,6 +988,7 @@ function stopInference() {
 
 function startReplay() {
     replayProgress.value = 0;
+    isReplaying.value = true;
     const payload = {
         episode: selectedEpisode.value,
         robot_ids: props.robots.map(r => r.id),
@@ -999,6 +1002,7 @@ function startReplay() {
     }
     api.post(`/dataset/${selectedDatasetId.value}/${selectedEpisode.value.name}/:start_replay_episode`, payload).catch((error) => {
         console.error('Error starting replay:', error);
+        isReplaying.value = false;
         Notify.create({
             color: 'negative',
             message: t('errorStartReplay')
@@ -1036,6 +1040,7 @@ onMounted(() => {
         }
         if (data.id === 'replay_episode') {
             replayProgress.value = 0;
+            isReplaying.value = false;
         }
         if (data.id === 'checkpoint_test') {
             inferenceSucceed.value = false;

@@ -243,7 +243,7 @@
                         </q-card-section>
                         <q-separator color="white" />
                         <q-card-section class="flex flex-center">
-                            <hdf5-viewer
+                            <episode-viewer
                                 v-if="dataset && augmentationPreviewFile"
                                 :path="`${dataset.id}/${augmentationPreviewFile.name}`"
                                 class="full-width full-height q-gutter-x-sm"
@@ -277,7 +277,7 @@
 import { ref, defineProps, onMounted, onUnmounted } from 'vue';
 import { api } from 'src/boot/axios';
 import { Notify } from 'quasar';
-import Hdf5Viewer from 'src/components/v2/Hdf5Viewer.vue';
+import EpisodeViewer from 'src/components/v2/EpisodeViewer.vue';
 import { useSocket } from 'src/composables/useSocket';
 import { useI18n } from 'vue-i18n';
 import TutorialHint from 'src/components/v2/TutorialHint.vue';

@@ -295,26 +295,135 @@ def _tar_datasets(dataset_ids, tar_path):
     """Create a tar.gz bundle of the requested dataset directories.
 
     Single dataset: bundle contents at archive root (meta/, data/, videos/).
-    Multiple datasets: each goes under its id directory — training server must
-    merge them, which is not yet implemented.
+    Multi dataset: merge into a temp dir first (non-destructive), then tar that
+    so training_server sees a single LeRobot-format dataset.
     """
-    dataset_ids = list(dataset_ids)
+    dataset_ids = [str(x) for x in dataset_ids]
     for ds_id in dataset_ids:
-        ds_dir = os.path.join(DATASET_DIR, str(ds_id))
+        ds_dir = os.path.join(DATASET_DIR, ds_id)
         if not os.path.isdir(ds_dir):
             raise FileNotFoundError(f'Dataset directory not found: {ds_dir}')
 
     if len(dataset_ids) == 1:
-        ds_dir = os.path.join(DATASET_DIR, str(dataset_ids[0]))
+        ds_dir = os.path.join(DATASET_DIR, dataset_ids[0])
         with tarfile.open(tar_path, 'w:gz') as tar:
             tar.add(ds_dir, arcname='.')
         return
 
-    # TODO: support multi-dataset merge on the training server side
-    raise NotImplementedError(
-        'Multi-dataset merge for remote training is not implemented yet. '
-        'Please train on a single dataset.'
+    merge_dir = tempfile.mkdtemp(prefix='et_merge_')
+    try:
+        _merge_datasets_to_dir(dataset_ids, merge_dir)
+        with tarfile.open(tar_path, 'w:gz') as tar:
+            tar.add(merge_dir, arcname='.')
+    finally:
+        shutil.rmtree(merge_dir, ignore_errors=True)
+
+
+def _merge_datasets_to_dir(dataset_ids, output_dir):
+    """Merge multiple LeRobot datasets into output_dir as a single dataset.
+
+    First dataset becomes the base (full copy). Subsequent datasets get their
+    episodes appended with re-indexed parquet/video/image paths and merged
+    tasks.jsonl. Source datasets are not modified.
+    """
+    from ...utils.lerobot_io import (
+        _read_json, _write_json, _read_jsonl, _write_jsonl, _append_jsonl,
+        get_dataset_info, list_episodes,
+        PARQUET_PATH_TEMPLATE, INFO_PATH, EPISODES_PATH, TASKS_PATH,
+        EPISODES_STATS_PATH, DEFAULT_CHUNK_SIZE,
     )
+
+    if not dataset_ids:
+        raise ValueError('dataset_ids cannot be empty')
+
+    base_id = str(dataset_ids[0])
+    base_path = os.path.join(DATASET_DIR, base_id)
+    if not os.path.isdir(base_path):
+        raise FileNotFoundError(f'Dataset {base_id} not found at {base_path}')
+
+    if os.path.isdir(output_dir):
+        shutil.rmtree(output_dir)
+    shutil.copytree(base_path, output_dir, symlinks=False)
+
+    for tgt_id in dataset_ids[1:]:
+        tgt_id = str(tgt_id)
+        tgt_path = os.path.join(DATASET_DIR, tgt_id)
+        if not os.path.isdir(tgt_path):
+            raise FileNotFoundError(f'Dataset {tgt_id} not found at {tgt_path}')
+
+        tgt_info = get_dataset_info(tgt_path)
+        if tgt_info is None:
+            raise RuntimeError(f'No info.json in dataset {tgt_id}')
+
+        tgt_episodes = list_episodes(tgt_path)
+        tgt_chunk_size = tgt_info.get('chunks_size', DEFAULT_CHUNK_SIZE)
+
+        out_tasks = _read_jsonl(os.path.join(output_dir, TASKS_PATH))
+        tgt_tasks = _read_jsonl(os.path.join(tgt_path, TASKS_PATH))
+        existing = {t['task'] for t in out_tasks}
+        for t in tgt_tasks:
+            if t['task'] not in existing:
+                out_tasks.append({'task_index': len(out_tasks), 'task': t['task']})
+                existing.add(t['task'])
+        _write_jsonl(out_tasks, os.path.join(output_dir, TASKS_PATH))
+
+        for ep_entry in tgt_episodes:
+            ep_idx = ep_entry['episode_index']
+            tgt_chunk = ep_idx // tgt_chunk_size
+
+            out_info = _read_json(os.path.join(output_dir, INFO_PATH))
+            new_ep_idx = out_info['total_episodes']
+            out_chunk_size = out_info.get('chunks_size', DEFAULT_CHUNK_SIZE)
+            new_chunk = new_ep_idx // out_chunk_size
+            num_frames = ep_entry.get('length', 0)
+
+            tgt_parquet = os.path.join(tgt_path, PARQUET_PATH_TEMPLATE.format(chunk=tgt_chunk, ep=ep_idx))
+            if not os.path.exists(tgt_parquet):
+                continue
+            new_parquet = os.path.join(output_dir, PARQUET_PATH_TEMPLATE.format(chunk=new_chunk, ep=new_ep_idx))
+            os.makedirs(os.path.dirname(new_parquet), exist_ok=True)
+            shutil.copy2(tgt_parquet, new_parquet)
+
+            features = out_info.get('features', {})
+            for key, feat in features.items():
+                if not key.startswith('observation.images.'):
+                    continue
+                if feat.get('dtype') == 'image':
+                    old = os.path.join(tgt_path, 'images', key, f'episode_{ep_idx:06d}')
+                    new = os.path.join(output_dir, 'images', key, f'episode_{new_ep_idx:06d}')
+                    if os.path.isdir(old):
+                        if os.path.isdir(new):
+                            shutil.rmtree(new)
+                        shutil.copytree(old, new)
+                elif feat.get('dtype') == 'video':
+                    old = os.path.join(tgt_path, 'videos', f'chunk-{tgt_chunk:03d}', key, f'episode_{ep_idx:06d}.mp4')
+                    new = os.path.join(output_dir, 'videos', f'chunk-{new_chunk:03d}', key, f'episode_{new_ep_idx:06d}.mp4')
+                    if os.path.isfile(old):
+                        os.makedirs(os.path.dirname(new), exist_ok=True)
+                        shutil.copy2(old, new)
+
+            tgt_stats_list = _read_jsonl(os.path.join(tgt_path, EPISODES_STATS_PATH))
+            ep_stats = {}
+            for s in tgt_stats_list:
+                if s.get('episode_index') == ep_idx:
+                    ep_stats = s.get('stats', {})
+                    break
+
+            out_info['total_episodes'] = new_ep_idx + 1
+            out_info['total_frames'] = out_info.get('total_frames', 0) + num_frames
+            out_info['total_chunks'] = new_chunk + 1
+            out_info['total_tasks'] = len(out_tasks)
+            out_info['splits'] = {'train': f'0:{new_ep_idx + 1}'}
+            _write_json(out_info, os.path.join(output_dir, INFO_PATH))
+
+            _append_jsonl(
+                {'episode_index': new_ep_idx, 'length': num_frames, 'tasks': ep_entry.get('tasks', [''])},
+                os.path.join(output_dir, EPISODES_PATH),
+            )
+            _append_jsonl(
+                {'episode_index': new_ep_idx, 'stats': ep_stats},
+                os.path.join(output_dir, EPISODES_STATS_PATH),
+            )
 
 
 def _tar_checkpoint(checkpoint_id, tar_path):
@@ -387,30 +496,33 @@ def run_training_job(checkpoint, server_url, callback_url,
 
     try:
         config = _build_train_config(checkpoint)
-        dataset_ids = list(config['dataset_info'].keys())
+        dataset_ids = [str(x) for x in config['dataset_info'].keys()]
         if not dataset_ids:
             _emit_log(socketio_instance, log_id, '[ERROR] No datasets assigned to checkpoint', 'error')
             return CheckpointModel.STATUS_FAILED
-        if len(dataset_ids) > 1:
-            _emit_log(socketio_instance, log_id,
-                      '[ERROR] Multi-dataset training on the remote server is not implemented yet.',
-                      'error')
-            return CheckpointModel.STATUS_FAILED
-        dataset_id = dataset_ids[0]
 
-        # 1) Upload dataset bundle (stored at datasets/<machine_id>/<dataset_id>/)
-        _emit_log(socketio_instance, log_id, f'Bundling dataset {dataset_id}...')
+        # Multi-dataset: backend merges into a temp dir and uploads as a single
+        # synthetic bundle so training_server stays single-dataset oriented.
+        if len(dataset_ids) > 1:
+            bundle_id = f'merged_{job_id}'
+            _emit_log(socketio_instance, log_id,
+                      f'Merging {len(dataset_ids)} datasets ({", ".join(dataset_ids)}) into bundle {bundle_id}...')
+        else:
+            bundle_id = dataset_ids[0]
+
+        # 1) Upload dataset bundle (stored at datasets/<machine_id>/<bundle_id>/)
+        _emit_log(socketio_instance, log_id, f'Bundling dataset {bundle_id}...')
         with tempfile.NamedTemporaryFile(suffix='.tar.gz', delete=False) as tmp:
             tar_path = tmp.name
         try:
-            _tar_datasets([dataset_id], tar_path)
+            _tar_datasets(dataset_ids, tar_path)
             size_mb = os.path.getsize(tar_path) / (1024 * 1024)
             _emit_log(socketio_instance, log_id, f'Uploading dataset ({size_mb:.1f} MB)...')
             with open(tar_path, 'rb') as f:
                 resp = requests.post(
                     f'{server_url}/api/train/upload-dataset',
                     files={'file': ('dataset.tar.gz', f, 'application/gzip')},
-                    data={'machine_id': machine_id, 'dataset_id': str(dataset_id)},
+                    data={'machine_id': machine_id, 'dataset_id': bundle_id},
                     timeout=600,
                 )
             if resp.status_code != 200:
@@ -452,7 +564,7 @@ def run_training_job(checkpoint, server_url, callback_url,
                 'job_id': job_id,
                 'machine_id': machine_id,
                 'checkpoint_id': str(checkpoint_id),
-                'dataset_ids': [str(dataset_id)],
+                'dataset_ids': [bundle_id],
                 'load_model_checkpoint_id': str(checkpoint.load_model_id) if checkpoint.load_model_id else None,
                 'policy': config['policy'],
                 'train_settings': config['train_settings'],

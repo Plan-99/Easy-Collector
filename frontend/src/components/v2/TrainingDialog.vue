@@ -13,9 +13,14 @@
       <q-card-section>
         <div class="text-center">
             <q-btn color="negative" :label="$t('trainStopBtn')" @click="stopTraining" v-if="isTraining" />
-            <q-btn color="positive" :label="$t('trainCompletedBtn')" @click="$emit('update:modelValue', false)" v-else-if="isTerminal" />
+            <q-btn :color="terminalColor" :label="terminalLabel" @click="$emit('update:modelValue', false)" v-else-if="isTerminal" />
             <q-btn color="primary" :label="$t('trainCancelBtn')" @click="cancelTraing" v-else />
         </div>
+      </q-card-section>
+
+      <q-card-section class="q-pt-none" v-if="props.isTraining || isFailed">
+        <div v-if="isFailed" class="text-negative q-mb-sm">{{ $t('trainFailed') }}</div>
+        <process-console v-if="isFailed" process="train_task" style="height: 240px;" />
       </q-card-section>
 
       <q-card-section class="q-pt-none" v-if="props.isTraining">
@@ -87,10 +92,25 @@ const props = defineProps({
 const { socket } = useSocket();
 
 // 종료 상태(finished/failed/canceled)에서는 다이얼로그가 남아 있고 닫기 전용
-// "학습 완료" 버튼만 노출 — 사용자가 결과를 확인한 뒤 직접 닫는다.
+// 버튼만 노출 — 결과를 확인한 뒤 사용자가 직접 닫는다.
 const isTerminal = computed(() => {
     const s = props.checkpoint?.status;
     return s === 'finished' || s === 'failed' || s === 'canceled';
+});
+
+const isFailed = computed(() => props.checkpoint?.status === 'failed');
+const isCanceled = computed(() => props.checkpoint?.status === 'canceled');
+
+// 종료 사유에 맞춰 버튼 색/라벨을 분기 — 실패를 초록색 "완료"로 위장하지 않도록.
+const terminalColor = computed(() => {
+    if (isFailed.value) return 'negative';
+    if (isCanceled.value) return 'grey-7';
+    return 'positive';
+});
+const terminalLabel = computed(() => {
+    if (isFailed.value) return t('trainFailedBtn');
+    if (isCanceled.value) return t('trainCanceledBtn');
+    return t('trainCompletedBtn');
 });
 
 const trainingProgress = ref(0);
@@ -198,7 +218,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-    socket.off('taks_log', onLogTrainTask);
+    socket.off('task_log', onLogTrainTask);
 });
 
 </script>

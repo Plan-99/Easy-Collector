@@ -15,7 +15,7 @@ from PIL import Image
 config = {}
 
 
-def read_dataset(node, episode_path, socketio_instance, sid, task_control, move_robot=False, sensors=None, agents=None, task=None, hz=5, capture_dataset_id=None, action_key='qaction'):
+def read_dataset(node, episode_path, socketio_instance, sid, task_control, move_robot=False, sensors=None, agents=None, task=None, hz=5, capture_dataset_id=None, action_key='qaction', start_frame=0):
     """Read and stream episode data from a LeRobot dataset.
 
     episode_path is now repurposed as dataset_dir/episode_NNNNNN (kept param name for API compat).
@@ -171,8 +171,11 @@ def read_dataset(node, episode_path, socketio_instance, sid, task_control, move_
 
         # i=0은 record_episode의 reset 프레임으로, qaction이 의미 없는 값(None/0)이라
         # 그대로 재생하면 로봇이 영점으로 튄다. 실제 전이를 만든 action은
-        # i=1..N이므로 거기서부터 재생.
-        for i in range(1, total_steps):
+        # i=1..N이므로 거기서부터 재생. start_frame이 주어지면 그 위치부터 재생.
+        loop_start = max(1, int(start_frame or 0))
+        if loop_start >= total_steps:
+            loop_start = 1
+        for i in range(loop_start, total_steps):
             now = time.time()
             dt = now - last_tick_time
             last_tick_time = now

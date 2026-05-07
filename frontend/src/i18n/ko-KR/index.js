@@ -221,6 +221,8 @@ export default {
   trainStopBtn: '학습 중지',
   trainCancelBtn: '학습 취소',
   trainCompletedBtn: '학습 완료',
+  trainFailedBtn: '학습 실패',
+  trainCanceledBtn: '학습 취소됨',
   trainLossTrain: '학습 손실',
   trainLossValidate: '검증 손실',
 
@@ -514,6 +516,14 @@ export default {
     '조작 방식을 고르세요. 키보드는 별도 장비 없이 바로 시작할 수 있고, 리더는 마스터 디바이스를 연결한 경우에 선택할 수 있어요.',
   tutorialTeleopStart:
     '이 버튼을 눌러야 키 입력이 실제 로봇으로 전달돼요. 처음에는 step size를 작게 두고 천천히 움직여보세요.',
+  tutorialTeleopDialogIntro:
+    '텔레오퍼레이션 세부 설정 창이에요. 어셈블리별로 EE 오프셋, 키보드 매핑, 리더 로봇 보정을 여기서 조정합니다.',
+  tutorialTeleopDialogGeneral:
+    '로봇별 엔드이펙터 오프셋이에요. 그리퍼 같은 도구가 손목보다 앞에 달려 있을 때, 실제 도구 끝과 EE 위치를 일치시키도록 미세 조정해요.',
+  tutorialTeleopDialogKeyboard:
+    '키보드 조작을 입맛에 맞게 바꿔요. 어떤 키가 어느 축에 매핑되는지, 한 번에 얼마나 움직이는지를 정할 수 있어요. 너무 만져버렸으면 Reset to Defaults로 되돌리세요.',
+  tutorialTeleopDialogLeader:
+    '리더 로봇(Easy Controller) 설정이에요. 리더 관절을 팔로워 관절 위로 끌어다 놓아 매핑하고, 원점 자세를 잡고, 필요하면 관절별로 부호(sign)를 바꿔 방향을 뒤집을 수 있습니다.',
 
   tutorialWorkspaceIntro:
     '워크스페이스는 하나의 작업(예: 컵 옮기기)을 위한 모든 것을 모아두는 곳이에요. 사용할 카메라/로봇, 모은 데이터, 학습 결과를 한 곳에서 관리합니다. 위 드롭다운에서 워크스페이스를 먼저 골라주세요.',
@@ -529,6 +539,48 @@ export default {
     '로봇이 작업을 시작할 때 취할 기본 자세(홈 포즈)를 정해주세요.',
   tutorialWorkspaceMonitoring:
     '여기 보이는 카메라 영상이나 로봇 카드를 누르면, 왼쪽에서 그 항목의 세부 설정을 할 수 있어요.',
+
+  tutorialAugmentIntro:
+    '데이터 증강(Augmentation)은 같은 시연을 색감·밝기·노이즈·시점 등을 살짝씩 바꿔 복제해서 학습 데이터를 늘리는 작업이에요. 직접 더 시연하지 않아도 다양한 환경에 강한 AI를 만들 수 있어요. 왼쪽에서 적용할 항목을 펼치고 슬라이더를 움직이면 오른쪽 미리보기에 즉시 결과가 반영됩니다. 다 정한 뒤 Start Augmentation을 누르면 새 데이터셋이 생성돼요.',
+  tutorialAugmentLightness:
+    '이미지의 밝기를 전체적으로 더 밝게(+) 또는 더 어둡게(−) 조정해요. 같은 작업을 다양한 조명에서 한 것처럼 보이게 만들어, 형광등/햇빛/저녁 같은 환경 변화에 강해집니다.',
+  tutorialAugmentHSV:
+    '색상(Hue)·채도(Saturation)·밝기값(Value)을 살짝씩 바꿔요. 카메라 화이트밸런스가 다르거나 배경 색이 살짝 달라도 잘 동작하게 만드는 데 효과적이에요. Random HSV를 켜면 매번 무작위로 흔들어 더 다양한 변형을 만듭니다.',
+  tutorialAugmentDisturbances:
+    '이미지에 작은 사각형 노이즈를 무작위로 그려 넣어요. 시연 도중 손/물체가 카메라를 살짝 가리는 상황을 흉내내서, 일부분이 가려져도 작업을 이어갈 수 있게 학습됩니다.',
+  tutorialAugmentSaltPepper:
+    '검은 점·흰 점을 무작위로 흩뿌려 카메라 센서 노이즈처럼 보이게 만들어요. 저조도/저화질 카메라에서도 강하게 동작하도록 도와줍니다.',
+  tutorialAugmentGaussian:
+    '평균(Mean)과 표준편차(Sigma)로 정의되는 가우시안 노이즈를 픽셀에 더해요. 일반적인 영상 잡음에 잘 견디는 모델을 만드는 가장 보편적인 방법입니다.',
+  tutorialAugmentPerspective:
+    '이미지 크기·회전·기울임(Shear)·원근(Perspective)을 변형해요. 카메라가 살짝 움직였거나 시점이 조금 달라져도 잘 동작하도록, 시점 변화에 대한 강건성을 높입니다.',
+
+  tutorialMonOverview:
+    '여기 보이는 카메라 영상이나 로봇 카드를 누르면, 왼쪽에서 그 항목의 세부 설정을 할 수 있어요. 카메라/로봇이 모두 켜지면 아래에 데이터 수집 또는 추론 버튼이 나타납니다.',
+  tutorialMonIdlePending:
+    '데이터를 모으기 전에 4가지를 정해주세요. (1) 어느 폴더에 모을지(Dataset) (2) 어떤 작업인지 한 줄 설명(Language Instruction) (3) 어떻게 조종할지(Teleoperation Type) (4) 초당 몇 프레임으로 기록할지(Hz). 빨간 REC 버튼을 누르면 녹화가 시작되고, 버튼 옆 집모양 뱃지를 켜두면 녹화 직전에 로봇이 자동으로 홈 포즈로 이동합니다.',
+  tutorialMonCollectingLeader:
+    'Easy Controller(리더 로봇)로 시연 중이에요. 리더를 직접 움직이면 화면 속 로봇이 그대로 따라오고, 그 동작이 데이터로 저장됩니다. 작업이 잘 끝났으면 SUCCESS(C)를 눌러 성공 라벨을 찍고, COMPLETE로 에피소드를 저장하세요.',
+  tutorialMonCollectingKeyboard:
+    '키보드로 로봇 끝(EE)을 직접 움직이는 모드예요. 왼쪽의 로봇 카드를 한 번 클릭해서 조작 대상을 고른 뒤 — W/S(앞뒤), A/D(좌우), E/Z(위아래), .[/]: 회전, B/N(그리퍼), Space(정지). Step Size를 조절해 한 번에 움직이는 거리를 바꿀 수 있어요. 작업 끝나면 SUCCESS(C) → COMPLETE.',
+  tutorialMonCollectingExternal:
+    '외부 시스템(다른 노드/조이스틱 등)이 로봇을 움직이고 있어요. EasyTrainer는 그 동작을 받아서 그대로 기록만 합니다. 끝나면 SUCCESS(C) → COMPLETE를 누르세요.',
+  tutorialMonCollectingViveExternal:
+    'HTC Vive 트래커로 손을 움직이면 그 위치를 따라 로봇이 함께 움직이고, 그 시연이 기록됩니다. 작업이 끝나면 SUCCESS(C) → COMPLETE.',
+  tutorialMonCollectingViveOnly:
+    '로봇 없이 Vive 트래커의 손 움직임만 기록하는 모드예요. 사람 시연을 데이터화해서 나중에 학습에 쓰기 위한 용도. 끝나면 SUCCESS(C) → COMPLETE.',
+  tutorialMonCollectingMotionPlanning:
+    '외부 ROS2 서비스(예: pick_and_place)가 자동으로 로봇을 움직이고, 그 동작이 데이터로 저장됩니다. 끝나면 SUCCESS(C) → COMPLETE.',
+  tutorialMonViveInit:
+    'Vive 트래커가 켜지길 기다리는 중이에요. 트래커 전원이 켜져 있고 베이스 스테이션과 연결됐는지 확인해주세요.',
+  tutorialMonMovingHome:
+    '로봇이 홈 포즈로 자동 이동 중이에요. 도착하면 곧바로 데이터 수집이 시작됩니다.',
+  tutorialMonReplay:
+    '저장된 에피소드를 다시 재생하는 화면이에요. qaction(저장된 관절 명령) 또는 ee_delta(EE 증분)로 재생할 수 있고, Capture Episode를 켜면 재생하면서 새 데이터셋에 다시 녹화도 됩니다.',
+  tutorialMonInferenceSelected:
+    '학습된 AI(체크포인트)를 골라뒀어요. Hz를 정하고 빨간 Start Inference 버튼을 누르면 AI가 직접 로봇을 움직입니다. 버튼 옆 집모양 뱃지를 켜두면 시작 전에 로봇이 자동으로 홈 포즈로 이동합니다.',
+  tutorialMonInferenceRunning:
+    'AI가 직접 로봇을 움직이는 중이에요. 위쪽 점수(Succeed/OOD)를 보면서 잘 동작하는지 지켜보고, 이상하면 Stop으로 즉시 멈추세요.',
 
   tutorialTrainIntro:
     '모은 데이터로 AI에게 작업을 가르치는 곳이에요. 위에서 워크스페이스를 먼저 고르면 단계별 학습이 시작됩니다.',
@@ -618,6 +670,8 @@ export default {
   navTeleoperation: '텔레오퍼레이션',
   navWorkspace: '워크스페이스',
   navTrain: '학습',
+  navDatasets: '데이터셋',
+  navPlanner: '플래너',
   ariaMenu: '메뉴',
   languageSwitcher: '언어',
   languageEnglish: 'English',
@@ -686,4 +740,66 @@ export default {
 
   // ───── Hdf5 viewer ─────
   hdf5LanguagePrefix: '지시: {value}',
+
+  // ───── Common verbs (Dataset 관련) ─────
+  copy: '복사',
+  trim: '자르기',
+  saveLanguage: '지시문 저장',
+
+  // ───── Dataset page ─────
+  datasetPageTitle: '데이터셋 관리',
+  datasetPageBody: '워크스페이스를 선택하면 해당 워크스페이스에 속한 데이터셋과 에피소드를 확인할 수 있습니다.',
+  datasetPageBody2: '에피소드를 클릭하면 영상과 그래프, trim/복사/이동 기능을 사용할 수 있습니다.',
+  datasetEmpty: '데이터셋이 없습니다.',
+  datasetEpisodesSuffix: '개 에피소드',
+  datasetSelectEpisodeHint: '왼쪽에서 에피소드를 선택하세요.',
+  datasetSelectedCount: '{count}개 선택됨',
+  datasetFrames: '{count} 프레임',
+  datasetCurrentFrame: '현재 프레임',
+  datasetNoVideo: '재생 가능한 영상이 없습니다.',
+
+  // Trim
+  datasetTrimRangeLabel: '자를 구간',
+  datasetTrimApply: 'Trim 적용',
+  datasetTrimReset: '범위 초기화',
+  datasetTrimInProgress: '에피소드를 자르는 중입니다…',
+  datasetTrimDone: '에피소드를 trim 했습니다.',
+  datasetTrimFailed: 'Trim에 실패했습니다.',
+
+  // Language prompt
+  datasetLanguagePrompt: '언어 지시문 (Language prompt)',
+  datasetLanguageSaved: '지시문을 저장했습니다.',
+  datasetLanguageSaveFailed: '지시문 저장에 실패했습니다.',
+  datasetSaveFailed: '저장에 실패했습니다.',
+
+  // Channels / graph
+  datasetChannelLabel: '채널',
+  datasetSeriesShown: '표시 중인 시리즈',
+  datasetSelectSeries: '시리즈 선택',
+  datasetAll: '모두',
+  datasetNone: '해제',
+  datasetGraphEmpty: '표시할 데이터가 없습니다.',
+
+  // Move / Copy / Delete
+  datasetCopyEpisode: '복사',
+  datasetMoveEpisode: '이동',
+  datasetMoveDialogTitle: '에피소드 이동',
+  datasetCopyDialogTitle: '에피소드 복사',
+  datasetMoveTargetLabel: '대상 데이터셋',
+  datasetMoveDone: '에피소드를 이동했습니다.',
+  datasetCopyDone: '에피소드를 복사했습니다.',
+  datasetTransferFailed: '에피소드 처리에 실패했습니다.',
+  datasetConfirmDeleteEpisode: '이 에피소드를 정말 삭제하시겠습니까?',
+  datasetDeleteFailed: '에피소드 삭제에 실패했습니다.',
+  datasetConfirmBatchDelete: '선택한 {count}개 에피소드를 정말 삭제하시겠습니까?',
+  datasetBatchDeleteDone: '{count}개 에피소드를 삭제했습니다.',
+  datasetBatchDeleteFailed: '일괄 삭제에 실패했습니다.',
+
+  // Downsample
+  datasetDownsample: '다운샘플',
+  datasetDownsampleTitle: '데이터셋 다운샘플',
+  datasetDownsampleKeep: '유지 비율',
+  datasetDownsampleEvery: 'N프레임마다 1프레임 유지',
+  datasetDownsampleStarted: '다운샘플을 시작했습니다.',
+  datasetDownsampleFailed: '다운샘플에 실패했습니다.',
 }

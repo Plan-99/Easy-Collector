@@ -221,6 +221,8 @@ export default {
   trainStopBtn: 'Stop Training',
   trainCancelBtn: 'Cancel Training',
   trainCompletedBtn: 'Training Complete',
+  trainFailedBtn: 'Training Failed',
+  trainCanceledBtn: 'Training Canceled',
   trainLossTrain: 'Train Loss',
   trainLossValidate: 'Validate Loss',
 
@@ -514,6 +516,14 @@ export default {
     'Choose a control method. Keyboard works without extra hardware; Leader is available when a master device is connected.',
   tutorialTeleopStart:
     'Press this button to send key input to the actual robot. Start with a small step size and move slowly at first.',
+  tutorialTeleopDialogIntro:
+    'Detailed teleoperation settings. Tweak EE offsets, keyboard mapping, and leader-robot calibration here per assembly.',
+  tutorialTeleopDialogGeneral:
+    'Per-robot end-effector offsets. Useful when a tool is mounted in front of the wrist — fine-tune so the EE position matches the actual tooltip.',
+  tutorialTeleopDialogKeyboard:
+    "Customize keyboard control: change which keys map to which axis and how big each step is. Use Reset to Defaults if you've over-tweaked it.",
+  tutorialTeleopDialogLeader:
+    'Set up a leader robot (Easy Controller). Drag a leader joint onto a follower joint to map them, set the origin pose, and pick a sign per joint to flip direction if needed.',
 
   tutorialWorkspaceIntro:
     'A workspace gathers everything for one task (e.g., moving a cup): cameras, robots, collected data, and trained models. Pick one from the dropdown above first.',
@@ -528,48 +538,48 @@ export default {
   tutorialWorkspaceRobotConfig:
     "Set the robot's default starting pose (home pose) for each task.",
   tutorialWorkspaceMonitoring:
-    '여기 보이는 카메라 영상이나 로봇 카드를 누르면, 왼쪽에서 그 항목의 세부 설정을 할 수 있어요.',
+    'Click any camera feed or robot card here to open its detailed settings on the left.',
   tutorialAugmentIntro:
-    '데이터 증강(Augmentation)은 같은 시연을 색감·밝기·노이즈·시점 등을 살짝씩 바꿔 복제해서 학습 데이터를 늘리는 작업이에요. 직접 더 시연하지 않아도 다양한 환경에 강한 AI를 만들 수 있어요. 왼쪽에서 적용할 항목을 펼치고 슬라이더를 움직이면 오른쪽 미리보기에 즉시 결과가 반영됩니다. 다 정한 뒤 Start Augmentation을 누르면 새 데이터셋이 생성돼요.',
+    'Augmentation grows your training set by cloning each demonstration with small variations in color, brightness, noise, and viewpoint — so the AI generalizes across environments without recording more demos. Expand items on the left and move the sliders to see results in the right preview, then click Start Augmentation to generate a new dataset.',
   tutorialAugmentLightness:
-    '이미지의 밝기를 전체적으로 더 밝게(+) 또는 더 어둡게(−) 조정해요. 같은 작업을 다양한 조명에서 한 것처럼 보이게 만들어, 형광등/햇빛/저녁 같은 환경 변화에 강해집니다.',
+    'Adjusts overall image brightness lighter (+) or darker (−). It makes the same task look like it was done under different lighting (fluorescent / sunlight / evening), so the model handles lighting changes better.',
   tutorialAugmentHSV:
-    '색상(Hue)·채도(Saturation)·밝기값(Value)을 살짝씩 바꿔요. 카메라 화이트밸런스가 다르거나 배경 색이 살짝 달라도 잘 동작하게 만드는 데 효과적이에요. Random HSV를 켜면 매번 무작위로 흔들어 더 다양한 변형을 만듭니다.',
+    'Slightly shifts hue, saturation, and value. Useful when camera white balance or background color varies. Turning Random HSV on jitters the values randomly each time for more variety.',
   tutorialAugmentDisturbances:
-    '이미지에 작은 사각형 노이즈를 무작위로 그려 넣어요. 시연 도중 손/물체가 카메라를 살짝 가리는 상황을 흉내내서, 일부분이 가려져도 작업을 이어갈 수 있게 학습됩니다.',
+    'Draws small random rectangular patches over the image — simulating a hand or object briefly blocking the camera so the model keeps working when parts of the view are occluded.',
   tutorialAugmentSaltPepper:
-    '검은 점·흰 점을 무작위로 흩뿌려 카메라 센서 노이즈처럼 보이게 만들어요. 저조도/저화질 카메라에서도 강하게 동작하도록 도와줍니다.',
+    'Sprinkles random black and white dots like camera sensor noise. Helps the model stay robust on low-light or low-quality cameras.',
   tutorialAugmentGaussian:
-    '평균(Mean)과 표준편차(Sigma)로 정의되는 가우시안 노이즈를 픽셀에 더해요. 일반적인 영상 잡음에 잘 견디는 모델을 만드는 가장 보편적인 방법입니다.',
+    'Adds Gaussian noise (defined by mean and sigma) to pixels. The most common way to make a model that tolerates ordinary video noise.',
   tutorialAugmentPerspective:
-    '이미지 크기·회전·기울임(Shear)·원근(Perspective)을 변형해요. 카메라가 살짝 움직였거나 시점이 조금 달라져도 잘 동작하도록, 시점 변화에 대한 강건성을 높입니다.',
+    'Varies image scale, rotation, shear, and perspective. Improves robustness when the camera shifts slightly or the viewpoint changes.',
 
   tutorialMonOverview:
-    '여기 보이는 카메라 영상이나 로봇 카드를 누르면, 왼쪽에서 그 항목의 세부 설정을 할 수 있어요. 카메라/로봇이 모두 켜지면 아래에 데이터 수집 또는 추론 버튼이 나타납니다.',
+    'Click any camera feed or robot card here to open its detailed settings on the left. Once cameras and robots are all on, the data-collection or inference button appears below.',
   tutorialMonIdlePending:
-    '데이터를 모으기 전에 4가지를 정해주세요. (1) 어느 폴더에 모을지(Dataset) (2) 어떤 작업인지 한 줄 설명(Language Instruction) (3) 어떻게 조종할지(Teleoperation Type) (4) 초당 몇 프레임으로 기록할지(Hz). 빨간 REC 버튼을 누르면 녹화가 시작되고, 버튼 옆 집모양 뱃지를 켜두면 녹화 직전에 로봇이 자동으로 홈 포즈로 이동합니다.',
+    'Set four things before recording: (1) which folder to save into (Dataset), (2) a one-line description of the task (Language Instruction), (3) how to control the robot (Teleoperation Type), (4) frames per second (Hz). Press the red REC button to start recording. Toggle the home-pose badge next to it if you want the robot to auto-move to home before each recording.',
   tutorialMonCollectingLeader:
-    'Easy Controller(리더 로봇)로 시연 중이에요. 리더를 직접 움직이면 화면 속 로봇이 그대로 따라오고, 그 동작이 데이터로 저장됩니다. 작업이 잘 끝났으면 SUCCESS(C)를 눌러 성공 라벨을 찍고, COMPLETE로 에피소드를 저장하세요.',
+    "You're demonstrating with the Easy Controller (leader robot). Move the leader and the on-screen robot follows it, and that motion is saved as data. When the task succeeds, press SUCCESS (C) to label it, then COMPLETE to save the episode.",
   tutorialMonCollectingKeyboard:
-    '키보드로 로봇 끝(EE)을 직접 움직이는 모드예요. 왼쪽의 로봇 카드를 한 번 클릭해서 조작 대상을 고른 뒤 — W/S(앞뒤), A/D(좌우), E/Z(위아래), .[/]: 회전, B/N(그리퍼), Space(정지). Step Size를 조절해 한 번에 움직이는 거리를 바꿀 수 있어요. 작업 끝나면 SUCCESS(C) → COMPLETE.',
+    'Drive the robot end-effector directly with the keyboard. Click a robot card on the left to choose the control target, then — W/S (forward/back), A/D (left/right), E/Z (up/down), [ ] . / for rotation, B/N (gripper), Space (stop). Adjust Step Size to change how far one keypress moves. When done, SUCCESS (C) → COMPLETE.',
   tutorialMonCollectingExternal:
-    '외부 시스템(다른 노드/조이스틱 등)이 로봇을 움직이고 있어요. EasyTrainer는 그 동작을 받아서 그대로 기록만 합니다. 끝나면 SUCCESS(C) → COMPLETE를 누르세요.',
+    'An external system (another node, joystick, etc.) is moving the robot. EasyTrainer just records what it sees. When done, press SUCCESS (C) → COMPLETE.',
   tutorialMonCollectingViveExternal:
-    'HTC Vive 트래커로 손을 움직이면 그 위치를 따라 로봇이 함께 움직이고, 그 시연이 기록됩니다. 작업이 끝나면 SUCCESS(C) → COMPLETE.',
+    'Move your hand with the HTC Vive tracker and the robot follows it, with the demonstration recorded. When done, SUCCESS (C) → COMPLETE.',
   tutorialMonCollectingViveOnly:
-    '로봇 없이 Vive 트래커의 손 움직임만 기록하는 모드예요. 사람 시연을 데이터화해서 나중에 학습에 쓰기 위한 용도. 끝나면 SUCCESS(C) → COMPLETE.',
+    'Records only the Vive tracker hand motion — no robot involved. Use this to capture human demonstrations for later training. When done, SUCCESS (C) → COMPLETE.',
   tutorialMonCollectingMotionPlanning:
-    '외부 ROS2 서비스(예: pick_and_place)가 자동으로 로봇을 움직이고, 그 동작이 데이터로 저장됩니다. 끝나면 SUCCESS(C) → COMPLETE.',
+    'An external ROS2 service (e.g., pick_and_place) is moving the robot automatically and the motion is saved as data. When done, SUCCESS (C) → COMPLETE.',
   tutorialMonViveInit:
-    'Vive 트래커가 켜지길 기다리는 중이에요. 트래커 전원이 켜져 있고 베이스 스테이션과 연결됐는지 확인해주세요.',
+    'Waiting for the Vive tracker to come online. Make sure the tracker is powered on and connected to the base station.',
   tutorialMonMovingHome:
-    '로봇이 홈 포즈로 자동 이동 중이에요. 도착하면 곧바로 데이터 수집이 시작됩니다.',
+    'The robot is auto-moving to its home pose. Data collection will start as soon as it arrives.',
   tutorialMonReplay:
-    '저장된 에피소드를 다시 재생하는 화면이에요. qaction(저장된 관절 명령) 또는 ee_delta(EE 증분)로 재생할 수 있고, Capture Episode를 켜면 재생하면서 새 데이터셋에 다시 녹화도 됩니다.',
+    'Replays a saved episode. Play back via qaction (saved joint commands) or ee_delta (EE increments). Toggle Capture Episode to also re-record into a new dataset while replaying.',
   tutorialMonInferenceSelected:
-    '학습된 AI(체크포인트)를 골라뒀어요. Hz를 정하고 빨간 Start Inference 버튼을 누르면 AI가 직접 로봇을 움직입니다. 버튼 옆 집모양 뱃지를 켜두면 시작 전에 로봇이 자동으로 홈 포즈로 이동합니다.',
+    "You've picked a trained AI (checkpoint). Set Hz and press the red Start Inference button to let the AI drive the robot. Toggle the home-pose badge next to it to auto-move the robot to home before starting.",
   tutorialMonInferenceRunning:
-    'AI가 직접 로봇을 움직이는 중이에요. 위쪽 점수(Succeed/OOD)를 보면서 잘 동작하는지 지켜보고, 이상하면 Stop으로 즉시 멈추세요.',
+    'The AI is driving the robot. Watch the Succeed / OOD scores at the top to see if it is doing well, and press Stop immediately if anything looks wrong.',
 
   tutorialTrainIntro:
     'A place to teach AI new skills using the data you collected. Pick a workspace above to start the step-by-step training flow.',
@@ -659,6 +669,8 @@ export default {
   navTeleoperation: 'Teleoperation',
   navWorkspace: 'Workspace',
   navTrain: 'Train',
+  navDatasets: 'Datasets',
+  navPlanner: 'Planner',
   ariaMenu: 'Menu',
   languageSwitcher: 'Language',
   languageEnglish: 'English',
@@ -727,4 +739,66 @@ export default {
 
   // ───── Hdf5 viewer ─────
   hdf5LanguagePrefix: 'Language: {value}',
+
+  // ───── Common verbs (Dataset) ─────
+  copy: 'Copy',
+  trim: 'Trim',
+  saveLanguage: 'Save Prompt',
+
+  // ───── Dataset page ─────
+  datasetPageTitle: 'Datasets',
+  datasetPageBody: 'Pick a workspace to browse the datasets and episodes that belong to it.',
+  datasetPageBody2: 'Click an episode to view video, graphs, and trim/copy/move tools.',
+  datasetEmpty: 'No datasets.',
+  datasetEpisodesSuffix: 'episodes',
+  datasetSelectEpisodeHint: 'Select an episode on the left.',
+  datasetSelectedCount: '{count} selected',
+  datasetFrames: '{count} frames',
+  datasetCurrentFrame: 'Frame',
+  datasetNoVideo: 'No playable video.',
+
+  // Trim
+  datasetTrimRangeLabel: 'Trim range',
+  datasetTrimApply: 'Apply trim',
+  datasetTrimReset: 'Reset range',
+  datasetTrimInProgress: 'Trimming episode…',
+  datasetTrimDone: 'Episode trimmed.',
+  datasetTrimFailed: 'Trim failed.',
+
+  // Language prompt
+  datasetLanguagePrompt: 'Language prompt',
+  datasetLanguageSaved: 'Prompt saved.',
+  datasetLanguageSaveFailed: 'Failed to save prompt.',
+  datasetSaveFailed: 'Save failed.',
+
+  // Channels / graph
+  datasetChannelLabel: 'Channel',
+  datasetSeriesShown: 'Series shown',
+  datasetSelectSeries: 'Series',
+  datasetAll: 'All',
+  datasetNone: 'None',
+  datasetGraphEmpty: 'No data to display.',
+
+  // Move / Copy / Delete
+  datasetCopyEpisode: 'Copy',
+  datasetMoveEpisode: 'Move',
+  datasetMoveDialogTitle: 'Move episodes',
+  datasetCopyDialogTitle: 'Copy episodes',
+  datasetMoveTargetLabel: 'Target dataset',
+  datasetMoveDone: 'Episodes moved.',
+  datasetCopyDone: 'Episodes copied.',
+  datasetTransferFailed: 'Failed to transfer episodes.',
+  datasetConfirmDeleteEpisode: 'Delete this episode?',
+  datasetDeleteFailed: 'Failed to delete episode.',
+  datasetConfirmBatchDelete: 'Delete the {count} selected episodes?',
+  datasetBatchDeleteDone: 'Deleted {count} episodes.',
+  datasetBatchDeleteFailed: 'Batch delete failed.',
+
+  // Downsample
+  datasetDownsample: 'Downsample',
+  datasetDownsampleTitle: 'Downsample dataset',
+  datasetDownsampleKeep: 'Keep ratio',
+  datasetDownsampleEvery: 'Keep 1 of every N frames',
+  datasetDownsampleStarted: 'Downsample started.',
+  datasetDownsampleFailed: 'Downsample failed.',
 }
