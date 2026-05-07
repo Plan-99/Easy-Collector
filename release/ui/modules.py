@@ -516,11 +516,10 @@ def _install_deps_in_containers(meta: dict) -> None:
     # SDK install_cmd (e.g. "pip3 install -e .")
     sdk_cfg = install.get("sdk", {})
     install_cmd = sdk_cfg.get("install_cmd", "")
-    sdk_target = sdk_cfg.get("target", "")
-    if install_cmd and sdk_target:
-        # sdk_target is relative to project root, map to container path
-        # e.g. "ros2/robot_sdk/piper" → "/root/robot_sdk/piper"
-        container_sdk_path = sdk_target.replace("ros2/robot_sdk", "/root/robot_sdk")
+    if install_cmd and meta.get("id"):
+        # SDK 설치 위치는 항상 module_id 기준 (manifest 의 install.sdk.target 무시).
+        # 컨테이너 안 경로: /root/robot_sdk/<module_id>
+        container_sdk_path = f"/root/robot_sdk/{meta['id']}"
         try:
             result = _sp.run(
                 ["docker", "inspect", "-f", "{{.State.Running}}", _ROS2_CONTAINER],
@@ -760,8 +759,10 @@ def _install_robot_sensor_module(tar_path: str, module_id: str) -> None:
                 ros2_target_cfg = "ros2/" + ros2_target_cfg
             ros2_base = project / ros2_target_cfg
 
-            # ros2_ws/src/<module_name>/ 안에 패키지들을 설치
-            ros2_target = ros2_base / module_name
+            # ros2_ws/src/<module_id>/ 안에 패키지들을 설치
+            # (옛 버전은 tar 의 top folder name 을 썼으나 vendor 명과 module_id 가 달라
+            #  manifest path 와 mismatch. id 로 통일.)
+            ros2_target = ros2_base / module_id
             if ros2_target.exists():
                 # 이전 빌드의 .pyc / __pycache__ 등이 컨테이너 안에서 root 소유로
                 # 만들어져 있을 수 있다. 호스트 user 로 직접 rmtree 가 막히면
@@ -812,7 +813,8 @@ def _install_robot_sensor_module(tar_path: str, module_id: str) -> None:
         # Install sdk/ contents
         sdk_src = module_dir / "sdk"
         if sdk_src.is_dir() and any(f for f in sdk_src.iterdir() if f.name != ".gitkeep"):
-            sdk_target_cfg = install_cfg.get("sdk", {}).get("target", f"ros2/robot_sdk/{module_name}")
+            # sdk 설치 폴더도 module_id 로 통일 (manifest 의 install.sdk.target 무시)
+            sdk_target_cfg = f"ros2/robot_sdk/{module_id}"
             if not sdk_target_cfg.startswith("ros2/"):
                 sdk_target_cfg = "ros2/" + sdk_target_cfg
             sdk_target = project / sdk_target_cfg
@@ -1108,35 +1110,29 @@ def remove_module(module_id: str) -> bool:
                     except Exception:
                         continue
 
-        # robot_sdk/ 에서도 삭제 — manifest의 install.sdk.target 경로 사용
-        sdk_target = None
+        # robot_sdk/ 에서도 삭제 — module_id 기준 폴더 (install 코드와 동일 정책)
+        # 옛 install (vendor 폴더명) 도 함께 정리해야 leftover 안 남음
+        sdk_dir = project / "ros2" / "robot_sdk"
+        sdk_targets_rel = [f"ros2/robot_sdk/{module_id}"]
         if manifest:
-            sdk_target = manifest.get("install", {}).get("sdk", {}).get("target", "")
-        _log = f"[MODULE REMOVE] {module_id}: manifest={manifest is not None}, sdk_target={sdk_target!r}, project={project}\n"
-        if sdk_target:
+            legacy_target = manifest.get("install", {}).get("sdk", {}).get("target", "")
+            if legacy_target and legacy_target not in sdk_targets_rel:
+                sdk_targets_rel.append(legacy_target)
+        _log = f"[MODULE REMOVE] {module_id}: cleaning sdk targets {sdk_targets_rel}\n"
+        for sdk_target in sdk_targets_rel:
             sdk_path = project / sdk_target
-            _log += f"[MODULE REMOVE] sdk_path={sdk_path}, exists={sdk_path.is_dir()}\n"
-            if sdk_path.is_dir():
-                try:
-                    shutil.rmtree(sdk_path)
-                except PermissionError:
-                    # root 소유 파일(egg-info 등)이 있으면 docker exec로 삭제
-                    import subprocess as _sp
-                    container_path = sdk_target.replace("ros2/robot_sdk", "/root/robot_sdk")
-                    _sp.run(["docker", "exec", _ROS2_CONTAINER, "rm", "-rf", container_path],
-                            check=False, timeout=10)
-                    # 컨테이너가 없을 경우 sudo fallback
-                    if sdk_path.is_dir():
-                        _sp.run(["sudo", "rm", "-rf", str(sdk_path)], check=False, timeout=10)
-                _log += f"[MODULE REMOVE] Deleted {sdk_path}, still_exists={sdk_path.exists()}\n"
-        else:
-            # fallback: 이름 추측
-            sdk_dir = project / "ros2" / "robot_sdk"
-            if sdk_dir.is_dir():
-                expected_name = module_id.replace("robot_", "").replace("sensor_", "").replace("gripper_", "")
-                candidate = sdk_dir / expected_name
-                if candidate.is_dir():
-                    shutil.rmtree(candidate, ignore_errors=True)
+            if not sdk_path.is_dir():
+                continue
+            try:
+                shutil.rmtree(sdk_path)
+            except PermissionError:
+                import subprocess as _sp
+                container_path = sdk_target.replace("ros2/robot_sdk", "/root/robot_sdk")
+                _sp.run(["docker", "exec", _ROS2_CONTAINER, "rm", "-rf", container_path],
+                        check=False, timeout=10)
+                if sdk_path.is_dir():
+                    _sp.run(["sudo", "rm", "-rf", str(sdk_path)], check=False, timeout=10)
+            _log += f"  removed {sdk_path}\n"
     else:
         # extension: backend/extensions/ 에서 삭제
         install_dir = project / "backend" / "extensions"

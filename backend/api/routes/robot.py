@@ -215,9 +215,6 @@ def create_robot():
     if 'is_sim' in request.json:
         settings['is_sim'] = request.json.get('is_sim', False)
 
-    if 'can_port' in settings and settings['can_port'].startswith('can_'):
-        settings['can_port'] = 'can' + settings['can_port'][4:]
-
     RobotModel.create(
         name=name,
         type=type,

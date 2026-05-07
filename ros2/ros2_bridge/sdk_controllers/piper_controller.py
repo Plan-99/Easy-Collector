@@ -46,7 +46,11 @@ class PiperSDKController(BaseSDKController):
     """Piper 로봇 SDK 직접 제어 컨트롤러."""
 
     def __init__(self, config: dict):
-        self._can_port = config.get('can_port', 'can0')
+        port = config.get('can_port', 'can0')
+        # Linux CAN 인터페이스 이름은 underscore 없는 형태(canX)여야 한다.
+        if isinstance(port, str) and port.startswith('can_'):
+            port = 'can' + port[4:]
+        self._can_port = port
         self._has_gripper = config.get('has_gripper', True)
         self._speed_percent = config.get('speed_percent', 100)
         self._piper = None

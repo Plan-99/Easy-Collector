@@ -33,6 +33,64 @@ def _iter_manifests():
             print(f"[module_loader] skip {fname}: {e}", flush=True)
 
 
+# ---------------------------------------------------------------------------
+# Path placeholder substitution: {ros2_root} / {sdk_root}
+#
+# manifest 의 urdf_path / urdf_package_dir / driver.launch.args 등에서 install
+# 폴더의 절대 경로를 module_id 에 의존하지 않고 portable 하게 표기하기 위한 placeholder.
+# - {ros2_root} → 실제 ros2 install 폴더 (보통 /root/ros2_ws/src/<id 또는 vendor명>)
+# - {sdk_root}  → 실제 sdk install 폴더 (보통 /root/robot_sdk/<id 또는 vendor명>)
+# install 폴더 이름이 module_id 와 다를 수 있어 (옛 마켓 모듈 piper 등) 동적 lookup.
+# ---------------------------------------------------------------------------
+
+def _resolve_install_root(module_id: str, kind: str = 'ros2') -> str:
+    """모듈의 실제 install 폴더 경로. 디스크에서 module.json id 매칭으로 찾고,
+    없으면 module_id 를 폴더명으로 가정해 fallback.
+    """
+    base = '/root/robot_sdk' if kind == 'sdk' else '/root/ros2_ws/src'
+    if os.path.isdir(base):
+        try:
+            for entry in os.listdir(base):
+                d = os.path.join(base, entry)
+                mj = os.path.join(d, 'module.json')
+                if not os.path.isfile(mj):
+                    continue
+                try:
+                    with open(mj) as f:
+                        if json.load(f).get('id') == module_id:
+                            return d
+                except Exception:
+                    continue
+        except OSError:
+            pass
+    return os.path.join(base, module_id)
+
+
+def _substitute_paths(value, ros2_root: str, sdk_root: str):
+    """문자열 / dict / list 안의 {ros2_root} / {sdk_root} placeholder 를 재귀 치환."""
+    if isinstance(value, str):
+        if '{ros2_root}' in value:
+            value = value.replace('{ros2_root}', ros2_root)
+        if '{sdk_root}' in value:
+            value = value.replace('{sdk_root}', sdk_root)
+        return value
+    if isinstance(value, dict):
+        return {k: _substitute_paths(v, ros2_root, sdk_root) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_substitute_paths(v, ros2_root, sdk_root) for v in value]
+    return value
+
+
+def _resolve_manifest_paths(manifest: dict) -> dict:
+    """manifest 전체에 대해 {ros2_root}/{sdk_root} placeholder 치환."""
+    mid = manifest.get('id', '')
+    if not mid:
+        return manifest
+    ros2_root = _resolve_install_root(mid, 'ros2')
+    sdk_root = _resolve_install_root(mid, 'sdk')
+    return _substitute_paths(manifest, ros2_root, sdk_root)
+
+
 def _ik_to_ros2_format(ik: dict) -> dict:
     """JSON 의 ik 섹션 → agent.py 가 받는 dict 형태.
 
@@ -67,6 +125,7 @@ def get_robot_config(robot_type: str) -> dict | None:
     for manifest in _iter_manifests():
         if (manifest.get('category') or '') != 'robot':
             continue
+        manifest = _resolve_manifest_paths(manifest)
         for robot in manifest.get('robots') or []:
             if robot.get('type') != robot_type:
                 continue
@@ -97,6 +156,7 @@ def get_robot_driver_launch(robot_type: str) -> dict | None:
     for manifest in _iter_manifests():
         if (manifest.get('category') or '') != 'robot':
             continue
+        manifest = _resolve_manifest_paths(manifest)
         for robot in manifest.get('robots') or []:
             if robot.get('type') != robot_type:
                 continue
@@ -132,6 +192,7 @@ def get_robot_driver_hooks(robot_type: str) -> dict | None:
     for manifest in _iter_manifests():
         if (manifest.get('category') or '') != 'robot':
             continue
+        manifest = _resolve_manifest_paths(manifest)
         for robot in manifest.get('robots') or []:
             if robot.get('type') != robot_type:
                 continue
@@ -155,6 +216,7 @@ def get_sensor_driver_launch(sensor_type: str) -> dict | None:
     for manifest in _iter_manifests():
         if (manifest.get('category') or '') != 'sensor':
             continue
+        manifest = _resolve_manifest_paths(manifest)
         for sensor in manifest.get('sensors') or []:
             if sensor.get('type') != sensor_type:
                 continue

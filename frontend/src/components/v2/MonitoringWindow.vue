@@ -717,6 +717,12 @@ function _doStartDataCollection(effectiveTeleType) {
     addSucceedKeyListener();
     showProcessConsole.value = true;
     collectingProgress.value = 0;
+    // 백엔드가 sensor init/env setup/home pose move 까지 끝내고 첫
+    // moving_homepose:false emit 을 보내기 전까지는 사용자 입력이 들어오면 안된다.
+    // 백엔드 setup 만 3~5초 걸려서 그 사이 keyboardHandler 가 그대로 작동했었음.
+    if (moveHomposeInDataCollection.value && effectiveTeleType !== 'externel' && effectiveTeleType !== 'vive_only') {
+        movingHomepose.value = true;
+    }
     const payload = {
         task: props.workspace,
         robots: props.robots,
@@ -795,6 +801,9 @@ function sendDelta(robot, eeDelta) {
 }
 
 const keyboardHandler = (event) => {
+    // Home pose 이동 / vive init 중에는 사용자 키 입력 무시 — 그동안 로봇이 백엔드
+    // 명령으로 움직이고 있으므로 사용자 입력과 충돌하면 충돌 또는 의도치 않은 위치로 감.
+    if (movingHomepose.value || viveInitializing.value) return;
     // Step size 등 폼 입력란이 포커스된 상태에서, 숫자 편집 키는 입력에 양보하고
     // 그 외 키(WASD 등 로봇 제어키)는 자동으로 input을 blur 후 그대로 로봇 제어로 처리.
     const ae = document.activeElement;

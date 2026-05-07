@@ -48,7 +48,10 @@ class RemoteAgent:
         self.last_joint_update = None
         self.moved_by_ui = False
         self.move_lock = False
-        self.is_moving = False
+        # move_to 는 비동기라 server-side 진행 상태를 매번 RPC 로 폴링하면 비싸다.
+        # 대신 호출자가 알려준 duration 으로 로컬 deadline 을 둬서 그 시간 동안만
+        # is_moving=True 로 보고한다. cancel_move_to 호출 시 즉시 0 으로 리셋.
+        self._move_deadline = 0.0  # monotonic seconds
 
         # gRPC로 Agent 생성
         client = get_bridge_client()
@@ -117,12 +120,19 @@ class RemoteAgent:
             duration=float(duration),
             hz=float(hz),
         ))
+        self._move_deadline = time.monotonic() + float(duration)
 
     def cancel_move_to(self):
         """진행 중인 move_to 를 즉시 중단 신호 — server-side thread 가
         다음 step 직전에 abort 검사 후 종료. is_moving 도 곧 False 로."""
         client = get_bridge_client()
         client.agent.CancelMoveTo(pb.AgentId(id=self._agent_id))
+        self._move_deadline = 0.0
+
+    @property
+    def is_moving(self):
+        """move_to 가 비동기로 진행 중인지. duration 기반 로컬 추정."""
+        return time.monotonic() < self._move_deadline
 
     # ------------------------------------------------------------------
     # State Queries

@@ -70,96 +70,25 @@ def get_checkpoint_dir(checkpoint_id) -> str:
 #   robotiq_2f_85                       → modules/robots/robotiq/module.json
 #   2FG7                                → modules/robots/onrobot/module.json
 from .module_loader import load_all_robots as _load_all_robots
+from .module_loader import load_all_sensors as _load_all_sensors
 
 # 옛 코드가 `from ...configs.global_configs import SUPPORT_ROBOTS` 외에
-# `_ALL_ROBOTS` 를 직접 import 하는 경로는 없지만, 안전을 위해 빈 list 로 alias.
+# `_ALL_ROBOTS` / `_ALL_SENSORS` 를 직접 import 하는 경로는 없지만, 안전을 위해
+# 빈 list 로 alias. 진실원천은 modules/ manifest.
 _ALL_ROBOTS: list = []
-
-
-_ALL_SENSORS = [
-    {
-        'name': 'realsense_d435_color',
-        'company': 'Intel',
-        'role': 'rgb_camera',
-        'topic_type': 'color',
-        'read_topic': '/camera/color/image_raw/compressed',
-        'read_topic_msg': 'sensor_msgs/CompressedImage',
-        'custom_fields': ['serial_no'],
-        'resolution': [1280, 720],
-        'module_id': 'sensor_realsense',
-    },
-    {
-        'name': 'realsense_d405_color',
-        'company': 'Intel',
-        'role': 'rgb_camera',
-        'topic_type': 'color',
-        'read_topic': '/camera/color/image_rect_raw/compressed',
-        'read_topic_msg': 'sensor_msgs/CompressedImage',
-        'custom_fields': ['serial_no'],
-        'resolution': [848, 480],
-        'module_id': 'sensor_realsense',
-    },
-    {
-        'name': 'webcam_color',
-        'company': 'Logitec',
-        'role': 'rgb_camera',
-        'topic_type': 'color',
-        'read_topic': '/image_raw/compressed',
-        'read_topic_msg': 'sensor_msgs/CompressedImage',
-        'custom_fields': ['device_index'],
-        'resolution': [600, 480],
-        'module_id': 'sensor_webcam',
-    },
-    {
-        'name': 'kinova_vision_color',
-        'company': 'Kinova',
-        'role': 'rgb_camera',
-        'topic_type': 'color',
-        'read_topic': '/color/image_raw/compressed',
-        'read_topic_msg': 'sensor_msgs/CompressedImage',
-        'custom_fields': ['ip_address'],
-        'resolution': [1980, 1080],
-        'module_id': 'robot_kinova',
-    }
-]
-
-def _get_installed_module_ids():
-    """설치된 모듈의 ID 목록을 반환한다.
-
-    Single source of truth: /opt/easytrainer/project/modules/*.json
-    런처에서 모듈 설치/제거 시 이 폴더에 manifest를 생성/삭제한다.
-    """
-    import json
-    data_root = os.environ.get('EASYTRAINER_DATA_DIR', '/opt/easytrainer')
-    modules_dir = os.path.join(data_root, 'project', 'modules')
-    installed = set()
-
-    if os.path.isdir(modules_dir):
-        for fname in os.listdir(modules_dir):
-            if not fname.endswith('.json'):
-                continue
-            fpath = os.path.join(modules_dir, fname)
-            try:
-                with open(fpath) as f:
-                    meta = json.load(f)
-                mid = meta.get('id', fname[:-5])  # fallback to filename without .json
-                installed.add(mid)
-            except Exception:
-                pass
-
-    return installed
+_ALL_SENSORS: list = []
 
 
 def _get_support_robots():
-    """module_loader 가 manifest 에서 직접 읽어옴 — 더 이상 _ALL_ROBOTS in-code
-    리스트 + module_id 필터 조합을 쓰지 않는다. manifest 자체가 곧 "설치됨" 의
-    증거이므로 별도 필터링 불필요.
-    """
+    """module_loader 가 manifest 에서 직접 읽어옴 — manifest 자체가 "설치됨"의
+    증거이므로 별도 필터링 불필요."""
     return _load_all_robots()
 
 def _get_support_sensors():
-    installed = _get_installed_module_ids()
-    return [s for s in _ALL_SENSORS if not s.get('module_id') or s['module_id'] in installed]
+    """robot 과 동일 패턴 — sensor 도 manifest 의 sensors[] 가 진실원천.
+    sensor 모듈뿐 아니라 robot 모듈(예: kinova)도 vision sensor 를 포함할 수 있다.
+    """
+    return _load_all_sensors()
 
 # 하위호환: 기존 코드에서 SUPPORT_ROBOTS / SUPPORT_SENSORS를 직접 참조하는 곳 대응
 class _DynamicList:

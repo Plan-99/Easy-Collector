@@ -1982,22 +1982,25 @@ class ModuleWizard(QDialog):
         for v in self._all_variants():
             d = v.to_dict()
             d["driver"] = v.driver_dict(is_sdk, fallback_sdk_type=mid)
-            # urdf_package_dir 은 모드 + (ROS 의 경우) variant 가 가리키는 sub-package 에 따라 다름
+            # urdf_package_dir 은 placeholder 형태로 저장 — module_loader 가 install
+            # 시점에 실제 경로로 치환. id 와 install 폴더가 달라도 portable.
+            #   ROS:  {ros2_root}/<sub_pkg>/
+            #   SDK:  {sdk_root}/
             if is_sdk:
-                upd = f"/root/robot_sdk/{mid}/"
+                upd = "{sdk_root}/"
             else:
                 pkg_name = v._urdf_pkg_name
                 if not pkg_name:
                     pkg_name = self._ros_pkg_src.name if self._ros_pkg_src else "<pkg>"
-                upd = f"{CONTAINER_ROS2_WS_SRC}/{mid}/{pkg_name}/"
+                upd = f"{{ros2_root}}/{pkg_name}/"
             ik = d.setdefault("ik", {})
             ik["urdf_package_dir"] = upd
-            # IK 솔버는 urdf_path 를 absolute 로 받는다.
-            # UI 는 패키지 기준 상대로 저장하므로 직렬화 시점에 합쳐서 absolute 화.
+            # urdf_path: UI 의 패키지 기준 상대 경로를 그대로 placeholder 와 합쳐
+            # absolute placeholder 형태로 저장 (예: {ros2_root}/<pkg>/urdf/foo.urdf).
             rel = (ik.get("urdf_path") or "").strip()
             if rel:
-                if rel.startswith("/"):
-                    # 사용자가 직접 absolute 를 입력한 케이스 (legacy) — 그대로 사용
+                if rel.startswith("/") or rel.startswith("{"):
+                    # 사용자가 직접 절대 또는 placeholder 입력한 케이스 — 그대로 사용
                     abs_urdf = rel
                 else:
                     abs_urdf = upd.rstrip("/") + "/" + rel.lstrip("/")

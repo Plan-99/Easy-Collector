@@ -280,6 +280,9 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
         if settings.get('sdk_control'):
             sdk_type = settings.get('sdk_type', '')
             can_port = settings.get('can_port', 'can0')
+            # Linux CAN 인터페이스 이름은 underscore 없는 형태(canX)여야 한다.
+            if isinstance(can_port, str) and can_port.startswith('can_'):
+                can_port = 'can' + can_port[4:]
             has_gripper = rtype not in ('piper_no_gripper',)
             ip_address = settings.get('ip_address', '')
             params = {
@@ -379,6 +382,32 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
     # ------------------------------------------------------------------
     # Pre / post launch hooks (manifest 정의)
     # ------------------------------------------------------------------
+    def _resolve_module_install_root(self, module_id: str, root_kind: str) -> str | None:
+        """주어진 module_id 의 실제 install 폴더 경로를 디스크에서 찾는다.
+        manifest 의 id 와 install 폴더 이름이 다를 수 있어 (예: id=robot_piper, 폴더=piper)
+        ros2_ws/src/*/module.json 또는 robot_sdk/*/module.json 을 스캔."""
+        if root_kind == 'sdk':
+            base = '/root/robot_sdk'
+        else:
+            base = '/root/ros2_ws/src'
+        if not os.path.isdir(base):
+            return None
+        try:
+            for entry in os.listdir(base):
+                d = os.path.join(base, entry)
+                mj = os.path.join(d, 'module.json')
+                if not os.path.isfile(mj):
+                    continue
+                try:
+                    with open(mj) as f:
+                        if json.load(f).get('id') == module_id:
+                            return d
+                except Exception:
+                    continue
+        except OSError:
+            return None
+        return None
+
     def _run_pre_launch_hook(self, hook: dict, robot_id: int, module_id: str,
                               ctx: dict, log_name: str) -> None:
         """driver.pre_launch 항목 하나 실행.
@@ -387,8 +416,9 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
           - "script": 주어진 path 의 bash 스크립트 실행. 보통 OS 셋업 (예: CAN bring-up).
             args: {type, path, [root="ros2"|"sdk"], [wait_after]}
             path 가 / 로 시작하면 absolute, 아니면 root 기준 상대:
-              root="ros2" → /root/ros2_ws/src/<module_id>/<path>
-              root="sdk"  → /root/robot_sdk/<module_id>/<path>
+              root="ros2" → ros2_ws/src/<module install dir>/<path>
+              root="sdk"  → /root/robot_sdk/<module install dir>/<path>
+            install dir 은 module_id 와 다를 수 있으므로(piper 등) 디스크 스캔으로 결정.
         """
         htype = (hook.get('type') or '').strip().lower()
         if htype == 'script':
@@ -400,13 +430,16 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
                 path = substituted
             else:
                 root = (hook.get('root') or 'ros2').strip().lower()
-                if root == 'sdk':
-                    base = f'/root/robot_sdk/{module_id}'
-                else:
-                    base = f'/root/ros2_ws/src/{module_id}'
+                base = self._resolve_module_install_root(module_id, root)
+                if base is None:
+                    # fallback: module_id 를 그대로 폴더명으로 가정 (wizard 로 만든 모듈은 일치)
+                    if root == 'sdk':
+                        base = f'/root/robot_sdk/{module_id}'
+                    else:
+                        base = f'/root/ros2_ws/src/{module_id}'
                 path = os.path.join(base, substituted)
             if not os.path.isfile(path):
-                print(f"[pre_launch] script not found: {path}", flush=True)
+                print(f"[pre_launch] script not found: {path} (module_id={module_id})", flush=True)
                 return
             self._start_subprocess(f'pre_launch_{robot_id}_{os.path.basename(path)}',
                                    ['bash', path], log_name=log_name)
