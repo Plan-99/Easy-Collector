@@ -1,9 +1,9 @@
 {
   "id": "sensor_webcam",
   "name": "Webcam",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "category": "sensor",
-  "description": "USB 웹캠 (Logitech 등)",
+  "description": "USB 웹캠 (Logitech 등). v4l2 device_index 로 카메라 식별.",
   "install": {
     "ros2": {
       "target": "ros2/ros2_ws/src",
@@ -22,10 +22,15 @@
   },
   "sensors": [
     {
-      "type": "webcam_logitec",
+      "type": "webcam_color",
       "spec": {
         "company": "Logitec",
-        "custom_fields": ["device_index"]
+        "role": "rgb_camera",
+        "topic_type": "color",
+        "read_topic": "/image_raw/compressed",
+        "read_topic_msg": "sensor_msgs/CompressedImage",
+        "custom_fields": ["device_index"],
+        "resolution": [600, 480]
       },
       "driver": {
         "kind": "topic",

@@ -1,18 +1,26 @@
 {
   "id": "robot_test_arm",
   "name": "Test Arm (Virtual)",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "category": "robot",
   "description": "EasyTrainer 모듈 위자드 검증용 가상 6자유도 로봇. ROS 토픽 모드와 SDK 직접 제어 모드 두 변형을 모두 포함.",
   "install": {
-    "ros2": {"target": "ros2/ros2_ws/src", "build": "colcon"},
-    "sdk": {"target": "ros2/robot_sdk/test_arm", "install_cmd": "pip3 install -e ."}
+    "ros2": {
+      "target": "ros2/ros2_ws/src",
+      "build": "colcon"
+    },
+    "sdk": {
+      "target": "ros2/robot_sdk/test_arm",
+      "install_cmd": "pip3 install -e ."
+    }
   },
   "dependencies": {
     "apt": [],
     "pip": []
   },
-  "check": {"type": "path"},
+  "check": {
+    "type": "path"
+  },
   "robots": [
     {
       "type": "test_arm_ros",
@@ -20,9 +28,30 @@
         "company": "Test",
         "role": "single_arm",
         "joint_dim": 6,
-        "joint_names": ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
-        "joint_lower_bounds": [-3.14, -3.14, -3.14, -3.14, -3.14, -3.14],
-        "joint_upper_bounds": [3.14, 3.14, 3.14, 3.14, 3.14, 3.14],
+        "joint_names": [
+          "joint1",
+          "joint2",
+          "joint3",
+          "joint4",
+          "joint5",
+          "joint6"
+        ],
+        "joint_lower_bounds": [
+          -3.14,
+          -3.14,
+          -3.14,
+          -3.14,
+          -3.14,
+          -3.14
+        ],
+        "joint_upper_bounds": [
+          3.14,
+          3.14,
+          3.14,
+          3.14,
+          3.14,
+          3.14
+        ],
         "tool_inner": false,
         "tool_index": [],
         "ik_available": true,
@@ -45,11 +74,19 @@
         }
       },
       "ik": {
-        "urdf_path": "urdf/test_arm.urdf",
-        "urdf_package_dir": "/root/ros2_ws/src/test_arm/test_arm_driver/",
+        "urdf_path": "{ros2_root}/test_arm_driver/urdf/test_arm.urdf",
+        "urdf_package_dir": "{ros2_root}/test_arm_driver/",
         "joints_to_lock": [],
         "ee_definitions": [
-          {"name": "ee", "parent": "joint6", "offset": [0.0, 0.0, 0.05]}
+          {
+            "name": "ee",
+            "parent": "joint6",
+            "offset": [
+              0.0,
+              0.0,
+              0.05
+            ]
+          }
         ]
       }
     },
@@ -59,9 +96,30 @@
         "company": "Test",
         "role": "single_arm",
         "joint_dim": 6,
-        "joint_names": ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
-        "joint_lower_bounds": [-3.14, -3.14, -3.14, -3.14, -3.14, -3.14],
-        "joint_upper_bounds": [3.14, 3.14, 3.14, 3.14, 3.14, 3.14],
+        "joint_names": [
+          "joint1",
+          "joint2",
+          "joint3",
+          "joint4",
+          "joint5",
+          "joint6"
+        ],
+        "joint_lower_bounds": [
+          -3.14,
+          -3.14,
+          -3.14,
+          -3.14,
+          -3.14,
+          -3.14
+        ],
+        "joint_upper_bounds": [
+          3.14,
+          3.14,
+          3.14,
+          3.14,
+          3.14,
+          3.14
+        ],
         "tool_inner": false,
         "tool_index": [],
         "ik_available": true,
@@ -74,11 +132,19 @@
         "sdk_type": "test_arm"
       },
       "ik": {
-        "urdf_path": "urdf/test_arm.urdf",
-        "urdf_package_dir": "/root/robot_sdk/test_arm/",
+        "urdf_path": "{sdk_root}/urdf/test_arm.urdf",
+        "urdf_package_dir": "{sdk_root}/",
         "joints_to_lock": [],
         "ee_definitions": [
-          {"name": "ee", "parent": "joint6", "offset": [0.0, 0.0, 0.05]}
+          {
+            "name": "ee",
+            "parent": "joint6",
+            "offset": [
+              0.0,
+              0.0,
+              0.05
+            ]
+          }
         ]
       }
     }

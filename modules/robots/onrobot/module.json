@@ -1,9 +1,9 @@
 {
   "id": "gripper_onrobot",
   "name": "OnRobot Gripper",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "category": "robot",
-  "description": "OnRobot \uadf8\ub9ac\ud37c \ub4dc\ub77c\uc774\ubc84",
+  "description": "OnRobot 그리퍼 드라이버",
   "install": {
     "ros2": {
       "target": "ros2/ros2_ws/src",
