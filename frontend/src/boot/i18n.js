@@ -7,6 +7,16 @@ const STORAGE_KEY = 'easytrainer.locale'
 
 function pickInitialLocale () {
   if (typeof window === 'undefined') return 'en-US'
+  // 1) 런처가 ?lang=<locale> 로 넘기면 그 값을 우선 사용한다.
+  //    런처 i18n.py 의 SUPPORTED_LOCALES (ko-KR, en-US) 와 동일 형식.
+  //    선택 시 localStorage 에도 저장해 다음 방문(런처 끄고 직접 접속)에도 유지.
+  try {
+    const param = new URLSearchParams(window.location.search).get('lang')
+    if (param && SUPPORTED.includes(param)) {
+      try { window.localStorage?.setItem(STORAGE_KEY, param) } catch { /* ignore */ }
+      return param
+    }
+  } catch { /* ignore parse errors */ }
   const stored = window.localStorage?.getItem(STORAGE_KEY)
   if (stored && SUPPORTED.includes(stored)) return stored
   const nav = window.navigator?.language || ''

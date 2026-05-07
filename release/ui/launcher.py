@@ -3962,6 +3962,14 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                             btn.setEnabled(True)
                             btn.clicked.disconnect()
                             btn.clicked.connect(_make_action(module_id, "remove", btn, status_lbl, ver_lbl, release_ref))
+                            # 설치된 모듈 (특히 ROS2 패키지/SDK) 은 런처 재시작 후 컨테이너
+                            # entrypoint 가 deps 복원 + 새 colcon install/setup.bash 를 source
+                            # 해야 비로소 안정적으로 동작 — 사용자에게 명시적으로 알린다.
+                            QMessageBox.information(
+                                dlg,
+                                t("modules.restartNeeded"),
+                                t("modules.restartNeededBody"),
+                            )
                         else:
                             status_lbl.setText(t("common.failed"))
                             status_lbl.setStyleSheet("color: #ef4444; font-size: 11px; font-weight: 600;")
@@ -4651,18 +4659,25 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
     def load_ui(self, open_mode: str | None = None, force_refresh: bool = False):
         url_str = FRONTEND_URL
-        if force_refresh:
-            try:
-                from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
-                parts = urlsplit(url_str)
-                query = dict(parse_qsl(parts.query, keep_blank_values=True))
+        # 런처에 설정된 언어를 frontend 가 첫 로드 시 그대로 쓰도록 ?lang=<locale> 로 전달.
+        # frontend boot/i18n.js 의 pickInitialLocale() 가 이 쿼리를 우선 사용하고
+        # localStorage 에도 저장해 이후 방문에도 유지된다.
+        try:
+            from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+            parts = urlsplit(url_str)
+            query = dict(parse_qsl(parts.query, keep_blank_values=True))
+            query["lang"] = get_ui_locale()
+            if force_refresh:
                 query["_ts"] = str(int(time.time() * 1000))
-                url_str = urlunsplit(
-                    (parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment)
-                )
-            except Exception:
-                sep = "&" if "?" in url_str else "?"
-                url_str = f"{url_str}{sep}_ts={int(time.time() * 1000)}"
+            url_str = urlunsplit(
+                (parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment)
+            )
+        except Exception:
+            # 파싱 실패 시 단순 append fallback
+            sep = "&" if "?" in url_str else "?"
+            url_str = f"{url_str}{sep}lang={get_ui_locale()}"
+            if force_refresh:
+                url_str = f"{url_str}&_ts={int(time.time() * 1000)}"
         url = QUrl(url_str)
         mode = open_mode or getattr(self, "_open_ui_mode", "NEW")
         if mode not in ("NEW", "CURRENT", "EMBEDDED"):

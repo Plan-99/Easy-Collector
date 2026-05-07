@@ -136,12 +136,23 @@ GUI 흐름 우선. 터미널 명령은 트러블슈팅에서만 다루므로 별
 | - [ ] 06 | `06-module-checkout.png` | "결제 진행" 다이얼로그 (URL + 복사) |
 | - [ ] 07 | `07-module-after-pay.png` | 결제 완료 후 자동 설치 |
 | - [ ] 08 | `08-module-removed.png` | "제거" 클릭 후 미설치 상태 |
+| - [ ] 09 | `09-launcher-modules-local-button.png` | 모듈 관리 다이얼로그 하단 — ➕ 로컬 모듈 만들기 버튼 |
+| - [ ] 10 | `10-wizard-open.png` | ModuleWizard 첫 화면 — 모듈 ID/이름/카테고리/버전 입력 |
+| - [ ] 11 | `11-wizard-variant.png` | ModuleWizard variant — ROS 패키지/SDK 폴더, joint, URDF, IK |
+| - [ ] 12 | `12-wizard-launch.png` | ModuleWizard — launch args / pre-launch / post-launch |
+| - [ ] 13 | `13-wizard-validate.png` | ModuleWizard — 검증 결과 (schema + controller.py 점검) |
+| - [ ] 14 | `14-wizard-install.png` | ModuleWizard — 설치 진행 로그 ([1/3] 패키징 → [2/3] 트리 설치 → [3/3] colcon build) |
+| - [ ] 15 | `15-wizard-installed.png` | 설치 완료 후 모듈 관리 목록에 새 로컬 모듈 등장 |
 
 ---
 
 ## 4. sensors — 센서 추가
 
 폴더: `public/docs/sensors/`
+
+| 페이지 | 파일명 | 캡처 대상 |
+|---|---|---|
+| 공통 (모든 타입에서 공유) | `add-sensor-button.png` | SensorPage — 우측 상단/카드 끝의 Add Sensor 버튼 영역 |
 
 | 페이지 | # | 파일명 | 캡처 대상 |
 |---|---|---|---|
@@ -158,11 +169,20 @@ GUI 흐름 우선. 터미널 명령은 트러블슈팅에서만 다루므로 별
 
 폴더: `public/docs/robots/`
 
+| 페이지 | 파일명 | 캡처 대상 |
+|---|---|---|
+| 공통 (모든 타입에서 공유) | `add-robot-button.png` | RobotPage — Add Robot 버튼 영역 |
+| 공통 (모든 타입에서 공유) | `robot-form.png` | RobotForm — Robot Type 선택 + 연결 정보 입력 다이얼로그 |
+| 공통 (모든 타입에서 공유) | `robot-online.png` | 로봇 카드 — 토글 ON, 상태 ONLINE |
+| 공통 (모든 타입에서 공유) | `add-pose-button.png` | RobotPendant — ADD POSE 버튼 + 저장된 pose 버튼들 |
+
+vendor별 페이지는 **하드웨어 케이블 / 컨트롤박스 / vendor 티치펜던트 화면 위주**로만 캡처합니다. EasyTrainer의 RobotPendant 패널·Add Robot 폼·ONLINE 카드 같은 공통 흐름은 위 공통 슬롯에서 처리합니다.
+
 | 페이지 | # | 파일명 | 캡처 대상 |
 |---|---|---|---|
-| Piper | - [ ] 01 | `piper-01-form.png` | RobotForm — Type=piper, CAN Port=can0 |
-| Piper | - [ ] 02 | `piper-02-online.png` | Piper 카드 ONLINE |
-| Piper | - [ ] 03 | `piper-03-pendant.png` | Piper RobotPendant — Joint + IK |
+| Piper | - [ ] 01 | `piper-01-can-setup.png` | USB-CAN 어댑터 + Piper CAN 포트 연결 (+ 호스트 `ip link show can0`) |
+| Fairino | - [ ] 01 | `fairino-01-network.png` | Fairino 티치펜던트 — 네트워크 / IP 확인 화면 (필요 시 Remote 모드 토글 포함) |
+| Custom | (스크린샷 없음 — 텍스트 가이드만) | — | 폼 화면은 공통 슬롯으로 충분, custom 페이지는 텍스트 단계만 |
 | Custom | - [ ] 01 | `custom-01-form.png` | RobotForm — Role / Joint Names / Bounds / Read·Write 토픽 / IK Settings JSON 한 화면 |
 | Custom | - [ ] 02 | `custom-02-online.png` | Custom 로봇 TOPIC ON 상태 |
 

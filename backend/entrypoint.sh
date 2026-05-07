@@ -23,18 +23,33 @@ MANIFEST_DIR="$DATA_DIR/project/modules"
 DEPS_MARKER="/tmp/.backend_deps_installed"
 if [ ! -f "$DEPS_MARKER" ]; then
     if [ -d "$MANIFEST_DIR" ]; then
+        # Python3 의 PEP 668 (Debian/Ubuntu 외부 관리 환경) 차단 우회. backend 컨테이너는
+        # 격리된 환경이라 시스템 site-packages 에 직접 깔아도 안전.
+        PIP_FLAG="--break-system-packages"
+        if ! python3 -m pip install $PIP_FLAG --quiet --help >/dev/null 2>&1; then
+            PIP_FLAG=""
+        fi
         for mj in "$MANIFEST_DIR"/*.json; do
             [ -f "$mj" ] || continue
             mod_id=$(python3 -c "import json; print(json.load(open('$mj')).get('id',''))" 2>/dev/null)
             [ -z "$mod_id" ] && continue
 
-            pip_deps=$(python3 -c "import json; deps=json.load(open('$mj')).get('dependencies',{}).get('pip',[]); print(' '.join(deps))" 2>/dev/null)
+            # backend 컨테이너에서는 'pip' (모든 컨테이너 공통) + 'backend_pip' 둘 다 적용한다.
+            pip_deps=$(python3 -c "
+import json
+d = json.load(open('$mj')).get('dependencies', {})
+print(' '.join(list(d.get('pip') or []) + list(d.get('backend_pip') or [])))
+" 2>/dev/null)
             if [ -n "$pip_deps" ]; then
                 echo "[backend] Restoring pip deps for $mod_id: $pip_deps"
-                python3 -m pip install --quiet $pip_deps 2>/dev/null || true
+                python3 -m pip install --quiet $PIP_FLAG $pip_deps 2>/dev/null || true
             fi
 
-            apt_deps=$(python3 -c "import json; deps=json.load(open('$mj')).get('dependencies',{}).get('apt',[]); print(' '.join(deps))" 2>/dev/null)
+            apt_deps=$(python3 -c "
+import json
+d = json.load(open('$mj')).get('dependencies', {})
+print(' '.join(list(d.get('apt') or []) + list(d.get('backend_apt') or [])))
+" 2>/dev/null)
             if [ -n "$apt_deps" ]; then
                 echo "[backend] Restoring apt deps for $mod_id..."
                 apt-get install -y --no-install-recommends $apt_deps 2>/dev/null || true

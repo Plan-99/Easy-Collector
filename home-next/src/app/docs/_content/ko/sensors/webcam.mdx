@@ -25,6 +25,18 @@ UVC를 지원하는 일반 USB 웹캠은 모두 사용할 수 있습니다.
 
    `/dev/video0`이면 `0`, `/dev/video2`면 `2`입니다.
 
+   웹캠 번호 확인:
+
+   ```bash
+   v4l2-ctl --list-devices
+   ```
+
+   디바이스마다 모델명과 USB 경로가 함께 표시되어 캡처카드/가상 V4L2 디바이스와 쉽게 구분됩니다. `v4l-utils` 패키지가 없으면 USB 심볼릭 링크로 대체할 수 있습니다.
+
+   ```bash
+   ls /dev/v4l/by-id/
+   ```
+
    <DocsImage
      src="/docs/sensors/webcam-01-form.png"
      alt="SensorForm — Type=webcam, Device Index"

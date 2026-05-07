@@ -462,13 +462,22 @@ _BACKEND_CONTAINER = "easytrainer_backend"
 
 
 def _install_deps_in_containers(meta: dict) -> None:
-    """Install module dependencies inside running Docker containers via docker exec."""
+    """Install module dependencies inside running Docker containers via docker exec.
+
+    스키마:
+      dependencies:
+        apt: [...]            # 기본 컨테이너에 apt-get install
+        pip: [...]            # 기본 컨테이너에 pip install
+        backend_apt: [...]    # 카테고리와 무관하게 backend 컨테이너에 추가 설치
+        backend_pip: [...]    # 카테고리와 무관하게 backend 컨테이너에 추가 설치 (예: realsense
+                              # 의 pyrealsense2 — backend 의 detect 엔드포인트가 사용)
+    """
     import subprocess as _sp
 
     deps = meta.get("dependencies", {})
     install = meta.get("install", {})
 
-    # Determine which containers need deps
+    # 기본 컨테이너 결정 (category 별)
     containers = []
     category = meta.get("category", "")
     if category in ("robot", "sensor"):
@@ -478,40 +487,61 @@ def _install_deps_in_containers(meta: dict) -> None:
     else:
         containers.extend([_ROS2_CONTAINER, _BACKEND_CONTAINER])
 
-    for container in containers:
-        # Check container is running
+    def _is_running(container: str) -> bool:
         try:
             result = _sp.run(
                 ["docker", "inspect", "-f", "{{.State.Running}}", container],
                 capture_output=True, text=True, timeout=5,
             )
-            if "true" not in result.stdout.lower():
-                continue
+            return "true" in result.stdout.lower()
         except Exception:
+            return False
+
+    def _pip_install(container: str, pkgs: list) -> None:
+        if not pkgs:
+            return
+        # 먼저 --break-system-packages 로 시도 (Python 3.11+ PEP 668 차단 우회).
+        # 옛 pip (Python 3.10 등) 에서는 unknown option 으로 실패 → 폴백으로 그 옵션
+        # 빼고 재시도. 컨테이너는 격리된 환경이라 system site-packages 에 직접 깔아도
+        # 안전하다 (호스트는 절대 안 됨).
+        cmd_base = ["docker", "exec", container, "python3", "-m", "pip", "install", "--quiet"]
+        try:
+            r = _sp.run(cmd_base + ["--break-system-packages"] + pkgs,
+                        capture_output=True, text=True, timeout=120, check=False)
+            if r.returncode == 0:
+                return
+            # unknown option 또는 다른 일시 오류 → flag 없이 재시도
+            _sp.run(cmd_base + pkgs, timeout=120, check=False)
+        except Exception:
+            pass
+
+    def _apt_install(container: str, pkgs: list) -> None:
+        if not pkgs:
+            return
+        try:
+            _sp.run(
+                ["docker", "exec", container, "bash", "-c",
+                 "apt-get update -qq && apt-get install -y --no-install-recommends " + " ".join(pkgs)],
+                timeout=300, check=False,
+            )
+        except Exception:
+            pass
+
+    pip_deps = deps.get("pip", []) or []
+    apt_deps = deps.get("apt", []) or []
+    backend_pip_deps = deps.get("backend_pip", []) or []
+    backend_apt_deps = deps.get("backend_apt", []) or []
+
+    for container in containers:
+        if not _is_running(container):
             continue
+        _pip_install(container, pip_deps)
+        _apt_install(container, apt_deps)
 
-        # pip deps
-        pip_deps = deps.get("pip", [])
-        if pip_deps:
-            try:
-                _sp.run(
-                    ["docker", "exec", container, "python3", "-m", "pip", "install", "--quiet"] + pip_deps,
-                    timeout=120, check=False,
-                )
-            except Exception:
-                pass
-
-        # apt deps
-        apt_deps = deps.get("apt", [])
-        if apt_deps:
-            try:
-                _sp.run(
-                    ["docker", "exec", container, "bash", "-c",
-                     "apt-get update -qq && apt-get install -y --no-install-recommends " + " ".join(apt_deps)],
-                    timeout=300, check=False,
-                )
-            except Exception:
-                pass
+    # backend_* deps 는 카테고리 무관하게 backend 컨테이너에 추가 설치 (중복 OK — pip/apt 모두 idempotent).
+    if (backend_pip_deps or backend_apt_deps) and _is_running(_BACKEND_CONTAINER):
+        _pip_install(_BACKEND_CONTAINER, backend_pip_deps)
+        _apt_install(_BACKEND_CONTAINER, backend_apt_deps)
 
     # SDK install_cmd (e.g. "pip3 install -e .")
     sdk_cfg = install.get("sdk", {})
@@ -656,6 +686,9 @@ def download_module(
         elif mod.category in ("robot", "sensor") or _module_meta.get("install", {}).get("ros2"):
             # ros2/ 트리를 가진 모듈은 같은 layout을 사용 (robot/sensor + sim 등)
             _install_robot_sensor_module(tmp_path, module_id)
+            # colcon build 도 설치의 일부 — entrypoint 가 install/ 존재 시 재빌드
+            # 안 하므로, 설치 직후 빌드 안 하면 새 패키지가 ros2 launch 에서 'not found'.
+            _colcon_build_module(module_id)
         else:
             with tarfile.open(tmp_path, "r:gz") as tar:
                 tar.extractall(path=str(install_dir))
@@ -874,6 +907,72 @@ def _install_robot_sensor_module(tar_path: str, module_id: str) -> None:
 
         # Install dependencies
         _install_module_deps(ros2_base / module_id, module_id)
+
+
+def _colcon_build_module(module_id: str) -> None:
+    """모듈이 설치한 ROS2 패키지들을 ros2 컨테이너에서 colcon build.
+
+    이게 없으면 새 모듈 설치 후 컨테이너를 재시작해야만 패키지가 인식됨 — 사용자가
+    바로 launch 시 'package not found' 에러를 봤음. 설치 직후 build 를 해 즉시 사용
+    가능하게 만든다.
+
+    빌드 대상은 `<install_dir>/<module_id>/` 아래의 모든 package.xml 에서 추출한
+    패키지 이름들. tar top folder 이름과 module_id 가 다를 수 있어(예: tar 의
+    'webcam_publisher' → install 'sensor_webcam') 정확한 매핑은 manifest 가 아닌
+    실제 package.xml 의 <name> 태그를 본다.
+
+    실패 시 install 자체는 계속 — 사용자가 수동 build 로 회복 가능. 컨테이너가
+    꺼져있으면 조용히 skip (entrypoint 가 다음 부팅 때 빌드).
+    """
+    import subprocess as _sp
+    import re
+
+    project = _get_project_root()
+    pkg_root = project / "ros2" / "ros2_ws" / "src" / module_id
+    if not pkg_root.is_dir():
+        return
+
+    # package.xml 들에서 <name> 태그를 추출 (간단한 regex — XML 파서까진 과함)
+    pkg_names = []
+    for pkg_xml in pkg_root.rglob("package.xml"):
+        try:
+            text = pkg_xml.read_text(encoding="utf-8", errors="ignore")
+            m = re.search(r"<name>\s*([^<\s]+)\s*</name>", text)
+            if m:
+                pkg_names.append(m.group(1))
+        except OSError:
+            continue
+    if not pkg_names:
+        return
+
+    try:
+        result = _sp.run(
+            ["docker", "inspect", "-f", "{{.State.Running}}", _ROS2_CONTAINER],
+            capture_output=True, text=True, timeout=5,
+        )
+        if "true" not in result.stdout.lower():
+            return
+    except Exception:
+        return
+
+    # colcon build 는 `--packages-select` 로 변경분만 빌드하면 빠름. 컨테이너 안에서
+    # ros 환경 source 후 ros2_ws 에서 build. 결과 setup.bash 는 entrypoint 의 source
+    # 시점이 지났더라도 새 노드를 띄울 때 ros2 launch 가 알아서 install/ 을 본다.
+    cmd = (
+        "set -e; "
+        "source /opt/ros/humble/setup.bash; "
+        "cd /root/ros2_ws; "
+        "colcon build --symlink-install "
+        "--packages-select " + " ".join(pkg_names) + " "
+        "--cmake-args -DCMAKE_BUILD_TYPE=Release"
+    )
+    try:
+        _sp.run(
+            ["docker", "exec", _ROS2_CONTAINER, "bash", "-c", cmd],
+            timeout=600, check=False,
+        )
+    except Exception as e:
+        print(f"[MODULE] {module_id}: colcon build failed (non-fatal): {e}")
 
 
 def _install_compose_module(tar_path: str, module_id: str, meta: dict) -> None:

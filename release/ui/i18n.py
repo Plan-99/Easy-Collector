@@ -62,6 +62,11 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "modules.priceWon": "{amount}원",
         "modules.sizeMb": "{size:.1f} MB",
         "modules.sizeKb": "{size:.0f} KB",
+        "modules.restartNeeded": "런처 재시작 필요",
+        "modules.restartNeededBody": (
+            "모듈이 설치되었습니다.\n"
+            "변경 사항을 적용하려면 런처를 재시작해 주세요."
+        ),
         # ── 카테고리 ──
         "category.core": "코어 기능 (필수)",
         "category.feature": "기능 모듈",
@@ -135,6 +140,11 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "modules.priceWon": "₩{amount}",
         "modules.sizeMb": "{size:.1f} MB",
         "modules.sizeKb": "{size:.0f} KB",
+        "modules.restartNeeded": "Restart required",
+        "modules.restartNeededBody": (
+            "Module installed.\n"
+            "Please restart the launcher to apply changes."
+        ),
         # ── Categories ──
         "category.core": "Core (required)",
         "category.feature": "Feature modules",

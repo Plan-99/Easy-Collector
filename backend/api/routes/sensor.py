@@ -40,6 +40,8 @@ def get_supporting_sensors():
     }, 200
 
 
+
+
 @sensor_bp.route('/sensor:start', methods=['POST'])
 def start_sensor():
     print("Received request to start sensor")

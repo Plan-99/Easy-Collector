@@ -1373,10 +1373,14 @@ class ModuleWizard(QDialog):
         rl = QVBoxLayout(self.robot_box)
 
         # 2-1) 제어 방식
+        # SDK 직접 제어는 vendor SDK 패키지 + controller.py 작성 + 컨테이너 안 import 정합 등
+        # 챙길 게 많아 위자드 사용자에게 노출하기엔 표면이 너무 넓다. 당분간 ROS 모드만 노출.
+        # 다시 켤 때는 addItems 에 "SDK (직접 제어)" 만 다시 추가하면 됨 — 내부 분기/검증
+        # 코드는 모두 유지되어 있음.
         method_row = QHBoxLayout()
         method_row.addWidget(QLabel("제어 방식:"))
         self.method_combo = QComboBox()
-        self.method_combo.addItems(["ROS (topic/service)", "SDK (직접 제어)"])
+        self.method_combo.addItems(["ROS (topic/service)"])
         self.method_combo.currentTextChanged.connect(self._on_method_changed)
         method_row.addWidget(self.method_combo)
         warning = QLabel(
@@ -1642,7 +1646,18 @@ class ModuleWizard(QDialog):
         robots = meta.get("robots") or []
         first_kind = (robots[0].get("driver", {}).get("kind") if robots else "topic") or "topic"
         is_sdk = first_kind == "sdk"
-        self.method_combo.setCurrentIndex(1 if is_sdk else 0)
+        if is_sdk:
+            # SDK 모드는 위자드에서 더이상 노출하지 않음. 기존 SDK 모듈은 위자드로
+            # 편집 불가 — 직접 module.json 을 손대거나 launcher 외부에서 다시 패키징.
+            QMessageBox.warning(
+                self,
+                "SDK 모드 모듈",
+                "이 모듈은 SDK 직접 제어 모드입니다.\n"
+                "위자드는 현재 SDK 편집을 지원하지 않습니다.\n"
+                "module.json 을 직접 수정하거나 새 ROS 모드 모듈로 다시 만들어 주세요.",
+            )
+            return
+        self.method_combo.setCurrentIndex(0)
 
         sdk_install = (meta.get("install", {}).get("sdk", {}) or {}).get("install_cmd")
         if sdk_install:
