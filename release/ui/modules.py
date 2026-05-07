@@ -751,6 +751,38 @@ def _install_robot_sensor_module(tar_path: str, module_id: str) -> None:
             except Exception:
                 pass
 
+        # 일부 sensor 모듈(webcam_publisher 등)은 tar 최상위가 곧 ROS 패키지인
+        # bare 레이아웃이라 ros2/ 서브폴더가 없다. 이 경우 module_dir 자체를 ROS
+        # 패키지로 보고 그대로 ros2_ws/src/<module_id>/ 에 복사한다.
+        if not (module_dir / "ros2").is_dir() and (module_dir / "package.xml").is_file():
+            ros2_target_cfg = install_cfg.get("ros2", {}).get("target", "ros2/ros2_ws/src")
+            if not ros2_target_cfg.startswith("ros2/"):
+                ros2_target_cfg = "ros2/" + ros2_target_cfg
+            ros2_target = project / ros2_target_cfg / module_id
+            if ros2_target.exists():
+                try:
+                    shutil.rmtree(ros2_target)
+                except PermissionError:
+                    import subprocess as _sp
+                    parts = ros2_target.relative_to(project).parts
+                    container_path = '/root/' + '/'.join(parts[1:])
+                    _sp.run(["docker", "exec", _ROS2_CONTAINER, "rm", "-rf", container_path],
+                            check=False, timeout=15)
+                    if ros2_target.exists():
+                        _sp.run(["sudo", "rm", "-rf", str(ros2_target)], check=False, timeout=15)
+            ros2_target.mkdir(parents=True, exist_ok=True)
+            for item in module_dir.iterdir():
+                if item.name == "module.json":
+                    continue  # module.json 은 별도 step 에서 복사
+                dst = ros2_target / item.name
+                try:
+                    if item.is_dir():
+                        shutil.copytree(item, dst, symlinks=True)
+                    else:
+                        shutil.copy2(item, dst)
+                except Exception as e:
+                    print(f"[MODULE] {module_id}: skip {item.name}: {e}")
+
         # Install ros2/ → ros2/ros2_ws/src/
         ros2_src = module_dir / "ros2"
         if ros2_src.is_dir() and any(ros2_src.iterdir()):
@@ -827,22 +859,21 @@ def _install_robot_sensor_module(tar_path: str, module_id: str) -> None:
                     shutil.rmtree(dst) if dst.is_dir() else dst.unlink()
                 shutil.copytree(item, dst) if item.is_dir() else shutil.copy2(item, dst)
 
-        # Copy module.json into ros2 target for dependency resolution
+        # Copy module.json into ros2 target for dependency resolution.
+        # 설치 폴더는 module_id 로 통일했으므로(line 765) tar top folder name(module_name)
+        # 이 아닌 module_id 를 써야 한다 — 예: tar 의 'webcam_publisher' 가 'sensor_webcam'
+        # 으로 설치되기 때문에 module_name 을 쓰면 path 불일치로 FileNotFoundError.
         ros2_dep_cfg = install_cfg.get("ros2", {}).get("target", "ros2/ros2_ws/src")
         if not ros2_dep_cfg.startswith("ros2/"):
             ros2_dep_cfg = "ros2/" + ros2_dep_cfg
         ros2_base = project / ros2_dep_cfg
-        # ros2/src/ 구조일 때는 module_name과 같은 이름의 패키지에, 없으면 module_name/ 폴더에
-        ros2_inner_src = module_dir / "ros2" / "src"
-        if ros2_inner_src.is_dir() and (ros2_base / module_name).is_dir():
-            target_mj = ros2_base / module_name / "module.json"
-        else:
-            target_mj = ros2_base / module_name / "module.json"
+        target_mj = ros2_base / module_id / "module.json"
         if mj_path.exists() and not target_mj.exists():
+            target_mj.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(mj_path, target_mj)
 
         # Install dependencies
-        _install_module_deps(ros2_base / module_name, module_id)
+        _install_module_deps(ros2_base / module_id, module_id)
 
 
 def _install_compose_module(tar_path: str, module_id: str, meta: dict) -> None:
