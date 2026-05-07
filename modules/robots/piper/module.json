@@ -1,7 +1,7 @@
 {
   "id": "robot_piper",
   "name": "Piper",
-  "version": "1.2.2",
+  "version": "1.3.0",
   "category": "robot",
   "description": "Agilex Piper 로봇. SDK 직접 제어와 ROS 토픽 제어 두 가지 모드 모두 제공. CAN 인터페이스는 robot:start 시 자동 감지·구성 (단일팔·양팔 모두 지원).",
   "install": {
@@ -35,13 +35,41 @@
         "company": "Piper",
         "role": "single_arm",
         "joint_dim": 7,
-        "joint_names": ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"],
-        "joint_lower_bounds": [-2.618, 0, -2.618, -1.745, -1.22, -2.094, 0],
-        "joint_upper_bounds": [2.618, 2.618, 0, 1.745, 1.22, 2.094, 0.087],
+        "joint_names": [
+          "joint1",
+          "joint2",
+          "joint3",
+          "joint4",
+          "joint5",
+          "joint6",
+          "gripper"
+        ],
+        "joint_lower_bounds": [
+          -2.618,
+          0,
+          -2.618,
+          -1.745,
+          -1.22,
+          -2.094,
+          0
+        ],
+        "joint_upper_bounds": [
+          2.618,
+          2.618,
+          0,
+          1.745,
+          1.22,
+          2.094,
+          0.087
+        ],
         "tool_inner": true,
-        "tool_index": [6],
+        "tool_index": [
+          6
+        ],
         "ik_available": true,
-        "custom_fields": ["can_port"]
+        "custom_fields": [
+          "can_port"
+        ]
       },
       "driver": {
         "kind": "sdk",
@@ -49,15 +77,28 @@
         "sdk_control": true,
         "sdk_type": "piper",
         "pre_launch": [
-          {"type": "script", "path": "can_activate_main.sh", "root": "ros2", "wait_after": 1.0}
+          {
+            "type": "script",
+            "path": "can_activate_main.sh",
+            "root": "ros2",
+            "wait_after": 1.0
+          }
         ]
       },
       "ik": {
-        "urdf_path": "/root/ros2_ws/src/piper/piper_description/urdf/piper_description.urdf",
-        "urdf_package_dir": "/root/ros2_ws/src/piper/piper_description/",
-        "joints_to_lock": ["joint6_to_gripper_base", "joint7", "joint8"],
+        "urdf_path": "{ros2_root}/piper_description/urdf/piper_description.urdf",
+        "urdf_package_dir": "{ros2_root}/piper_description/",
+        "joints_to_lock": [
+          "joint6_to_gripper_base",
+          "joint7",
+          "joint8"
+        ],
         "ee_definitions": [
-          {"name": "ee", "parent": "joint7", "offset": null}
+          {
+            "name": "ee",
+            "parent": "joint7",
+            "offset": null
+          }
         ]
       }
     },
@@ -67,13 +108,36 @@
         "company": "Piper",
         "role": "single_arm",
         "joint_dim": 6,
-        "joint_names": ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
-        "joint_lower_bounds": [-2.618, 0, -2.618, -1.745, -1.22, -2.094],
-        "joint_upper_bounds": [2.618, 2.618, 0, 1.745, 1.22, 2.094],
+        "joint_names": [
+          "joint1",
+          "joint2",
+          "joint3",
+          "joint4",
+          "joint5",
+          "joint6"
+        ],
+        "joint_lower_bounds": [
+          -2.618,
+          0,
+          -2.618,
+          -1.745,
+          -1.22,
+          -2.094
+        ],
+        "joint_upper_bounds": [
+          2.618,
+          2.618,
+          0,
+          1.745,
+          1.22,
+          2.094
+        ],
         "tool_inner": false,
         "tool_index": [],
         "ik_available": true,
-        "custom_fields": ["can_port"]
+        "custom_fields": [
+          "can_port"
+        ]
       },
       "driver": {
         "kind": "sdk",
@@ -81,15 +145,28 @@
         "sdk_control": true,
         "sdk_type": "piper",
         "pre_launch": [
-          {"type": "script", "path": "can_activate_main.sh", "root": "ros2", "wait_after": 1.0}
+          {
+            "type": "script",
+            "path": "can_activate_main.sh",
+            "root": "ros2",
+            "wait_after": 1.0
+          }
         ]
       },
       "ik": {
-        "urdf_path": "/root/ros2_ws/src/piper/piper_description/urdf/piper_no_gripper_description.urdf",
-        "urdf_package_dir": "/root/ros2_ws/src/piper/piper_description/",
+        "urdf_path": "{ros2_root}/piper_description/urdf/piper_no_gripper_description.urdf",
+        "urdf_package_dir": "{ros2_root}/piper_description/",
         "joints_to_lock": [],
         "ee_definitions": [
-          {"name": "ee", "parent": "joint6", "offset": [0.20, 0.0, 0.0]}
+          {
+            "name": "ee",
+            "parent": "joint6",
+            "offset": [
+              0.2,
+              0.0,
+              0.0
+            ]
+          }
         ]
       }
     },
@@ -99,13 +176,41 @@
         "company": "Piper",
         "role": "single_arm",
         "joint_dim": 7,
-        "joint_names": ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"],
-        "joint_lower_bounds": [-2.618, 0, -2.618, -1.745, -1.22, -2.094, 0],
-        "joint_upper_bounds": [2.618, 2.618, 0, 1.745, 1.22, 2.094, 0.087],
+        "joint_names": [
+          "joint1",
+          "joint2",
+          "joint3",
+          "joint4",
+          "joint5",
+          "joint6",
+          "gripper"
+        ],
+        "joint_lower_bounds": [
+          -2.618,
+          0,
+          -2.618,
+          -1.745,
+          -1.22,
+          -2.094,
+          0
+        ],
+        "joint_upper_bounds": [
+          2.618,
+          2.618,
+          0,
+          1.745,
+          1.22,
+          2.094,
+          0.087
+        ],
         "tool_inner": true,
-        "tool_index": [6],
+        "tool_index": [
+          6
+        ],
         "ik_available": true,
-        "custom_fields": ["can_port"]
+        "custom_fields": [
+          "can_port"
+        ]
       },
       "driver": {
         "kind": "topic",
@@ -116,7 +221,12 @@
         "write_topic": "/joint_states",
         "write_topic_msg": "sensor_msgs/JointState",
         "pre_launch": [
-          {"type": "script", "path": "can_activate_main.sh", "root": "ros2", "wait_after": 1.0}
+          {
+            "type": "script",
+            "path": "can_activate_main.sh",
+            "root": "ros2",
+            "wait_after": 1.0
+          }
         ],
         "launch": {
           "package": "piper",
@@ -131,11 +241,19 @@
         }
       },
       "ik": {
-        "urdf_path": "/root/ros2_ws/src/piper/piper_description/urdf/piper_description.urdf",
-        "urdf_package_dir": "/root/ros2_ws/src/piper/piper_description/",
-        "joints_to_lock": ["joint6_to_gripper_base", "joint7", "joint8"],
+        "urdf_path": "{ros2_root}/piper_description/urdf/piper_description.urdf",
+        "urdf_package_dir": "{ros2_root}/piper_description/",
+        "joints_to_lock": [
+          "joint6_to_gripper_base",
+          "joint7",
+          "joint8"
+        ],
         "ee_definitions": [
-          {"name": "ee", "parent": "joint7", "offset": null}
+          {
+            "name": "ee",
+            "parent": "joint7",
+            "offset": null
+          }
         ]
       }
     },
@@ -145,13 +263,36 @@
         "company": "Piper",
         "role": "single_arm",
         "joint_dim": 6,
-        "joint_names": ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
-        "joint_lower_bounds": [-2.618, 0, -2.618, -1.745, -1.22, -2.094],
-        "joint_upper_bounds": [2.618, 2.618, 0, 1.745, 1.22, 2.094],
+        "joint_names": [
+          "joint1",
+          "joint2",
+          "joint3",
+          "joint4",
+          "joint5",
+          "joint6"
+        ],
+        "joint_lower_bounds": [
+          -2.618,
+          0,
+          -2.618,
+          -1.745,
+          -1.22,
+          -2.094
+        ],
+        "joint_upper_bounds": [
+          2.618,
+          2.618,
+          0,
+          1.745,
+          1.22,
+          2.094
+        ],
         "tool_inner": false,
         "tool_index": [],
         "ik_available": true,
-        "custom_fields": ["can_port"]
+        "custom_fields": [
+          "can_port"
+        ]
       },
       "driver": {
         "kind": "topic",
@@ -173,15 +314,28 @@
           }
         },
         "pre_launch": [
-          {"type": "script", "path": "can_activate_main.sh", "root": "ros2", "wait_after": 1.0}
+          {
+            "type": "script",
+            "path": "can_activate_main.sh",
+            "root": "ros2",
+            "wait_after": 1.0
+          }
         ]
       },
       "ik": {
-        "urdf_path": "/root/ros2_ws/src/piper/piper_description/urdf/piper_no_gripper_description.urdf",
-        "urdf_package_dir": "/root/ros2_ws/src/piper/piper_description/",
+        "urdf_path": "{ros2_root}/piper_description/urdf/piper_no_gripper_description.urdf",
+        "urdf_package_dir": "{ros2_root}/piper_description/",
         "joints_to_lock": [],
         "ee_definitions": [
-          {"name": "ee", "parent": "joint6", "offset": [0.20, 0.0, 0.0]}
+          {
+            "name": "ee",
+            "parent": "joint6",
+            "offset": [
+              0.2,
+              0.0,
+              0.0
+            ]
+          }
         ]
       }
     }

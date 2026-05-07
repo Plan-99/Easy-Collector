@@ -1,9 +1,9 @@
 {
   "id": "robot_kinova",
   "name": "Kinova Kortex",
-  "version": "1.1.0",
+  "version": "1.3.0",
   "category": "robot",
-  "description": "Kinova Kortex \ub85c\ubd07 \ub4dc\ub77c\uc774\ubc84",
+  "description": "Kinova Kortex 로봇 드라이버",
   "install": {
     "ros2": {
       "target": "ros2/ros2_ws/src",
@@ -82,8 +82,8 @@
         }
       },
       "ik": {
-        "urdf_path": "/root/ros2_ws/src/ros2_kortex/kortex_description/robots/gen3_7dof.urdf",
-        "urdf_package_dir": "/root/ros2_ws/src/ros2_kortex/kortex_description/",
+        "urdf_path": "{ros2_root}/kortex_description/robots/gen3_7dof.urdf",
+        "urdf_package_dir": "{ros2_root}/kortex_description/",
         "joints_to_lock": [],
         "ee_definitions": [
           {
@@ -97,6 +97,36 @@
           }
         ],
         "gravity_compensate": 3e-05
+      }
+    }
+  ],
+  "sensors": [
+    {
+      "type": "kinova_vision_color",
+      "spec": {
+        "company": "Kinova",
+        "role": "rgb_camera",
+        "topic_type": "color",
+        "read_topic": "/color/image_raw/compressed",
+        "read_topic_msg": "sensor_msgs/CompressedImage",
+        "custom_fields": [
+          "ip_address"
+        ],
+        "resolution": [
+          1980,
+          1080
+        ]
+      },
+      "driver": {
+        "kind": "topic",
+        "launch": {
+          "package": "kinova_vision",
+          "launch_file": "kinova_vision.launch.py",
+          "args": {
+            "device": "{ip_address|192.168.1.10}",
+            "camera": "{namespace}"
+          }
+        }
       }
     }
   ]
