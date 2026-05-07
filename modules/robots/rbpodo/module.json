@@ -1,9 +1,9 @@
 {
   "id": "robot_rbpodo",
   "name": "RBPodo",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "category": "robot",
-  "description": "Rainbow Robotics RBPodo 로봇 드라이버",
+  "description": "Rainbow Robotics RBPodo \ub85c\ubd07 \ub4dc\ub77c\uc774\ubc84",
   "install": {
     "ros2": {
       "target": "ros2/ros2_ws/src",
@@ -23,5 +23,130 @@
   },
   "check": {
     "type": "path"
-  }
+  },
+  "robots": [
+    {
+      "type": "rb3_730es_u",
+      "spec": {
+        "company": "Rainbow Robotics",
+        "role": "single_arm",
+        "joint_dim": 6,
+        "joint_names": [
+          "base",
+          "shoulder",
+          "elbow",
+          "wrist1",
+          "wrist2",
+          "wrist3"
+        ],
+        "joint_lower_bounds": [
+          -3.14,
+          -3.14,
+          -3.14,
+          -3.14,
+          -3.14,
+          -3.14
+        ],
+        "joint_upper_bounds": [
+          3.14,
+          3.14,
+          3.14,
+          3.14,
+          3.14,
+          3.14
+        ],
+        "tool_inner": false,
+        "tool_index": [],
+        "ik_available": true,
+        "custom_fields": [
+          "ip_address"
+        ]
+      },
+      "driver": {
+        "kind": "topic",
+        "read_topic": "/rbpodo/joint_states",
+        "read_topic_msg": "sensor_msgs/JointState",
+        "write_type": "topic",
+        "write_topic": "/position_controllers/commands",
+        "write_topic_msg": "std_msgs/Float64MultiArray",
+        "interpolation": true,
+        "launch": {
+          "package": "rbpodo_bringup",
+          "launch_file": "rbpodo.launch.py",
+          "args": {
+            "namespace": "{namespace}",
+            "robot_ip": "{ip_address|10.0.2.27}",
+            "use_fake_hardware": "false"
+          }
+        }
+      },
+      "ik": {
+        "urdf_path": "/root/ros2_ws/src/rbpodo_ros2/rbpodo_description/robots/rb3_730es_u.urdf",
+        "urdf_package_dir": "/root/ros2_ws/src/rbpodo_ros2/rbpodo_description/",
+        "joints_to_lock": [],
+        "ee_definitions": [
+          {
+            "name": "ee",
+            "parent": "tcp_joint",
+            "offset": null
+          }
+        ]
+      }
+    },
+    {
+      "type": "rb5_850e",
+      "spec": {
+        "company": "Rainbow Robotics",
+        "role": "single_arm",
+        "joint_dim": 6,
+        "joint_names": [
+          "base",
+          "shoulder",
+          "elbow",
+          "wrist1",
+          "wrist2",
+          "wrist3"
+        ],
+        "joint_lower_bounds": [
+          -3.14,
+          -3.14,
+          -3.14,
+          -3.14,
+          -3.14,
+          -3.14
+        ],
+        "joint_upper_bounds": [
+          3.14,
+          3.14,
+          3.14,
+          3.14,
+          3.14,
+          3.14
+        ],
+        "tool_inner": false,
+        "tool_index": [],
+        "custom_fields": [
+          "ip_address"
+        ]
+      },
+      "driver": {
+        "kind": "topic",
+        "read_topic": "/rbpodo/joint_states",
+        "read_topic_msg": "sensor_msgs/JointState",
+        "write_type": "topic",
+        "write_topic": "/position_controllers/commands",
+        "write_topic_msg": "std_msgs/Float64MultiArray",
+        "interpolation": true,
+        "launch": {
+          "package": "rbpodo_bringup",
+          "launch_file": "rbpodo.launch.py",
+          "args": {
+            "namespace": "{namespace}",
+            "robot_ip": "{ip_address|10.0.2.27}",
+            "use_fake_hardware": "false"
+          }
+        }
+      }
+    }
+  ]
 }

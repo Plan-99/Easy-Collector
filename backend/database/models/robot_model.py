@@ -293,7 +293,8 @@ class Robot(SoftDeleteModel):
         default_pose = next((p for p in poses if p.is_default), None)
         if default_pose:
             data['homepose'] = default_pose._get_pose()
-        # Default ee_definitions (frontend General teleop tab 표시용)
-        from ...configs.robot_ik_defaults import get_default_ee_definitions
+        # Default ee_definitions (frontend General teleop tab 표시용).
+        # module_loader 가 manifest 의 ik.ee_definitions 섹션에서 직접 읽음.
+        from ...configs.module_loader import get_default_ee_definitions
         data['default_ee_definitions'] = get_default_ee_definitions(self.type)
         return data

@@ -1,9 +1,9 @@
 {
   "id": "sensor_realsense",
   "name": "Intel RealSense",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "category": "sensor",
-  "description": "Intel RealSense 깊이 카메라 (D435, D405 등)",
+  "description": "Intel RealSense 깊이/색상 카메라 (D405, D435, D435i 등)",
   "install": {
     "ros2": {
       "target": "ros2/ros2_ws/src",
@@ -20,5 +20,82 @@
       "ros-humble-realsense2-description"
     ],
     "pip": []
-  }
+  },
+  "sensors": [
+    {
+      "type": "realsense_d435",
+      "spec": {
+        "company": "Intel",
+        "custom_fields": ["serial_number"]
+      },
+      "driver": {
+        "kind": "topic",
+        "launch": {
+          "package": "realsense2_camera",
+          "launch_file": "rs_launch.py",
+          "args": {
+            "camera_namespace": "{namespace}",
+            "serial_no": "\"{serial_number}\""
+          }
+        }
+      }
+    },
+    {
+      "type": "realsense_d435i",
+      "spec": {
+        "company": "Intel",
+        "custom_fields": ["serial_number"]
+      },
+      "driver": {
+        "kind": "topic",
+        "launch": {
+          "package": "realsense2_camera",
+          "launch_file": "rs_launch.py",
+          "args": {
+            "camera_namespace": "{namespace}",
+            "serial_no": "\"{serial_number}\""
+          }
+        }
+      }
+    },
+    {
+      "type": "realsense_d405",
+      "spec": {
+        "company": "Intel",
+        "custom_fields": ["serial_number"]
+      },
+      "driver": {
+        "kind": "topic",
+        "launch": {
+          "package": "realsense2_camera",
+          "launch_file": "rs_launch.py",
+          "args": {
+            "camera_namespace": "{namespace}",
+            "serial_no": "\"{serial_number}\""
+          }
+        }
+      }
+    },
+    {
+      "type": "realsense_d405_color",
+      "spec": {
+        "company": "Intel",
+        "custom_fields": ["serial_number"]
+      },
+      "driver": {
+        "kind": "topic",
+        "launch": {
+          "package": "realsense2_camera",
+          "launch_file": "rs_launch.py",
+          "args": {
+            "camera_namespace": "{namespace}",
+            "serial_no": "\"{serial_number}\"",
+            "enable_depth": "false",
+            "enable_infra1": "false",
+            "enable_infra2": "false"
+          }
+        }
+      }
+    }
+  ]
 }

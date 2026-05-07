@@ -41,6 +41,8 @@ model User {
   entitlements Entitlement[]
   payments     Payment[]
   billingKeys  BillingKey[]
+  orders       Order[]
+  addresses    Address[]
 }
 
 model Account {
@@ -157,10 +159,14 @@ model Entitlement {
 }
 
 // Each PortOne payment attempt. Source of truth for billing history.
+// A payment is tied to either a Module (digital, software entitlement) OR an
+// Order (physical hardware shipment) — exactly one of moduleId / orderId is
+// non-null.
 model Payment {
   id               String    @id @default(cuid())
   userId           String
   moduleId         String?
+  orderId          String?
   portonePaymentId String    @unique // paymentId we send to PortOne
   status           String    @default("PENDING") // PENDING | PAID | FAILED | CANCELLED | REFUNDED
   amountKrw        Int
@@ -175,9 +181,11 @@ model Payment {
 
   user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   module      Module?       @relation(fields: [moduleId], references: [id])
+  order       Order?        @relation(fields: [orderId], references: [id])
   entitlement Entitlement[]
 
   @@index([userId])
+  @@index([orderId])
 }
 
 // PortOne-issued billing key for repeat charges. We never store the raw PAN.
@@ -194,4 +202,131 @@ model BillingKey {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+// Hardware product catalog (e.g. leader robots). Visible to logged-in users
+// in /store. Sold via the regular PortOne checkout flow.
+//
+// Variant model:
+//   - If `variants` is empty, Product.priceKrw / Product.stock are used as-is.
+//   - If `variants` exist, customer must pick one; variant.priceKrw / .stock
+//     override Product values for the selected option.
+model Product {
+  id           String   @id @default(cuid())
+  // Optional: when variants exist, the variant SKUs are the actual fulfillment
+  // identifiers; Product.sku is only used as the unit SKU for variant-less
+  // products. Unique among non-null values.
+  sku          String?  @unique
+  name         String
+  description  String?
+  priceKrw     Int
+  stock        Int      @default(0)
+  weightG      Int?
+  leadTimeDays Int?
+  imageUrl     String?
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  orderItems OrderItem[]
+  variants   ProductVariant[]
+}
+
+// Single-axis variants (e.g. "빨강", "L 사이즈", "v1.0 좌수형"). The variant
+// owns its own price + stock.
+model ProductVariant {
+  id        String   @id @default(cuid())
+  productId String
+  name      String
+  sku       String   @unique
+  priceKrw  Int
+  stock     Int      @default(0)
+  active    Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product    Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
+
+  @@index([productId])
+}
+
+// One purchase = one Order, even with multiple OrderItems. Address fields
+// are denormalized so editing the user's profile later doesn't change a
+// shipped order's record.
+model Order {
+  id            String   @id @default(cuid())
+  userId        String
+  status        String   @default("PENDING") // PENDING | PAID | SHIPPED | DELIVERED | CANCELLED | REFUNDED
+  totalKrw      Int
+  recipientName String
+  phone         String
+  postalCode    String
+  addressLine1  String
+  addressLine2  String?
+  requestNote   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user     User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items    OrderItem[]
+  payments Payment[]
+  shipment Shipment?
+
+  @@index([userId])
+  @@index([status])
+}
+
+model OrderItem {
+  id               String @id @default(cuid())
+  orderId          String
+  productId        String
+  productName      String // snapshot at time of order
+  productSku       String
+  productVariantId String?
+  variantName      String? // snapshot
+  variantSku       String?
+  quantity         Int
+  unitPriceKrw     Int
+
+  order   Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product          @relation(fields: [productId], references: [id])
+  variant ProductVariant?  @relation(fields: [productVariantId], references: [id])
+
+  @@index([orderId])
+}
+
+// User's saved shipping addresses, available as quick-fill in OrderForm.
+model Address {
+  id            String   @id @default(cuid())
+  userId        String
+  label         String?  // "집", "회사" 등 (optional)
+  recipientName String
+  phone         String
+  postalCode    String
+  addressLine1  String
+  addressLine2  String?
+  requestNote   String?
+  isDefault     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// 1:1 with Order. Created when admin enters tracking number.
+model Shipment {
+  id             String    @id @default(cuid())
+  orderId        String    @unique
+  courier        String    // "CJ" | "한진" | "우체국" | "롯데" | etc
+  trackingNumber String
+  shippedAt      DateTime?
+  deliveredAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 }

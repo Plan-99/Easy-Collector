@@ -1,7 +1,7 @@
 {
   "id": "sensor_webcam",
   "name": "Webcam",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "category": "sensor",
   "description": "USB 웹캠 (Logitech 등)",
   "install": {
@@ -19,5 +19,25 @@
   },
   "check": {
     "type": "path"
-  }
+  },
+  "sensors": [
+    {
+      "type": "webcam_logitec",
+      "spec": {
+        "company": "Logitec",
+        "custom_fields": ["device_index"]
+      },
+      "driver": {
+        "kind": "topic",
+        "launch": {
+          "package": "webcam_publisher",
+          "launch_file": "webcam_publisher.launch.py",
+          "args": {
+            "namespace": "{namespace}",
+            "device_index": "{device_index|0}"
+          }
+        }
+      }
+    }
+  ]
 }

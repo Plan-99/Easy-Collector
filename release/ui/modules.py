@@ -29,6 +29,7 @@ class ModuleInfo:
     default: bool = False  # checked by default in installer
     asset_name: str = ""   # GitHub Release asset pattern e.g. "module-training-{version}.tar.gz"
     dependencies: list[str] = field(default_factory=list)
+    local: bool = False    # 로컬 위자드로 만든 모듈 — 마켓 카탈로그에 없음
 
 
 # Hardcoded fallback used when the launcher can't reach home-next AND no cache
@@ -91,13 +92,46 @@ CATEGORY_ORDER = ["core", "feature", "robot", "sensor", "extension"]
 
 
 def get_module(module_id: str) -> Optional[ModuleInfo]:
-    return _REGISTRY_MAP.get(module_id)
+    m = _REGISTRY_MAP.get(module_id)
+    if m is not None:
+        return m
+    # 로컬 모듈 — manifest 가 있으면 ModuleInfo 형태로 합성. remove_module 등이 그대로 동작.
+    meta = _load_module_manifest(module_id)
+    if meta is not None:
+        return ModuleInfo(
+            id=module_id,
+            name=meta.get("name") or module_id,
+            category=meta.get("category") or "robot",
+            description=meta.get("description") or "",
+            asset_name="",
+            local=True,
+        )
+    return None
 
 
 def modules_by_category() -> dict[str, list[ModuleInfo]]:
     result: dict[str, list[ModuleInfo]] = {}
+    seen_ids: set[str] = set()
     for m in MODULE_REGISTRY:
         result.setdefault(m.category, []).append(m)
+        seen_ids.add(m.id)
+    # 로컬 위자드로 만든 모듈을 카탈로그에 합쳐 다이얼로그에서 함께 보이게 한다.
+    try:
+        for mid, meta in get_all_installed_manifests().items():
+            if mid in seen_ids:
+                continue
+            cat = meta.get("category") or "robot"
+            info = ModuleInfo(
+                id=mid,
+                name=(meta.get("name") or mid) + " (로컬)",
+                category=cat,
+                description=meta.get("description") or "",
+                asset_name="",
+                local=True,
+            )
+            result.setdefault(cat, []).append(info)
+    except Exception:
+        pass
     return result
 
 
@@ -371,6 +405,21 @@ def get_remote_versions(release: dict | None = None) -> dict[str, str]:
 
     Each module has its own release with tag: module-{id}-v{version}
     """
+    return {mid: info["version"] for mid, info in _scan_remote_module_releases().items()}
+
+
+def get_remote_sizes(release: dict | None = None) -> dict[str, int]:
+    """Scan recent releases to get {module_id: latest_asset_size_bytes}."""
+    return {mid: info["size"] for mid, info in _scan_remote_module_releases().items()
+            if info.get("size")}
+
+
+def _scan_remote_module_releases() -> dict[str, dict]:
+    """Walk recent module releases and pick the newest version per module id.
+
+    Returns {module_id: {"version": str, "size": int}}. Size comes from the
+    matching tar.gz asset; missing assets just leave size unset.
+    """
     import urllib.request
 
     repo = _get_repo()
@@ -382,18 +431,29 @@ def get_remote_versions(release: dict | None = None) -> dict[str, str]:
     except Exception:
         return {}
 
-    result: dict[str, str] = {}
+    result: dict[str, dict] = {}
     for r in releases:
         tag = r.get("tag_name", "")
-        # module-robot_piper-v1.0.1 → id=robot_piper, ver=1.0.1
         if not tag.startswith("module-"):
             continue
         stripped = tag[len("module-"):]
         parts = stripped.rsplit("-v", 1)
-        if len(parts) == 2 and parts[1] and parts[1][0].isdigit():
-            mid, ver = parts[0], parts[1]
-            if mid not in result:  # 최신순이므로 첫 번째만 유지
-                result[mid] = ver
+        if len(parts) != 2 or not parts[1] or not parts[1][0].isdigit():
+            continue
+        mid, ver = parts[0], parts[1]
+        if mid in result:  # newest-first ordering — keep first hit only
+            continue
+        info: dict = {"version": ver}
+        prefix = f"module-{mid}-"
+        for asset in r.get("assets", []) or []:
+            name = asset.get("name", "")
+            if name.startswith(prefix) and name.endswith(".tar.gz"):
+                try:
+                    info["size"] = int(asset.get("size") or 0)
+                except Exception:
+                    pass
+                break
+        result[mid] = info
     return result
 
 
@@ -703,7 +763,22 @@ def _install_robot_sensor_module(tar_path: str, module_id: str) -> None:
             # ros2_ws/src/<module_name>/ 안에 패키지들을 설치
             ros2_target = ros2_base / module_name
             if ros2_target.exists():
-                shutil.rmtree(ros2_target)
+                # 이전 빌드의 .pyc / __pycache__ 등이 컨테이너 안에서 root 소유로
+                # 만들어져 있을 수 있다. 호스트 user 로 직접 rmtree 가 막히면
+                # docker exec / sudo 로 폴백.
+                try:
+                    shutil.rmtree(ros2_target)
+                except PermissionError:
+                    # 호스트 <project>/ros2/ros2_ws/src/<id> ↔ 컨테이너 /root/ros2_ws/src/<id>
+                    import subprocess as _sp
+                    parts = ros2_target.relative_to(project).parts  # ('ros2', 'ros2_ws', ...)
+                    container_path = '/root/' + '/'.join(parts[1:])
+                    _sp.run(["docker", "exec", _ROS2_CONTAINER, "rm", "-rf", container_path],
+                            check=False, timeout=15)
+                    if ros2_target.exists():
+                        _sp.run(["sudo", "rm", "-rf", str(ros2_target)], check=False, timeout=15)
+                    if ros2_target.exists():
+                        raise
 
             # ros2/src/ 가 있으면 그 안의 패키지들을 module_name/ 아래에 복사.
             # symlinks=True 로 두면 깨진 절대경로 심볼릭 링크(예: fairino libfairino.so
@@ -715,6 +790,21 @@ def _install_robot_sensor_module(tar_path: str, module_id: str) -> None:
                 for pkg_dir in ros2_inner_src.iterdir():
                     if pkg_dir.is_dir():
                         shutil.copytree(pkg_dir, ros2_target / pkg_dir.name, symlinks=True)
+                # ros2/ 루트의 비-src 콘텐츠(스크립트, README, asserts 등) 도 함께 복사.
+                # 예: piper 의 can_activate_main.sh 가 모듈 루트에 있어 패키지 안에는 없음.
+                for item in ros2_src.iterdir():
+                    if item.name in ("src", "install", "build", "log"):
+                        continue
+                    dst = ros2_target / item.name
+                    if dst.exists():
+                        continue
+                    try:
+                        if item.is_dir():
+                            shutil.copytree(item, dst, symlinks=True)
+                        else:
+                            shutil.copy2(item, dst)
+                    except Exception as e:
+                        print(f"[MODULE] {module_id}: skip {item.name}: {e}")
             else:
                 # src/ 없으면 ros2/ 전체를 module_name/ 으로 복사
                 shutil.copytree(ros2_src, ros2_target, symlinks=True)

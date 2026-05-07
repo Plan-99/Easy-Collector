@@ -159,16 +159,18 @@ class MoveEEDeltaRequest(_message.Message):
     def __init__(self, agent_id: _Optional[int] = ..., delta_ee_json: _Optional[str] = ..., velocity_arg: _Optional[float] = ..., tool_positions_json: _Optional[str] = ...) -> None: ...
 
 class MoveToRequest(_message.Message):
-    __slots__ = ("agent_id", "target_pos", "step_size", "duration")
+    __slots__ = ("agent_id", "target_pos", "step_size", "duration", "hz")
     AGENT_ID_FIELD_NUMBER: _ClassVar[int]
     TARGET_POS_FIELD_NUMBER: _ClassVar[int]
     STEP_SIZE_FIELD_NUMBER: _ClassVar[int]
     DURATION_FIELD_NUMBER: _ClassVar[int]
+    HZ_FIELD_NUMBER: _ClassVar[int]
     agent_id: int
     target_pos: _containers.RepeatedScalarFieldContainer[float]
     step_size: float
     duration: float
-    def __init__(self, agent_id: _Optional[int] = ..., target_pos: _Optional[_Iterable[float]] = ..., step_size: _Optional[float] = ..., duration: _Optional[float] = ...) -> None: ...
+    hz: float
+    def __init__(self, agent_id: _Optional[int] = ..., target_pos: _Optional[_Iterable[float]] = ..., step_size: _Optional[float] = ..., duration: _Optional[float] = ..., hz: _Optional[float] = ...) -> None: ...
 
 class ResetIKRequest(_message.Message):
     __slots__ = ("agent_id", "q")

@@ -528,6 +528,11 @@ class AgentServiceStub(object):
                 request_serializer=robot__bridge__pb2.MoveToRequest.SerializeToString,
                 response_deserializer=robot__bridge__pb2.StatusResponse.FromString,
                 _registered_method=True)
+        self.CancelMoveTo = channel.unary_unary(
+                '/easytrainer.AgentService/CancelMoveTo',
+                request_serializer=robot__bridge__pb2.AgentId.SerializeToString,
+                response_deserializer=robot__bridge__pb2.StatusResponse.FromString,
+                _registered_method=True)
         self.GetJointStates = channel.unary_unary(
                 '/easytrainer.AgentService/GetJointStates',
                 request_serializer=robot__bridge__pb2.AgentId.SerializeToString,
@@ -617,6 +622,14 @@ class AgentServiceServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def MoveTo(self, request, context):
+        """MoveTo: 비동기 — 별도 thread 에서 보간 진행. 호출자는 즉시 return 받고
+        is_moving 폴링 또는 CancelMoveTo 로 중단.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CancelMoveTo(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -717,6 +730,11 @@ def add_AgentServiceServicer_to_server(servicer, server):
             'MoveTo': grpc.unary_unary_rpc_method_handler(
                     servicer.MoveTo,
                     request_deserializer=robot__bridge__pb2.MoveToRequest.FromString,
+                    response_serializer=robot__bridge__pb2.StatusResponse.SerializeToString,
+            ),
+            'CancelMoveTo': grpc.unary_unary_rpc_method_handler(
+                    servicer.CancelMoveTo,
+                    request_deserializer=robot__bridge__pb2.AgentId.FromString,
                     response_serializer=robot__bridge__pb2.StatusResponse.SerializeToString,
             ),
             'GetJointStates': grpc.unary_unary_rpc_method_handler(
@@ -953,6 +971,33 @@ class AgentService(object):
             target,
             '/easytrainer.AgentService/MoveTo',
             robot__bridge__pb2.MoveToRequest.SerializeToString,
+            robot__bridge__pb2.StatusResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CancelMoveTo(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/easytrainer.AgentService/CancelMoveTo',
+            robot__bridge__pb2.AgentId.SerializeToString,
             robot__bridge__pb2.StatusResponse.FromString,
             options,
             channel_credentials,

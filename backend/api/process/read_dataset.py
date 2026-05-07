@@ -75,6 +75,11 @@ def read_dataset(node, episode_path, socketio_instance, sid, task_control, move_
             start_wait = time.time()
             while time.time() - start_wait < timeout:
                 if task_control['stop']:
+                    for a in agents:
+                        try:
+                            a.cancel_move_to()
+                        except Exception:
+                            pass
                     return
                 if not any(a.is_moving for a in agents):
                     break

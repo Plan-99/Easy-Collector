@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 const TABS = [
   { href: "/dashboard", label: "내 정보" },
   { href: "/dashboard/modules", label: "모듈" },
+  { href: "/dashboard/orders", label: "하드웨어 주문" },
 ];
 
 export default function DashboardTabs() {
@@ -13,7 +14,11 @@ export default function DashboardTabs() {
   return (
     <nav className="flex gap-1 border-b border-white/10 mb-8">
       {TABS.map(t => {
-        const active = pathname === t.href;
+        // /dashboard 자체는 정확히 일치할 때만, 하위 탭은 prefix로 매칭.
+        const active =
+          t.href === "/dashboard"
+            ? pathname === "/dashboard"
+            : pathname === t.href || pathname.startsWith(t.href + "/");
         return (
           <Link
             key={t.href}

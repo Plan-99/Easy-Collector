@@ -74,6 +74,7 @@ from modules import (
     get_installed_version,
     is_module_installed,
     get_remote_versions,
+    get_remote_sizes,
     set_module_installed,
     download_module,
     remove_module,
@@ -88,6 +89,12 @@ from modules import (
     get_module_price_krw,
     is_module_entitled,
     fetch_owned_module_ids,
+)
+from i18n import (
+    SUPPORTED_LOCALES,
+    get_locale as get_ui_locale,
+    set_locale as set_ui_locale,
+    t,
 )
 import training_server_install as _ts
 from service import ComposeServiceMixin, HealthServiceMixin, RuntimeServiceMixin, docker_compose_available
@@ -390,7 +397,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         circle_icons = self._circle_icon_paths()
         self.btn_quick_apply = self._create_circle_button(
             "⇆",
-            "빠른 동기화",
+            t("pill.codeSync"),
             circle_icons[1] if len(circle_icons) > 1 else None,
         )
         self.btn_quick_apply.clicked.connect(self._on_quick_apply_clicked)
@@ -398,7 +405,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
         self.btn_folder = self._create_circle_button(
             "📁",
-            "불러오기",
+            t("pill.import"),
             circle_icons[2] if len(circle_icons) > 2 else None,
         )
         self.btn_folder.clicked.connect(self._on_import_clicked)
@@ -406,7 +413,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
         self.btn_export = self._create_circle_button(
             "🧾",
-            "내보내기",
+            t("pill.export"),
             circle_icons[3] if len(circle_icons) > 3 else None,
         )
         self.btn_export.clicked.connect(self._on_export_clicked)
@@ -414,7 +421,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
         self.btn_logs = self._create_circle_button(
             "📋",
-            "로그",
+            t("pill.logs"),
             circle_icons[4] if len(circle_icons) > 4 else None,
         )
         self.btn_logs.clicked.connect(self.open_logs_window)
@@ -422,7 +429,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
         self.btn_modules = self._create_circle_button(
             "🧩",
-            "모듈 관리",
+            t("pill.modules"),
             circle_icons[5] if len(circle_icons) > 5 else None,
         )
         self.btn_modules.clicked.connect(self._on_modules_clicked)
@@ -430,16 +437,26 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
         self.btn_training = self._create_circle_button(
             "🔥",
-            "학습 서버",
+            t("pill.training"),
             circle_icons[6] if len(circle_icons) > 6 else None,
         )
         self.btn_training.clicked.connect(self._on_training_clicked)
         pill_layout.addWidget(self.btn_training, 0, Qt.AlignHCenter)
 
+        self.btn_lang = self._create_circle_button(
+            "🌐",
+            t("language.title"),
+            circle_icons[7] if len(circle_icons) > 7 else None,
+        )
+        # Click toggles current language too — but the pad below is the
+        # canonical UI; click is just a fallback for users who don't hover.
+        self.btn_lang.clicked.connect(self._on_language_clicked)
+        pill_layout.addWidget(self.btn_lang, 0, Qt.AlignHCenter)
+
         self.btn_exit = self._create_circle_button(
             "✕",
-            "서비스 종료",
-            circle_icons[7] if len(circle_icons) > 7 else None,
+            t("pill.exit"),
+            circle_icons[8] if len(circle_icons) > 8 else None,
         )
         self.btn_exit.clicked.connect(self._on_exit_action)
         pill_layout.addWidget(self.btn_exit, 0, Qt.AlignHCenter)
@@ -498,28 +515,34 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             self.pad_stack_sync,
             self.pad_path_label,
             self.pad_path_change_btn,
-        ) = self._create_pad_path_box("1. 코드 동기화")
+        ) = self._create_pad_path_box(t("pad.codeSync"))
         (
             self.pad_box_folder,
             self.pad_label_folder,
             self.pad_stack_folder,
             self.pad_import_buttons,
-        ) = self._create_pad_choice_box("2. 불러오기", self._pad_import_choice, self._set_import_choice)
+        ) = self._create_pad_choice_box(t("pad.import"), self._pad_import_choice, self._set_import_choice)
         (
         self.pad_box_logs,
         self.pad_label_logs,
         self.pad_stack_logs,
         self.pad_export_buttons,
-        ) = self._create_pad_choice_box("3. 내보내기", self._pad_export_choice, self._set_export_choice)
-        self.pad_box_settings, self.pad_label_settings, self.pad_stack_settings = self._create_pad_simple_box("4. 로그")
-        self.pad_box_modules, self.pad_label_modules, self.pad_stack_modules = self._create_pad_simple_box("5. 모듈 관리")
-        self.pad_box_training, self.pad_label_training, self.pad_stack_training = self._create_pad_simple_box("6. 학습 서버")
+        ) = self._create_pad_choice_box(t("pad.export"), self._pad_export_choice, self._set_export_choice)
+        self.pad_box_settings, self.pad_label_settings, self.pad_stack_settings = self._create_pad_simple_box(t("pad.logs"))
+        self.pad_box_modules, self.pad_label_modules, self.pad_stack_modules = self._create_pad_simple_box(t("pad.modules"))
+        self.pad_box_training, self.pad_label_training, self.pad_stack_training = self._create_pad_simple_box(t("pad.training"))
+        (
+            self.pad_box_lang,
+            self.pad_label_lang,
+            self.pad_stack_lang,
+            self._lang_buttons,
+        ) = self._create_pad_language_box(self._lang_pad_label_text(), get_ui_locale(), self._on_language_choice)
         (
             self.pad_box_exit,
             self.pad_label_exit,
             self.pad_stack_exit,
             self._exit_action_buttons,
-        ) = self._create_pad_exit_action_box("7. 종료", self._exit_action, self._set_exit_action)
+        ) = self._create_pad_exit_action_box(t("pad.exit"), self._exit_action, self._set_exit_action)
         self._pad_boxes = [
             self.pad_box_sync,
             self.pad_box_folder,
@@ -527,6 +550,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             self.pad_box_settings,
             self.pad_box_modules,
             self.pad_box_training,
+            self.pad_box_lang,
             self.pad_box_exit,
         ]
         self._pad_loading_panel = self._create_pad_loading_panel()
@@ -539,6 +563,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             self.pad_label_settings,
             self.pad_label_modules,
             self.pad_label_training,
+            self.pad_label_lang,
             self.pad_label_exit,
         ]
         self._pad_desc_stacks = [
@@ -548,6 +573,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             self.pad_stack_settings,
             self.pad_stack_modules,
             self.pad_stack_training,
+            self.pad_stack_lang,
             self.pad_stack_exit,
         ]
         self._update_pad_choice_labels()
@@ -560,6 +586,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         pad_layout.addWidget(self.pad_box_settings)
         pad_layout.addWidget(self.pad_box_modules)
         pad_layout.addWidget(self.pad_box_training)
+        pad_layout.addWidget(self.pad_box_lang)
         pad_layout.addWidget(self.pad_box_exit)
         try:
             self._right_pad.lower()  # keep the pad behind the pill so pill corners stay round
@@ -778,6 +805,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             getattr(self, "btn_logs", None),
             getattr(self, "btn_modules", None),
             getattr(self, "btn_training", None),
+            getattr(self, "btn_lang", None),
             getattr(self, "btn_exit", None),
             getattr(self, "pad_box_sync", None),
             getattr(self, "pad_box_folder", None),
@@ -785,6 +813,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             getattr(self, "pad_box_settings", None),
             getattr(self, "pad_box_modules", None),
             getattr(self, "pad_box_training", None),
+            getattr(self, "pad_box_lang", None),
             getattr(self, "pad_box_exit", None),
         ]
         bounds = None
@@ -841,6 +870,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                 getattr(self, "pad_box_settings", None),
                 getattr(self, "pad_box_modules", None),
                 getattr(self, "pad_box_training", None),
+                getattr(self, "pad_box_lang", None),
                 getattr(self, "pad_box_exit", None),
             ]
             for idx, box in enumerate(boxes):
@@ -882,6 +912,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                 getattr(self, "pad_box_settings", None),
                 getattr(self, "pad_box_modules", None),
                 getattr(self, "pad_box_training", None),
+                getattr(self, "pad_box_lang", None),
                 getattr(self, "pad_box_exit", None),
             ]
             x_min = None
@@ -997,6 +1028,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             getattr(self, "btn_logs", None),
             getattr(self, "btn_modules", None),
             getattr(self, "btn_training", None),
+            getattr(self, "btn_lang", None),
             getattr(self, "btn_exit", None),
         ]
         for idx, btn in enumerate(buttons):
@@ -1085,11 +1117,17 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
     def _update_pad_choice_labels(self):
         try:
-            self.pad_label_folder.setText(f"2. {self._pad_import_choice} 불러오기")
+            base = t("pad.import")
+            self.pad_label_folder.setText(
+                base.replace(t("pill.import"), f"{self._pad_import_choice} {t('pill.import')}")
+            )
         except Exception:
             pass
         try:
-            self.pad_label_logs.setText(f"3. {self._pad_export_choice} 내보내기")
+            base = t("pad.export")
+            self.pad_label_logs.setText(
+                base.replace(t("pill.export"), f"{self._pad_export_choice} {t('pill.export')}")
+            )
         except Exception:
             pass
 
@@ -1097,11 +1135,11 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         if getattr(self, "_disable_circle_tooltips", False):
             return
         try:
-            self.btn_folder.setToolTip(f"{self._pad_import_choice} 불러오기")
+            self.btn_folder.setToolTip(t("pad.importChoice", choice=self._pad_import_choice))
         except Exception:
             pass
         try:
-            self.btn_export.setToolTip(f"{self._pad_export_choice} 내보내기")
+            self.btn_export.setToolTip(t("pad.exportChoice", choice=self._pad_export_choice))
         except Exception:
             pass
 
@@ -1121,8 +1159,8 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
     def _exit_action_label(self, action: str) -> str:
         if action == "RESTART":
-            return "7. 재실행"
-        return "7. 종료"
+            return t("pad.exitRestart")
+        return t("pad.exit")
 
     def _update_open_ui_tooltip(self):
         mode = getattr(self, "_open_ui_mode", "NEW")
@@ -1141,6 +1179,99 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         action = getattr(self, "_exit_action", "EXIT")
         try:
             self.pad_label_exit.setText(self._exit_action_label(action))
+        except Exception:
+            pass
+
+    def _lang_pad_label_text(self) -> str:
+        """Pad label text for the language row. Index 8 in the pill order."""
+        return f"8. {t('language.title')}"
+
+    def _on_language_clicked(self):
+        """Click handler for the 🌐 pill button — toggles between supported locales.
+
+        Hover already reveals the two-button picker in the pad; this fallback
+        flips between ko-KR / en-US so a single click is enough on touch
+        devices where hover isn't reliable.
+        """
+        cur = get_ui_locale()
+        nxt = "en-US" if cur == "ko-KR" else "ko-KR"
+        self._on_language_choice(nxt)
+
+    def _on_language_choice(self, locale: str):
+        """Apply a locale change picked from the pad buttons or pill toggle."""
+        if locale not in SUPPORTED_LOCALES:
+            return
+        if locale == get_ui_locale():
+            return
+        set_ui_locale(locale)
+        # Reflect new selection on the pad buttons
+        for code, btn in (getattr(self, "_lang_buttons", {}) or {}).items():
+            try:
+                btn.setChecked(code == locale)
+            except Exception:
+                pass
+            try:
+                if code == "ko-KR":
+                    btn.setText(t("language.korean"))
+                elif code == "en-US":
+                    btn.setText(t("language.english"))
+            except Exception:
+                pass
+        try:
+            self._refresh_static_labels()
+        except Exception:
+            pass
+
+    def _refresh_static_labels(self):
+        """Re-apply translated text to long-lived widgets after a locale change.
+
+        Best-effort — any widget that has been GC'd is silently skipped.
+        """
+        # Pill button tooltips
+        for attr, key in (
+            ("btn_quick_apply", "pill.codeSync"),
+            ("btn_logs", "pill.logs"),
+            ("btn_modules", "pill.modules"),
+            ("btn_training", "pill.training"),
+            ("btn_lang", "language.title"),
+            ("btn_exit", "pill.exit"),
+        ):
+            try:
+                getattr(self, attr).setToolTip(t(key))
+            except Exception:
+                pass
+        # Static pad labels
+        try:
+            self.pad_label_sync.setText(t("pad.codeSync"))
+        except Exception:
+            pass
+        try:
+            self.pad_label_settings.setText(t("pad.logs"))
+        except Exception:
+            pass
+        try:
+            self.pad_label_modules.setText(t("pad.modules"))
+        except Exception:
+            pass
+        try:
+            self.pad_label_training.setText(t("pad.training"))
+        except Exception:
+            pass
+        try:
+            self.pad_label_lang.setText(self._lang_pad_label_text())
+        except Exception:
+            pass
+        # Choice + exit labels recompute from current state
+        try:
+            self._update_pad_choice_labels()
+        except Exception:
+            pass
+        try:
+            self._update_pad_choice_tooltips()
+        except Exception:
+            pass
+        try:
+            self._update_exit_label()
         except Exception:
             pass
 
@@ -1524,6 +1655,74 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         stack.addWidget(mode2_page)
         stack.setCurrentIndex(0)
         return box, desc_label, stack, path_label, change_btn
+
+    def _create_pad_language_box(
+        self,
+        desc_text: str,
+        default_locale: str,
+        on_change,
+    ) -> tuple[QFrame, QLabel, QStackedLayout, dict[str, QPushButton]]:
+        """Two-page pad box for language selection.
+
+        Page 0 shows the description label (e.g. "8. 언어").
+        Page 1 shows two checkable buttons — 한국어 / English — and is
+        revealed when the user hovers the row.
+        """
+        box = QFrame(self._right_pad)
+        box.setObjectName("PadInfoBox")
+        box.setMinimumHeight(self._pad_item_height)
+        box.setMaximumHeight(self._pad_item_height)
+        box.setStyleSheet("background-color: #2d2d2d; border: none; border-radius: 12px;")
+        stack = QStackedLayout(box)
+        stack.setContentsMargins(0, 0, 0, 0)
+        stack.setSpacing(0)
+
+        desc_page = QWidget(box)
+        desc_layout = QHBoxLayout(desc_page)
+        desc_layout.setContentsMargins(12, 0, 12, 0)
+        desc_layout.setSpacing(0)
+        desc_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        desc_label = QLabel(desc_text, desc_page)
+        desc_label.setObjectName("PadInfoLabel")
+        desc_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        desc_label.setStyleSheet("color: #f5f5f5; font-weight: 800; font-size: 16px; background-color: transparent; border: none;")
+        desc_layout.addWidget(desc_label, 1, Qt.AlignLeft | Qt.AlignVCenter)
+        stack.addWidget(desc_page)
+
+        mode2_page = QWidget(box)
+        mode2_layout = QHBoxLayout(mode2_page)
+        mode2_layout.setContentsMargins(5, 5, 5, 5)
+        mode2_layout.setSpacing(5)
+        mode2_layout.setAlignment(Qt.AlignVCenter)
+        group = QButtonGroup(mode2_page)
+        group.setExclusive(True)
+        buttons: dict[str, QPushButton] = {}
+        labels = [
+            ("ko-KR", t("language.korean")),
+            ("en-US", t("language.english")),
+        ]
+        for code, lbl in labels:
+            btn = QPushButton(lbl, mode2_page)
+            btn.setObjectName("PadChoiceButton")
+            btn.setCheckable(True)
+            btn.setChecked(code == default_locale)
+            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            try:
+                btn.setAutoFillBackground(True)
+            except Exception:
+                pass
+            btn.clicked.connect(lambda _=False, c=code: on_change(c))
+            btn._choice_indicator_hide_text = True
+            group.addButton(btn)
+            buttons[code] = btn
+            mode2_layout.addWidget(btn, 1)
+        try:
+            self._style_choice_buttons(buttons)
+        except Exception:
+            pass
+        stack.addWidget(mode2_page)
+        stack.setCurrentIndex(0)
+        return box, desc_label, stack, buttons
 
     def _create_pad_choice_box(
         self,
@@ -3542,23 +3741,42 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         from app_context import QScrollArea
 
         dlg = QDialog()
-        dlg.setWindowTitle("모듈 관리")
+        dlg.setWindowTitle(t("modules.title"))
         dlg.setWindowFlags(dlg.windowFlags() | Qt.Window)
-        dlg.resize(750, 600)
+        dlg.resize(820, 640)
         layout = QVBoxLayout(dlg)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(8)
 
-        title = QLabel("모듈 관리")
+        title = QLabel(t("modules.title"))
         f = title.font()
         f.setPointSize(f.pointSize() + 4)
         f.setBold(True)
         title.setFont(f)
         layout.addWidget(title)
 
-        desc = QLabel("설치된 모듈을 확인하고 추가/제거할 수 있습니다.")
+        desc = QLabel(t("modules.subtitle"))
         desc.setStyleSheet("color: #999; font-size: 12px;")
         layout.addWidget(desc)
+        layout.addSpacing(4)
+
+        # 로컬 모듈 만들기 진입 버튼
+        local_row = QHBoxLayout()
+        btn_local = QPushButton("➕ 로컬 모듈 만들기")
+        btn_local.setStyleSheet("padding: 6px 14px;")
+
+        def _open_wizard():
+            try:
+                from module_wizard import ModuleWizard
+                w = ModuleWizard(dlg)
+                w.exec_()
+            except Exception as e:
+                QMessageBox.critical(dlg, "오류", f"마법사 열기 실패: {e}")
+
+        btn_local.clicked.connect(_open_wizard)
+        local_row.addWidget(btn_local)
+        local_row.addStretch()
+        layout.addLayout(local_row)
         layout.addSpacing(4)
 
         # Kick off catalog + owned refresh in the background. The dialog
@@ -3573,19 +3791,30 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
         by_cat = modules_by_category()
 
-        # Fetch remote versions (best-effort)
+        # Fetch remote versions and asset sizes (best-effort, single API scan).
         remote_vers: dict[str, str] = {}
+        remote_sizes: dict[str, int] = {}
         try:
             release = fetch_latest_release()
             remote_vers = get_remote_versions(release)
+            remote_sizes = get_remote_sizes(release)
         except Exception:
             release = None
 
         def _format_krw(amount: int) -> str:
             try:
-                return f"{amount:,}원"
+                return t("modules.priceWon", amount=f"{amount:,}")
             except Exception:
-                return f"{amount}원"
+                return t("modules.priceWon", amount=str(amount))
+
+        def _format_size(size_bytes: int) -> str:
+            if not size_bytes or size_bytes <= 0:
+                return ""
+            mb = size_bytes / (1024 * 1024)
+            if mb >= 1:
+                return t("modules.sizeMb", size=mb)
+            kb = size_bytes / 1024
+            return t("modules.sizeKb", size=kb)
 
         def _open_checkout(module_id: str, btn=None, status_lbl=None, ver_lbl=None,
                            release_ref=None):
@@ -3644,13 +3873,13 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             def _copy_url():
                 try:
                     QApplication.clipboard().setText(checkout_url)
-                    copy_btn.setText("복사됨")
-                    QTimer.singleShot(1500, lambda: copy_btn.setText("복사"))
+                    copy_btn.setText(t("common.copied"))
+                    QTimer.singleShot(1500, lambda: copy_btn.setText(t("common.copy")))
                 except Exception:
                     pass
             copy_btn.clicked.connect(_copy_url)
 
-            cancel_btn = QPushButton("닫기")
+            cancel_btn = QPushButton(t("common.close"))
             wlayout.addWidget(cancel_btn)
 
             timer = QTimer(wait_dlg)
@@ -3669,8 +3898,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                 if time.monotonic() > deadline:
                     _stop()
                     QMessageBox.warning(
-                        dlg, "시간 초과",
-                        "결제 확인 대기 시간이 만료되었습니다. 결제를 완료하셨다면 모듈 창을 다시 열어주세요.",
+                        dlg, t("checkout.timeout"), t("checkout.timeoutBody"),
                     )
                     return
                 try:
@@ -3688,13 +3916,11 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                             _make_action(module_id, "install", btn, status_lbl, ver_lbl, release_ref)()
                         except Exception:
                             QMessageBox.information(
-                                dlg, "결제 완료",
-                                "결제가 확인되었습니다. 모듈 창을 다시 열어 설치를 진행해 주세요.",
+                                dlg, t("checkout.completed"), t("checkout.completedBody"),
                             )
                     else:
                         QMessageBox.information(
-                            dlg, "결제 완료",
-                            "결제가 확인되었습니다. 모듈 창을 다시 열어 설치를 진행해 주세요.",
+                            dlg, t("checkout.completed"), t("checkout.completedBody"),
                         )
 
             timer.timeout.connect(_poll)
@@ -3708,7 +3934,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                 if action == "install" or action == "update":
                     btn.setEnabled(False)
                     btn.setText("⏳")
-                    status_lbl.setText("설치 중...")
+                    status_lbl.setText(t("common.installing"))
                     status_lbl.setStyleSheet("color: #facc15; font-size: 11px; font-weight: 600;")
 
                     import threading
@@ -3717,29 +3943,29 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                     def _run():
                         result[0] = download_module(module_id)
 
-                    t = threading.Thread(target=_run, daemon=True)
-                    t.start()
+                    install_thread = threading.Thread(target=_run, daemon=True)
+                    install_thread.start()
 
                     # Poll every 500ms until thread finishes
                     timer = QTimer()
                     def _check():
-                        if t.is_alive():
+                        if install_thread.is_alive():
                             return
                         timer.stop()
                         ok = result[0]
                         if ok:
                             rv = remote_vers.get(module_id, "")
-                            status_lbl.setText(f"v{rv}" if rv else "설치됨")
+                            status_lbl.setText(f"v{rv}" if rv else t("common.installed"))
                             status_lbl.setStyleSheet("color: #86efac; font-size: 11px; font-weight: 600;")
                             ver_lbl.setText("")
-                            btn.setText("제거")
+                            btn.setText(t("common.remove"))
                             btn.setEnabled(True)
                             btn.clicked.disconnect()
                             btn.clicked.connect(_make_action(module_id, "remove", btn, status_lbl, ver_lbl, release_ref))
                         else:
-                            status_lbl.setText("실패")
+                            status_lbl.setText(t("common.failed"))
                             status_lbl.setStyleSheet("color: #ef4444; font-size: 11px; font-weight: 600;")
-                            btn.setText("재시도")
+                            btn.setText(t("common.retry"))
                             btn.setEnabled(True)
                     timer.timeout.connect(_check)
                     timer.start(500)
@@ -3747,10 +3973,10 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
                 elif action == "remove":
                     remove_module(module_id)
-                    status_lbl.setText("미설치")
+                    status_lbl.setText(t("common.notInstalled"))
                     status_lbl.setStyleSheet("color: #999; font-size: 11px; font-weight: 600;")
                     ver_lbl.setText("")
-                    btn.setText("설치")
+                    btn.setText(t("common.install"))
                     btn.clicked.disconnect()
                     btn.clicked.connect(_make_action(module_id, "install", btn, status_lbl, ver_lbl, release_ref))
             return _do
@@ -3773,12 +3999,16 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             col = QVBoxLayout()
             col.setSpacing(4)
 
-            cat_label = QLabel(f"■ {CATEGORY_LABELS.get(cat, cat)}")
+            cat_key = f"category.{cat}"
+            cat_text = t(cat_key)
+            if cat_text == cat_key:
+                cat_text = CATEGORY_LABELS.get(cat, cat)
+            cat_label = QLabel(f"■ {cat_text}")
             cat_label.setStyleSheet("font-weight: bold; font-size: 13px;")
             col.addWidget(cat_label)
 
             search_input = QLineEdit()
-            search_input.setPlaceholderText("검색...")
+            search_input.setPlaceholderText(t("common.search"))
             search_input.setFixedHeight(28)
             search_input.setStyleSheet("font-size: 11px; padding: 2px 8px;")
             col.addWidget(search_input)
@@ -3788,13 +4018,26 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
             for mod in sorted_mods:
                 row_widget = QWidget()
-                row = QHBoxLayout(row_widget)
-                row.setContentsMargins(4, 4, 4, 4)
-                row.setSpacing(4)
+                row_v = QVBoxLayout(row_widget)
+                row_v.setContentsMargins(4, 6, 4, 6)
+                row_v.setSpacing(2)
+
+                # Top row: name + size + status + update + action button
+                row = QHBoxLayout()
+                row.setContentsMargins(0, 0, 0, 0)
+                row.setSpacing(6)
 
                 name_label = QLabel(mod.name)
                 name_label.setStyleSheet("font-weight: 600; font-size: 12px;")
                 row.addWidget(name_label)
+
+                size_bytes = remote_sizes.get(mod.id, 0)
+                size_text = _format_size(size_bytes)
+                if size_text:
+                    size_label = QLabel(size_text)
+                    size_label.setStyleSheet("color: #94a3b8; font-size: 10px; font-weight: 500;")
+                    row.addWidget(size_label)
+
                 row.addStretch(1)
 
                 is_installed = is_module_installed(mod.id)
@@ -3807,10 +4050,10 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                     status = QLabel(f"v{local_ver}")
                     status.setStyleSheet("color: #86efac; font-size: 11px; font-weight: 600;")
                 elif is_installed:
-                    status = QLabel("설치됨")
+                    status = QLabel(t("common.installed"))
                     status.setStyleSheet("color: #86efac; font-size: 11px; font-weight: 600;")
                 else:
-                    status = QLabel("미설치")
+                    status = QLabel(t("common.notInstalled"))
                     status.setStyleSheet("color: #999; font-size: 11px; font-weight: 600;")
                 row.addWidget(status)
 
@@ -3823,13 +4066,13 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
                 # Action button
                 if has_update:
-                    btn = QPushButton("업데이트")
-                    btn.setFixedSize(60, 26)
+                    btn = QPushButton(t("common.update"))
+                    btn.setFixedSize(70, 26)
                     btn.setStyleSheet("font-size: 11px; border-radius: 6px; background-color: #1e3a5f; color: #7dd3fc; border: 1px solid #7dd3fc;")
                     btn.clicked.connect(_make_action(mod.id, "update", btn, status, ver_lbl, release))
                 elif is_installed:
-                    btn = QPushButton("제거")
-                    btn.setFixedSize(52, 26)
+                    btn = QPushButton(t("common.remove"))
+                    btn.setFixedSize(60, 26)
                     btn.setStyleSheet("font-size: 11px; border-radius: 6px;")
                     btn.clicked.connect(_make_action(mod.id, "remove", btn, status, ver_lbl, release))
                 else:
@@ -3837,8 +4080,8 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                     entitled = is_module_entitled(mod.id)
                     if price_krw > 0 and not entitled:
                         # Paid module the user has not bought yet.
-                        btn = QPushButton(f"결제 · {_format_krw(price_krw)}")
-                        btn.setFixedSize(120, 26)
+                        btn = QPushButton(t("modules.checkout", price=_format_krw(price_krw)))
+                        btn.setFixedSize(140, 26)
                         btn.setStyleSheet(
                             "font-size: 11px; border-radius: 6px; "
                             "background-color: #4338ca; color: #ffffff; border: 1px solid #6366f1;"
@@ -3849,14 +4092,26 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                         )
                     else:
                         # Free or already owned.
-                        label = "설치"
                         if price_krw > 0 and entitled:
-                            label = "설치 (구매 완료)"
+                            label = t("modules.installPaid")
+                            btn_w = 140
+                        else:
+                            label = t("common.install")
+                            btn_w = 60
                         btn = QPushButton(label)
-                        btn.setFixedSize(120 if price_krw > 0 else 52, 26)
+                        btn.setFixedSize(btn_w, 26)
                         btn.setStyleSheet("font-size: 11px; border-radius: 6px;")
                         btn.clicked.connect(_make_action(mod.id, "install", btn, status, ver_lbl, release))
                 row.addWidget(btn)
+                row_v.addLayout(row)
+
+                # Description row (only when present, dim and word-wrapped).
+                desc_text = (mod.description or "").strip()
+                if desc_text:
+                    desc_label = QLabel(desc_text)
+                    desc_label.setStyleSheet("color: #8b9aab; font-size: 10px; font-weight: 400;")
+                    desc_label.setWordWrap(True)
+                    row_v.addWidget(desc_label)
 
                 col.addWidget(row_widget)
                 search_key = f"{mod.name} {mod.description} {mod.id}".lower()
@@ -3873,7 +4128,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
 
         layout.addLayout(columns_row, 1)
 
-        btn_close = QPushButton("닫기")
+        btn_close = QPushButton(t("common.close"))
         btn_close.clicked.connect(dlg.close)
         close_row = QHBoxLayout()
         close_row.addStretch(1)

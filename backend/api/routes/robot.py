@@ -296,23 +296,42 @@ def delete_robot(id):
 
 @robot_bp.route('/robot/<id>/:move_to', methods=['POST'])
 def move_robot(id):
-    data = request.json
+    """비동기 move_to 트리거. server-side 가 별도 thread 에서 보간 진행.
+    UI 는 즉시 응답을 받고, 중단이 필요하면 :cancel_move_to 호출.
+    """
+    data = request.json or {}
     robot = RobotModel.find(id)
     if not robot:
         return {'status': 'error', 'message': 'Robot not found'}, 404
 
     goal_pos = data.get('goal_pos')
-    step_size = data.get('step_size', 0.1)
-
     if not goal_pos:
-        return {'status': 'error', 'message': 'Action is required'}, 400
+        return {'status': 'error', 'message': 'goal_pos is required'}, 400
 
-    print(current_app.agents)
-    agent = current_app.agents[int(id)]
+    duration = float(data.get('duration', 5.0))
+    hz = float(data.get('hz', 100.0))
 
-    agent.move_to(goal_pos, step_size)
-    time.sleep(3)
-    return {'status': 'success', 'message': 'Robot moved'}, 200
+    agent = current_app.agents.get(int(id))
+    if agent is None:
+        return {'status': 'error', 'message': f'Agent {id} not running'}, 404
+
+    agent.move_to(goal_pos, duration=duration, hz=hz)
+    return {
+        'status': 'success',
+        'message': 'Move started',
+        'duration': duration,
+        'hz': hz,
+    }, 200
+
+
+@robot_bp.route('/robot/<id>/:cancel_move_to', methods=['POST'])
+def cancel_move_robot(id):
+    """진행 중인 move_to 즉시 중단."""
+    agent = current_app.agents.get(int(id))
+    if agent is None:
+        return {'status': 'error', 'message': f'Agent {id} not running'}, 404
+    agent.cancel_move_to()
+    return {'status': 'success', 'message': 'Cancel signal sent'}, 200
 
 
 @robot_bp.route('/robot/<id>/:subscribe_robot', methods=['POST'])

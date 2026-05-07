@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import UnbindDeviceButton from "./UnbindDeviceButton";
 import RefundButton from "./RefundButton";
 import PasswordCard from "./PasswordCard";
+import AddressCard from "./AddressCard";
 import { getDashboardUser } from "@/lib/dashboard-user";
 
 const REFUND_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
@@ -77,6 +78,21 @@ export default async function DashboardPage() {
 
       {/* Password */}
       <PasswordCard hasPassword={hasPassword} />
+
+      {/* Saved addresses */}
+      <AddressCard
+        initial={user.addresses.map(a => ({
+          id: a.id,
+          label: a.label,
+          recipientName: a.recipientName,
+          phone: a.phone,
+          postalCode: a.postalCode,
+          addressLine1: a.addressLine1,
+          addressLine2: a.addressLine2,
+          requestNote: a.requestNote,
+          isDefault: a.isDefault,
+        }))}
+      />
 
       {/* Connected devices */}
       <div className="bezel-card mb-8">

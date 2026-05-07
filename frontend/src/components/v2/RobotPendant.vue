@@ -1,27 +1,41 @@
 <template>
     <div class="row q-mb-md items-center q-gutter-sm">
-        <!-- Saved Pose Buttons -->
-        <q-btn
-            v-for="pose in poses" :key="pose.id"
-            outline
-            :label="pose.name"
-            @click="goToPose(pose)"
-            :style="pose.color ? { borderColor: pose.color, color: pose.color } : {}"
-        >
-            <q-menu context-menu>
-                <q-list dense dark>
-                    <q-item clickable v-close-popup @click="deletePose(pose)" class="text-negative">
-                        <q-item-section avatar><q-icon name="delete" size="xs" /></q-item-section>
-                        <q-item-section>{{ $t('robotPoseDelete') }}</q-item-section>
-                    </q-item>
-                </q-list>
-            </q-menu>
-        </q-btn>
+        <!-- 이동 중에는 모든 Pose 버튼이 단일 정지 버튼으로 토글된다.
+             cancelMove() 가 즉시 백엔드 cancel_move_to + 로컬 isMoving false. -->
+        <template v-if="!isMoving">
+            <!-- Saved Pose Buttons -->
+            <q-btn
+                v-for="pose in poses" :key="pose.id"
+                outline
+                :label="pose.name"
+                @click="goToPose(pose)"
+                :style="pose.color ? { borderColor: pose.color, color: pose.color } : {}"
+            >
+                <q-menu context-menu>
+                    <q-list dense dark>
+                        <q-item clickable v-close-popup @click="deletePose(pose)" class="text-negative">
+                            <q-item-section avatar><q-icon name="delete" size="xs" /></q-item-section>
+                            <q-item-section>{{ $t('robotPoseDelete') }}</q-item-section>
+                        </q-item>
+                    </q-list>
+                </q-menu>
+            </q-btn>
 
-        <!-- Add Pose Button -->
-        <q-btn outline color="white" @click="openAddPoseDialog">
-            {{ $t('robotPoseAddBtn') }}
-        </q-btn>
+            <!-- Add Pose Button -->
+            <q-btn outline color="white" @click="openAddPoseDialog">
+                {{ $t('robotPoseAddBtn') }}
+            </q-btn>
+        </template>
+        <template v-else>
+            <q-btn
+                unelevated color="negative" icon="stop"
+                :label="$t('robotPoseStop')"
+                @click="cancelMove"
+            />
+            <div class="text-caption text-grey-5 q-ml-sm">
+                {{ $t('robotPoseMovingTo', { name: movingPoseName || '' }) }}
+            </div>
+        </template>
 
         <q-space></q-space>
 
@@ -111,7 +125,7 @@
     </q-dialog>
 </template>
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { api } from 'src/boot/axios'
 import { Notify } from 'quasar'
 import { useI18n } from 'vue-i18n'
@@ -194,10 +208,41 @@ function addPose() {
     })
 }
 
-function goToPose(pose) {
-    if (pose.pose && pose.pose.length === props.robot.joint_names.length) {
-        props.robot.handler.moveRobotJoint(pose.pose)
+// 이동 중 토글 — 백엔드 is_moving 이 push 되지 않으므로 로컬에서 duration 만큼
+// 타이머로 자동 해제. cancelMove 호출 시 즉시 reset.
+const POSE_MOVE_DURATION = 5.0
+const isMoving = ref(false)
+const movingPoseName = ref(null)
+let moveTimer = null
+
+function clearMoveTimer() {
+    if (moveTimer) {
+        clearTimeout(moveTimer)
+        moveTimer = null
     }
+}
+
+function goToPose(pose) {
+    if (!pose.pose || pose.pose.length !== props.robot.joint_names.length) return
+    // moveRobotJoint(socketio 단발) 가 아니라 move_to API 로 보내야 보간이 적용된다.
+    // 단발 publish 는 interp_node 에서 default cmd_interval 만에 jump 해서
+    // duration 이 무시되고 한 번에 가는 것처럼 보임.
+    clearMoveTimer()
+    isMoving.value = true
+    movingPoseName.value = pose.name
+    props.robot.handler.moveToPose(pose.pose, { duration: POSE_MOVE_DURATION })
+    moveTimer = setTimeout(() => {
+        isMoving.value = false
+        movingPoseName.value = null
+        moveTimer = null
+    }, POSE_MOVE_DURATION * 1000)
+}
+
+function cancelMove() {
+    clearMoveTimer()
+    isMoving.value = false
+    movingPoseName.value = null
+    props.robot.handler.stopMove()
 }
 
 function deletePose(pose) {
@@ -208,6 +253,10 @@ function deletePose(pose) {
 
 onMounted(() => {
     loadPoses()
+})
+
+onBeforeUnmount(() => {
+    clearMoveTimer()
 })
 
 </script>

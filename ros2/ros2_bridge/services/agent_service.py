@@ -90,8 +90,21 @@ class AgentServiceServicer(pb_grpc.AgentServiceServicer):
         agent = self._get_agent(request.agent_id, context)
         if agent is None:
             return pb.StatusResponse(success=False, message='Agent not found')
-        agent.move_to(list(request.target_pos), step_size=request.step_size, duration=request.duration)
-        return pb.StatusResponse(success=True, message='OK')
+        # 비동기 — agent.move_to 가 thread 띄우고 즉시 return.
+        # step_size 는 deprecated (proto 호환만 남김), duration/hz 만 사용.
+        agent.move_to(
+            list(request.target_pos),
+            duration=request.duration,
+            hz=request.hz,
+        )
+        return pb.StatusResponse(success=True, message='Move started (async)')
+
+    def CancelMoveTo(self, request, context):
+        agent = self._get_agent(request.id, context)
+        if agent is None:
+            return pb.StatusResponse(success=False, message='Agent not found')
+        agent.cancel_move_to()
+        return pb.StatusResponse(success=True, message='Cancel signal sent')
 
     # ------------------------------------------------------------------
     # State Queries

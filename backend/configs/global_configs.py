@@ -56,246 +56,25 @@ def get_checkpoint_dir(checkpoint_id) -> str:
     from ..utils.machine_id import machine_id
     return os.path.join(_checkpoint_base, machine_id(), str(checkpoint_id))
 
-_ALL_ROBOTS = [
-    {
-        'name': 'test_arm',
-        'role': 'single_arm',
-        'company': 'Test',
-        'joint_dim': 7,
-        'joint_names': ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"],
-        'joint_lower_bounds': [-2.618, 0, -2.618, -1.745, -1.22, -2.094, 0],
-        'joint_upper_bounds': [2.618, 2.618, 0, 1.745, 1.22, 2.094, 0.087],
-        'read_topic': '/joint_states_single',
-        'read_topic_msg': 'sensor_msgs/JointState',
-        'write_type': 'topic',
-        'write_topic': '/joint_states',
-        'write_topic_msg': 'sensor_msgs/JointState',
-        'interpolation': True,
-        'tool_inner': True,
-        'tool_index': [6],
-        'ik_available': True,
-        'custom_fields': [],
-    },
-    {
-        'name': 'piper',
-        'module_id': 'robot_piper',
-        'role': 'single_arm',
-        'company': 'Piper',
-        'joint_dim': 7,
-        'joint_names': ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"],
-        'joint_lower_bounds': [-2.618, 0, -2.618, -1.745, -1.22, -2.094, 0],
-        'joint_upper_bounds': [2.618, 2.618, 0, 1.745, 1.22, 2.094, 0.087],
-        'interpolation': True,
-        'sdk_control': True,
-        'sdk_type': 'piper',
-        'tool_inner': True,
-        'tool_index': [6],
-        'ik_available': True,
-        'custom_fields': ['can_port'],
-    },
-    
-    {
-        'name': 'piper(no gripper)',
-        'module_id': 'robot_piper',
-        'role': 'single_arm',
-        'company': 'Piper',
-        'joint_dim': 6,
-        'joint_names': ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
-        'joint_lower_bounds': [-2.618, 0, -2.618, -1.745, -1.22, -2.094],
-        'joint_upper_bounds': [2.618, 2.618, 0, 1.745, 1.22, 2.094],
-        'interpolation': True,
-        'sdk_control': True,
-        'sdk_type': 'piper',
-        'tool_inner': False,
-        'tool_index': [],
-        'ik_available': True,
-        'custom_fields': ['can_port'],
-    },
-    {
-        'name': 'tm_12',
-        'module_id': 'robot_techman',
-        'role': 'single_arm',
-        'company': 'OMRON',
-        'joint_dim': 6,
-        'joint_names': ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6"],
-        'joint_lower_bounds': [-6.283, -6.283, -2.827, -6.283, -6.283, -6.283],
-        'joint_upper_bounds': [6.283, 6.283, 2.827, 6.283, 6.283, 6.283],
-        'read_topic': '/joint_states',
-        'read_topic_msg': 'sensor_msgs/JointState',
-        'write_type': 'service',
-        'write_topic': '/send_script',
-        'write_topic_msg': 'tm_msgs/srv/SendScript',
-        'tool_inner': False,
-        'tool_index': [],
-        'ik_available': True,
-        'custom_fields': ['ip_address'],
-    },
-    {
-        'name': 'tm_12s',
-        'module_id': 'robot_techman',
-        'role': 'single_arm',
-        'company': 'OMRON',
-        'joint_dim': 6,
-        'joint_names': ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6"],
-        'joint_lower_bounds': [-6.283, -6.283, -2.827, -6.283, -6.283, -6.283],
-        'joint_upper_bounds': [6.283, 6.283, 2.827, 6.283, 6.283, 6.283],
-        'read_topic': '/joint_states',
-        'read_topic_msg': 'sensor_msgs/JointState',
-        'write_type': 'service',
-        'write_topic': '/send_script',
-        'write_topic_msg': 'tm_msgs/srv/SendScript',
-        'tool_inner': False,
-        'tool_index': [],
-        'ik_available': True,
-        'custom_fields': ['ip_address'],
-    },
-    {
-        'name': 'tm_12_robotiq',
-        'module_id': 'robot_techman',
-        'role': 'single_arm',
-        'company': 'OMRON',
-        'joint_dim': 7,
-        'joint_names': ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "gripper"],
-        'joint_lower_bounds': [-6.283, -6.283, -2.827, -6.283, -6.283, -6.283, 0.0],
-        'joint_upper_bounds': [6.283, 6.283, 2.827, 6.283, 6.283, 6.283, 0.85],
-        'read_topic': '/feedback_states',
-        'read_topic_msg': 'tm_msgs/msg/FeedbackState',
-        'write_type': 'service',
-        'write_topic': '/send_script',
-        'write_topic_msg': 'tm_msgs/srv/SendScript',
-        'tool_inner': True,
-        'tool_index': [6],
-        'ik_available': True,
-        'custom_fields': ['ip_address'],
-    },
-    {
-        'name': 'rb3_730es_u',
-        'module_id': 'robot_rbpodo',
-        'role': 'single_arm',
-        'company': 'Rainbow Robotics',
-        'joint_dim': 6,
-        'joint_names': ["base", "shoulder", "elbow", "wrist1", "wrist2", "wrist3"],
-        'joint_lower_bounds': [-3.14, -3.14, -3.14, -3.14, -3.14, -3.14],
-        'joint_upper_bounds': [3.14, 3.14, 3.14, 3.14, 3.14, 3.14],
-        'read_topic': '/rbpodo/joint_states',
-        'read_topic_msg': 'sensor_msgs/JointState',
-        'write_type': 'topic',
-        'write_topic': '/position_controllers/commands',
-        'write_topic_msg': 'std_msgs/Float64MultiArray',
-        'tool_inner': False,
-        'tool_index': [],
-        'ik_available': True,
-        'custom_fields': ['ip_address'],
-    },
-    {
-        'name': 'rb5_850e',
-        'module_id': 'robot_rbpodo',
-        'role': 'single_arm',
-        'company': 'Rainbow Robotics',
-        'joint_dim': 6,
-        'joint_names': ["base", "shoulder", "elbow", "wrist1", "wrist2", "wrist3"],
-        'joint_lower_bounds': [-3.14, -3.14, -3.14, -3.14, -3.14, -3.14],
-        'joint_upper_bounds': [3.14, 3.14, 3.14, 3.14, 3.14, 3.14],
-        'read_topic': '/rbpodo/joint_states',
-        'read_topic_msg': 'sensor_msgs/JointState',
-        'write_type': 'topic',
-        'write_topic': '/position_controllers/commands',
-        'write_topic_msg': 'std_msgs/Float64MultiArray',
-        'tool_inner': False,
-        'tool_index': [],
-        'custom_fields': ['ip_address'],
-    },
-    {
-        'name': 'kinova_gen3_7dof_robotiq_2f_85',
-        'module_id': 'robot_kinova',
-        'role': 'single_arm',
-        'company': 'Kinova',
-        'joint_dim': 7,
-        'joint_names': ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7"],
-        'joint_lower_bounds': [-3.14, -3.14, -3.14, -3.14, -3.14, -3.14, -3.14],
-        'joint_upper_bounds': [3.14, 3.14, 3.14, 3.14, 3.14, 3.14, 3.14],
-        'read_topic': '/joint_trajectory_controller/controller_state',
-        'read_topic_msg': 'control_msgs/JointTrajectoryControllerState',
-        'write_topic': '/joint_trajectory_controller/joint_trajectory',
-        'write_topic_msg': 'trajectory_msgs/JointTrajectory',
-        'tool_inner': False,
-        'tool_index': [],
-        'ik_available': True,
-        'custom_fields': ['ip_address'],
-    },
-    {
-        'name': 'fairino_fr5',
-        'module_id': 'robot_fairino',
-        'role': 'single_arm',
-        'company': 'Fairino',
-        'joint_dim': 6,
-        'joint_names': ["j1", "j2", "j3", "j4", "j5", "j6"],
-        'joint_lower_bounds': [-3.0543, -4.6251, -2.8274, -4.6251, -3.0543, -3.0543],
-        'joint_upper_bounds': [3.0543, 1.4835, 2.8274, 1.4835, 3.0543, 3.0543],
-        'interpolation': True,
-        'sdk_control': True,
-        'sdk_type': 'fairino',
-        'tool_inner': False,
-        'tool_index': [],
-        'ik_available': True,
-        'custom_fields': ['ip_address'],
-    },
-    {
-        'name': 'jaka_zu12',
-        'module_id': 'robot_jaka',
-        'role': 'single_arm',
-        'company': 'JAKA',
-        'joint_dim': 6,
-        'joint_names': ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6"],
-        'joint_lower_bounds': [-6.28, -1.48, -3.05, -1.48, -6.28, -6.28],
-        'joint_upper_bounds': [6.28, 4.62, 3.05, 4.62, 6.28, 6.28],
-        'read_topic': '/jaka_driver/joint_position',
-        'read_topic_msg': 'sensor_msgs/JointState',
-        'write_type': 'service',
-        'write_topic': '/jaka_driver/servo_j',
-        'write_topic_msg': 'jaka_msgs/srv/ServoMove',
-        'tool_inner': False,
-        'tool_index': [],
-        'ik_available': True,
-        'custom_fields': ['ip_address'],
-    },
-    {
-        'name': 'robotiq_2f_85',
-        'module_id': 'gripper_robotiq',
-        'role': 'tool',
-        'company': 'Robotiq',
-        'joint_dim': 1,
-        'joint_names': ['robotiq_85_left_knuckle_joint'],
-        'joint_lower_bounds': [0.0],
-        'joint_upper_bounds': [0.85],
-        'read_topic': '/joint_states',
-        'read_topic_msg': 'sensor_msgs/JointState',
-        'write_type': 'action',
-        'write_topic': '/robotiq_gripper_controller/gripper_cmd',
-        'write_topic_msg': 'control_msgs/action/GripperCommand',
-        'tool_inner': False,
-        'tool_index': [],
-        'custom_fields': ['serial_port'],
-    },
-    {
-        'name': '2FG7',
-        'module_id': 'gripper_onrobot',
-        'role': 'tool',
-        'company': 'OnRobot',
-        'joint_dim': 1,
-        'joint_names': ['gripper_pos'],
-        'joint_lower_bounds': [0.1],
-        'joint_upper_bounds': [0.48],
-        'read_topic': '/joint_states',
-        'read_topic_msg': 'sensor_msgs/JointState',
-        'write_type': 'topic',
-        'write_topic': '/command',
-        'write_topic_msg': 'sensor_msgs/JointState',
-        'tool_inner': False,
-        'tool_index': [],
-        'custom_fields': ['ip_address', 'port'],
-    }
-]
+# 빌트인 / 외부 module manifest 모두 module_loader 가 단일 진실원천으로 노출.
+# 이전엔 _ALL_ROBOTS 에 in-code dict 로 박혀있던 9 로봇 + 4 그리퍼 정의를
+# `modules/robots/<id>/module.json::robots[]` 로 옮겼다.
+#   tutorial_arm                        → backend/configs/tutorial_defaults.py
+#   test_arm                            → module_loader._BUILTIN_ROBOTS
+#   piper / piper(no gripper)           → modules/robots/piper/module.json
+#   tm_12 / tm_12s / tm_12_robotiq      → modules/robots/techman/module.json
+#   rb3_730es_u / rb5_850e              → modules/robots/rbpodo/module.json
+#   kinova_gen3_7dof_robotiq_2f_85      → modules/robots/kinova/module.json
+#   fairino_fr5                         → modules/robots/fairino/module.json
+#   jaka_zu12                           → modules/robots/jaka/module.json
+#   robotiq_2f_85                       → modules/robots/robotiq/module.json
+#   2FG7                                → modules/robots/onrobot/module.json
+from .module_loader import load_all_robots as _load_all_robots
+
+# 옛 코드가 `from ...configs.global_configs import SUPPORT_ROBOTS` 외에
+# `_ALL_ROBOTS` 를 직접 import 하는 경로는 없지만, 안전을 위해 빈 list 로 alias.
+_ALL_ROBOTS: list = []
+
 
 _ALL_SENSORS = [
     {
@@ -372,8 +151,11 @@ def _get_installed_module_ids():
 
 
 def _get_support_robots():
-    installed = _get_installed_module_ids()
-    return [r for r in _ALL_ROBOTS if not r.get('module_id') or r['module_id'] in installed]
+    """module_loader 가 manifest 에서 직접 읽어옴 — 더 이상 _ALL_ROBOTS in-code
+    리스트 + module_id 필터 조합을 쓰지 않는다. manifest 자체가 곧 "설치됨" 의
+    증거이므로 별도 필터링 불필요.
+    """
+    return _load_all_robots()
 
 def _get_support_sensors():
     installed = _get_installed_module_ids()

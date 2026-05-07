@@ -8,7 +8,6 @@ _DATA_ROOT = os.environ.get('EASYTRAINER_DATA_DIR', '/opt/easytrainer')
 _ROS2_SRC = os.path.join(_DATA_ROOT, 'project', 'ros2', 'ros2_ws', 'src')
 
 URDF_REGISTRY = {
-    'test_arm': f'{_ROS2_SRC}/piper_description/urdf/piper_description.urdf',
     'piper': f'{_ROS2_SRC}/piper_description/urdf/piper_description.urdf',
     'piper(no gripper)': f'{_ROS2_SRC}/piper_description/urdf/piper_no_gripper_description.urdf',
     'tm_12': f'{_ROS2_SRC}/tm2_ros2/tm_description/urdf/tm12s.urdf',

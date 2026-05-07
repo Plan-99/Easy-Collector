@@ -1,7 +1,7 @@
 {
   "id": "gripper_robotiq",
   "name": "Robotiq Gripper",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "category": "robot",
   "description": "Robotiq 그리퍼 드라이버",
   "install": {
@@ -21,5 +21,37 @@
   },
   "check": {
     "type": "path"
-  }
+  },
+  "robots": [
+    {
+      "type": "robotiq_2f_85",
+      "spec": {
+        "company": "Robotiq",
+        "role": "tool",
+        "joint_dim": 1,
+        "joint_names": ["robotiq_85_left_knuckle_joint"],
+        "joint_lower_bounds": [0.0],
+        "joint_upper_bounds": [0.85],
+        "tool_inner": false,
+        "tool_index": [],
+        "custom_fields": ["serial_port"]
+      },
+      "driver": {
+        "kind": "action",
+        "read_topic": "/joint_states",
+        "read_topic_msg": "sensor_msgs/JointState",
+        "write_type": "action",
+        "write_topic": "/robotiq_gripper_controller/gripper_cmd",
+        "write_topic_msg": "control_msgs/action/GripperCommand",
+        "launch": {
+          "package": "robotiq_description",
+          "launch_file": "robotiq_control.launch.py",
+          "args": {
+            "namespace": "{namespace}",
+            "com_port": "{serial_port|/dev/ttyUSB0}"
+          }
+        }
+      }
+    }
+  ]
 }

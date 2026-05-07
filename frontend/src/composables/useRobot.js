@@ -182,6 +182,8 @@ export function useRobot(robot, robotOnCallback = () => {}) {
   }
 
   function goOriginPos() {
+    // backend 가 비동기로 진행 (server-side thread). 응답은 즉시 옴 — 실제
+    // 도달은 stopMove() 또는 시간이 지나기를 기다리는 방식으로 관찰.
     api
       .post(`/robot/${robot.id}/:move_to`, { goal_pos: robot.homepose })
       .then(() => {
@@ -189,6 +191,31 @@ export function useRobot(robot, robotOnCallback = () => {}) {
       })
       .catch((error) => {
         console.error('Error moving robot to origin:', error);
+        Notify.create({ color: 'negative', message: t('robotPoseMoveToOriginFailed') });
+      });
+  }
+
+  function stopMove() {
+    // 진행 중인 move_to 즉시 취소. UI 의 'stop' 버튼에 바인딩.
+    return api
+      .post(`/robot/${robot.id}/:cancel_move_to`)
+      .catch((error) => {
+        console.error('Error cancelling move_to:', error);
+      });
+  }
+
+  function moveToPose(goalPos, { duration = 5.0, hz = 100.0 } = {}) {
+    // RobotPendant 의 saved pose 클릭처럼 "duration 동안 부드럽게 이동" 하는 케이스용.
+    // moveRobotJoint(socketio 단발) 와 달리 server-side thread 에서 hz 주기로
+    // 보간된 명령을 흘려 보낸다. 진행 중에는 stopMove() 로 취소 가능.
+    return api
+      .post(`/robot/${robot.id}/:move_to`, {
+        goal_pos: goalPos,
+        duration,
+        hz,
+      })
+      .catch((error) => {
+        console.error('Error starting move_to:', error);
         Notify.create({ color: 'negative', message: t('robotPoseMoveToOriginFailed') });
       });
   }
@@ -208,6 +235,8 @@ export function useRobot(robot, robotOnCallback = () => {}) {
     moveRobotEEDelta,
     moveRobotJointDelta,
     goOriginPos,
+    stopMove,
+    moveToPose,
     subscribeRobot,
     unSubscribeRobot,
     checkRobotTopic,

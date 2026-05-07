@@ -102,11 +102,18 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                     if agent.ik_solver is not None:
                         agent.reset_ik_solver(home_pose[str(agent.id)])
 
-                # is_moving 플래그로 도달 대기 (타임아웃 30초)
+                # is_moving 플래그로 도달 대기 (타임아웃 30초). move_to 가
+                # 비동기 thread 라 stop 신호 시 cancel_move_to 로 명시 중단해야
+                # background thread 가 명령을 계속 쏘는 걸 막을 수 있다.
                 timeout = 30.0
                 start_wait = time.time()
                 while time.time() - start_wait < timeout:
                     if task_control['stop']:
+                        for a in agents:
+                            try:
+                                a.cancel_move_to()
+                            except Exception:
+                                pass
                         socketio_instance.emit('moving_homepose', {'moving': False})
                         return
                     moving_agents = [a for a in agents if a.is_moving]

@@ -1,10 +1,9 @@
 from geometry_msgs.msg import Pose
 
-from rosidl_runtime_py.utilities import get_message, get_service, get_action
+from rosidl_runtime_py.utilities import get_message
 
 import rclpy
 from rclpy.node import Node
-import rclpy.action
 import threading
 from collections import deque
 import time
@@ -106,59 +105,58 @@ class Agent:
                 self.ik_solver = Common_ArmIK(urdf_path=urdf_path, urdf_package_dir=urdf_package_dir, **ik_setting)
                 self.ee_names = self.ik_solver.ee_names
 
-        # 보간 노드용 publisher: interpolation=True이면 ec_joint_cmd로 보냄
+        # ── Write 경로: 두 갈래만 존재 ──
+        #   (a) interpolation ON  → JointState 를 ec_joint_cmd 에 publish.
+        #                          그 다음은 interp_node 가 책임 (변환/200Hz 보간).
+        #   (b) interpolation OFF → 사용자 정의 driver (custom robot 한정).
+        #                          driver.py 가 action → 실제 transport (publish/
+        #                          service/action 등) 로직을 본인이 들고 있음.
+        # 빌트인 robot 은 모두 (a) 로 가는 게 권장 정책. 기존 service/action 빌트인
+        # (TM/Jaka/Robotiq) 의 in-agent 분기는 SDK / driver-plugin 으로 흡수 예정
+        # 이라 더 이상 agent 가 들고 있지 않는다.
         self._interp_pub = None
-        self._direct_pub = None  # 보간 우회 직접 명령 (move_to 등)
+        self._direct_pub = None
+        self._driver = None
         ns = f'/ec_robot_{robot["id"]}'
 
-        if robot.get('interpolation'):
-            from sensor_msgs.msg import JointState as JointStateMsg
+        from sensor_msgs.msg import JointState as JointStateMsg
+
+        interpolation_on = bool(robot.get('interpolation'))
+
+        if interpolation_on:
             interp_topic = f'{ns}/ec_joint_cmd'
             direct_topic = f'{ns}/ec_joint_cmd_direct'
             self._interp_pub = node.create_publisher(JointStateMsg, interp_topic, 10)
             self._direct_pub = node.create_publisher(JointStateMsg, direct_topic, 10)
+            self._sdk_write_msg = JointStateMsg()  # move_to direct path 가 재사용
+        else:
+            # custom robot 의 interp OFF 모드 — module.json 에서 driver entrypoint 를
+            # 찾아 dynamic load. (없으면 None 으로 남겨 — 모든 write_joints 호출이
+            # NotImplemented 로 떨어지므로 호출자가 명시적으로 인지 가능.)
+            try:
+                from ..drivers import load_driver
+                self._driver = load_driver(robot, node=node)
+            except Exception as e:
+                print(f"[Agent] driver load failed for {robot.get('name')}: {e}", flush=True)
 
+        # ── Read 경로: SDK 모드 / 일반 모드 두 갈래 ──
         if self.sdk_control:
-            # ── SDK 모드 ──
-            # 보간 노드가 SDK로 제어+상태읽기. Agent는 ec_joint_cmd로 명령, state 토픽 구독.
-            from sensor_msgs.msg import JointState as JointStateMsg
+            # SDK 모드에서는 interp_node 가 SDK 로부터 상태를 읽어
+            # ec_robot_<id>/interpolated_joint_cmd 로 publish 해준다.
             state_topic = f'{ns}/interpolated_joint_cmd'
             self.read_topic_msg = 'sensor_msgs/JointState'
             self.read_topic_msg_cls = JointStateMsg
             self.read_topic_sub = node.create_subscription(
                 JointStateMsg, state_topic, self.joint_state_cb, 10)
             self.read_topic_msg_data = JointStateMsg()
-            self.write_type = 'sdk'
-            self._sdk_write_msg = JointStateMsg()
         else:
-            # ── 기존 ROS2 토픽/서비스/액션 모드 ──
+            # 일반 모드: robot 의 실제 read_topic 을 직접 구독.
             self.read_topic_msg_cls = get_message(robot['read_topic_msg'])
             self.read_topic_sub = node.create_subscription(
                 self.read_topic_msg_cls, robot['read_topic'], self.joint_state_cb, 10)
             self.read_topic_msg_data = self.read_topic_msg_cls()
 
-            self.write_type = robot.get('write_type', 'topic')
-
-            if self.write_type == 'topic':
-                self.write_topic_msg_cls = get_message(robot['write_topic_msg'])
-                self.write_topic_msg_data = self.write_topic_msg_cls()
-                self.write_topic_sub = node.create_subscription(self.write_topic_msg_cls, robot['write_topic'], self.joint_action_cb, 10)
-                self.move_robot_pub = node.create_publisher(self.write_topic_msg_cls, robot['write_topic'], 10)
-
-            elif self.write_type == 'service':
-                self.write_service_srv_cls = get_service(robot['write_topic_msg'])
-                self.write_service_srv_data = None
-                self.move_robot_client = node.create_client(self.write_service_srv_cls, robot['write_topic'])
-                if not self.move_robot_client.wait_for_service(timeout_sec=5.0):
-                    print(f'Service {robot["write_topic"]} not available. Please check the connection.')
-
-            elif self.write_type == 'action':
-                self.write_action_goal_cls = get_action(robot['write_topic_msg']).Goal
-                self.write_action_goal_data = self.write_action_goal_cls()
-                self.move_robot_client = rclpy.action.ActionClient(node, get_action(robot['write_topic_msg']), robot['write_topic'])
-                if not self.move_robot_client.wait_for_server(timeout_sec=5.0):
-                    print(f'Action server {robot["write_topic"]} not available. Please check the connection.')
-            self.is_waiting_for_goal = False
+        self.is_waiting_for_goal = False
 
         self.ee_pos_cmd = None
         self.last_ee_delta = None  # keyboard 모드에서 raw EE delta 저장
@@ -171,10 +169,16 @@ class Agent:
         self._move_target = None
         self._move_threshold = 0.01
         self.is_waiting_for_service = False
+        # move_to async 실행 + 취소 지원. is_moving 만으로 동시성 다 못 다루므로
+        # 실제 작업 thread + 취소 플래그를 별도 보관.
+        self._move_to_thread = None
+        self._move_to_aborted = False
         time.sleep(0.1)  # Wait for subscriber to be ready
 
     def destroy(self):
-        """ROS2 구독/퍼블리셔/클라이언트를 해제하여 리소스 누수를 방지한다."""
+        """ROS2 구독/퍼블리셔/driver 를 해제. write 경로가 (a) interp ON / (b)
+        custom driver 두 갈래뿐이므로 정리도 단순.
+        """
         if hasattr(self, 'read_topic_sub') and self.read_topic_sub is not None:
             self.node.destroy_subscription(self.read_topic_sub)
             self.read_topic_sub = None
@@ -187,23 +191,12 @@ class Agent:
             self.node.destroy_publisher(self._direct_pub)
             self._direct_pub = None
 
-        if self.write_type == 'sdk':
-            pass  # SDK 모드: 위에서 이미 정리됨
-        elif self.write_type == 'topic':
-            if hasattr(self, 'write_topic_sub') and self.write_topic_sub is not None:
-                self.node.destroy_subscription(self.write_topic_sub)
-                self.write_topic_sub = None
-            if hasattr(self, 'move_robot_pub') and self.move_robot_pub is not None:
-                self.node.destroy_publisher(self.move_robot_pub)
-                self.move_robot_pub = None
-        elif self.write_type == 'service':
-            if hasattr(self, 'move_robot_client') and self.move_robot_client is not None:
-                self.node.destroy_client(self.move_robot_client)
-                self.move_robot_client = None
-        elif self.write_type == 'action':
-            if hasattr(self, 'move_robot_client') and self.move_robot_client is not None:
-                self.move_robot_client.destroy()
-                self.move_robot_client = None
+        if self._driver is not None:
+            try:
+                self._driver.destroy()
+            except Exception as e:
+                print(f"[Agent] driver.destroy() raised: {e}")
+            self._driver = None
 
     def fetch_joint_map_to_action(self, joint_map):
         action = [0] * self.joint_len
@@ -214,6 +207,15 @@ class Agent:
 
 
     def move_joint_step(self, action, from_ee=False, velocity_arg=None):
+        """Joint position 한 발 송신.
+
+        두 갈래만 존재:
+          (a) interpolation ON  → JointState 를 ec_joint_cmd 에 publish.
+                                  변환/200Hz smoothing 은 interp_node 가 책임.
+          (b) interpolation OFF → custom robot 의 사용자 정의 driver 호출.
+                                  driver 가 publish/service/action 등 transport
+                                  로직을 본인이 보유.
+        """
         if not from_ee:
             self.ee_pos_cmd = None
 
@@ -231,253 +233,39 @@ class Agent:
         except Exception as exc:
             print(f"[ERROR] move_joint_step received invalid action {action}: {exc}")
             return
-        
-        # clipping with joint bound
+
+        # Joint bound clipping
         if self.joint_upper_bounds is not None and self.joint_lower_bounds is not None:
-            # numpy를 사용하여 각 관절의 인덱스에 맞는 범위를 한 번에 적용합니다.
-            action = np.clip(action, self.joint_lower_bounds, self.joint_upper_bounds).tolist()
+            action = np.clip(
+                action, self.joint_lower_bounds, self.joint_upper_bounds
+            ).tolist()
 
-        if self.write_type == 'sdk':
-            # SDK 모드: ec_joint_cmd → 보간 노드 → SDK
-            self._sdk_write_msg.name = self.joint_names
-            self._sdk_write_msg.position = action
-            self._sdk_write_msg.velocity = [0.0] * self.joint_len
-            if self.tool_inner:
-                self._sdk_write_msg.velocity[-1] = 100.0
-            self.joint_actions = action
-            self._interp_pub.publish(self._sdk_write_msg)
-            return
-        elif self.write_type == 'topic':
-            self.move_joint_step_by_topic(action, velocity_arg)
-        elif self.write_type == 'service':
-            self.move_joint_step_by_service(action, velocity_arg)
-        elif self.write_type == 'action':
-            self.move_joint_step_by_action(action, velocity_arg)
-        
-    def move_joint_step_by_topic(self, action, vel_arg=None):
-        # 보간 ON 일 때는 출력 msg_type 과 무관하게 ec_joint_cmd(JointState) 로
-        # 한 번에 통일해 흘려보낸다 — interp_node 가 200Hz 보간 후 사용자
-        # write_topic_msg 형식에 맞춰 변환/발행한다. write_topic 으로 직접 쏘는
-        # 경로는 보간 OFF 일 때만 사용.
+        self.joint_actions = action
+
         if self._interp_pub is not None:
+            # (a) interpolation ON — 모든 빌트인 + custom(interp ON) 의 경로.
             from sensor_msgs.msg import JointState as JointStateMsg
-            interp_msg = JointStateMsg()
-            interp_msg.name = self.joint_names
-            interp_msg.position = list(action)
-            interp_msg.velocity = [0.0] * self.joint_len
-            self._interp_pub.publish(interp_msg)
+            msg = JointStateMsg()
+            msg.name = self.joint_names
+            msg.position = action
+            msg.velocity = [0.0] * self.joint_len
+            if self.tool_inner:
+                # tool 채널에 100 표식 (SDK controller / interp_node 가 인식)
+                msg.velocity[-1] = 100.0
+            self._interp_pub.publish(msg)
             return
 
-        if self.write_topic_msg == 'std_msgs/Float64MultiArray':
-            self.write_topic_msg_data.data = action
-            self.move_robot_pub.publish(self.write_topic_msg_data)
-        elif self.write_topic_msg == 'sensor_msgs/JointState':
-            self.write_topic_msg_data.name = self.joint_names
-            self.write_topic_msg_data.position = action
-            self.write_topic_msg_data.velocity = [0.0] * self.joint_len
-            self.write_topic_msg_data.velocity[-1] = 100
-            self.move_robot_pub.publish(self.write_topic_msg_data)
-        elif self.write_topic_msg == 'trajectory_msgs/JointTrajectory':
-            self.write_topic_msg_data.joint_names = self.joint_names
-            self.joint_trajectory_point.positions = action
-            second = 0 if vel_arg is None else vel_arg
-            self.joint_trajectory_point.velocities = []
-            self.joint_trajectory_point.time_from_start = rclpy.duration.Duration(seconds=second).to_msg()
-            self.write_topic_msg_data.points = [self.joint_trajectory_point]
-            self.move_robot_pub.publish(self.write_topic_msg_data)
-        else:
-            print("Unsupported write topic message type for move_joint_step_by_topic.")
-            return
-        
-    def move_joint_step_by_service(self, action, vel_arg=None):
-        req = self.write_service_srv_cls.Request()
-        self.joint_actions = action
-
-        if self.write_topic_msg == 'onrobot_rg_msgs/SetCommand':
-            # 서비스가 준비되었는지 확인 (Blocking 하지 않음)
-            if not self.move_robot_client.service_is_ready():
-                print("Service is not ready, skipping command.")
-                return
-
-            req.command = int(action[0])
-            
-            self.move_robot_client.call_async(req)
-
-        elif self.write_topic_msg == 'tm_msgs/srv/SendScript':
-            if not self.move_robot_client.service_is_ready():
-                return
-
-            # TM Script는 도(degree) 단위를 사용하므로 라디안에서 변환
-            # If there are 7 joints (6 arm + 1 gripper), use only first 6 for PTP
-            arm_action = action[:6]
-            angles_deg = [float(np.degrees(a)) for a in arm_action]
-            if self.robot_type == 'tm_12':
-                if vel_arg is None:
-                    curr_joints = self.get_joint_states()
-                    if curr_joints is None:
-                        vel_arg = 10
-                    else:
-                        scale_factor = 3
-                        max_speeds_deg = np.array([180, 180, 180, 225, 225, 225])
-                        # 3. 이동할 거리 계산 (도 단위)
-                        arm_action = action[:6]
-                        target_deg = np.degrees(arm_action)
-                        curr_deg = np.degrees(curr_joints[:6])
-                        diff_deg = np.abs(target_deg - curr_deg)
-
-                        # 4. 0.1초 내에 도달하기 위해 필요한 속도 비율(%) 계산
-                        # 공식: (거리 / 시간) / 최대속도 * 100
-                        # 25ms의 가속 시간(acc_ms)을 고려하면 실제 가용 시간은 더 짧아질 수 있습니다.
-                        required_speed_pct = (diff_deg / 0.1) / max_speeds_deg * scale_factor * 100
-
-                        # 5. 모든 관절 중 가장 큰 비율을 선택하고 1~100 사이로 제한
-                        vel_arg = int(np.max(required_speed_pct))
-                        vel_arg = max(1, min(100, vel_arg))
-
-                script = 'PTP("JPP",{},{},{},{},{},{},{},25,100,false)'.format(*[f"{a:.4f}" for a in angles_deg] + [vel_arg])  # 속도 인자 추가, 기본값은 50%
-                
-                # Gripper control: Append SET command to the same script string
-                # Module 1 (EndEffector), Type 1 (Digital Out), Pin 0
-                if len(action) > 6 and self.tool_inner:
-                    gripper_state = 1 if action[6] > 0.4 else 0
-                    script += '\r\nSET(1,1,0,{})'.format(gripper_state)
-                
-                req.id = '1'
-                req.script = script
-                self.is_waiting_for_service = True
-                self.move_robot_client.call_async(req)
-
-            elif self.robot_type == 'tm_12s':
-                script = 'Position({},{},{},{},{},{})'.format(*[f"{a:.4f}" for a in angles_deg])
-                req.id = '1'
-                req.script = script
-                self.move_robot_client.call_async(req)
-
-
-        elif self.write_topic_msg == 'fairino_msgs/srv/RemoteCmdInterface':
-            if not self.move_robot_client.service_is_ready():
-                print("Fairino command service is not ready, skipping command.")
-                return
-
-            # ServoJ 모드 시작 (최초 1회)
-            if not getattr(self, '_fairino_servo_started', False):
-                req_start = self.write_service_srv_cls.Request()
-                req_start.cmd_str = 'ServoMoveStart()'
-                future = self.move_robot_client.call_async(req_start)
-                # spin_until_future_complete 대신 future 직접 대기 (executor 충돌 방지)
-                timeout = time.time() + 1.0
-                while not future.done() and time.time() < timeout:
-                    time.sleep(0.01)
-                self._fairino_servo_started = True
-
-            # Fairino SDK는 도(degree) 단위를 사용하므로 라디안에서 변환
-            angles_deg = [float(np.degrees(a)) for a in action]
-            jnt_str = ','.join([f"{a:.4f}" for a in angles_deg])
-
-            req = self.write_service_srv_cls.Request()
-            req.cmd_str = f'ServoJ({jnt_str},0,0,0.008,0,0)'
-            self.move_robot_client.call_async(req)
-
-        elif self.write_topic_msg == 'jaka_msgs/srv/ServoMove':
-            if not self.move_robot_client.service_is_ready():
-                print("JAKA servo_j service is not ready, skipping command.")
-                return
-            
-            current_pos = self.get_joint_states()
-            if current_pos is None:
-                print("JAKA agent cannot get current joint states, skipping servo command.")
-                return
-            
-            # servo_j는 증분(increment) 값을 받으므로 delta를 계산
-            delta = np.array(action) - np.array(current_pos)
-            
-            req.pose = delta.tolist()
-            self.move_robot_client.call_async(req)
-            
-
-    def service_response_callback(self, future):
-        """서비스 응답이 도착했을 때 호출되는 콜백"""
-        try:
-            response = future.result()
-            # 성공적으로 응답을 받았으므로 다음 명령 전송 가능
-            self.is_waiting_for_service = False
-        except Exception as e:
-            self.node.get_logger().error(f"Service call failed: {e}")
-            # 에러가 발생해도 플래그를 풀어줘야 다음 시도가 가능합니다.
-            self.is_waiting_for_service = False
-
-    def move_joint_step_by_action(self, action, vel_arg=None):
-        # 1. 이전 명령이 아직 '수락' 대기 중이면 바로 리턴 (병목 방지)
-        if self.is_waiting_for_goal:
+        if self._driver is not None:
+            # (b) interpolation OFF — custom robot 의 driver plugin.
+            try:
+                self._driver.write_joints(action, vel_arg=velocity_arg)
+            except Exception as e:
+                print(f"[ERROR] driver.write_joints failed for {self.id}: {e}")
             return
 
-        # 2. 값의 변화가 거의 없다면 통신하지 않음 (Deadband 필터)
-        # 10Hz에서 미세한 떨림으로 계속 Goal을 쏘는 것을 방지합니다.
-        current_states = self.get_joint_states()
-
-        if self.write_topic_msg == 'control_msgs/action/GripperCommand':
-            move_threshold = vel_arg if vel_arg is not None else 0.08
-            if  current_states[0] < 0.7 and current_states is not None and all(abs(a - b) < move_threshold for a, b in zip(action, current_states)):
-                return
-            
-            if current_states[0] >= 0.7 and current_states is not None and all(abs(a - b) < move_threshold / 3 for a, b in zip(action, current_states)):
-                return
-            
-            if current_states[0] > 0.78 and action[0] > 0.78:
-                return
-        
-        self.joint_actions = action
-
-        # 3. 중요: 멤버 변수 대신 '로컬 변수'로 Goal 객체 생성
-        # 여러 스레드나 루프에서 공유 변수를 수정하는 위험을 방지합니다.
-        goal_msg = get_action(self.write_topic_msg).Goal()
-
-        if self.write_topic_msg == 'control_msgs/action/GripperCommand':
-            goal_msg.command.position = float(action[0])
-            goal_msg.command.max_effort = 1.0
-
-        elif self.write_topic_msg == 'control_msgs/action/FollowJointTrajectory':
-            from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
-            seconds = 0 if vel_arg is None else vel_arg
-
-            point = JointTrajectoryPoint()
-            point.positions = [float(a) for a in action]
-            point.velocities = []
-            point.time_from_start = rclpy.duration.Duration(seconds=seconds).to_msg()
-
-            traj = JointTrajectory()
-            traj.joint_names = self.joint_names
-            traj.points = [point]
-
-            goal_msg.trajectory = traj
-
-        self.is_waiting_for_goal = True
-
-        # send_goal_async 자체가 Non-blocking이므로 그대로 사용
-        send_goal_future = self.move_robot_client.send_goal_async(goal_msg)
-        send_goal_future.add_done_callback(self.goal_response_callback)
-
-    def goal_response_callback(self, future):
-        # 서버가 Goal 수락 여부를 결정하면 즉시 플래그 해제
-        self.is_waiting_for_goal = False
-        
-        try:
-            goal_handle = future.result()
-            if not goal_handle.accepted:
-                # Rejection 사유 확인을 위해 로그 출력
-                pass 
-        except Exception as e:
-            print(f"Goal call failed: {e}")
-
-        
-    # def move_step(self, action):
-    #     action = [float(a) for a in action]
-    #     js = JointState()
-    #     js.name = self.joint_names
-    #     js.position = action
-    #     js.velocity = [0.0] * self.joint_len
-    #     js.velocity[-1] = 100
-    #     self.move_robot_pub.publish(js)
+        # 둘 다 없으면 transport 미설정.
+        print(f"[ERROR] agent {self.id} has no transport "
+              f"(interp OFF + no driver). module.json driver 설정 확인 필요.")
 
     def move_joint_delta_step(self, delta_action):
         current_js = self.get_joint_states()
@@ -782,38 +570,16 @@ class Agent:
             return [0.0] * self.joint_len
 
     def get_joint_actions(self):
-        if self.write_type == 'sdk':
-            # SDK: joint_actions는 list (move_joint_step에서 직접 할당)
-            return self.joint_actions if self.joint_actions is not None else self.get_joint_states()
+        """move_joint_step 이 마지막으로 보낸 joint position. (refactor 후 항상
+        list[float]). 명령이 한 번도 발행 안 됐으면 현재 joint_states 로 대체.
 
-        if self.joint_actions is None:
-            return None
-
-        if self.write_type == 'topic':
-            joint_actions = []
-            if self.write_topic_msg == 'sensor_msgs/JointState':
-                for i, joint_name in enumerate(self.joint_names):
-                    topic_index = self.joint_actions.name.index(joint_name)
-                    joint_actions.append(self.joint_actions.position[topic_index])
-            elif self.write_topic_msg == 'std_msgs/Float64MultiArray':
-                joint_actions = list(self.joint_actions.data)
-            elif self.write_topic_msg in (
-                'control_msgs/JointTrajectoryControllerState',
-                'control_msgs/msg/JointTrajectoryControllerState',
-            ):
-                for i, joint_name in enumerate(self.joint_names):
-                    topic_index = self.joint_actions.joint_names.index(joint_name)
-                    joint_actions.append(self.joint_actions.actual.positions[topic_index])
-            elif self.write_topic_msg == 'trajectory_msgs/JointTrajectory':
-                if self.joint_actions.points:
-                    point = self.joint_actions.points[-1]
-                    for i, joint_name in enumerate(self.joint_names):
-                        joint_actions.append(point.positions[i])
-        elif self.write_type == 'action' or self.write_type == 'service':
-            joint_actions = self.joint_actions if self.joint_actions is not None else self.get_joint_states()
-        else:
-            return None
-        return joint_actions
+        write_type / write_topic_msg 별 분기는 더 이상 필요 없음 — agent 가
+        보유하는 transport 가 (a) interp_pub publish 또는 (b) custom driver
+        호출 두 가지로 단일화됐고, 둘 다 list[float] 만 다룬다.
+        """
+        if self.joint_actions is not None:
+            return self.joint_actions
+        return self.get_joint_states()
 
     def get_ee_position(self):
         """현재 상태의 EE 포즈 + 그리퍼 상태 반환"""
@@ -910,64 +676,77 @@ class Agent:
 
         return full_joint_positions, None
 
-    def move_to(self, target_pos, step_size=0.0005, duration=5.0):
+    def move_to(self, target_pos, duration=5.0, hz=100):
+        """비동기 — 별도 thread 에서 현재 자세 → target_pos 까지 hz 주기로
+        선형 보간된 명령을 보낸다. duration 초 안에 도달.
+
+        호출 즉시 return. 호출자는 (a) `agent.is_moving` 폴링으로 완료 감지,
+        또는 (b) `agent.cancel_move_to()` 로 중단.
+
+        모든 로봇 종류에 대해 동일 경로 — 보간 ON 일 때는 `move_joint_step` 이
+        `_interp_pub` 으로 라우팅 → interp_node 가 200Hz 로 추가 smoothing.
+        보간 OFF 일 때는 `move_joint_step` 이 직접 write_topic 으로 발행.
+        어느 쪽이든 hz 의 small step 명령이 흘러간다.
+
+        Args:
+            target_pos: 목표 joint position (rad). 길이 = joint_len.
+            duration: 도달 목표 시간 (초). 기본 5s.
+            hz: 명령 송신 주기. 기본 100Hz (interp_node 의 200Hz publish_rate
+                보다 낮게 — interp_node 가 그 사이를 다시 메우게).
+        """
+        target_pos = [float(x) for x in target_pos]
+        duration = float(duration) if duration and duration > 0 else 5.0
+        hz = float(hz) if hz and hz > 0 else 100.0
+
+        # 이미 다른 move_to 가 도는 중이면 그걸 먼저 취소하고 새 motion 시작.
+        if self.is_moving:
+            self.cancel_move_to()
+            # join 잠깐 기다렸다 새로 시작 (전 thread 가 cleanup 할 시간).
+            if self._move_to_thread is not None:
+                self._move_to_thread.join(timeout=0.5)
+
         self._move_target = list(target_pos)
+        self._move_to_aborted = False
         self.is_moving = True
 
-        if self.is_sim:
-            print("Moving to target position:", target_pos)
-            self.move_joint_step(target_pos)
-            time.sleep(0.5)
-        elif self.sdk_control:
-            # SDK 모드: 보간 우회 직접 명령
-            print("Moving to target position (SDK direct):", target_pos)
-            self._sdk_write_msg.name = self.joint_names
-            self._sdk_write_msg.position = [float(x) for x in target_pos]
-            self._sdk_write_msg.velocity = [0.0] * self.joint_len
-            if self.tool_inner:
-                self._sdk_write_msg.velocity[-1] = 100.0
-            self._direct_pub.publish(self._sdk_write_msg)
-            time.sleep(0.5)
-        elif self.robot_company == 'Piper':
-            print("Moving to target position:", target_pos)
-            # 보간 우회 직접 토픽으로 보냄
-            self.write_topic_msg_data.name = self.joint_names
-            self.write_topic_msg_data.position = [float(x) for x in target_pos]
-            self.write_topic_msg_data.velocity = [0.0] * self.joint_len
-            self.write_topic_msg_data.velocity[-1] = 100.0
-            pub = self._direct_pub if self._direct_pub is not None else self.move_robot_pub
-            pub.publish(self.write_topic_msg_data)
-            time.sleep(0.5)
-        elif self.robot_company == 'Kinova' or self.write_topic_msg == 'trajectory_msgs/JointTrajectory':
-            self.write_topic_msg_data.joint_names = self.joint_names
-            print("Moving to target position:", target_pos)
-            self.joint_trajectory_point.positions = [float(x) for x in target_pos]
-            # velocities를  0으로 설정
-            self.joint_trajectory_point.velocities = [0.0] * self.joint_len
-            self.joint_trajectory_point.time_from_start = rclpy.duration.Duration(seconds=duration).to_msg()
-            self.write_topic_msg_data.points = [self.joint_trajectory_point]
-            self.move_robot_pub.publish(self.write_topic_msg_data)
-        elif self.robot_company == 'OMRON':
-            self.move_joint_step(target_pos, velocity_arg=10)
-        elif self.role == 'tool':
-            self.move_joint_step(target_pos, velocity_arg=0)
-        else:
-            while True:
+        def _runner():
+            try:
                 current_pos = self.get_joint_states()
-                # 현재 위치와 목표 위치의 차이를 계산
-                pos_diff = [target - current for target, current in zip(target_pos, current_pos)]
-                
-                # 목표 위치에 도달했는지 확인
-                if all(abs(diff) < 0.001 for diff in pos_diff):
-                    print("Reached target position.")
-                    break
+                if current_pos is None:
+                    print("[move_to] joint_states 없음 — 중단")
+                    return
+                current_pos = [float(x) for x in current_pos]
+                # 차원이 안 맞으면 가장 안전한 선택은 중단.
+                if len(current_pos) != len(target_pos):
+                    print(f"[move_to] dim mismatch current={len(current_pos)} "
+                          f"target={len(target_pos)} — 중단")
+                    return
 
-                # 각 관절의 위치를 step_size만큼 이동
-                next_pos = [current + step_size * diff for current, diff in zip(current_pos, pos_diff)]
-                
-                # 이동 명령을 발행
-                self.move_joint_step(next_pos)
-                time.sleep(0.01)  # 짧은 대기 시간 추가
+                period = 1.0 / hz
+                n_steps = max(1, int(round(duration * hz)))
+                deltas = [t - c for t, c in zip(target_pos, current_pos)]
+
+                for step in range(1, n_steps + 1):
+                    if self._move_to_aborted:
+                        print(f"[move_to] aborted at step {step}/{n_steps}")
+                        return
+                    t = step / n_steps
+                    next_pos = [c + t * d for c, d in zip(current_pos, deltas)]
+                    self.move_joint_step(next_pos)
+                    time.sleep(period)
+            finally:
+                self.is_moving = False
+                self._move_to_aborted = False
+
+        self._move_to_thread = threading.Thread(
+            target=_runner, name=f"move_to_{self.id}", daemon=True
+        )
+        self._move_to_thread.start()
+
+    def cancel_move_to(self):
+        """진행 중인 move_to thread 에 abort 신호. is_moving 플래그가 곧 False
+        로 떨어진다. thread 가 없거나 이미 끝났으면 no-op."""
+        self._move_to_aborted = True
 
 
     def reset_ik_solver(self, q):

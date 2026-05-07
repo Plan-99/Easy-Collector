@@ -331,6 +331,7 @@
                     <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerBlockDetailsName') }}:</span> {{ detailBlock.name }}</div>
                     <template v-if="detailBlock.type === 'joint_position'">
                         <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerBlockDetailsWorkspace') }}:</span> {{ getWorkspaceName(detailBlock.workspace_id) }}</div>
+                        <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerBlockDetailsDuration') }}:</span> {{ detailBlock.duration }}s</div>
                         <div v-for="robot in getWorkspaceRobots(detailBlock.workspace_id)" :key="robot.id" class="q-mb-xs">
                             <div class="text-bold text-caption">{{ robot.name }}</div>
                             <div class="text-caption text-grey">{{ (detailBlock.positions?.[robot.id] || []).map(v => Number(v).toFixed(4)).join(', ') }}</div>
@@ -391,6 +392,15 @@
                             map-options
                             emit-value
                         ></q-select>
+                        <q-input
+                            dense outlined dark bg-color="dark"
+                            v-model.number="blockForm.duration"
+                            :label="$t('plannerDurationSeconds')"
+                            type="number"
+                            min="0.1"
+                            step="0.1"
+                            class="q-mb-md"
+                        ></q-input>
                         <div v-if="blockForm.workspace_id">
                             <div
                                 v-for="robot in getWorkspaceRobots(blockForm.workspace_id)"
@@ -945,7 +955,10 @@ function moveToSavedPosition(robot) {
     const pose = blockForm.value.positions?.[robot.id];
     if (!Array.isArray(pose) || !pose.length) return;
     if (!robot.handler) return;
-    robot.handler.moveRobotJoint(pose);
+    // 단발 publish 는 interp_node 가 default cmd_interval 만에 jump → duration 무시.
+    // 실행 시 적용될 duration 과 동일하게 미리보기 이동도 부드럽게 보간.
+    const duration = Number(blockForm.value.duration) || 5.0;
+    robot.handler.moveToPose(pose, { duration });
 }
 
 // Edit Block dialog가 열리면 workspace 로봇들의 socket listener를 등록 (no-op callback).

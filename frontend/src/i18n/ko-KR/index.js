@@ -97,6 +97,8 @@ export default {
   robotPoseSavedNotify: '포즈가 저장되었습니다.',
   robotPoseMovedToOrigin: '로봇이 원점 위치로 이동했습니다',
   robotPoseMoveToOriginFailed: '로봇 원점 이동에 실패했습니다',
+  robotPoseStop: '정지',
+  robotPoseMovingTo: '{name} 이동 중...',
 
   // ───── Workspace page ─────
   workspaceIntroTitle: '워크스페이스, 로봇의 놀이터',

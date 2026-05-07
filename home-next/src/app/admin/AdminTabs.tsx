@@ -6,6 +6,8 @@ import { usePathname } from "next/navigation";
 const TABS: { href: string; label: string; matchPrefix: string }[] = [
   { href: "/admin/users", label: "사용자 관리", matchPrefix: "/admin/users" },
   { href: "/admin/modules", label: "모듈 관리", matchPrefix: "/admin/modules" },
+  { href: "/admin/products", label: "상품 관리", matchPrefix: "/admin/products" },
+  { href: "/admin/orders", label: "주문 관리", matchPrefix: "/admin/orders" },
 ];
 
 export default function AdminTabs() {

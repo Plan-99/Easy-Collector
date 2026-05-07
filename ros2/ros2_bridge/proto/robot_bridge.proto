@@ -134,8 +134,9 @@ message MoveEEDeltaRequest {
 message MoveToRequest {
   int32 agent_id = 1;
   repeated double target_pos = 2;
-  double step_size = 3;
-  double duration = 4;
+  double step_size = 3;  // DEPRECATED — 무시됨. duration/hz 로 자동 계산.
+  double duration = 4;   // 도달까지 목표 시간 (초). 0 이면 default 5s.
+  double hz = 5;         // 명령 송신 주기 (Hz). 0 이면 default 100Hz.
 }
 
 message ResetIKRequest {
@@ -177,7 +178,10 @@ service AgentService {
   rpc MoveJointDeltaStep(MoveJointRequest) returns (StatusResponse);
   rpc MoveEEStep(MoveEERequest) returns (StatusResponse);
   rpc MoveEEDeltaStep(MoveEEDeltaRequest) returns (StatusResponse);
+  // MoveTo: 비동기 — 별도 thread 에서 보간 진행. 호출자는 즉시 return 받고
+  // is_moving 폴링 또는 CancelMoveTo 로 중단.
   rpc MoveTo(MoveToRequest) returns (StatusResponse);
+  rpc CancelMoveTo(AgentId) returns (StatusResponse);
 
   // State queries
   rpc GetJointStates(AgentId) returns (JointValues);

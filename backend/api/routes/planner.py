@@ -19,7 +19,7 @@ BLOCK_CONFIGS = {
         'label': 'Joint Position',
         'icon': 'precision_manufacturing',
         'color': 'blue',
-        'keys': ['workspace_id', 'positions', 'name'],
+        'keys': ['workspace_id', 'positions', 'duration', 'name'],
     },
     'checkpoint': {
         'label': 'Checkpoint',

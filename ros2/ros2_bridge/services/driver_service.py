@@ -6,6 +6,7 @@ ROS2 컨테이너에서 ros2 launch/run 프로세스를 관리한다.
 """
 import json
 import os
+import re
 import signal
 import subprocess
 import threading
@@ -15,6 +16,92 @@ import grpc
 
 from ..generated import robot_bridge_pb2 as pb
 from ..generated import robot_bridge_pb2_grpc as pb_grpc
+from ..configs.module_loader import (
+    get_robot_driver_launch,
+    get_sensor_driver_launch,
+    get_robot_driver_hooks,
+)
+
+
+# {key} 또는 {key|default}
+_LAUNCH_PLACEHOLDER_RE = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)(?:\|([^}]*))?\}")
+
+
+def _substitute_launch_args(value: str, ctx: dict) -> str:
+    """문자열의 `{key}` / `{key|default}` 플레이스홀더를 ctx 에서 치환.
+    ctx 에 키가 없거나 빈 값이고 default 가 있으면 default 사용. 둘 다 없으면 원본 유지."""
+    def repl(m):
+        k = m.group(1)
+        default = m.group(2)
+        v = ctx.get(k)
+        if v is not None and v != "":
+            return str(v)
+        if default is not None:
+            return default
+        return m.group(0)
+    return _LAUNCH_PLACEHOLDER_RE.sub(repl, value)
+
+
+def _build_ctx(entity_kind: str, entity_id: int, settings: dict) -> dict:
+    """launch args 치환용 컨텍스트. 표준 placeholder + 정규화."""
+    ctx = dict(settings or {})
+    # CAN 인터페이스 이름 정규화 (can_X → canX)
+    cp = ctx.get('can_port')
+    if isinstance(cp, str) and cp.startswith('can_'):
+        ctx['can_port'] = 'can' + cp[4:]
+    if entity_kind == 'sensor':
+        ctx['sensor_id'] = entity_id
+        ctx['namespace'] = f'ec_sensor_{entity_id}'
+    else:
+        ctx['robot_id'] = entity_id
+        ctx['namespace'] = f'ec_robot_{entity_id}'
+    return ctx
+
+
+def _build_argv_from_launch(launch: dict, ctx: dict) -> list[str] | None:
+    """module.json `driver.launch` 블록에서 ros2 launch / ros2 run argv 를 만든다.
+
+    스키마:
+      {"command": "launch"|"run", "package": str,
+       "launch_file": str (launch 일 때),
+       "executable": str (run 일 때),
+       "args": {key: value_template, ...}}
+
+    `command` 필드 생략 시 기본 'launch'.
+    """
+    if not isinstance(launch, dict):
+        return None
+    pkg = launch.get('package', '').strip()
+    if not pkg:
+        return None
+    cmd = (launch.get('command') or 'launch').strip().lower()
+    args = launch.get('args') or {}
+
+    if cmd == 'launch':
+        lfile = launch.get('launch_file', '').strip()
+        if not lfile:
+            return None
+        argv = ['ros2', 'launch', pkg, lfile]
+        for k, v in args.items():
+            if not k:
+                continue
+            argv.append(f'{k}:={_substitute_launch_args(str(v), ctx)}')
+        return argv
+    if cmd == 'run':
+        executable = launch.get('executable', '').strip()
+        if not executable:
+            return None
+        argv = ['ros2', 'run', pkg, executable]
+        # run 은 ros_args 별도 처리: --ros-args 뒤에 -p / -r 등 붙임
+        ros_args = launch.get('ros_args') or {}
+        if ros_args:
+            argv.append('--ros-args')
+            for k, v in ros_args.items():
+                if not k:
+                    continue
+                argv += ['-p', f'{k}:={_substitute_launch_args(str(v), ctx)}']
+        return argv
+    return None
 
 
 class DriverServiceServicer(pb_grpc.DriverServiceServicer):
@@ -40,12 +127,19 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
         # 기존 프로세스 정리
         self._stop(process_id)
 
-        # Piper CAN 설정 (SDK/ROS2 공통)
-        if company == 'Piper':
-            can_cmd = self._piper_can_setup(robot_id, settings)
-            if can_cmd:
-                self._start_subprocess(f'can_config_{robot_id}', can_cmd, log_name=process_id)
-                time.sleep(1)
+        # module.json 의 driver hooks (pre/post launch). 없으면 빈 dict.
+        try:
+            hooks = get_robot_driver_hooks(rtype) or {}
+        except Exception as e:
+            print(f"[driver_service] get_robot_driver_hooks 실패: {e}", flush=True)
+            hooks = {}
+        hook_module_id = hooks.get('module_id', '')
+
+        # Pre-launch hooks — driver 시작 전 (예: piper CAN setup script)
+        ctx = _build_ctx('robot', robot_id, settings)
+        for hook in hooks.get('pre_launch') or []:
+            self._run_pre_launch_hook(hook, robot_id=robot_id, module_id=hook_module_id,
+                                      ctx=ctx, log_name=process_id)
 
         # SDK 제어 로봇: ROS2 드라이버/보간 노드 불필요 (Agent가 SDK로 직접 제어)
         if settings.get('sdk_control'):
@@ -56,7 +150,7 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
         else:
             command = self._build_robot_command(company, rtype, robot_id, settings)
             if not command:
-                return pb.DriverStatus(success=False, message=f'Unsupported company: {company}')
+                return pb.DriverStatus(success=False, message=f'Unsupported robot type: {rtype}')
             proc = self._start_subprocess(process_id, command)
             if proc is None:
                 return pb.DriverStatus(success=False, message='Failed to start process')
@@ -68,9 +162,9 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
                 log_name=process_id,
             )
 
-        # JAKA servo enable
-        if company == 'JAKA':
-            self._jaka_servo_enable()
+        # Post-launch hooks (예: JAKA servo enable ROS service call)
+        for hook in hooks.get('post_launch') or []:
+            self._run_post_launch_hook(hook, ctx=ctx)
 
         pid = proc.pid if proc else 0
         return pb.DriverStatus(success=True, message='Driver started', pid=pid)
@@ -267,102 +361,106 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
     # Internal helpers
     # ------------------------------------------------------------------
     def _build_robot_command(self, company, rtype, robot_id, settings):
-        ns = f'ec_robot_{robot_id}'
-        ip = settings.get('ip_address', '192.168.1.10')
-
-        if company == 'Piper':
-            gripper_exist = 'true' if rtype == 'piper' else 'false'
-            can_port = settings.get('can_port', 'can0')
-            if can_port.startswith('can_'):
-                can_port = 'can' + can_port[4:]
-            return ['ros2', 'launch', 'piper', 'start_single_piper.launch.py',
-                    f'namespace:={ns}', f'can_port:={can_port}',
-                    'auto_enable:=true', 'rviz_ctrl_flag:=false',
-                    f'gripper_exist:={gripper_exist}']
-
-        if company == 'Rainbow Robotics':
-            return ['ros2', 'launch', 'rbpodo_bringup', 'rbpodo.launch.py',
-                    f'namespace:={ns}', f'robot_ip:={settings.get("ip", "10.0.2.27")}',
-                    'use_fake_hardware:=false']
-
-        if company == 'OnRobot':
-            return ['ros2', 'launch', 'onrobot_rg_control', 'bringup.launch.py',
-                    f'namespace:={ns}', f'gripper:={rtype}',
-                    f'ip:={ip}', f'port:={settings.get("port", 41414)}',
-                    f'changer_addr:={settings.get("changer_address", 5)}']
-
-        if company == 'Robotiq':
-            return ['ros2', 'launch', 'robotiq_description', 'robotiq_control.launch.py',
-                    f'namespace:={ns}',
-                    f'com_port:={settings.get("serial_port", "/dev/ttyUSB0")}']
-
-        if company == 'Kinova':
-            return ['ros2', 'launch', f'{rtype}_moveit_config', 'robot.launch.py',
-                    f'namespace:={ns}', f'robot_ip:={ip}',
-                    'launch_rviz:=false']
-
-        if company == 'OMRON':
-            return ['ros2', 'launch', 'tm_driver', 'tm_bringup.launch.py',
-                    f'namespace:={ns}', f'robot_ip:={ip}']
-
-        if company == 'JAKA':
-            return ['ros2', 'launch', 'jaka_driver', 'robot_start.launch.py',
-                    f'namespace:={ns}', f'ip:={ip}']
-
-        if company == 'Fairino':
-            return ['ros2', 'run', 'fairino_hardware', 'ros2_cmd_server',
-                    '--ros-args', '-r', f'__ns:=/ec_robot_{robot_id}',
-                    '-p', f'robot_ip:={settings.get("ip_address", "192.168.58.2")}']
-
-        if company == 'Test':
-            return ['ros2', 'launch', 'test_arm', 'test_arm.launch.py',
-                    f'namespace:={ns}']
-
-        return None
+        """robot driver 시작 argv. module.json driver.launch 만 본다 (manifest-driven)."""
+        launch = get_robot_driver_launch(rtype)
+        if not launch:
+            return None
+        ctx = _build_ctx('robot', robot_id, settings)
+        return _build_argv_from_launch(launch, ctx)
 
     def _build_sensor_command(self, company, stype, sensor_id, settings):
-        ns = f'ec_sensor_{sensor_id}'
+        """sensor driver 시작 argv. module.json driver.launch 만 본다 (manifest-driven)."""
+        launch = get_sensor_driver_launch(stype)
+        if not launch:
+            return None
+        ctx = _build_ctx('sensor', sensor_id, settings)
+        return _build_argv_from_launch(launch, ctx)
 
-        if company == 'Intel':
-            serial_no = settings.get('serial_number')
-            if not serial_no:
-                return None
-            return ['ros2', 'launch', 'realsense2_camera', 'rs_launch.py',
-                    f'camera_namespace:={ns}', f'serial_no:="{serial_no}"']
+    # ------------------------------------------------------------------
+    # Pre / post launch hooks (manifest 정의)
+    # ------------------------------------------------------------------
+    def _run_pre_launch_hook(self, hook: dict, robot_id: int, module_id: str,
+                              ctx: dict, log_name: str) -> None:
+        """driver.pre_launch 항목 하나 실행.
 
-        if company == 'Logitec':
-            device_index = settings.get('device_index')
-            if device_index is None:
-                return None
-            return ['ros2', 'launch', 'webcam_publisher', 'webcam_publisher.launch.py',
-                    f'namespace:={ns}', f'device_index:={device_index}']
+        지원 type:
+          - "script": 주어진 path 의 bash 스크립트 실행. 보통 OS 셋업 (예: CAN bring-up).
+            args: {type, path, [root="ros2"|"sdk"], [wait_after]}
+            path 가 / 로 시작하면 absolute, 아니면 root 기준 상대:
+              root="ros2" → /root/ros2_ws/src/<module_id>/<path>
+              root="sdk"  → /root/robot_sdk/<module_id>/<path>
+        """
+        htype = (hook.get('type') or '').strip().lower()
+        if htype == 'script':
+            raw_path = hook.get('path', '').strip()
+            if not raw_path:
+                return
+            substituted = _substitute_launch_args(raw_path, ctx)
+            if substituted.startswith('/'):
+                path = substituted
+            else:
+                root = (hook.get('root') or 'ros2').strip().lower()
+                if root == 'sdk':
+                    base = f'/root/robot_sdk/{module_id}'
+                else:
+                    base = f'/root/ros2_ws/src/{module_id}'
+                path = os.path.join(base, substituted)
+            if not os.path.isfile(path):
+                print(f"[pre_launch] script not found: {path}", flush=True)
+                return
+            self._start_subprocess(f'pre_launch_{robot_id}_{os.path.basename(path)}',
+                                   ['bash', path], log_name=log_name)
+            wait = float(hook.get('wait_after', 1.0))
+            if wait > 0:
+                time.sleep(wait)
+        else:
+            print(f"[pre_launch] unsupported type: {htype}", flush=True)
 
-        if company == 'Kinova':
-            ip_address = settings.get('ip_address')
-            if not ip_address:
-                return None
-            return ['ros2', 'launch', 'kinova_vision', 'kinova_vision.launch.py',
-                    f'device:={ip_address}', f'camera:={ns}']
+    def _run_post_launch_hook(self, hook: dict, ctx: dict) -> None:
+        """driver.post_launch 항목 하나 실행.
 
-        return None
-
-    def _piper_can_setup(self, robot_id, settings):
-        script_path = os.path.expanduser('~/ros2/ros2_ws/src/piper_ros/can_activate_main.sh')
-        if os.path.exists(script_path):
-            return ['bash', script_path]
-        return None
-
-    def _jaka_servo_enable(self):
-        """JAKA servo mode 활성화 - ROS2 서비스 호출"""
-        try:
-            from jaka_msgs.srv import ServoMoveEnable
-            client = self.node.create_client(ServoMoveEnable, '/jaka_driver/servo_move_enable')
-            if client.wait_for_service(timeout_sec=5.0):
-                req = ServoMoveEnable.Request()
-                req.enable = True
+        지원 type:
+          - "ros_service": ROS 2 서비스 호출. driver 노드가 떠 있어야 함.
+            args: {type, service, service_type, request, [wait_before, timeout]}
+        """
+        htype = (hook.get('type') or '').strip().lower()
+        if htype == 'ros_service':
+            wait_before = float(hook.get('wait_before', 0.0))
+            if wait_before > 0:
+                time.sleep(wait_before)
+            service = _substitute_launch_args(hook.get('service', ''), ctx)
+            srv_type = hook.get('service_type', '')
+            if not service or not srv_type:
+                print(f"[post_launch] missing service/service_type", flush=True)
+                return
+            # service_type "pkg/srv/Name" → import pkg.srv (then attr Name)
+            parts = srv_type.split('/')
+            if len(parts) != 3:
+                print(f"[post_launch] service_type 형식 'pkg/srv/Name' 이어야 함: {srv_type}", flush=True)
+                return
+            pkg, kind, name = parts
+            try:
+                mod = __import__(f'{pkg}.{kind}', fromlist=[name])
+                cls = getattr(mod, name)
+            except Exception as e:
+                print(f"[post_launch] import {srv_type} failed: {e}", flush=True)
+                return
+            try:
+                client = self.node.create_client(cls, service)
+                timeout = float(hook.get('timeout', 5.0))
+                if not client.wait_for_service(timeout_sec=timeout):
+                    print(f"[post_launch] service {service} not available within {timeout}s", flush=True)
+                    return
+                req = cls.Request()
+                for k, v in (hook.get('request') or {}).items():
+                    if isinstance(v, str):
+                        v = _substitute_launch_args(v, ctx)
+                    setattr(req, k, v)
                 client.call_async(req)
-        except Exception as e:
-            print(f"[WARN] JAKA servo enable failed: {e}")
+            except Exception as e:
+                print(f"[post_launch] service call failed for {service}: {e}", flush=True)
+        else:
+            print(f"[post_launch] unsupported type: {htype}", flush=True)
 
     @staticmethod
     def _shell_quote(s):

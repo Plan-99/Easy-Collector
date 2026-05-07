@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
 import { getPortonePayment, verifyPortoneWebhook } from "@/lib/portone";
 import { applyPaidPayment, applyNonPaidPayment } from "@/lib/payments";
+import { applyPaidOrder } from "@/lib/orders";
 
 // PortOne v2 async webhook receiver.
 // - Verifies signature with PORTONE_WEBHOOK_SECRET
@@ -41,8 +43,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "PORTONE_LOOKUP_FAILED" }, { status: 502 });
   }
 
+  // Determine whether this is a Module payment or HW Order payment by
+  // checking which FK is set on our local Payment row.
+  const local = await prisma.payment.findUnique({
+    where: { portonePaymentId },
+    select: { moduleId: true, orderId: true },
+  });
+
   if (portonePayment.status === "PAID") {
-    await applyPaidPayment({ portonePaymentId, portonePayment });
+    if (local?.orderId) {
+      await applyPaidOrder({ portonePaymentId, portonePayment });
+    } else {
+      await applyPaidPayment({ portonePaymentId, portonePayment });
+    }
   } else {
     await applyNonPaidPayment({ portonePaymentId, portonePayment });
   }

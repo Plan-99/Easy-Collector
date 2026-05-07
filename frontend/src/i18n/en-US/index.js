@@ -97,6 +97,8 @@ export default {
   robotPoseSavedNotify: 'Pose saved.',
   robotPoseMovedToOrigin: 'Robot moved to origin position',
   robotPoseMoveToOriginFailed: 'Failed to move robot to origin',
+  robotPoseStop: 'STOP',
+  robotPoseMovingTo: 'Moving to {name}...',
 
   // ───── Workspace page ─────
   workspaceIntroTitle: "Workspace, Your Robot's Playground",

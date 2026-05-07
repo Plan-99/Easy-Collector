@@ -1,9 +1,9 @@
 {
   "id": "gripper_onrobot",
   "name": "OnRobot Gripper",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "category": "robot",
-  "description": "OnRobot 그리퍼 드라이버",
+  "description": "OnRobot \uadf8\ub9ac\ud37c \ub4dc\ub77c\uc774\ubc84",
   "install": {
     "ros2": {
       "target": "ros2/ros2_ws/src",
@@ -21,5 +21,50 @@
   },
   "check": {
     "type": "path"
-  }
+  },
+  "robots": [
+    {
+      "type": "2FG7",
+      "spec": {
+        "company": "OnRobot",
+        "role": "tool",
+        "joint_dim": 1,
+        "joint_names": [
+          "gripper_pos"
+        ],
+        "joint_lower_bounds": [
+          0.1
+        ],
+        "joint_upper_bounds": [
+          0.48
+        ],
+        "tool_inner": false,
+        "tool_index": [],
+        "custom_fields": [
+          "ip_address",
+          "port"
+        ]
+      },
+      "driver": {
+        "kind": "topic",
+        "read_topic": "/joint_states",
+        "read_topic_msg": "sensor_msgs/JointState",
+        "write_type": "topic",
+        "write_topic": "/command",
+        "write_topic_msg": "sensor_msgs/JointState",
+        "interpolation": true,
+        "launch": {
+          "package": "onrobot_rg_control",
+          "launch_file": "bringup.launch.py",
+          "args": {
+            "namespace": "{namespace}",
+            "gripper": "2FG7",
+            "ip": "{ip_address|192.168.1.10}",
+            "port": "{port|41414}",
+            "changer_addr": "{changer_address|5}"
+          }
+        }
+      }
+    }
+  ]
 }

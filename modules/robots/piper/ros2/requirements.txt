@@ -1,2 +1,6 @@
-mujoco-py==2.1.2.14
-python_version >= "3.10"
+# Piper ROS 2 패키지가 필요로 하는 Python 의존성.
+# 실제 설치는 module.json 의 dependencies.pip 가 담당.
+# (이 파일은 upstream piper_ros 호환을 위한 참고용 — 설치 파이프라인은 읽지 않음.)
+python-can>=4.3.1
+piper_sdk
+scipy

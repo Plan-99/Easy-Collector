@@ -16,6 +16,9 @@ export const getDashboardUser = cache(async (userId: string) => {
       },
       payments: { orderBy: { createdAt: "desc" }, take: 20 },
       billingKeys: { where: { active: true }, orderBy: { createdAt: "desc" } },
+      addresses: {
+        orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
+      },
     },
   });
 });

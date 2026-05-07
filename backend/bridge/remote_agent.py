@@ -105,14 +105,24 @@ class RemoteAgent:
             req.velocity_arg = vel_arg
         client.agent.MoveEEDeltaStep(req)
 
-    def move_to(self, target_pos, step_size=0.0005, duration=5.0):
+    def move_to(self, target_pos, duration=5.0, hz=100.0, step_size=None):
+        """Async — 즉시 return. is_moving 폴링 또는 cancel_move_to 로 제어.
+
+        step_size 는 backwards-compat 용 (무시됨). duration/hz 만 사용.
+        """
         client = get_bridge_client()
         client.agent.MoveTo(pb.MoveToRequest(
             agent_id=self._agent_id,
-            target_pos=target_pos,
-            step_size=step_size,
-            duration=duration,
+            target_pos=list(target_pos),
+            duration=float(duration),
+            hz=float(hz),
         ))
+
+    def cancel_move_to(self):
+        """진행 중인 move_to 를 즉시 중단 신호 — server-side thread 가
+        다음 step 직전에 abort 검사 후 종료. is_moving 도 곧 False 로."""
+        client = get_bridge_client()
+        client.agent.CancelMoveTo(pb.AgentId(id=self._agent_id))
 
     # ------------------------------------------------------------------
     # State Queries

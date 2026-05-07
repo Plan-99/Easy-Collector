@@ -157,23 +157,43 @@ def _run_joint_position(block, ctx, task_control):
         print(f"[WARN] block '{block.get('name')}' has no joint targets, skipping")
         return
 
-    pool = ThreadPoolExecutor(max_workers=len(targets))
+    # 새 move_to 는 비동기 — 호출 즉시 return, 실제 작업은 server-side thread.
+    # 도달 여부는 agent.is_moving 폴링으로 확인. stop 시 cancel_move_to 송신.
+    duration = float(block.get('duration', 5.0))
+    for agent, pos in targets:
+        agent.move_to(pos, duration=duration)
+
+    timeout_at = time.time() + max(30.0, float(block.get('timeout', 30)))
+    agents_only = [a for a, _ in targets]
     try:
-        futures = [pool.submit(agent.move_to, pos) for agent, pos in targets]
-        timeout_at = time.time() + max(30.0, float(block.get('timeout', 30)))
-        while not all(f.done() for f in futures):
+        while time.time() < timeout_at:
             if task_control['stop']:
                 print('[NOTICE] joint_position interrupted by stop signal')
+                for a in agents_only:
+                    try:
+                        a.cancel_move_to()
+                    except Exception as e:
+                        print(f"[WARN] cancel_move_to failed: {e}")
                 break
-            if time.time() > timeout_at:
-                print('[WARNING] joint_position timed out — moving on')
+            if not any(a.is_moving for a in agents_only):
                 break
             time.sleep(0.1)
-        for f in futures:
-            if f.done() and f.exception() is not None:
-                print(f"[ERROR] move_to failed: {f.exception()}")
+        else:
+            print('[WARNING] joint_position timed out — moving on')
+            for a in agents_only:
+                try:
+                    a.cancel_move_to()
+                except Exception:
+                    pass
     finally:
-        pool.shutdown(wait=False)
+        # 안전장치: 종료 직전 한 번 더 cancel — block error 등으로 빠져나오는
+        # 경로에서도 background thread 가 남지 않도록.
+        if task_control.get('stop'):
+            for a in agents_only:
+                try:
+                    a.cancel_move_to()
+                except Exception:
+                    pass
 
 
 def _run_checkpoint(block, ctx, task_control):
