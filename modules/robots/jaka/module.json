@@ -1,7 +1,7 @@
 {
   "id": "robot_jaka",
   "name": "Jaka",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "category": "robot",
   "description": "Jaka 협동로봇 드라이버",
   "install": {
@@ -23,5 +23,56 @@
   },
   "check": {
     "type": "path"
-  }
+  },
+  "robots": [
+    {
+      "type": "jaka_zu12",
+      "spec": {
+        "company": "JAKA",
+        "role": "single_arm",
+        "joint_dim": 6,
+        "joint_names": ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6"],
+        "joint_lower_bounds": [-6.28, -1.48, -3.05, -1.48, -6.28, -6.28],
+        "joint_upper_bounds": [6.28, 4.62, 3.05, 4.62, 6.28, 6.28],
+        "tool_inner": false,
+        "tool_index": [],
+        "ik_available": true,
+        "custom_fields": ["ip_address"]
+      },
+      "driver": {
+        "kind": "service",
+        "read_topic": "/jaka_driver/joint_position",
+        "read_topic_msg": "sensor_msgs/JointState",
+        "write_type": "service",
+        "write_topic": "/jaka_driver/servo_j",
+        "write_topic_msg": "jaka_msgs/srv/ServoMove",
+        "launch": {
+          "package": "jaka_driver",
+          "launch_file": "robot_start.launch.py",
+          "args": {
+            "namespace": "{namespace}",
+            "ip": "{ip_address|192.168.1.10}"
+          }
+        },
+        "post_launch": [
+          {
+            "type": "ros_service",
+            "service": "/jaka_driver/servo_move_enable",
+            "service_type": "jaka_msgs/srv/ServoMoveEnable",
+            "request": {"enable": true},
+            "wait_before": 5.0,
+            "timeout": 5.0
+          }
+        ]
+      },
+      "ik": {
+        "urdf_path": "/root/ros2_ws/src/jaka_ros2/src/jaka_description/urdf/jaka_zu12.urdf",
+        "urdf_package_dir": "/root/ros2_ws/src/jaka_ros2/src/jaka_description/",
+        "joints_to_lock": [],
+        "ee_definitions": [
+          {"name": "ee", "parent": "joint_6", "offset": null}
+        ]
+      }
+    }
+  ]
 }

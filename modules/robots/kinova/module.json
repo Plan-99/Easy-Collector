@@ -1,9 +1,9 @@
 {
   "id": "robot_kinova",
   "name": "Kinova Kortex",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "category": "robot",
-  "description": "Kinova Kortex 로봇 드라이버",
+  "description": "Kinova Kortex \ub85c\ubd07 \ub4dc\ub77c\uc774\ubc84",
   "install": {
     "ros2": {
       "target": "ros2/ros2_ws/src",
@@ -22,5 +22,82 @@
   },
   "check": {
     "type": "path"
-  }
+  },
+  "robots": [
+    {
+      "type": "kinova_gen3_7dof_robotiq_2f_85",
+      "spec": {
+        "company": "Kinova",
+        "role": "single_arm",
+        "joint_dim": 7,
+        "joint_names": [
+          "joint_1",
+          "joint_2",
+          "joint_3",
+          "joint_4",
+          "joint_5",
+          "joint_6",
+          "joint_7"
+        ],
+        "joint_lower_bounds": [
+          -3.14,
+          -3.14,
+          -3.14,
+          -3.14,
+          -3.14,
+          -3.14,
+          -3.14
+        ],
+        "joint_upper_bounds": [
+          3.14,
+          3.14,
+          3.14,
+          3.14,
+          3.14,
+          3.14,
+          3.14
+        ],
+        "tool_inner": false,
+        "tool_index": [],
+        "ik_available": true,
+        "custom_fields": [
+          "ip_address"
+        ]
+      },
+      "driver": {
+        "kind": "topic",
+        "read_topic": "/joint_trajectory_controller/controller_state",
+        "read_topic_msg": "control_msgs/JointTrajectoryControllerState",
+        "write_topic": "/joint_trajectory_controller/joint_trajectory",
+        "write_topic_msg": "trajectory_msgs/JointTrajectory",
+        "interpolation": true,
+        "launch": {
+          "package": "kinova_gen3_7dof_robotiq_2f_85_moveit_config",
+          "launch_file": "robot.launch.py",
+          "args": {
+            "namespace": "{namespace}",
+            "robot_ip": "{ip_address|192.168.1.10}",
+            "launch_rviz": "false"
+          }
+        }
+      },
+      "ik": {
+        "urdf_path": "/root/ros2_ws/src/ros2_kortex/kortex_description/robots/gen3_7dof.urdf",
+        "urdf_package_dir": "/root/ros2_ws/src/ros2_kortex/kortex_description/",
+        "joints_to_lock": [],
+        "ee_definitions": [
+          {
+            "name": "ee",
+            "parent": "joint_7",
+            "offset": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        ],
+        "gravity_compensate": 3e-05
+      }
+    }
+  ]
 }

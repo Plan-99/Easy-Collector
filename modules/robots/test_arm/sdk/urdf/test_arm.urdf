@@ -1,0 +1,47 @@
+<?xml version="1.0"?>
+<robot name="test_arm">
+  <!-- 동일한 URDF — SDK 변형의 urdf_package_dir(/root/robot_sdk/test_arm/) 기준 'urdf/test_arm.urdf' -->
+  <link name="base_link"><visual><geometry><cylinder length="0.05" radius="0.05"/></geometry></visual></link>
+  <link name="link1"><visual><geometry><cylinder length="0.10" radius="0.04"/></geometry></visual></link>
+  <link name="link2"><visual><geometry><cylinder length="0.20" radius="0.04"/></geometry></visual></link>
+  <link name="link3"><visual><geometry><cylinder length="0.20" radius="0.04"/></geometry></visual></link>
+  <link name="link4"><visual><geometry><cylinder length="0.10" radius="0.03"/></geometry></visual></link>
+  <link name="link5"><visual><geometry><cylinder length="0.10" radius="0.03"/></geometry></visual></link>
+  <link name="link6"><visual><geometry><cylinder length="0.05" radius="0.025"/></geometry></visual></link>
+  <link name="ee_link"/>
+
+  <joint name="joint1" type="revolute">
+    <parent link="base_link"/><child link="link1"/>
+    <origin xyz="0 0 0.05" rpy="0 0 0"/><axis xyz="0 0 1"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="2.0"/>
+  </joint>
+  <joint name="joint2" type="revolute">
+    <parent link="link1"/><child link="link2"/>
+    <origin xyz="0 0 0.10" rpy="0 0 0"/><axis xyz="0 1 0"/>
+    <limit lower="-1.57" upper="1.57" effort="100" velocity="2.0"/>
+  </joint>
+  <joint name="joint3" type="revolute">
+    <parent link="link2"/><child link="link3"/>
+    <origin xyz="0 0 0.20" rpy="0 0 0"/><axis xyz="0 1 0"/>
+    <limit lower="-2.40" upper="2.40" effort="100" velocity="2.0"/>
+  </joint>
+  <joint name="joint4" type="revolute">
+    <parent link="link3"/><child link="link4"/>
+    <origin xyz="0 0 0.20" rpy="0 0 0"/><axis xyz="0 0 1"/>
+    <limit lower="-3.14" upper="3.14" effort="50" velocity="2.5"/>
+  </joint>
+  <joint name="joint5" type="revolute">
+    <parent link="link4"/><child link="link5"/>
+    <origin xyz="0 0 0.10" rpy="0 0 0"/><axis xyz="0 1 0"/>
+    <limit lower="-1.57" upper="1.57" effort="50" velocity="2.5"/>
+  </joint>
+  <joint name="joint6" type="revolute">
+    <parent link="link5"/><child link="link6"/>
+    <origin xyz="0 0 0.10" rpy="0 0 0"/><axis xyz="0 0 1"/>
+    <limit lower="-3.14" upper="3.14" effort="20" velocity="3.0"/>
+  </joint>
+  <joint name="joint6_to_ee" type="fixed">
+    <parent link="link6"/><child link="ee_link"/>
+    <origin xyz="0 0 0.05" rpy="0 0 0"/>
+  </joint>
+</robot>

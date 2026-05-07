@@ -1,7 +1,7 @@
 {
   "id": "robot_fairino",
   "name": "Fairino",
-  "version": "1.1.1",
+  "version": "1.1.3",
   "category": "robot",
   "description": "Fairino 협동로봇 (fairino-python-sdk 직접 제어)",
   "install": {
@@ -21,5 +21,36 @@
   },
   "check": {
     "type": "path"
-  }
+  },
+  "robots": [
+    {
+      "type": "fairino_fr5",
+      "spec": {
+        "company": "Fairino",
+        "role": "single_arm",
+        "joint_dim": 6,
+        "joint_names": ["j1", "j2", "j3", "j4", "j5", "j6"],
+        "joint_lower_bounds": [-3.0543, -4.6251, -2.8274, -4.6251, -3.0543, -3.0543],
+        "joint_upper_bounds": [3.0543, 1.4835, 2.8274, 1.4835, 3.0543, 3.0543],
+        "tool_inner": false,
+        "tool_index": [],
+        "ik_available": true,
+        "custom_fields": ["ip_address"]
+      },
+      "driver": {
+        "kind": "sdk",
+        "interpolation": true,
+        "sdk_control": true,
+        "sdk_type": "fairino"
+      },
+      "ik": {
+        "urdf_path": "/root/ros2_ws/src/fairino/fairino_description/urdf/fairino5_v6.urdf",
+        "urdf_package_dir": "/root/ros2_ws/src/fairino/fairino_description/",
+        "joints_to_lock": [],
+        "ee_definitions": [
+          {"name": "ee", "parent": "j6", "offset": [0.0, 0.0, 0.1]}
+        ]
+      }
+    }
+  ]
 }
