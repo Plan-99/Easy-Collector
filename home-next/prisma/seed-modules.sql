@@ -33,7 +33,8 @@ INSERT INTO "Module" (
   ('sensor_realsense',     'Intel RealSense',        'sensor',    'Intel RealSense 깊이 카메라 (D435, D405 등)',                    0, true, false, false, 'module-sensor_realsense-{version}.tar.gz',           ARRAY[]::TEXT[], NOW(), NOW()),
   -- Extensions
   ('vr_teleop',            'VR 텔레오퍼레이션',      'extension', 'VR 기반 원격 조종',                                              0, true, false, false, 'module-vr_teleop-{version}.tar.gz',                  ARRAY[]::TEXT[], NOW(), NOW()),
-  ('test_arm',             'Test Arm',               'extension', '테스트 로봇 암 시뮬레이션',                                       0, true, false, false, 'module-test_arm-{version}.tar.gz',                   ARRAY[]::TEXT[], NOW(), NOW())
+  ('test_arm',             'Test Arm',               'extension', '테스트 로봇 암 시뮬레이션',                                       0, true, false, false, 'module-test_arm-{version}.tar.gz',                   ARRAY[]::TEXT[], NOW(), NOW()),
+  ('sam3',                 'SAM 3 세그멘테이션',     'extension', 'Meta SAM 3 기반 객체 세그멘테이션 (텍스트/박스 프롬프트, 첫프레임 detect + 트래커)',  0, true, false, false, 'module-sam3-{version}.tar.gz',                       ARRAY[]::TEXT[], NOW(), NOW())
 ON CONFLICT ("id") DO UPDATE SET
   -- Refresh metadata but never overwrite the admin-set price or active flag.
   "name"             = EXCLUDED."name",
