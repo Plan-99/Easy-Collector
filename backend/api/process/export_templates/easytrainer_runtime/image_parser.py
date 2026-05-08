@@ -9,6 +9,16 @@ from sensor_msgs.msg import CompressedImage
 
 
 def fetch_image_with_config(image, config):
+    # SAM3 mask runs first on the raw frame so prompts are anchored to the
+    # original camera coordinates. Lazy import — if the runtime sam3_helper
+    # is missing or the SAM3 module isn't installed on the deployment host,
+    # this silently no-ops.
+    if config.get('sam3'):
+        try:
+            from .sam3_helper import apply_sam3_to_image
+            image = apply_sam3_to_image(image, config.get('sensor_id'), config['sam3'])
+        except ImportError:
+            pass
     if 'cropped_area' in config and config['cropped_area']:
         area = config['cropped_area']
         xy_start = (area[0], area[1])

@@ -431,6 +431,8 @@ def checkpoint_test(
                         image = obs_t['images'][f'sensor_{sensor["id"]}']
                         sensor_id = str(sensor['id'])
                         image = fetch_image_with_config(image, {
+                            'sensor_id': str(sensor_id),
+                            'sam3': (task.get('sensor_sam3') or {}).get(str(sensor_id)),
                             'resize': task['sensor_img_size'][str(sensor_id)],
                             'cropped_area': task['sensor_cropped_area'][str(sensor_id)],
                             'rotate': task['sensor_rotate'][str(sensor_id)]
@@ -652,6 +654,8 @@ def checkpoint_test(
                         sensor_id = str(sensor['id'])
                         image = obs_t1['images'][f'sensor_{sensor_id}']
                         image = fetch_image_with_config(image, {
+                            'sensor_id': sensor_id,
+                            'sam3': (task.get('sensor_sam3') or {}).get(sensor_id),
                             'resize': task['sensor_img_size'][sensor_id],
                             'cropped_area': task['sensor_cropped_area'][sensor_id].get('cropped_area', None),
                             'rotate': task['sensor_rotate'][sensor_id]

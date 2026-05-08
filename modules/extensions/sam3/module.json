@@ -1,0 +1,20 @@
+{
+  "id": "sam3",
+  "name": "SAM 3 Segmentation",
+  "version": "0.1.0",
+  "category": "extension",
+  "description": "SAM 3 (Segment Anything Model 3) 기반 객체 세그멘테이션. 텍스트/박스 프롬프트로 센서 이미지에서 특정 객체를 분리하고 첫 프레임 detect + tracker propagate 모드로 동영상 마스킹을 수행합니다.",
+  "install": {
+    "target": "backend/extensions"
+  },
+  "dependencies": {
+    "apt": [],
+    "pip": [
+      "huggingface_hub>=0.24.0",
+      "git+https://github.com/facebookresearch/sam3.git@main#egg=sam3"
+    ]
+  },
+  "check": {
+    "type": "path"
+  }
+}

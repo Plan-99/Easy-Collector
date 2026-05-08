@@ -432,6 +432,10 @@ def append_episode(dataset_dir, timesteps, agents, sensors, task,
 
     # ── Save frames as temporary PNGs, then encode to MP4 ────────────────
     num_videos = 0
+    # SAM3 tracker lifecycle: initialize once per sensor on the first frame,
+    # propagate masks for the rest of the episode, then tear down. No-op when
+    # the extension isn't installed.
+    from .sam3_helper import start_episode as _sam3_start, end_episode as _sam3_end
     for sensor in sensors:
         s_id = str(sensor['id'])
         feature_key = f"observation.images.sensor_{s_id}"
@@ -442,32 +446,43 @@ def append_episode(dataset_dir, timesteps, agents, sensors, task,
         )
         os.makedirs(imgs_dir, exist_ok=True)
 
-        for t in range(num_frames):
-            ts = timesteps[t]
-            img = ts.observation['images'][f'sensor_{s_id}']
+        sam3_cfg = (task.get('sensor_sam3') or {}).get(s_id)
+        if num_frames > 0 and sam3_cfg and sam3_cfg.get('enabled'):
+            first_img = timesteps[0].observation['images'][f'sensor_{s_id}']
+            _sam3_start(s_id, first_img, sam3_cfg)
 
-            if fetch_image_fn is not None:
-                img = fetch_image_fn(img, {
-                    'resize': task.get('sensor_img_size', {}).get(s_id),
-                    'cropped_area': task.get('sensor_cropped_area', {}).get(s_id, {}),
-                    'rotate': task.get('sensor_rotate', {}).get(s_id, 0),
-                })
+        try:
+            for t in range(num_frames):
+                ts = timesteps[t]
+                img = ts.observation['images'][f'sensor_{s_id}']
 
-            if isinstance(img, np.ndarray):
-                # OpenCV uses BGR, convert to RGB for PIL/video encoding
-                if img.ndim == 3 and img.shape[2] == 3:
-                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                img_pil = Image.fromarray(img)
-            else:
-                img_pil = img
+                if fetch_image_fn is not None:
+                    img = fetch_image_fn(img, {
+                        'sensor_id': s_id,
+                        'sam3': sam3_cfg,
+                        'resize': task.get('sensor_img_size', {}).get(s_id),
+                        'cropped_area': task.get('sensor_cropped_area', {}).get(s_id, {}),
+                        'rotate': task.get('sensor_rotate', {}).get(s_id, 0),
+                    })
 
-            # NOTE: lerobot's encode_video_frames glob is "frame-NNNNNN.png" (hyphen).
-            # If we use "frame_NNNNNN.png" (underscore) the encoder finds zero matches,
-            # raises FileNotFoundError, the except branch warns silently and keeps the
-            # PNGs without writing an mp4. The training dataset loader then falls back
-            # to all-zero images and the model trains on a black screen.
-            frame_path = os.path.join(imgs_dir, f"frame-{t:06d}.png")
-            img_pil.save(frame_path)
+                if isinstance(img, np.ndarray):
+                    # OpenCV uses BGR, convert to RGB for PIL/video encoding
+                    if img.ndim == 3 and img.shape[2] == 3:
+                        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    img_pil = Image.fromarray(img)
+                else:
+                    img_pil = img
+
+                # NOTE: lerobot's encode_video_frames glob is "frame-NNNNNN.png" (hyphen).
+                # If we use "frame_NNNNNN.png" (underscore) the encoder finds zero matches,
+                # raises FileNotFoundError, the except branch warns silently and keeps the
+                # PNGs without writing an mp4. The training dataset loader then falls back
+                # to all-zero images and the model trains on a black screen.
+                frame_path = os.path.join(imgs_dir, f"frame-{t:06d}.png")
+                img_pil.save(frame_path)
+        finally:
+            if sam3_cfg and sam3_cfg.get('enabled'):
+                _sam3_end(s_id)
 
         # Encode PNGs to MP4
         video_path = os.path.join(

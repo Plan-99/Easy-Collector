@@ -162,10 +162,12 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _resolve_sensor_config(meta: dict, sensor_id) -> dict:
-    """Per-sensor crop / rotate / resize from the task block."""
+    """Per-sensor crop / rotate / resize / sam3 from the task block."""
     sid_str = str(sensor_id)
     task = meta.get("task", {}) or {}
     return {
+        "sensor_id": sid_str,
+        "sam3": (task.get("sensor_sam3") or {}).get(sid_str),
         "cropped_area": (task.get("sensor_cropped_area") or {}).get(sid_str),
         "rotate": (task.get("sensor_rotate") or {}).get(sid_str, 0),
         "resize": (task.get("sensor_img_size") or {}).get(sid_str),

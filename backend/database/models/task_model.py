@@ -23,7 +23,8 @@ class Task(SoftDeleteModel):
         'sensors',
         'sensor_img_size',
         'sensor_cropped_area',
-        'sensor_rotate'
+        'sensor_rotate',
+        'sensor_sam3'
     ]
 
     name = CharField(null=True)
@@ -138,6 +139,24 @@ class Task(SoftDeleteModel):
                 rotation[str(sensor_id)] = self._settings['sensors'][str(sensor_id)].get('rotate', 0)
         return rotation
 
+    @property
+    def sensor_sam3_computed(self):
+        # SAM3 per-sensor segmentation config. Default = disabled / no-op so
+        # the rest of the pipeline can read this dict unconditionally.
+        default = {
+            'enabled': False,
+            'text_prompts': [],
+            'boxes': [],
+            'mode': 'background',  # 'off' | 'background' | 'object'
+            'color': [0, 0, 0],
+        }
+        out = {}
+        for sensor_id in self._sensor_ids:
+            sid = str(sensor_id)
+            stored = self._settings.get('sensors', {}).get(sid, {}).get('sam3') or {}
+            out[sid] = {**default, **stored}
+        return out
+
     def to_dict(self):
         data = super().to_dict()
         # Override appended properties
@@ -147,6 +166,7 @@ class Task(SoftDeleteModel):
         data['sensor_img_size'] = self.sensor_img_size_computed
         data['sensor_cropped_area'] = self.sensor_cropped_area_computed
         data['sensor_rotate'] = self.sensor_rotate_computed
+        data['sensor_sam3'] = self.sensor_sam3_computed
         data['sensor_ids'] = self._sensor_ids
         data['settings'] = self._settings
         # Include assembly

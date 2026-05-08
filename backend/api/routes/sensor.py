@@ -4,6 +4,7 @@ from ...database.models.sensor_model import Sensor as SensorModel
 from ...configs.global_configs import SUPPORT_SENSORS
 from ...bridge.client import get_bridge_client
 from ...bridge.generated import robot_bridge_pb2 as pb
+import base64
 import json
 
 sensor_bp = Blueprint('sensor', __name__)
@@ -153,3 +154,55 @@ def delete_sensor(id):
     sensor.hide = True
     sensor.save()
     return {'status': 'success', 'message': 'Sensor Deleted'}, 200
+
+
+@sensor_bp.route('/sensor/<id>/sam3_preview', methods=['POST'])
+def sam3_preview(id):
+    """One-shot SAM3 mask preview for the WorkspacePage Test button.
+
+    Body: { text_prompts: [str], boxes: [[x1,y1,x2,y2]], mode: str, color: [r,g,b] }
+    Returns: { status, image: 'data:image/png;base64,...' } on success.
+    """
+    import cv2
+    import numpy as np
+    from ...bridge.image_reader import ImageBridgeReader
+    from ...utils.sam3_helper import is_extension_installed, preview_mask
+
+    if not is_extension_installed():
+        return {
+            'status': 'error',
+            'message': 'SAM3 extension is not installed. Install the sam3 module first.',
+        }, 400
+
+    body = request.json or {}
+    cfg = {
+        'enabled': True,
+        'text_prompts': body.get('text_prompts') or [],
+        'boxes': body.get('boxes') or [],
+        'mode': body.get('mode', 'background'),
+        'color': body.get('color') or [0, 0, 0],
+    }
+
+    reader = ImageBridgeReader()
+    image, _ts = reader.read(f'sensor_{id}')
+    if image is None:
+        return {
+            'status': 'error',
+            'message': 'No frame available — make sure the sensor is running.',
+        }, 404
+
+    masked = preview_mask(image, cfg)
+    if masked is None:
+        return {
+            'status': 'error',
+            'message': 'SAM3 preview failed. Check HF token and prompts.',
+        }, 500
+
+    ok, buf = cv2.imencode('.png', masked)
+    if not ok:
+        return {'status': 'error', 'message': 'Encoding failed'}, 500
+    b64 = base64.b64encode(buf.tobytes()).decode('ascii')
+    return {
+        'status': 'success',
+        'image': f'data:image/png;base64,{b64}',
+    }, 200

@@ -276,12 +276,106 @@
                                     v-model="selectedWorkspace.sensor_rotate[focused.id]"
                                     :options="[0, 90, 180, 270]"
                                     :label="$t('workspaceRotationDegrees')"
-                                    @update:model-value="updateWorkspaceDeviceSetting({ 
+                                    @update:model-value="updateWorkspaceDeviceSetting({
                                         device_type: 'sensors',
                                         key: 'rotate',
                                         setting: selectedWorkspace.sensor_rotate,
                                     });"
                                 ></q-select>
+                            </div>
+                            <div class="q-mt-md q-pa-sm border-rounded bg-grey-10">
+                                <div class="row items-center q-mb-xs">
+                                    <q-icon name="auto_fix_high" class="q-mr-xs" />
+                                    <div class="text-caption text-bold">{{ $t('workspaceSam3Title') }}</div>
+                                    <q-space />
+                                    <q-toggle
+                                        :model-value="sam3Cfg.enabled"
+                                        dense
+                                        color="positive"
+                                        @update:model-value="(v) => updateSam3({ enabled: v })"
+                                    />
+                                </div>
+                                <div v-if="sam3Cfg.enabled">
+                                    <div class="text-caption q-mb-xs">{{ $t('workspaceSam3Mode') }}</div>
+                                    <q-select
+                                        dense outlined dark bg-color="dark"
+                                        :model-value="sam3Cfg.mode"
+                                        :options="[
+                                            { label: $t('workspaceSam3ModeBackground'), value: 'background' },
+                                            { label: $t('workspaceSam3ModeObject'), value: 'object' },
+                                        ]"
+                                        emit-value map-options
+                                        @update:model-value="(v) => updateSam3({ mode: v })"
+                                    />
+                                    <div class="row items-center q-mt-sm q-gutter-x-sm">
+                                        <div class="text-caption">{{ $t('workspaceSam3Color') }}</div>
+                                        <div
+                                            class="border-rounded"
+                                            :style="`width: 28px; height: 20px; background: rgb(${sam3Cfg.color.join(',')}); border: 1px solid #888;`"
+                                        ></div>
+                                        <q-btn dense flat size="xs" icon="colorize">
+                                            <q-popup-proxy>
+                                                <q-color
+                                                    :model-value="sam3ColorHex"
+                                                    @change="(v) => updateSam3({ color: hexToRgb(v) })"
+                                                    no-header no-footer default-view="palette"
+                                                />
+                                            </q-popup-proxy>
+                                        </q-btn>
+                                    </div>
+                                    <div class="text-caption q-mt-sm q-mb-xs">{{ $t('workspaceSam3TextPrompts') }}</div>
+                                    <div
+                                        v-for="(prompt, idx) in sam3Cfg.text_prompts"
+                                        :key="`p-${idx}`"
+                                        class="row items-center q-mb-xs q-gutter-x-xs"
+                                    >
+                                        <q-input
+                                            dense outlined dark bg-color="dark"
+                                            class="col"
+                                            :model-value="prompt"
+                                            :placeholder="$t('workspaceSam3TextPromptPlaceholder')"
+                                            @update:model-value="(v) => updateSam3TextPrompt(idx, v)"
+                                        />
+                                        <q-btn dense flat size="sm" icon="close" color="negative" @click="removeSam3TextPrompt(idx)" />
+                                    </div>
+                                    <q-btn
+                                        outline rounded dense size="sm"
+                                        class="full-width q-mb-sm"
+                                        color="primary"
+                                        icon="add"
+                                        :label="$t('workspaceSam3AddText')"
+                                        @click="addSam3TextPrompt()"
+                                    />
+                                    <div class="text-caption q-mb-xs">{{ $t('workspaceSam3Boxes') }} ({{ sam3Cfg.boxes.length }})</div>
+                                    <div
+                                        v-for="(box, idx) in sam3Cfg.boxes"
+                                        :key="`b-${idx}`"
+                                        class="row items-center q-mb-xs"
+                                    >
+                                        <div class="text-caption col">[{{ box.join(', ') }}]</div>
+                                        <q-btn dense flat size="sm" icon="close" color="negative" @click="removeSam3Box(idx)" />
+                                    </div>
+                                    <q-btn
+                                        outline rounded dense size="sm"
+                                        class="full-width q-mb-sm"
+                                        :color="sam3DrawingBox ? 'orange' : 'primary'"
+                                        :icon="sam3DrawingBox ? 'cancel' : 'crop_free'"
+                                        :label="sam3DrawingBox ? $t('workspaceSam3CancelDraw') : $t('workspaceSam3DrawBox')"
+                                        @click="toggleSam3DrawBox()"
+                                    />
+                                    <q-btn
+                                        outline rounded dense size="sm"
+                                        class="full-width"
+                                        color="positive"
+                                        icon="play_arrow"
+                                        :loading="sam3PreviewLoading"
+                                        :label="$t('workspaceSam3TestPreview')"
+                                        @click="testSam3Preview()"
+                                    />
+                                    <div v-if="sam3PreviewImg" class="q-mt-sm">
+                                        <q-img :src="sam3PreviewImg" />
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         <div
@@ -1272,7 +1366,12 @@ function doCrop(event) {
 
 function endCrop() {
     isCropping.value = false;
-    saveCroppedArea();
+    if (sam3DrawingBox.value) {
+        saveSam3Box();
+        sam3DrawingBox.value = false;
+    } else {
+        saveCroppedArea();
+    }
 }
 
 function cancelCrop() {
@@ -1405,6 +1504,143 @@ onMounted(() => {
         uncertaintyScore.value = Math.round(data.uncertainty_score * 100) / 100;
     });
 });
+
+// ── SAM3 segmentation per-sensor config ───────────────────────────────────
+const SAM3_DEFAULT = {
+    enabled: false,
+    text_prompts: [],
+    boxes: [],
+    mode: 'background',
+    color: [0, 0, 0],
+};
+
+const sam3DrawingBox = ref(false);
+const sam3PreviewLoading = ref(false);
+const sam3PreviewImg = ref(null);
+
+const sam3Cfg = computed(() => {
+    if (!focused.value?.id || !selectedWorkspace.value) {
+        return { ...SAM3_DEFAULT };
+    }
+    const map = selectedWorkspace.value.sensor_sam3 || {};
+    const cur = map[focused.value.id] || {};
+    return {
+        ...SAM3_DEFAULT,
+        ...cur,
+        text_prompts: Array.isArray(cur.text_prompts) ? cur.text_prompts : [],
+        boxes: Array.isArray(cur.boxes) ? cur.boxes : [],
+        color: Array.isArray(cur.color) ? cur.color : [0, 0, 0],
+    };
+});
+
+const sam3ColorHex = computed(() => {
+    const [r, g, b] = sam3Cfg.value.color;
+    const h = (n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
+    return `#${h(r)}${h(g)}${h(b)}`;
+});
+
+function hexToRgb(hex) {
+    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})/i.exec(hex || '');
+    if (!m) return [0, 0, 0];
+    return [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
+}
+
+function persistSam3() {
+    if (!selectedWorkspace.value) return;
+    updateWorkspaceDeviceSetting({
+        device_type: 'sensors',
+        key: 'sam3',
+        setting: selectedWorkspace.value.sensor_sam3,
+    });
+}
+
+function updateSam3(patch) {
+    if (!focused.value?.id || !selectedWorkspace.value) return;
+    if (!selectedWorkspace.value.sensor_sam3) {
+        selectedWorkspace.value.sensor_sam3 = {};
+    }
+    const sid = focused.value.id;
+    const cur = { ...sam3Cfg.value, ...selectedWorkspace.value.sensor_sam3[sid] };
+    selectedWorkspace.value.sensor_sam3[sid] = { ...cur, ...patch };
+    persistSam3();
+}
+
+function addSam3TextPrompt() {
+    const cur = sam3Cfg.value;
+    updateSam3({ text_prompts: [...cur.text_prompts, ''] });
+}
+
+function updateSam3TextPrompt(idx, value) {
+    const cur = sam3Cfg.value;
+    const next = [...cur.text_prompts];
+    next[idx] = value;
+    updateSam3({ text_prompts: next });
+}
+
+function removeSam3TextPrompt(idx) {
+    const cur = sam3Cfg.value;
+    updateSam3({ text_prompts: cur.text_prompts.filter((_, i) => i !== idx) });
+}
+
+function removeSam3Box(idx) {
+    const cur = sam3Cfg.value;
+    updateSam3({ boxes: cur.boxes.filter((_, i) => i !== idx) });
+}
+
+function toggleSam3DrawBox() {
+    sam3DrawingBox.value = !sam3DrawingBox.value;
+}
+
+function saveSam3Box() {
+    if (!focused.value.id) return;
+    const videoEl = videoContainer.value;
+    if (!videoEl) return;
+    const video = videoEl.querySelector('video');
+    if (!video) return;
+    const videoRect = video.getBoundingClientRect();
+    const containerRect = videoEl.getBoundingClientRect();
+    const scaleX = focused.value.resolution[0] / videoRect.width;
+    const scaleY = focused.value.resolution[1] / videoRect.height;
+    const x1_rel = Math.min(cropStartPoint.value.x, cropEndPoint.value.x) - (videoRect.left - containerRect.left);
+    const y1_rel = Math.min(cropStartPoint.value.y, cropEndPoint.value.y) - (videoRect.top - containerRect.top);
+    const x2_rel = Math.max(cropStartPoint.value.x, cropEndPoint.value.x) - (videoRect.left - containerRect.left);
+    const y2_rel = Math.max(cropStartPoint.value.y, cropEndPoint.value.y) - (videoRect.top - containerRect.top);
+    const x1 = Math.max(0, Math.round(x1_rel * scaleX));
+    const y1 = Math.max(0, Math.round(y1_rel * scaleY));
+    const x2 = Math.min(focused.value.resolution[0], Math.round(x2_rel * scaleX));
+    const y2 = Math.min(focused.value.resolution[1], Math.round(y2_rel * scaleY));
+    if (x2 - x1 < 5 || y2 - y1 < 5) return;
+    updateSam3({ boxes: [...sam3Cfg.value.boxes, [x1, y1, x2, y2]] });
+}
+
+function testSam3Preview() {
+    if (!focused.value?.id) return;
+    const cfg = sam3Cfg.value;
+    if (!cfg.text_prompts.length && !cfg.boxes.length) {
+        Notify.create({ type: 'warning', message: t('workspaceSam3NeedPrompt') });
+        return;
+    }
+    sam3PreviewLoading.value = true;
+    sam3PreviewImg.value = null;
+    api.post(`/sensor/${focused.value.id}/sam3_preview`, {
+        text_prompts: cfg.text_prompts.filter(p => p && p.trim()),
+        boxes: cfg.boxes,
+        mode: cfg.mode,
+        color: cfg.color,
+    })
+        .then((res) => {
+            sam3PreviewImg.value = res.data.image;
+        })
+        .catch((err) => {
+            Notify.create({
+                type: 'negative',
+                message: err?.response?.data?.message || String(err),
+            });
+        })
+        .finally(() => {
+            sam3PreviewLoading.value = false;
+        });
+}
 </script>
 <style>
 .crop-area {
