@@ -1102,6 +1102,111 @@ def _uninstall_deps(meta: dict) -> None:
     # apt packages: 일반적으로 제거하지 않음 (다른 모듈이 공유할 수 있으므로)
 
 
+# ---------------------------------------------------------------------------
+# post_install.credentials — generic mechanism for modules that need an
+# external secret (HF token, API key, license file, etc.) at runtime.
+#
+# Schema (in module.json):
+#   "post_install": {
+#     "credentials": [
+#       {
+#         "id": "hf_token",
+#         "title": "HuggingFace 액세스 토큰",
+#         "description": "facebook/sam3 gated repo 접근에 필요합니다.",
+#         "instructions": [
+#           {"label": "1. 라이선스 동의", "url": "https://huggingface.co/facebook/sam3"},
+#           {"label": "2. 토큰 발급",     "url": "https://huggingface.co/settings/tokens"}
+#         ],
+#         "input": {"type": "secret", "placeholder": "hf_xxxx", "validate": "^hf_.{20,}$"},
+#         "save_to": "$EASYTRAINER_DATA_DIR/.hf_token",
+#         "save_format": "raw",   // "raw" | "json:<key>" | "env:<NAME>"
+#         "skippable": true
+#       }
+#     ]
+#   }
+#
+# The launcher UI fetches `pending_credentials_for(module_id)` after a
+# successful install — anything whose `save_to` file is missing/empty becomes
+# a dialog prompt. `save_credential(spec, value)` writes the value with 0600
+# perms. Modules without a `post_install.credentials` block are unaffected.
+# ---------------------------------------------------------------------------
+
+def _expand_credential_path(raw_path: str) -> Path:
+    data_dir = os.environ.get("EASYTRAINER_DATA_DIR", "/opt/easytrainer")
+    expanded = (raw_path or "").replace("$EASYTRAINER_DATA_DIR", data_dir)
+    expanded = os.path.expandvars(expanded)
+    expanded = os.path.expanduser(expanded)
+    return Path(expanded)
+
+
+def _credential_already_satisfied(spec: dict) -> bool:
+    """True if the file backing this credential exists and has content."""
+    save_to = spec.get("save_to")
+    if not save_to:
+        return False
+    p = _expand_credential_path(save_to)
+    try:
+        return p.is_file() and p.stat().st_size > 0
+    except OSError:
+        return False
+
+
+def pending_credentials_for(module_id: str) -> list[dict]:
+    """Return credential specs from module.json that aren't yet satisfied.
+
+    Reads the saved manifest at project/modules/<id>.json so this works for
+    modules installed in any past session. Returns [] for modules without
+    a credentials block. `post_install` is allowed to be a script-path string
+    (legacy) or a dict — only the dict form may carry credentials."""
+    meta = _load_module_manifest(module_id)
+    if not meta:
+        return []
+    pi = meta.get("post_install")
+    if not isinstance(pi, dict):
+        return []
+    creds = pi.get("credentials") or []
+    if not isinstance(creds, list):
+        return []
+    return [c for c in creds if isinstance(c, dict) and not _credential_already_satisfied(c)]
+
+
+def save_credential(spec: dict, value: str) -> bool:
+    """Persist `value` to spec.save_to using spec.save_format. Returns ok."""
+    save_to = spec.get("save_to")
+    if not save_to:
+        return False
+    target = _expand_credential_path(save_to)
+    fmt = spec.get("save_format", "raw")
+
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if fmt == "raw":
+            target.write_text(str(value).strip() + "\n", encoding="utf-8")
+        elif fmt.startswith("json:"):
+            key = fmt.split(":", 1)[1] or spec.get("id", "value")
+            existing = {}
+            if target.is_file():
+                try:
+                    existing = json.loads(target.read_text(encoding="utf-8")) or {}
+                except Exception:
+                    existing = {}
+            existing[key] = str(value).strip()
+            target.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+        elif fmt.startswith("env:"):
+            name = fmt.split(":", 1)[1] or spec.get("id", "VALUE")
+            target.write_text(f"{name}={str(value).strip()}\n", encoding="utf-8")
+        else:
+            target.write_text(str(value).strip() + "\n", encoding="utf-8")
+        try:
+            target.chmod(0o600)
+        except OSError:
+            pass
+        return True
+    except Exception as e:
+        print(f"[MODULE] save_credential failed for {spec.get('id')}: {e}")
+        return False
+
+
 def _run_module_script(module_id: str, meta: dict, script_key: str) -> bool:
     """Run a module's lifecycle script (post_install, start_command, stop_command).
 
@@ -1109,7 +1214,16 @@ def _run_module_script(module_id: str, meta: dict, script_key: str) -> bool:
     """
     import subprocess as _sp
 
-    script_rel = meta.get(script_key)
+    raw = meta.get(script_key)
+    if not raw:
+        return True
+    # post_install may be a string ("scripts/post_install.sh") or a dict
+    # ({"script": "...", "credentials": [...]}). Pull the script path out
+    # of either shape; missing → nothing to run, return True.
+    if isinstance(raw, dict):
+        script_rel = raw.get("script")
+    else:
+        script_rel = raw
     if not script_rel:
         return True
 

@@ -3962,6 +3962,19 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                             btn.setEnabled(True)
                             btn.clicked.disconnect()
                             btn.clicked.connect(_make_action(module_id, "remove", btn, status_lbl, ver_lbl, release_ref))
+                            # post_install.credentials — generic per-module
+                            # secret prompts (HF token, API keys, license
+                            # files, etc). No-op when the module declares
+                            # no creds. Fired before the restart-needed
+                            # dialog so the user finishes setup in one flow.
+                            try:
+                                from modules import pending_credentials_for
+                                from credential_dialog import prompt_credentials
+                                _pending = pending_credentials_for(module_id)
+                                if _pending:
+                                    prompt_credentials(dlg, module_id, _pending)
+                            except Exception as _cred_err:
+                                print(f"[MODULE] credential prompt failed: {_cred_err}")
                             # 설치된 모듈 (특히 ROS2 패키지/SDK) 은 런처 재시작 후 컨테이너
                             # entrypoint 가 deps 복원 + 새 colcon install/setup.bash 를 source
                             # 해야 비로소 안정적으로 동작 — 사용자에게 명시적으로 알린다.

@@ -667,6 +667,19 @@ def run_setup_wizard(self: "MainWindow") -> bool:
                         name = mod.name if mod else mid
                         if ok:
                             log.append(f"[MODULE] ✓ {name} 설치 완료")
+                            # post_install.credentials prompts — runs in the
+                            # GUI thread because install_modules_batch is
+                            # called synchronously from here. Generic across
+                            # all modules; no-op when the module declares
+                            # no credentials block.
+                            try:
+                                from modules import pending_credentials_for
+                                from credential_dialog import prompt_credentials
+                                _pending = pending_credentials_for(mid)
+                                if _pending:
+                                    prompt_credentials(dlg, mid, _pending)
+                            except Exception as _cred_err:
+                                log.append(f"[MODULE][WARN] 인증 정보 입력 실패: {_cred_err}")
                         else:
                             log.append(f"[MODULE] ✗ {name} 설치 실패")
                     try:

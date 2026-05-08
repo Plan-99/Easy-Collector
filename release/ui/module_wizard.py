@@ -23,7 +23,7 @@ from typing import Optional
 
 # 대부분의 위젯은 launcher가 PySide6/PyQt6 폴백을 처리해 둔 app_context에서 가져온다.
 from app_context import (
-    Qt, QFont,
+    Qt, QApplication, QFont,
     QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout,
     QInputDialog, QLabel, QLineEdit, QListWidget, QMessageBox,
     QPlainTextEdit, QPushButton, QScrollArea, QVBoxLayout, QWidget,
@@ -2315,7 +2315,31 @@ class ModuleWizard(QDialog):
         self._log(("[OK] " if ok else "[ERR] ") + msg)
         self._set_buttons_enabled(True)
         if ok:
-            QMessageBox.information(self, "설치 완료", "런처를 재시작하면 모듈이 인식됩니다.")
+            # Generic post-install credential prompts (HF token, API keys,
+            # etc.) — driven by module.json's post_install.credentials
+            # block. No-op for modules that don't declare any.
+            try:
+                from modules import pending_credentials_for
+                from credential_dialog import prompt_credentials
+                _pending = pending_credentials_for(self.module_id)
+                if _pending:
+                    prompt_credentials(self, self.module_id, _pending)
+            except Exception as _cred_err:
+                self._log(f"[WARN] credential prompt failed: {_cred_err}")
+            QMessageBox.information(
+                self, "설치 완료",
+                "런처를 재시작하면 모듈이 인식됩니다.\n확인을 누르면 런처가 종료됩니다.",
+            )
+            try:
+                self.close()
+            except Exception:
+                pass
+            try:
+                app = QApplication.instance()
+                if app is not None:
+                    app.quit()
+            except Exception:
+                pass
 
     def _set_buttons_enabled(self, on: bool) -> None:
         for b in (self.btn_validate, self.btn_install, self.btn_close):
