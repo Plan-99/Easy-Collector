@@ -791,6 +791,9 @@ export default {
   datasetAll: '모두',
   datasetNone: '해제',
   datasetGraphEmpty: '표시할 데이터가 없습니다.',
+  datasetSectionVideo: '영상',
+  datasetSectionSensors: '센서 데이터',
+  datasetLanguagePlaceholder: '예: pick up the red block and place it on the table',
 
   // Move / Copy / Delete
   datasetCopyEpisode: '복사',

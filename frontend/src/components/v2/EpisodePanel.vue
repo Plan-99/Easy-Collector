@@ -1,152 +1,229 @@
 <template>
-    <div class="column text-white" v-if="episode">
+    <div class="column text-white ep-panel" v-if="episode">
         <!-- Header -->
-        <div class="row items-center q-mb-md">
-            <div class="text-subtitle1 text-weight-medium">{{ episode.name }}</div>
+        <div class="row items-center q-mb-md ep-panel__header">
+            <q-icon name="movie_creation" size="22px" color="primary" class="q-mr-sm" />
+            <div class="column" style="min-width: 0;">
+                <div class="text-subtitle1 text-weight-medium ellipsis">{{ episode.name }}</div>
+                <div class="text-caption text-grey-5" v-if="totalFrames > 0">
+                    {{ $t('datasetFrames', { count: totalFrames }) }}
+                </div>
+            </div>
             <q-space />
-            <q-btn flat round dense icon="close" color="white" @click="$emit('close')" />
+            <q-btn flat round dense icon="close" color="grey-5" @click="$emit('close')">
+                <q-tooltip>{{ $t('close') || 'Close' }}</q-tooltip>
+            </q-btn>
         </div>
 
-        <!-- Video (socketio 프레임 스트리밍 + 재생/슬라이더) -->
-        <div class="bg-dark border-rounded q-pa-sm q-mb-md" style="min-width: 0; overflow-x: hidden;">
+        <!-- Video section (socketio 프레임 스트리밍 + 재생/슬라이더) -->
+        <section class="ep-section q-mb-md" style="min-width: 0;">
             <episode-viewer
                 :key="hdf5Path"
                 :path="hdf5Path"
                 :total-frames="totalFrames"
                 :preview-frame="trimPreviewFrame"
             />
-        </div>
+        </section>
 
-        <!-- Trim range slider with two handles -->
-        <div class="bg-dark border-rounded q-pa-sm q-mb-md">
-            <div class="row items-center q-mb-xs text-caption text-grey-5">
+        <!-- Trim section -->
+        <section class="ep-section q-mb-md">
+            <div class="ep-section__title">
+                <q-icon name="content_cut" size="16px" color="amber-5" />
                 <span>{{ $t('datasetTrimRangeLabel') }}</span>
                 <q-space />
-                <span v-if="totalFrames > 0">
-                    {{ trimStart }} – {{ trimEnd }}
-                    ({{ $t('datasetFrames', { count: Math.max(0, trimEnd - trimStart) }) }})
-                </span>
+                <q-badge
+                    v-if="totalFrames > 0"
+                    color="dark"
+                    text-color="amber-5"
+                    class="ep-trim-badge"
+                >
+                    <span class="text-weight-medium">{{ trimStart }}</span>
+                    <q-icon name="arrow_forward" size="12px" class="q-mx-xs" />
+                    <span class="text-weight-medium">{{ trimEnd }}</span>
+                    <span class="text-grey-5 q-ml-sm">
+                        · {{ $t('datasetFrames', { count: Math.max(0, trimEnd - trimStart) }) }}
+                    </span>
+                </q-badge>
             </div>
-            <q-range
-                v-model="trimRange"
-                :min="0"
-                :max="Math.max(1, totalFrames - 1)"
-                :step="1"
-                :disable="totalFrames === 0"
-                label
-                color="amber"
-                drag-range
-            />
-            <div class="row q-gutter-sm q-mt-sm">
+            <div class="q-px-sm q-pt-sm">
+                <q-range
+                    v-model="trimRange"
+                    :min="0"
+                    :max="Math.max(1, totalFrames - 1)"
+                    :step="1"
+                    :disable="totalFrames === 0"
+                    label
+                    color="amber"
+                    drag-range
+                />
+            </div>
+            <div class="row q-gutter-sm q-mt-sm q-px-sm">
                 <q-btn
                     color="primary"
                     :label="$t('datasetTrimApply')"
                     icon="content_cut"
                     size="sm"
+                    unelevated
+                    no-caps
                     :disable="!canTrim"
                     @click="$emit('trim', { start: trimStart, end: trimEnd })"
                 />
                 <q-btn
-                    outline
-                    color="grey-5"
+                    flat
+                    color="grey-4"
                     :label="$t('datasetTrimReset')"
                     icon="restore"
                     size="sm"
+                    no-caps
                     @click="resetTrim"
                 />
             </div>
-        </div>
+        </section>
 
-        <!-- Language prompt -->
-        <div class="q-mb-md">
+        <!-- Language prompt section -->
+        <section class="ep-section q-mb-md">
+            <div class="ep-section__title">
+                <q-icon name="translate" size="16px" color="primary" />
+                <span>{{ $t('datasetLanguagePrompt') }}</span>
+                <q-space />
+                <q-btn
+                    flat
+                    dense
+                    size="sm"
+                    color="primary"
+                    icon="save"
+                    :label="$t('saveLanguage')"
+                    no-caps
+                    :disable="languageDraft === (data?.language_instruction || '')"
+                    @click="$emit('saveLanguage', languageDraft)"
+                />
+            </div>
             <q-input
                 v-model="languageDraft"
                 outlined
                 dense
                 dark
-                color="grey-5"
+                color="primary"
                 bg-color="dark"
-                :label="$t('datasetLanguagePrompt')"
                 type="textarea"
                 autogrow
                 input-class="text-white"
-                label-color="grey-5"
-            >
-                <template v-slot:append>
-                    <q-btn
-                        flat
-                        dense
-                        size="sm"
-                        color="primary"
-                        icon="save"
-                        :disable="languageDraft === (data?.language_instruction || '')"
-                        @click="$emit('saveLanguage', languageDraft)"
-                    >
-                        <q-tooltip>{{ $t('saveLanguage') }}</q-tooltip>
-                    </q-btn>
-                </template>
-            </q-input>
-        </div>
+                :placeholder="$t('datasetLanguagePlaceholder')"
+            />
+        </section>
 
-        <!-- Channel / state field selector -->
-        <div class="row q-gutter-sm q-mb-sm items-center">
+        <!-- Sensor data section -->
+        <section class="ep-section">
+            <div class="ep-section__title">
+                <q-icon name="show_chart" size="16px" color="primary" />
+                <span>{{ $t('datasetSectionSensors') }}</span>
+                <q-space />
+                <span class="text-caption text-grey-5" v-if="visibleSeriesCount">
+                    {{ $t('datasetSeriesShown') }}: <span class="text-white">{{ visibleSeriesCount }}</span>
+                </span>
+            </div>
+
             <q-select
                 v-model="selectedChannelKey"
                 :options="channelOptions"
                 outlined
                 dense
                 dark
-                color="grey-5"
+                color="primary"
                 bg-color="dark"
                 emit-value
                 map-options
                 :label="$t('datasetChannelLabel')"
-                style="min-width: 240px;"
                 input-class="text-white"
                 label-color="grey-5"
+                class="q-mb-sm"
             />
-            <q-space />
-            <div class="text-caption text-grey-5">
-                {{ $t('datasetSeriesShown', { count: visibleSeriesCount }) }}
-            </div>
-        </div>
 
-        <!-- Per-channel name multi-select -->
-        <div class="q-mb-sm" v-if="currentChannel">
             <q-select
+                v-if="currentChannel"
                 v-model="visibleSeries"
                 :options="currentChannel.names"
                 outlined
                 dense
                 dark
-                color="grey-5"
+                color="primary"
                 bg-color="dark"
                 multiple
                 use-chips
                 :label="$t('datasetSelectSeries')"
                 input-class="text-white"
                 label-color="grey-5"
+                class="q-mb-md"
             >
                 <template v-slot:before>
-                    <q-btn flat dense size="sm" color="grey-5" :label="$t('datasetAll')" @click="selectAllSeries" />
-                    <q-btn flat dense size="sm" color="grey-5" :label="$t('datasetNone')" @click="visibleSeries = []" />
+                    <q-btn flat dense size="sm" color="primary" :label="$t('datasetAll')" no-caps @click="selectAllSeries" />
+                    <q-btn flat dense size="sm" color="grey-5" :label="$t('datasetNone')" no-caps @click="visibleSeries = []" />
                 </template>
             </q-select>
-        </div>
 
-        <!-- Chart -->
-        <div style="height: 260px; position: relative;" class="q-mb-md">
-            <Line
-                v-if="chartData.datasets.length"
-                :data="chartData"
-                :options="chartOptions"
-            />
-            <div v-else class="text-grey-5 text-center q-pa-md">
-                {{ $t('datasetGraphEmpty') }}
+            <div class="ep-chart-wrapper">
+                <Line
+                    v-if="chartData.datasets.length"
+                    :data="chartData"
+                    :options="chartOptions"
+                />
+                <div v-else class="ep-chart-empty">
+                    <q-icon name="bar_chart" size="40px" color="grey-7" />
+                    <div class="text-caption text-grey-6 q-mt-xs">{{ $t('datasetGraphEmpty') }}</div>
+                </div>
             </div>
-        </div>
+        </section>
     </div>
 </template>
+
+<style scoped>
+.ep-panel__header {
+    padding: 4px 4px 0 4px;
+}
+
+.ep-section {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 10px;
+    padding: 12px 14px;
+}
+
+.ep-section__title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    color: #e0e0e0;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.ep-trim-badge {
+    padding: 4px 10px;
+    font-size: 12px;
+    border-radius: 6px;
+}
+
+.ep-chart-wrapper {
+    position: relative;
+    height: 240px;
+    background: rgba(0, 0, 0, 0.4);
+    border-radius: 8px;
+    padding: 8px;
+}
+
+.ep-chart-empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+}
+</style>
 
 <script setup>
 import { ref, computed, watch } from 'vue';

@@ -1,18 +1,18 @@
 <template>
-    <div class="column" style="min-width: 0; max-width: 100%; overflow-x: hidden;">
+    <div class="column" style="min-width: 0; max-width: 100%;">
         <div v-if="languageInstruction" class="text-white text-caption q-pb-sm">
             {{ $t('hdf5LanguagePrefix', { value: languageInstruction }) }}
         </div>
         <div
             class="row q-py-sm q-gutter-sm justify-center items-center"
-            style="min-height: 220px; min-width: 0; max-width: 100%; overflow-x: hidden; flex-wrap: wrap;"
+            style="min-width: 0; max-width: 100%; flex-wrap: wrap;"
         >
             <img
                 v-for="(image, name) in images"
                 :key="name"
                 :src="image"
                 alt=""
-                style="flex: 1 1 240px; min-width: 0; max-width: 100%; max-height: 320px; height: auto; object-fit: contain;"
+                :style="imageStyle"
                 :class="imageClass"
             >
         </div>
@@ -25,6 +25,7 @@
                 dense
                 color="white"
                 :icon="playbackIcon"
+                :disable="disablePlayback"
                 @click="onTogglePlayback"
             />
             <q-slider
@@ -76,6 +77,10 @@ const props = defineProps({
         type: Boolean,
         default: false,
     },
+    disablePlayback: {
+        type: Boolean,
+        default: false,
+    },
     previewFrame: {
         type: Number,
         default: null,
@@ -94,6 +99,23 @@ const seeking = ref(false);
 const sliderFrame = ref(0);
 
 const sliderMax = computed(() => Math.max(0, (props.totalFrames || 0) - 1));
+
+const imageStyle = computed(() => {
+    const count = Object.keys(images.value || {}).length;
+    let maxHeight;
+    if (count <= 1) maxHeight = 'min(380px, 38vh)';
+    else if (count === 2) maxHeight = 'min(220px, 20vh)';
+    else if (count === 3) maxHeight = 'min(190px, 18vh)';
+    else maxHeight = 'min(170px, 16vh)';
+    return {
+        flex: '1 1 200px',
+        minWidth: 0,
+        maxWidth: '100%',
+        maxHeight,
+        height: 'auto',
+        objectFit: 'contain',
+    };
+});
 
 const playbackIcon = computed(() => {
     if (finished.value) return 'replay';
@@ -135,6 +157,7 @@ function fetchFrame(path, index) {
 }
 
 function onTogglePlayback() {
+    if (props.disablePlayback) return;
     if (finished.value) {
         startReading(props.path, 0);
         return;
@@ -177,6 +200,21 @@ watch(() => props.path, (newVal, oldVal) => {
     finished.value = false;
     sliderFrame.value = 0;
     if (newVal) startReading(newVal);
+});
+
+// Replay 모드 전환 시 로컬 스트림 / paused 상태를 정리해서, 백엔드 replay 가
+// 발행하는 show_episode_step / replay_progress 가 그대로 viewer 에 흘러가도록 한다.
+watch(() => props.disablePlayback, (locked) => {
+    if (locked) {
+        // replay 시작 — 백엔드가 read_dataset_* 프로세스를 이미 죽였으므로 로컬
+        // stop 호출은 불필요. 단지 paused 게이트만 풀어주면 됨.
+        paused.value = false;
+        finished.value = false;
+        seeking.value = false;
+    } else {
+        // replay 종료 — 로컬 미리보기 스트림 재개.
+        if (props.path) startReading(props.path, sliderFrame.value);
+    }
 });
 
 watch(() => props.previewFrame, (newVal) => {

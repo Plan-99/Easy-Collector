@@ -38,9 +38,10 @@
             {{ $t('selectWorkspaceFirst') }}
         </div>
 
-        <div class="row q-mb-lg items-start" v-else>
+        <div class="row q-mb-lg" v-else>
             <!-- LEFT: dataset list with episodes -->
-            <div class="col-4 bg-secondary q-mr-lg border-rounded q-pa-sm column" style="height: calc(100vh - 280px); position: sticky; top: 16px;">
+            <div class="col-4 bg-secondary q-mr-lg border-rounded">
+                <div class="q-pa-sm column" style="height: calc(100vh - 280px); position: sticky; top: 16px;">
                 <q-btn
                     outline
                     rounded
@@ -238,6 +239,7 @@
                         </q-expansion-item>
                     </q-list>
                 </q-scroll-area>
+                </div>
             </div>
 
             <!-- RIGHT: Episode viewer -->
@@ -286,7 +288,7 @@
             :ok-button-label="$t('datasetDownsample')"
         />
 
-        <q-dialog v-model="showAugmentationForm" maximized persistent>
+        <q-dialog v-model="showAugmentationForm" persistent full-width>
             <data-augmentation-dialog
                 :dataset="augmentingDataset"
                 :task-id="selectedWorkspaceId"

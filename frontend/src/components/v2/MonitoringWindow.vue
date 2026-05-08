@@ -470,6 +470,7 @@
                 :path="`${selectedDatasetId}/${selectedEpisode.name}`"
                 :total-frames="selectedEpisodeFrames"
                 :disable-seek="isReplaying"
+                :disable-playback="isReplaying"
             ></episode-viewer>
         </div>
         <!-- Inference Settings Dialog -->

@@ -667,8 +667,8 @@
 
         <q-dialog
             v-model="showAugmentationForm"
-            maximized
             persistent
+            full-width
         >
             <data-augmentation-dialog
                 :dataset="augmentingDataset"

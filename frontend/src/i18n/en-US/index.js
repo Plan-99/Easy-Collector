@@ -790,6 +790,9 @@ export default {
   datasetAll: 'All',
   datasetNone: 'None',
   datasetGraphEmpty: 'No data to display.',
+  datasetSectionVideo: 'Video',
+  datasetSectionSensors: 'Sensor data',
+  datasetLanguagePlaceholder: 'e.g. pick up the red block and place it on the table',
 
   // Move / Copy / Delete
   datasetCopyEpisode: 'Copy',

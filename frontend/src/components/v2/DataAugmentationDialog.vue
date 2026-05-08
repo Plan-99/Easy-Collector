@@ -1,12 +1,12 @@
 <template>
-    <q-card class="text-white full-height column">
+    <q-card class="text-white full-height column" style="max-height: 90vh;">
         <q-card-section class="row items-center bg-dark text-white">
             <div class="text-h6">{{ $t('augmentDatasetTitle') }}</div>
             <q-space />
             <q-btn icon="close" flat round dense v-close-popup />
         </q-card-section>
         <q-separator></q-separator>
-        <q-card-section class="bg-secondary q-px-xl q-py-lg col">
+        <q-card-section class="bg-secondary q-px-xl q-py-lg col scroll">
             <TutorialHint class="q-mb-md" :text="$t('tutorialAugmentIntro')" />
             <div class="row q-col-gutter-lg">
                 <div class="col-md-4 col-sm-12">
@@ -242,14 +242,13 @@
                             <div class="text-subtitle1">{{ $t('augPreviewTitle', { name: dataset ? dataset.name : '' }) }}</div>
                         </q-card-section>
                         <q-separator color="white" />
-                        <q-card-section class="flex flex-center">
+                        <q-card-section>
                             <episode-viewer
                                 v-if="dataset && augmentationPreviewFile"
                                 :path="`${dataset.id}/${augmentationPreviewFile.name}`"
                                 :total-frames="previewTotalFrames"
                                 :disable-seek="processing"
-                                class="full-width full-height q-gutter-x-sm"
-                                style="width: 100%; height: 100%;"
+                                class="full-width q-gutter-x-sm"
                                 image-class="border-rounded border-white"
                             />
                         </q-card-section>
