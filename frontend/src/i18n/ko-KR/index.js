@@ -282,6 +282,16 @@ export default {
   plannerDurationSeconds: '시간 (초)',
   plannerHzLabel: '추론 Hz',
   plannerHzHint: '초당 정책을 몇 번 호출할지 설정합니다.',
+  plannerUntilDone: 'Done 신호까지 실행',
+  plannerUntilDoneHint: 'done 점수가 임계값을 넘으면 다음 블록으로 넘어갑니다. (체크포인트가 has_succeed로 학습되어 있어야 함)',
+  plannerDoneThreshold: 'Done 임계값',
+  plannerDoneThresholdHint: '0과 1 사이 값 (기본 0.5)',
+  plannerUntilDoneBadge: 'Done까지',
+  plannerCheckpointNoSucceed: '이 체크포인트는 has_succeed 옵션 없이 학습되어 Done 신호를 사용할 수 없습니다.',
+  plannerSyncId: '동기화 ID',
+  plannerSyncIdHint: '다른 그룹 플랜에 같은 ID의 Sync 블록이 있으면 둘 다 도달할 때까지 대기합니다. 워크스페이스가 하나뿐이거나 다른 그룹에 같은 ID가 없으면 무시됩니다.',
+  plannerSyncBadge: 'Sync',
+  plannerNameAutoSync: 'Sync {sync_id}',
   plannerNameLabel: '이름',
   plannerCreateNew: '+ 새 플래너 만들기',
   plannerDeleteConfirm: "플래너 '{name}'을(를) 삭제할까요?",
@@ -304,6 +314,13 @@ export default {
   plannerRunFinished: '플래너 실행이 완료되었습니다.',
   plannerRunStopped: '플래너 실행이 중지되었습니다.',
   plannerRunFailed: '플래너 실행 실패: {error}',
+  plannerPlansTitle: '플랜',
+  plannerRunAllGroups: '전체 실행',
+  plannerRunGroup: '이 그룹만 실행',
+  plannerNoGroups: '워크스페이스를 추가하면 플랜 그룹이 자동으로 생성됩니다.',
+  plannerGroupBlocksCount: '블록 {count}개',
+  plannerForGroup: '대상 그룹',
+  plannerNoGroupSelected: '대상 그룹을 찾을 수 없습니다.',
 
   // ───── Assemble page ─────
   assembleIntroTitle: '어셈블, 이상적인 로봇을 조립하자',
@@ -464,7 +481,7 @@ export default {
   viveOnlySingleArm: 'single_arm 어셈블리에서만 사용 가능',
   rec: 'REC',
   configureRos2Service: 'ROS2 서비스 설정',
-  successBtn: '성공 (C)',
+  successBtn: '완료 (C)',
   stopBtn: '중지',
   collectionStepSize: '스텝 크기',
   ros2DialogTitle: 'ROS2 서비스 (std_srvs/Trigger)',
@@ -482,7 +499,7 @@ export default {
   viveWaiting: 'VIVE 컨트롤러 대기 중...',
   movingToHomepose: '홈 포즈로 이동 중...',
   stopCollection: '중지',
-  completeEpisode: '완료',
+  completeEpisode: '종료',
   episodeSaved: '에피소드가 저장되었습니다.',
   errorCompleteEpisode: '에피소드 완료에 실패했습니다.',
   terminal: '터미널',
@@ -572,17 +589,17 @@ export default {
   tutorialMonIdlePending:
     '데이터를 모으기 전에 4가지를 정해주세요. (1) 어느 폴더에 모을지(Dataset) (2) 어떤 작업인지 한 줄 설명(Language Instruction) (3) 어떻게 조종할지(Teleoperation Type) (4) 초당 몇 프레임으로 기록할지(Hz). 빨간 REC 버튼을 누르면 녹화가 시작되고, 버튼 옆 집모양 뱃지를 켜두면 녹화 직전에 로봇이 자동으로 홈 포즈로 이동합니다.',
   tutorialMonCollectingLeader:
-    'Easy Controller(리더 로봇)로 시연 중이에요. 리더를 직접 움직이면 화면 속 로봇이 그대로 따라오고, 그 동작이 데이터로 저장됩니다. 작업이 잘 끝났으면 SUCCESS(C)를 눌러 성공 라벨을 찍고, COMPLETE로 에피소드를 저장하세요.',
+    'Easy Controller(리더 로봇)로 시연 중이에요. 리더를 직접 움직이면 화면 속 로봇이 그대로 따라오고, 그 동작이 데이터로 저장됩니다. 작업이 잘 끝났으면 DONE(C)을 눌러 성공 라벨을 찍고, FINISH로 에피소드를 저장하세요.',
   tutorialMonCollectingKeyboard:
-    '키보드로 로봇 끝(EE)을 직접 움직이는 모드예요. 왼쪽의 로봇 카드를 한 번 클릭해서 조작 대상을 고른 뒤 — W/S(앞뒤), A/D(좌우), E/Z(위아래), .[/]: 회전, B/N(그리퍼), Space(정지). Step Size를 조절해 한 번에 움직이는 거리를 바꿀 수 있어요. 작업 끝나면 SUCCESS(C) → COMPLETE.',
+    '키보드로 로봇 끝(EE)을 직접 움직이는 모드예요. 왼쪽의 로봇 카드를 한 번 클릭해서 조작 대상을 고른 뒤 — W/S(앞뒤), A/D(좌우), E/Z(위아래), .[/]: 회전, B/N(그리퍼), Space(정지). Step Size를 조절해 한 번에 움직이는 거리를 바꿀 수 있어요. 작업 끝나면 DONE(C) → FINISH.',
   tutorialMonCollectingExternal:
-    '외부 시스템(다른 노드/조이스틱 등)이 로봇을 움직이고 있어요. EasyTrainer는 그 동작을 받아서 그대로 기록만 합니다. 끝나면 SUCCESS(C) → COMPLETE를 누르세요.',
+    '외부 시스템(다른 노드/조이스틱 등)이 로봇을 움직이고 있어요. EasyTrainer는 그 동작을 받아서 그대로 기록만 합니다. 끝나면 DONE(C) → FINISH를 누르세요.',
   tutorialMonCollectingViveExternal:
-    'HTC Vive 트래커로 손을 움직이면 그 위치를 따라 로봇이 함께 움직이고, 그 시연이 기록됩니다. 작업이 끝나면 SUCCESS(C) → COMPLETE.',
+    'HTC Vive 트래커로 손을 움직이면 그 위치를 따라 로봇이 함께 움직이고, 그 시연이 기록됩니다. 작업이 끝나면 DONE(C) → FINISH.',
   tutorialMonCollectingViveOnly:
-    '로봇 없이 Vive 트래커의 손 움직임만 기록하는 모드예요. 사람 시연을 데이터화해서 나중에 학습에 쓰기 위한 용도. 끝나면 SUCCESS(C) → COMPLETE.',
+    '로봇 없이 Vive 트래커의 손 움직임만 기록하는 모드예요. 사람 시연을 데이터화해서 나중에 학습에 쓰기 위한 용도. 끝나면 DONE(C) → FINISH.',
   tutorialMonCollectingMotionPlanning:
-    '외부 ROS2 서비스(예: pick_and_place)가 자동으로 로봇을 움직이고, 그 동작이 데이터로 저장됩니다. 끝나면 SUCCESS(C) → COMPLETE.',
+    '외부 ROS2 서비스(예: pick_and_place)가 자동으로 로봇을 움직이고, 그 동작이 데이터로 저장됩니다. 끝나면 DONE(C) → FINISH.',
   tutorialMonViveInit:
     'Vive 트래커가 켜지길 기다리는 중이에요. 트래커 전원이 켜져 있고 베이스 스테이션과 연결됐는지 확인해주세요.',
   tutorialMonMovingHome:

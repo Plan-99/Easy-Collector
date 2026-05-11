@@ -1,5 +1,5 @@
 <template>
-    <q-page class="q-pt-lg q-pr-lg full-height column">
+    <q-page class="q-pt-lg q-pr-lg q-pb-lg">
         <TutorialHint class="q-mb-md" :text="$t('tutorialPlannerIntro')" />
         <!-- Planner selection header -->
         <div class="border-rounded bg-secondary q-pa-lg q-mb-lg row">
@@ -49,18 +49,18 @@
         </div>
 
         <!-- Page loading -->
-        <div class="col q-mb-lg border-rounded border-grey flex-center flex column" v-if="pageLoading">
+        <div class="q-mb-lg border-rounded border-grey flex-center flex column" v-if="pageLoading" style="min-height: 400px;">
             <q-spinner-gears size="50px" color="primary" class="q-mb-md" />
             <div class="text-h6 text-grey">{{ $t('plannerInitializing') }}</div>
         </div>
 
         <!-- Main content area -->
-        <div class="col q-mb-lg border-rounded border-grey text-grey flex-center flex text-h6" v-else-if="!selectedPlannerId">
+        <div class="q-mb-lg border-rounded border-grey text-grey flex-center flex text-h6" v-else-if="!selectedPlannerId" style="min-height: 400px;">
             {{ $t('plannerSelectFirst') }}
         </div>
-        <div class="col row q-mb-lg" v-else>
+        <div class="row q-mb-lg items-stretch" v-else>
             <!-- First Column: Workspace Selection -->
-            <div class="col-2 bg-secondary q-mr-sm border-rounded q-pa-sm column">
+            <div class="col-2 bg-secondary q-mr-sm border-rounded q-pa-sm">
                 <div class="text-h6 text-white q-mb-md">{{ $t('plannerWorkspacesTitle') }}</div>
                 <TutorialHint step="1" class="q-mb-sm" :text="$t('tutorialPlannerWorkspaces')" />
                 <q-btn
@@ -72,8 +72,7 @@
                     :label="$t('plannerAddWorkspaces')"
                     @click="openAddWorkspacesForm"
                 ></q-btn>
-                <q-scroll-area class="col">
-                    <q-list bordered separator class="border-rounded bg-dark" dark>
+                <q-list bordered separator class="border-rounded bg-dark" dark>
                         <q-expansion-item
                             v-for="workspace in selectedWorkspaces"
                             :key="workspace.id"
@@ -136,168 +135,224 @@
                             </q-card>
                         </q-expansion-item>
                     </q-list>
-                </q-scroll-area>
             </div>
 
-            <!-- Second Column: Blocks Panel -->
-            <div class="col-3 bg-secondary q-mr-sm border-rounded q-pa-sm column">
-                <div class="row items-center q-mb-md">
-                    <div class="text-h6 text-white">{{ $t('plannerBlocksTitle') }}</div>
-                    <q-space />
-                    <q-btn
-                        outline
-                        rounded
-                        color="primary bg-dark"
-                        icon="add"
-                        :label="$t('plannerNewBlock')"
-                        @click="openBlockForm"
-                        size="sm"
-                        :disable="isRunning"
-                    ></q-btn>
-                </div>
-
-                <TutorialHint step="2" class="q-mb-sm" :text="$t('tutorialPlannerBlocks')" />
-                <TutorialHint step="3" class="q-mb-sm" :text="$t('tutorialPlannerRun')" />
-
-                <!-- Run / Stop bar -->
-                <div class="row items-center q-mb-sm">
-                    <q-btn
-                        v-if="!isRunning"
-                        unelevated
-                        color="positive"
-                        icon="play_arrow"
-                        :label="$t('plannerRunAll')"
-                        size="sm"
-                        class="col"
-                        :disable="!blocks.length"
-                        @click="startRun"
-                    >
-                        <q-badge
-                            @click.stop="repeatActive = !repeatActive"
-                            :color="repeatActive ? 'blue' : 'grey-5'"
-                            floating>
-                            <q-icon name="repeat" size="xs" class="cursor-pointer" />
-                            <q-tooltip>{{ repeatActive ? $t('plannerRepeatOn') : $t('plannerRepeatOff') }}</q-tooltip>
-                        </q-badge>
-                    </q-btn>
-                    <q-btn
-                        v-else
-                        unelevated
-                        color="negative"
-                        icon="stop"
-                        :label="$t('plannerStop')"
-                        size="sm"
-                        class="col"
-                        @click="stopRun"
-                    ></q-btn>
-                </div>
-                <div v-if="isRunning && runStatusText" class="text-caption text-grey q-mb-xs">
-                    {{ runStatusText }}
-                </div>
-                <q-scroll-area class="col">
-                    <div v-if="!blocks.length" class="text-grey text-center q-pa-xl">
-                        {{ $t('plannerNoBlocks') }}
+            <!-- Right side: Plans (top, horizontal timelines) + Monitoring (bottom) -->
+            <div class="col column">
+                <!-- Plans area: 모든 그룹이 통째로 보이도록 자연 높이로 둠 -->
+                <div class="bg-secondary border-rounded q-pa-sm q-mb-sm">
+                    <div class="row items-center q-mb-sm">
+                        <div class="text-h6 text-white q-mr-md">{{ $t('plannerPlansTitle') }}</div>
+                        <TutorialHint step="2" :text="$t('tutorialPlannerBlocks')" class="q-mr-sm" />
+                        <TutorialHint step="3" :text="$t('tutorialPlannerRun')" class="q-mr-sm" />
+                        <q-space />
+                        <q-btn
+                            v-if="!isRunning"
+                            unelevated
+                            color="positive"
+                            icon="play_arrow"
+                            :label="$t('plannerRunAllGroups')"
+                            size="sm"
+                            :disable="!hasAnyBlock || plans.length === 0"
+                            @click="startRun(null)"
+                        >
+                            <q-badge
+                                @click.stop="repeatActive = !repeatActive"
+                                :color="repeatActive ? 'blue' : 'grey-5'"
+                                floating>
+                                <q-icon name="repeat" size="xs" class="cursor-pointer" />
+                                <q-tooltip>{{ repeatActive ? $t('plannerRepeatOn') : $t('plannerRepeatOff') }}</q-tooltip>
+                            </q-badge>
+                        </q-btn>
+                        <q-btn
+                            v-else
+                            unelevated
+                            color="negative"
+                            icon="stop"
+                            :label="$t('plannerStop')"
+                            size="sm"
+                            @click="stopRun"
+                        ></q-btn>
                     </div>
-                    <div
-                        v-for="(block, index) in blocks"
-                        :key="block.id"
-                        class="q-my-xs border-rounded row items-center text-white"
-                        :class="[
-                            blockRowBg(index),
-                            { 'border-primary': dragOverIndex === index || runningIndex === index }
-                        ]"
-                        :draggable="!isRunning"
-                        @dragstart="onDragStart(index, $event)"
-                        @dragover.prevent="onDragOver(index, $event)"
-                        @drop="onDrop(index)"
-                        @dragend="onDragEnd"
-                        :style="{ cursor: isRunning ? 'default' : 'grab', overflow: 'hidden' }"
-                    >
+
+                    <div>
+                        <div v-if="!plans.length" class="text-grey text-center q-pa-xl">
+                            {{ $t('plannerNoGroups') }}
+                        </div>
+
                         <div
-                            class="self-stretch"
-                            :style="{ width: '4px', backgroundColor: blockTypeColor(block.type) }"
-                        ></div>
-                        <div class="q-pa-sm q-px-md row items-center col">
-                            <q-icon
-                                :name="blockConfigs[block.type]?.icon || 'help'"
-                                :color="blockConfigs[block.type]?.color || 'grey'"
-                                size="sm"
-                                class="q-mr-sm"
-                            />
-                            <div class="col">
-                                <div class="text-body2 text-bold">{{ block.name || blockConfigs[block.type]?.label }}</div>
-                                <div class="text-caption text-grey">
-                                    <span v-if="block.type === 'joint_position'">
-                                        {{ getWorkspaceName(block.workspace_id) }}
-                                    </span>
-                                    <span v-else-if="block.type === 'checkpoint'">
-                                        {{ block.checkpoint_name }}
-                                    </span>
+                            v-for="group in plans"
+                            :key="group.id"
+                            class="border-rounded q-mb-sm q-pa-sm"
+                            :class="groupRunningSet.has(group.id) ? 'bg-blue-grey-10 border-primary' : 'bg-dark'"
+                        >
+                            <!-- Track header -->
+                            <div class="row items-center q-mb-xs">
+                                <q-icon name="hub" size="xs" class="q-mr-xs text-white" />
+                                <div class="text-body2 text-white text-weight-medium">{{ groupTitle(group) }}</div>
+                                <q-badge color="grey-8" class="q-ml-sm">
+                                    {{ $t('plannerGroupBlocksCount', { count: (group.blocks || []).length }) }}
+                                </q-badge>
+                                <q-space />
+                                <div v-if="runStatusByGroup[group.id]" class="text-caption text-grey-5 q-mr-sm ellipsis" style="max-width: 360px;">
+                                    {{ runStatusByGroup[group.id] }}
+                                </div>
+                                <q-btn
+                                    v-if="!isRunning"
+                                    size="sm"
+                                    flat
+                                    round
+                                    color="positive"
+                                    icon="play_arrow"
+                                    :disable="!(group.blocks || []).length"
+                                    @click.stop="startRun(group.id)"
+                                >
+                                    <q-tooltip>{{ $t('plannerRunGroup') }}</q-tooltip>
+                                </q-btn>
+                                <q-spinner
+                                    v-else-if="groupRunningSet.has(group.id)"
+                                    color="primary"
+                                    size="xs"
+                                />
+                                <q-btn
+                                    v-if="!isRunning"
+                                    size="sm"
+                                    flat
+                                    round
+                                    color="primary"
+                                    icon="add"
+                                    @click.stop="openBlockForm(group)"
+                                >
+                                    <q-tooltip>{{ $t('plannerNewBlock') }}</q-tooltip>
+                                </q-btn>
+                            </div>
+
+                            <!-- Horizontal block track -->
+                            <div v-if="!(group.blocks || []).length" class="text-caption text-grey text-center q-pa-md">
+                                {{ $t('plannerNoBlocks') }}
+                            </div>
+                            <div v-else class="row no-wrap items-stretch" style="overflow-x: auto; overflow-y: hidden;">
+                                <div
+                                    v-for="(block, index) in (group.blocks || [])"
+                                    :key="block.id"
+                                    class="planner-block-card column q-mr-xs"
+                                    :class="[
+                                        runningByGroup[group.id] === index ? 'bg-blue-grey-9' : 'bg-grey-10',
+                                        { 'block-card-active': isDragOver(group.id, index) || runningByGroup[group.id] === index }
+                                    ]"
+                                    :draggable="!isRunning"
+                                    @dragstart="onDragStart(group.id, index, $event)"
+                                    @dragover.prevent="onDragOver(group.id, index, $event)"
+                                    @drop="onDrop(group.id, index)"
+                                    @dragend="onDragEnd"
+                                    :style="{ cursor: isRunning ? 'default' : 'grab' }"
+                                >
+                                    <div :style="{ height: '3px', backgroundColor: blockTypeColor(block.type) }"></div>
+                                    <div class="q-pa-xs col column">
+                                        <div class="row items-center no-wrap">
+                                            <q-icon
+                                                :name="blockConfigs[block.type]?.icon || 'help'"
+                                                :color="blockConfigs[block.type]?.color || 'grey'"
+                                                size="xs"
+                                                class="q-mr-xs"
+                                            />
+                                            <q-spinner
+                                                v-if="runningByGroup[group.id] === index"
+                                                color="primary"
+                                                size="xs"
+                                            />
+                                            <q-icon
+                                                v-else-if="blockResultIcon(group.id, block.id)"
+                                                :name="blockResultIcon(group.id, block.id)"
+                                                :color="blockResultColor(group.id, block.id)"
+                                                size="xs"
+                                            />
+                                            <q-space />
+                                            <q-icon name="drag_indicator" color="grey-7" size="xs" v-if="!isRunning" />
+                                        </div>
+                                        <div class="text-caption text-bold text-white ellipsis q-mt-xs">
+                                            {{ block.name || blockConfigs[block.type]?.label }}
+                                        </div>
+                                        <div class="text-caption text-grey-5 ellipsis">
+                                            <span v-if="block.type === 'joint_position'">
+                                                {{ getWorkspaceName(block.workspace_id) }}
+                                            </span>
+                                            <span v-else-if="block.type === 'checkpoint'">
+                                                {{ block.checkpoint_name }}
+                                            </span>
+                                            <span v-else-if="block.type === 'timesleep'">—</span>
+                                            <span v-else-if="block.type === 'sync'">
+                                                ID: {{ block.sync_id || '—' }}
+                                            </span>
+                                        </div>
+                                        <q-space />
+                                        <div class="row q-mt-xs" v-if="block.type === 'sync' || block.duration != null || block.until_done">
+                                            <q-badge
+                                                v-if="block.type === 'sync'"
+                                                rounded
+                                                color="teal-8"
+                                            >
+                                                <q-icon name="sync" size="xs" class="q-mr-xs" />{{ $t('plannerSyncBadge') }}
+                                            </q-badge>
+                                            <q-badge
+                                                v-else-if="block.type === 'checkpoint' && block.until_done"
+                                                rounded
+                                                color="purple-8"
+                                            >
+                                                <q-icon name="check_circle" size="xs" class="q-mr-xs" />{{ $t('plannerUntilDoneBadge') }}
+                                            </q-badge>
+                                            <q-badge
+                                                v-else
+                                                rounded
+                                                :color="block.type === 'timesleep' ? 'orange-8' : 'purple-8'"
+                                            >
+                                                <q-icon name="timer" size="xs" class="q-mr-xs" />{{ block.duration }}s
+                                            </q-badge>
+                                        </div>
+                                    </div>
+                                    <q-menu context-menu v-if="!isRunning">
+                                        <q-list bordered separator>
+                                            <q-item clickable v-ripple v-close-popup @click="openBlockDetails(block)">
+                                                <q-item-section>{{ $t('plannerShowDetails') }}</q-item-section>
+                                                <q-item-section side><q-icon name="info" size="xs" /></q-item-section>
+                                            </q-item>
+                                            <q-item clickable v-ripple v-close-popup @click="openEditBlockForm(group, block, index)">
+                                                <q-item-section>{{ $t('plannerEditBlock') }}</q-item-section>
+                                                <q-item-section side><q-icon name="edit" size="xs" /></q-item-section>
+                                            </q-item>
+                                            <q-item clickable v-ripple v-close-popup @click="copyBlock(group, block, index)">
+                                                <q-item-section>{{ $t('plannerCopyBlock') }}</q-item-section>
+                                                <q-item-section side><q-icon name="content_copy" size="xs" /></q-item-section>
+                                            </q-item>
+                                            <q-item clickable v-ripple v-close-popup @click="deleteBlock(group, index)">
+                                                <q-item-section class="text-red">{{ $t('plannerDeleteBlock') }}</q-item-section>
+                                                <q-item-section side><q-icon name="delete" size="xs" color="red" /></q-item-section>
+                                            </q-item>
+                                        </q-list>
+                                    </q-menu>
                                 </div>
                             </div>
-                            <q-badge
-                                v-if="block.duration != null"
-                                rounded
-                                :color="block.type === 'timesleep' ? 'orange-8' : 'purple-8'"
-                                class="q-mr-sm"
-                            >
-                                <q-icon name="timer" size="xs" class="q-mr-xs" />{{ block.duration }}s
-                            </q-badge>
-                            <q-spinner
-                                v-if="runningIndex === index"
-                                color="primary"
-                                size="sm"
-                                class="q-mr-xs"
-                            />
-                            <q-icon
-                                v-else-if="blockResultIcon(index)"
-                                :name="blockResultIcon(index)"
-                                :color="blockResultColor(index)"
-                                size="sm"
-                                class="q-mr-xs"
-                            />
-                            <q-icon name="drag_indicator" color="grey" class="q-ml-xs" v-if="!isRunning" />
                         </div>
-                        <q-menu context-menu v-if="!isRunning">
-                            <q-list bordered separator>
-                                <q-item clickable v-ripple v-close-popup @click="openBlockDetails(block)">
-                                    <q-item-section>{{ $t('plannerShowDetails') }}</q-item-section>
-                                    <q-item-section side><q-icon name="info" size="xs" /></q-item-section>
-                                </q-item>
-                                <q-item clickable v-ripple v-close-popup @click="openEditBlockForm(block, index)">
-                                    <q-item-section>{{ $t('plannerEditBlock') }}</q-item-section>
-                                    <q-item-section side><q-icon name="edit" size="xs" /></q-item-section>
-                                </q-item>
-                                <q-item clickable v-ripple v-close-popup @click="copyBlock(block, index)">
-                                    <q-item-section>{{ $t('plannerCopyBlock') }}</q-item-section>
-                                    <q-item-section side><q-icon name="content_copy" size="xs" /></q-item-section>
-                                </q-item>
-                                <q-item clickable v-ripple v-close-popup @click="deleteBlock(index)">
-                                    <q-item-section class="text-red">{{ $t('plannerDeleteBlock') }}</q-item-section>
-                                    <q-item-section side><q-icon name="delete" size="xs" color="red" /></q-item-section>
-                                </q-item>
-                            </q-list>
-                        </q-menu>
                     </div>
-                </q-scroll-area>
-            </div>
+                </div>
 
-            <!-- Third Column: Monitoring Window -->
-            <div class="col column">
-                <monitoring-window
-                    class="col"
-                    :workspace="monitorWorkspace"
-                    :robots="allSelectedRobots"
-                    :sensors="allSelectedSensors"
-                    v-model:focused="focused"
-                    v-model:selected-dataset-id="monitorDatasetId"
-                    v-model:selected-checkpoint-id="monitorCheckpointId"
-                    v-model:selected-episode="monitorEpisode"
-                    :datasets="[]"
-                    :checkpoints="[]"
-                    status="pending"
-                    monitor-only
-                />
+                <!-- Monitoring (bottom): 페이지가 자라는 만큼만 보이도록 고정 높이 -->
+                <div style="height: 600px;">
+                    <monitoring-window
+                        class="full-height"
+                        :workspace="monitorWorkspace"
+                        :robots="allSelectedRobots"
+                        :sensors="allSelectedSensors"
+                        v-model:focused="focused"
+                        v-model:selected-dataset-id="monitorDatasetId"
+                        v-model:selected-checkpoint-id="monitorCheckpointId"
+                        v-model:selected-episode="monitorEpisode"
+                        :datasets="[]"
+                        :checkpoints="[]"
+                        status="pending"
+                        monitor-only
+                    />
+                </div>
             </div>
         </div>
 
@@ -340,10 +395,19 @@
                     <template v-if="detailBlock.type === 'checkpoint'">
                         <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerBlockDetailsWorkspace') }}:</span> {{ getWorkspaceName(detailBlock.workspace_id) }}</div>
                         <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerBlockDetailsCheckpoint') }}:</span> {{ detailBlock.checkpoint_name }}</div>
-                        <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerBlockDetailsDuration') }}:</span> {{ detailBlock.duration }}s</div>
+                        <div class="q-mb-sm" v-if="detailBlock.until_done">
+                            <span class="text-bold">{{ $t('plannerUntilDone') }}:</span>
+                            {{ $t('plannerDoneThreshold') }} = {{ detailBlock.done_threshold ?? 0.5 }}
+                        </div>
+                        <div class="q-mb-sm" v-else>
+                            <span class="text-bold">{{ $t('plannerBlockDetailsDuration') }}:</span> {{ detailBlock.duration }}s
+                        </div>
                     </template>
                     <template v-if="detailBlock.type === 'timesleep'">
                         <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerBlockDetailsDuration') }}:</span> {{ detailBlock.duration }}s</div>
+                    </template>
+                    <template v-if="detailBlock.type === 'sync'">
+                        <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerSyncId') }}:</span> {{ detailBlock.sync_id }}</div>
                     </template>
                 </q-card-section>
                 <q-card-actions align="right">
@@ -357,6 +421,9 @@
             <q-card :style="{ minWidth: blockForm.type === 'joint_position' && blockForm.workspace_id ? '900px' : '500px' }" class="bg-secondary text-white">
                 <q-card-section>
                     <div class="text-h6">{{ editingBlockIndex !== null ? $t('plannerEditBlock') : $t('plannerCreateBlock') }}</div>
+                    <div v-if="formGroupId" class="text-caption text-grey-5 q-mt-xs">
+                        {{ $t('plannerForGroup') }}: {{ groupTitle(formGroup) }}
+                    </div>
                 </q-card-section>
 
                 <q-card-section>
@@ -384,9 +451,10 @@
                     <!-- Joint Position Fields -->
                     <template v-if="blockForm.type === 'joint_position'">
                         <q-select
+                            v-if="formWorkspaceOptions.length > 1"
                             dense outlined dark bg-color="dark"
                             v-model="blockForm.workspace_id"
-                            :options="workspaceOptions"
+                            :options="formWorkspaceOptions"
                             :label="$t('plannerWorkspaceLabel')"
                             class="q-mb-md"
                             map-options
@@ -457,14 +525,12 @@
                                     </div>
                                 </div>
 
-                                <!-- 경계선 -->
                                 <q-separator dark class="q-my-md" />
                                 <div class="text-caption text-grey-5 q-mb-sm">
                                     <q-icon name="gamepad" size="xs" class="q-mr-xs" />
                                     {{ $t('plannerPendantHint') }}
                                 </div>
 
-                                <!-- Robot Pendant for jogging -->
                                 <robot-pendant
                                     v-if="robot.status === 'on'"
                                     :robot="robot"
@@ -479,9 +545,10 @@
                     <!-- Checkpoint Fields -->
                     <template v-if="blockForm.type === 'checkpoint'">
                         <q-select
+                            v-if="formWorkspaceOptions.length > 1"
                             dense outlined dark bg-color="dark"
                             v-model="blockForm.workspace_id"
-                            :options="workspaceOptions"
+                            :options="formWorkspaceOptions"
                             :label="$t('plannerWorkspaceLabel')"
                             class="q-mb-md"
                             map-options
@@ -504,6 +571,30 @@
                             v-model.number="blockForm.duration"
                             :label="$t('plannerDurationSeconds')"
                             type="number"
+                            class="q-mb-md"
+                            :disable="blockForm.until_done"
+                        ></q-input>
+                        <q-toggle
+                            v-model="blockForm.until_done"
+                            :label="$t('plannerUntilDone')"
+                            color="purple"
+                            dark
+                            class="q-mb-xs"
+                            :disable="!selectedCheckpointHasSucceed"
+                        ></q-toggle>
+                        <div class="text-caption text-grey q-mb-md">
+                            {{ selectedCheckpointHasSucceed ? $t('plannerUntilDoneHint') : $t('plannerCheckpointNoSucceed') }}
+                        </div>
+                        <q-input
+                            v-if="blockForm.until_done"
+                            dense outlined dark bg-color="dark"
+                            v-model.number="blockForm.done_threshold"
+                            :label="$t('plannerDoneThreshold')"
+                            :hint="$t('plannerDoneThresholdHint')"
+                            type="number"
+                            step="0.05"
+                            min="0"
+                            max="1"
                             class="q-mb-md"
                         ></q-input>
                         <q-input
@@ -544,6 +635,17 @@
                             type="number"
                         ></q-input>
                     </template>
+
+                    <!-- Sync Fields -->
+                    <template v-if="blockForm.type === 'sync'">
+                        <q-input
+                            dense outlined dark bg-color="dark"
+                            v-model="blockForm.sync_id"
+                            :label="$t('plannerSyncId')"
+                            :hint="$t('plannerSyncIdHint')"
+                            class="q-mb-md"
+                        ></q-input>
+                    </template>
                 </q-card-section>
 
                 <q-card-actions align="right">
@@ -557,7 +659,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, watch, onUnmounted } from 'vue';
+import { ref, onMounted, computed, watch, onUnmounted, reactive } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { api } from 'src/boot/axios';
 import FormDialog from 'src/components/v2/FormDialog.vue';
@@ -665,8 +767,6 @@ function listAvailableWorkspaces() {
     return api.get('/tasks').then((response) => {
         const tasks = response.data?.tasks || [];
         availableWorkspaces.value = tasks;
-        // ref에 할당된 후 reactive proxy를 통해 handler를 붙여야
-        // useSensor/useRobot 클로저가 proxy 참조를 잡아 socket으로 들어오는 jointState 변화에 반응함.
         availableWorkspaces.value.forEach(workspace => {
             (workspace.sensors || []).forEach(sensor => {
                 sensor.handler = useSensor(sensor);
@@ -789,6 +889,7 @@ function updatePlanner(form) {
         return listPlanners();
     }).then(() => {
         listSelectedWorkspaces();
+        loadPlans();
     });
 }
 
@@ -808,22 +909,29 @@ const blockTypeOptions = computed(() => {
     }));
 });
 
-// --- Blocks Logic ---
-const blocks = ref([]);
+// --- Plans (groups) ---
+const plans = ref([]);
 
-function loadBlocks() {
-    const plan = selectedPlanner.value.plan;
-    blocks.value = Array.isArray(plan) ? plan : [];
+function loadPlans() {
+    const raw = selectedPlanner.value.plans;
+    plans.value = Array.isArray(raw) ? raw.map(g => ({
+        id: g.id,
+        workspace_ids: g.workspace_ids || [],
+        blocks: Array.isArray(g.blocks) ? g.blocks : [],
+    })) : [];
 }
 
-function saveBlocks() {
-    return updatePlanner({ plan: blocks.value });
+const hasAnyBlock = computed(() => plans.value.some(g => (g.blocks || []).length > 0));
+
+function saveGroupBlocks(group) {
+    return updatePlanner({ group_id: group.id, blocks: group.blocks });
 }
 
 const BLOCK_TYPE_COLORS = {
     joint_position: '#2196F3',
     checkpoint: '#9C27B0',
     timesleep: '#FF9800',
+    sync: '#009688',
 };
 
 function blockTypeColor(type) {
@@ -840,9 +948,11 @@ function getWorkspaceRobots(workspaceId) {
     return ws?.assembly?.robots || [];
 }
 
-const workspaceOptions = computed(() => {
-    return selectedWorkspaces.value.map(w => ({ label: w.name, value: w.id }));
-});
+function groupTitle(group) {
+    if (!group) return '';
+    const names = (group.workspace_ids || []).map(getWorkspaceName);
+    return names.join(' + ');
+}
 
 // --- Checkpoints ---
 const checkpoints = ref([]);
@@ -874,24 +984,54 @@ function openBlockDetails(block) {
 // --- Block Form ---
 const showBlockForm = ref(false);
 const editingBlockIndex = ref(null);
+const formGroupId = ref(null);
 const blockForm = ref({
     type: null,
     name: '',
     workspace_id: null,
     checkpoint_id: null,
     duration: 5,
+    until_done: false,
+    done_threshold: 0.5,
+    sync_id: '',
     hz: 10,
     re_inference_steps: 1,
     temporal_ensemble_coeff: 0.01,
     positions: {},
 });
 
-function openBlockForm() {
+const formGroup = computed(() => plans.value.find(g => g.id === formGroupId.value) || null);
+
+const selectedCheckpointHasSucceed = computed(() => {
+    const cp = checkpoints.value.find(c => c.id === blockForm.value.checkpoint_id);
+    return !!cp?.train_settings?.has_succeed;
+});
+
+watch(() => blockForm.value.checkpoint_id, () => {
+    if (!selectedCheckpointHasSucceed.value) {
+        blockForm.value.until_done = false;
+    }
+});
+
+// 폼이 특정 그룹에 묶여있을 때 그 그룹의 워크스페이스들만 보여줌.
+const formWorkspaceOptions = computed(() => {
+    const grp = formGroup.value;
+    const wsIds = grp ? grp.workspace_ids : selectedWorkspaceIds.value;
+    return wsIds
+        .map(id => availableWorkspaces.value.find(w => w.id === id))
+        .filter(Boolean)
+        .map(w => ({ label: w.name, value: w.id }));
+});
+
+function openBlockForm(group) {
     editingBlockIndex.value = null;
+    formGroupId.value = group ? group.id : null;
+    const wsIds = group?.workspace_ids || [];
+    // 그룹이 워크스페이스 1개만 가지면 자동 선택 — 다이얼로그에서 드롭다운을 숨김.
     blockForm.value = {
         type: null,
         name: '',
-        workspace_id: null,
+        workspace_id: wsIds.length === 1 ? wsIds[0] : null,
         checkpoint_id: null,
         duration: 5,
         hz: 10,
@@ -902,14 +1042,18 @@ function openBlockForm() {
     showBlockForm.value = true;
 }
 
-function openEditBlockForm(block, index) {
+function openEditBlockForm(group, block, index) {
     editingBlockIndex.value = index;
+    formGroupId.value = group.id;
     blockForm.value = {
         type: block.type,
         name: block.name || '',
         workspace_id: block.workspace_id || null,
         checkpoint_id: block.checkpoint_id || null,
         duration: block.duration || 5,
+        until_done: !!block.until_done,
+        done_threshold: typeof block.done_threshold === 'number' ? block.done_threshold : 0.5,
+        sync_id: block.sync_id || '',
         hz: typeof block.hz === 'number' ? block.hz : 10,
         re_inference_steps: typeof block.re_inference_steps === 'number' ? block.re_inference_steps : 1,
         temporal_ensemble_coeff: typeof block.temporal_ensemble_coeff === 'number' ? block.temporal_ensemble_coeff : 0.01,
@@ -918,15 +1062,14 @@ function openEditBlockForm(block, index) {
     showBlockForm.value = true;
 }
 
-function copyBlock(block, index) {
+function copyBlock(group, block, index) {
     const copied = JSON.parse(JSON.stringify(block));
     copied.id = Date.now().toString(36) + Math.random().toString(36).substring(2, 7);
     copied.name = (copied.name || '') + ' (copy)';
-    blocks.value.splice(index + 1, 0, copied);
-    saveBlocks();
+    group.blocks.splice(index + 1, 0, copied);
+    saveGroupBlocks(group);
 }
 
-// workspace 선택 시 positions 초기화/보강
 watch(() => blockForm.value.workspace_id, (newId, oldId) => {
     if (blockForm.value.type !== 'joint_position' || !newId) return;
     const robots = getWorkspaceRobots(newId);
@@ -955,15 +1098,10 @@ function moveToSavedPosition(robot) {
     const pose = blockForm.value.positions?.[robot.id];
     if (!Array.isArray(pose) || !pose.length) return;
     if (!robot.handler) return;
-    // 단발 publish 는 interp_node 가 default cmd_interval 만에 jump → duration 무시.
-    // 실행 시 적용될 duration 과 동일하게 미리보기 이동도 부드럽게 보간.
     const duration = Number(blockForm.value.duration) || 5.0;
     robot.handler.moveToPose(pose, { duration });
 }
 
-// Edit Block dialog가 열리면 workspace 로봇들의 socket listener를 등록 (no-op callback).
-// subscribeRobot 내부 listener가 robot.jointState/eePos를 proxy를 통해 쓰므로
-// RobotPendant의 live 표시가 reactive하게 업데이트된다.
 function ensureRobotLiveListeners() {
     if (blockForm.value.type !== 'joint_position' || !blockForm.value.workspace_id) return;
     const robots = getWorkspaceRobots(blockForm.value.workspace_id);
@@ -989,27 +1127,30 @@ function saveBlock() {
         return;
     }
 
+    const grp = formGroup.value;
+    if (!grp) {
+        Notify.create({ color: 'negative', message: t('plannerNoGroupSelected') });
+        return;
+    }
+
     const config = blockConfigs.value[blockForm.value.type];
     if (!config) return;
 
     const isEditing = editingBlockIndex.value !== null;
     const block = {
-        id: isEditing ? blocks.value[editingBlockIndex.value].id : Date.now().toString(36) + Math.random().toString(36).substring(2, 7),
+        id: isEditing ? grp.blocks[editingBlockIndex.value].id : Date.now().toString(36) + Math.random().toString(36).substring(2, 7),
         type: blockForm.value.type,
     };
 
-    // config.keys에 정의된 키만 블록에 포함
     config.keys.forEach(key => {
         block[key] = blockForm.value[key];
     });
 
-    // checkpoint 선택 시 이름 저장
     if (block.type === 'checkpoint' && block.checkpoint_id) {
         const cp = checkpoints.value.find(c => c.id === block.checkpoint_id);
         block.checkpoint_name = cp?.name || '';
     }
 
-    // 이름 자동 생성
     if (!block.name) {
         if (block.type === 'joint_position') {
             block.name = t('plannerNameAutoMove', { workspace: getWorkspaceName(block.workspace_id) });
@@ -1017,93 +1158,105 @@ function saveBlock() {
             block.name = t('plannerNameAutoCheckpoint', { checkpoint: block.checkpoint_name });
         } else if (block.type === 'timesleep') {
             block.name = t('plannerNameAutoSleep', { duration: block.duration });
+        } else if (block.type === 'sync') {
+            block.name = t('plannerNameAutoSync', { sync_id: block.sync_id });
         }
     }
 
     if (isEditing) {
-        blocks.value.splice(editingBlockIndex.value, 1, block);
+        grp.blocks.splice(editingBlockIndex.value, 1, block);
     } else {
-        blocks.value.push(block);
+        grp.blocks.push(block);
     }
-    saveBlocks();
+    saveGroupBlocks(grp);
     showBlockForm.value = false;
 }
 
-function deleteBlock(index) {
-    blocks.value.splice(index, 1);
-    saveBlocks();
+function deleteBlock(group, index) {
+    group.blocks.splice(index, 1);
+    saveGroupBlocks(group);
 }
 
-// --- Drag and Drop ---
-const dragIndex = ref(null);
-const dragOverIndex = ref(null);
+// --- Drag and Drop (group-scoped) ---
+const dragState = ref({ groupId: null, index: null });
+const dragOverState = ref({ groupId: null, index: null });
 
-function onDragStart(index, event) {
-    dragIndex.value = index;
+function isDragOver(groupId, index) {
+    return dragOverState.value.groupId === groupId && dragOverState.value.index === index;
+}
+
+function onDragStart(groupId, index, event) {
+    dragState.value = { groupId, index };
     event.dataTransfer.effectAllowed = 'move';
 }
 
-function onDragOver(index) {
-    dragOverIndex.value = index;
+function onDragOver(groupId, index) {
+    // 같은 그룹 안에서만 reorder 표시.
+    if (dragState.value.groupId !== groupId) return;
+    dragOverState.value = { groupId, index };
 }
 
-function onDrop(index) {
-    if (dragIndex.value === null || dragIndex.value === index) return;
-    const item = blocks.value.splice(dragIndex.value, 1)[0];
-    blocks.value.splice(index, 0, item);
-    saveBlocks();
+function onDrop(groupId, index) {
+    const ds = dragState.value;
+    if (ds.groupId !== groupId) return;  // 그룹 간 이동 금지
+    if (ds.index === null || ds.index === index) return;
+    const grp = plans.value.find(g => g.id === groupId);
+    if (!grp) return;
+    const item = grp.blocks.splice(ds.index, 1)[0];
+    grp.blocks.splice(index, 0, item);
+    saveGroupBlocks(grp);
 }
 
 function onDragEnd() {
-    dragIndex.value = null;
-    dragOverIndex.value = null;
+    dragState.value = { groupId: null, index: null };
+    dragOverState.value = { groupId: null, index: null };
 }
 
 // --- Run / Stop ---
 const isRunning = ref(false);
-// repeat 뱃지 ON이면 정지 버튼을 누를 때까지 plan을 무한 반복.
 const repeatActive = ref(false);
-const currentIteration = ref(0);
-const runningIndex = ref(null);
-const runStatusText = ref('');
-// blockResults: { [block.id]: 'finished' | 'stopped' | 'error' }
-const blockResults = ref({});
+const currentIterationByGroup = reactive({});
+const runningByGroup = reactive({});  // groupId -> currently running block index
+const runStatusByGroup = reactive({});  // groupId -> status text
+const blockResultsByGroup = reactive({});  // groupId -> { blockId: 'finished'|'stopped'|'error' }
+const groupRunningSet = ref(new Set());  // groupIds currently mid-run
 
-function blockRowBg(index) {
-    if (runningIndex.value === index) return 'bg-blue-grey-9';
-    return 'bg-dark';
-}
-
-function blockResultIcon(index) {
-    const block = blocks.value[index];
-    if (!block) return null;
-    const r = blockResults.value[block.id];
+function blockResultIcon(groupId, blockId) {
+    const r = blockResultsByGroup[groupId]?.[blockId];
     if (r === 'finished') return 'check_circle';
     if (r === 'stopped') return 'cancel';
     if (r === 'error') return 'error';
     return null;
 }
 
-function blockResultColor(index) {
-    const block = blocks.value[index];
-    const r = blockResults.value[block?.id];
+function blockResultColor(groupId, blockId) {
+    const r = blockResultsByGroup[groupId]?.[blockId];
     if (r === 'finished') return 'positive';
     if (r === 'stopped') return 'orange';
     if (r === 'error') return 'negative';
     return 'grey';
 }
 
-function startRun() {
+function resetRunState() {
+    Object.keys(runningByGroup).forEach(k => delete runningByGroup[k]);
+    Object.keys(runStatusByGroup).forEach(k => delete runStatusByGroup[k]);
+    Object.keys(blockResultsByGroup).forEach(k => delete blockResultsByGroup[k]);
+    Object.keys(currentIterationByGroup).forEach(k => delete currentIterationByGroup[k]);
+    groupRunningSet.value = new Set();
+}
+
+function startRun(groupId) {
     if (!selectedPlannerId.value) return;
-    blockResults.value = {};
-    runningIndex.value = null;
-    currentIteration.value = 0;
-    runStatusText.value = t('plannerStartingStatus');
-    // repeat ON이면 0(=무한 반복) 전달, OFF면 1(기본 1회 실행).
+    resetRunState();
     api.post(`/planner/${selectedPlannerId.value}/:start_run`, {
         repeat_count: repeatActive.value ? 0 : 1,
-    }).then(() => {
+        group_id: groupId,
+    }).then((res) => {
         isRunning.value = true;
+        const ids = res.data?.group_ids || [];
+        ids.forEach(gid => {
+            runStatusByGroup[gid] = t('plannerStartingStatus');
+        });
     }).catch((error) => {
         const data = error.response?.data || {};
         const errors = Array.isArray(data.errors) ? data.errors.join('\n') : data.message || t('plannerStartFailed');
@@ -1113,7 +1266,6 @@ function startRun() {
             timeout: 8000,
             multiLine: true,
         });
-        runStatusText.value = '';
     });
 }
 
@@ -1126,36 +1278,51 @@ function stopRun() {
 
 function onPlannerRunStart(payload) {
     isRunning.value = true;
-    runningIndex.value = null;
-    blockResults.value = {};
-    currentIteration.value = 0;
-    runStatusText.value = t('plannerRunningStatus', { current: 0, total: payload?.total ?? blocks.value.length });
+    resetRunState();
+    const ids = payload?.group_ids || [];
+    ids.forEach(gid => {
+        runStatusByGroup[gid] = t('plannerStartingStatus');
+    });
+}
+
+function onPlannerGroupStart(payload) {
+    const gid = payload?.group_id;
+    if (!gid) return;
+    const newSet = new Set(groupRunningSet.value);
+    newSet.add(gid);
+    groupRunningSet.value = newSet;
+    runStatusByGroup[gid] = t('plannerRunningStatus', { current: 0, total: payload?.total ?? 0 });
 }
 
 function onPlannerIterationStart(payload) {
-    currentIteration.value = payload?.iteration || 0;
-    // 새 회차 시작 시 블록 결과 표시 초기화 (UI에서 "한 바퀴" 시각적 분리).
-    blockResults.value = {};
-    runningIndex.value = null;
+    const gid = payload?.group_id;
+    if (!gid) return;
+    currentIterationByGroup[gid] = payload?.iteration || 0;
+    blockResultsByGroup[gid] = {};
+    runningByGroup[gid] = undefined;
 }
 
 function onPlannerBlockStart(payload) {
-    runningIndex.value = payload?.index ?? null;
+    const gid = payload?.group_id;
+    if (!gid) return;
+    runningByGroup[gid] = payload?.index ?? null;
     let text = t('plannerRunningStatusDetail', {
         current: (payload?.index ?? 0) + 1,
-        total: payload?.total ?? blocks.value.length,
+        total: payload?.total ?? 0,
         name: payload?.name || payload?.type,
     });
-    // repeat ON일 때만 회차 표시.
-    if (repeatActive.value && currentIteration.value > 0) {
-        text += ` · ${t('plannerIterationInfinite', { current: currentIteration.value })}`;
+    if (repeatActive.value && (currentIterationByGroup[gid] || 0) > 0) {
+        text += ` · ${t('plannerIterationInfinite', { current: currentIterationByGroup[gid] })}`;
     }
-    runStatusText.value = text;
+    runStatusByGroup[gid] = text;
 }
 
 function onPlannerBlockEnd(payload) {
+    const gid = payload?.group_id;
+    if (!gid) return;
     if (payload?.block_id) {
-        blockResults.value = { ...blockResults.value, [payload.block_id]: payload.status };
+        if (!blockResultsByGroup[gid]) blockResultsByGroup[gid] = {};
+        blockResultsByGroup[gid] = { ...blockResultsByGroup[gid], [payload.block_id]: payload.status };
     }
     if (payload?.status === 'error' && payload?.error) {
         Notify.create({
@@ -1167,11 +1334,22 @@ function onPlannerBlockEnd(payload) {
     }
 }
 
+function onPlannerGroupEnd(payload) {
+    const gid = payload?.group_id;
+    if (!gid) return;
+    const newSet = new Set(groupRunningSet.value);
+    newSet.delete(gid);
+    groupRunningSet.value = newSet;
+    runningByGroup[gid] = undefined;
+    runStatusByGroup[gid] = '';
+}
+
 function onPlannerRunEnd(payload) {
     isRunning.value = false;
-    runningIndex.value = null;
+    Object.keys(runningByGroup).forEach(k => delete runningByGroup[k]);
+    Object.keys(runStatusByGroup).forEach(k => delete runStatusByGroup[k]);
+    groupRunningSet.value = new Set();
     const status = payload?.status || 'finished';
-    runStatusText.value = '';
     Notify.create({
         color: status === 'finished' ? 'positive' : (status === 'stopped' ? 'warning' : 'negative'),
         message: status === 'finished' ? t('plannerRunFinished') :
@@ -1186,8 +1364,7 @@ function loadRunStatus() {
     api.get(`/planner/${selectedPlannerId.value}/:run_status`).then((res) => {
         isRunning.value = !!res.data?.is_running;
         if (!isRunning.value) {
-            runningIndex.value = null;
-            runStatusText.value = '';
+            resetRunState();
         }
     }).catch(() => {});
 }
@@ -1195,7 +1372,7 @@ function loadRunStatus() {
 // --- Watchers ---
 watch(selectedPlannerId, () => {
     listSelectedWorkspaces();
-    loadBlocks();
+    loadPlans();
     loadRunStatus();
     repollCustomDevices();
 });
@@ -1210,8 +1387,8 @@ watch(() => tutorialStore.hasTopics, (hasTopics) => {
     }
 });
 
-watch(() => tutorialStore.running, (isRunning) => {
-    if (isRunning) {
+watch(() => tutorialStore.running, (isRun) => {
+    if (isRun) {
         repollCustomDevices();
     }
 });
@@ -1227,9 +1404,11 @@ onUnmounted(() => {
         }
     });
     socket.off('planner_run_start', onPlannerRunStart);
+    socket.off('planner_group_start', onPlannerGroupStart);
     socket.off('planner_iteration_start', onPlannerIterationStart);
     socket.off('planner_block_start', onPlannerBlockStart);
     socket.off('planner_block_end', onPlannerBlockEnd);
+    socket.off('planner_group_end', onPlannerGroupEnd);
     socket.off('planner_run_end', onPlannerRunEnd);
 });
 
@@ -1239,16 +1418,33 @@ onMounted(async () => {
     listCheckpoints();
     listPlanners();
     await listAvailableWorkspaces();
-    // useSensor의 checkSensorTopic(1) 폴링(1초) + sensor:stop 완료 대기
     await new Promise(resolve => setTimeout(resolve, 2000));
     listSelectedWorkspaces();
-    loadBlocks();
+    loadPlans();
     loadRunStatus();
     socket.on('planner_run_start', onPlannerRunStart);
+    socket.on('planner_group_start', onPlannerGroupStart);
     socket.on('planner_iteration_start', onPlannerIterationStart);
     socket.on('planner_block_start', onPlannerBlockStart);
     socket.on('planner_block_end', onPlannerBlockEnd);
+    socket.on('planner_group_end', onPlannerGroupEnd);
     socket.on('planner_run_end', onPlannerRunEnd);
     pageLoading.value = false;
 });
 </script>
+
+<style scoped>
+.planner-block-card {
+    width: 160px;
+    min-width: 160px;
+    max-width: 160px;
+    flex-shrink: 0;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    overflow: hidden;
+    transition: border-color 0.15s ease;
+}
+.planner-block-card.block-card-active {
+    border-color: var(--q-primary);
+}
+</style>

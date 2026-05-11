@@ -282,6 +282,16 @@ export default {
   plannerDurationSeconds: 'Duration (seconds)',
   plannerHzLabel: 'Inference Hz',
   plannerHzHint: 'How often the policy is queried per second.',
+  plannerUntilDone: 'Run until done',
+  plannerUntilDoneHint: 'Advance to the next block when the done score exceeds the threshold. (Checkpoint must be trained with has_succeed.)',
+  plannerDoneThreshold: 'Done threshold',
+  plannerDoneThresholdHint: 'A value between 0 and 1 (default 0.5).',
+  plannerUntilDoneBadge: 'until done',
+  plannerCheckpointNoSucceed: 'This checkpoint was not trained with has_succeed; the done signal is unavailable.',
+  plannerSyncId: 'Sync ID',
+  plannerSyncIdHint: 'If another group has a sync block with the same ID, both groups wait at this point until the other arrives. Ignored when only one workspace exists or no other group uses the same ID.',
+  plannerSyncBadge: 'Sync',
+  plannerNameAutoSync: 'Sync {sync_id}',
   plannerNameLabel: 'Name',
   plannerCreateNew: '+ Create New Planner',
   plannerDeleteConfirm: "Delete planner '{name}'?",
@@ -304,6 +314,13 @@ export default {
   plannerRunFinished: 'Planner run finished.',
   plannerRunStopped: 'Planner run stopped.',
   plannerRunFailed: 'Planner run failed: {error}',
+  plannerPlansTitle: 'Plans',
+  plannerRunAllGroups: 'Run all',
+  plannerRunGroup: 'Run this group',
+  plannerNoGroups: 'Add workspaces and groups will be created automatically.',
+  plannerGroupBlocksCount: '{count} blocks',
+  plannerForGroup: 'Target group',
+  plannerNoGroupSelected: 'Could not find the target group.',
 
   // ───── Assemble page ─────
   assembleIntroTitle: 'Assemble, Build Your Ideal Robot',
@@ -464,7 +481,7 @@ export default {
   viveOnlySingleArm: 'Only available for single_arm assembly',
   rec: 'REC',
   configureRos2Service: 'Configure ROS2 Service',
-  successBtn: 'SUCCESS (F)',
+  successBtn: 'DONE (F)',
   stopBtn: 'Stop',
   collectionStepSize: 'Step Size',
   ros2DialogTitle: 'ROS2 Service (std_srvs/Trigger)',
@@ -482,7 +499,7 @@ export default {
   viveWaiting: 'Waiting for VIVE controller...',
   movingToHomepose: 'Moving to home pose...',
   stopCollection: 'STOP',
-  completeEpisode: 'DONE',
+  completeEpisode: 'FINISH',
   episodeSaved: 'Episode saved successfully.',
   errorCompleteEpisode: 'Failed to complete episode.',
   terminal: 'Terminal',
@@ -571,17 +588,17 @@ export default {
   tutorialMonIdlePending:
     'Set four things before recording: (1) which folder to save into (Dataset), (2) a one-line description of the task (Language Instruction), (3) how to control the robot (Teleoperation Type), (4) frames per second (Hz). Press the red REC button to start recording. Toggle the home-pose badge next to it if you want the robot to auto-move to home before each recording.',
   tutorialMonCollectingLeader:
-    "You're demonstrating with the Easy Controller (leader robot). Move the leader and the on-screen robot follows it, and that motion is saved as data. When the task succeeds, press SUCCESS (C) to label it, then COMPLETE to save the episode.",
+    "You're demonstrating with the Easy Controller (leader robot). Move the leader and the on-screen robot follows it, and that motion is saved as data. When the task succeeds, press DONE (F) to label it, then FINISH to save the episode.",
   tutorialMonCollectingKeyboard:
-    'Drive the robot end-effector directly with the keyboard. Click a robot card on the left to choose the control target, then — W/S (forward/back), A/D (left/right), E/Z (up/down), [ ] . / for rotation, B/N (gripper), Space (stop). Adjust Step Size to change how far one keypress moves. When done, SUCCESS (C) → COMPLETE.',
+    'Drive the robot end-effector directly with the keyboard. Click a robot card on the left to choose the control target, then — W/S (forward/back), A/D (left/right), E/Z (up/down), [ ] . / for rotation, B/N (gripper), Space (stop). Adjust Step Size to change how far one keypress moves. When done, DONE (F) → FINISH.',
   tutorialMonCollectingExternal:
-    'An external system (another node, joystick, etc.) is moving the robot. EasyTrainer just records what it sees. When done, press SUCCESS (C) → COMPLETE.',
+    'An external system (another node, joystick, etc.) is moving the robot. EasyTrainer just records what it sees. When done, press DONE (F) → FINISH.',
   tutorialMonCollectingViveExternal:
-    'Move your hand with the HTC Vive tracker and the robot follows it, with the demonstration recorded. When done, SUCCESS (C) → COMPLETE.',
+    'Move your hand with the HTC Vive tracker and the robot follows it, with the demonstration recorded. When done, DONE (F) → FINISH.',
   tutorialMonCollectingViveOnly:
-    'Records only the Vive tracker hand motion — no robot involved. Use this to capture human demonstrations for later training. When done, SUCCESS (C) → COMPLETE.',
+    'Records only the Vive tracker hand motion — no robot involved. Use this to capture human demonstrations for later training. When done, DONE (F) → FINISH.',
   tutorialMonCollectingMotionPlanning:
-    'An external ROS2 service (e.g., pick_and_place) is moving the robot automatically and the motion is saved as data. When done, SUCCESS (C) → COMPLETE.',
+    'An external ROS2 service (e.g., pick_and_place) is moving the robot automatically and the motion is saved as data. When done, DONE (F) → FINISH.',
   tutorialMonViveInit:
     'Waiting for the Vive tracker to come online. Make sure the tracker is powered on and connected to the base station.',
   tutorialMonMovingHome:

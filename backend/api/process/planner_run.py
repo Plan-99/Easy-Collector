@@ -1,4 +1,8 @@
-"""Planner runner: executes a plan (list of blocks) sequentially.
+"""Planner runner: executes one or more group plans, optionally in parallel.
+
+Each group plan is a list of blocks (joint_position / checkpoint / timesleep).
+Groups are partitioned by robot-overlap on the route layer, so parallel
+execution is safe — different groups never touch the same robot.
 
 Block types:
     - joint_position: move each robot in a workspace to a given joint configuration
@@ -6,29 +10,108 @@ Block types:
     - timesleep:      pause for `duration` seconds
 
 Stop semantics:
-    The runner receives a shared `task_control` dict from ProcessManager. When the user clicks
-    Stop, ProcessManager sets task_control['stop'] = True. Each block handler polls this flag.
+    The runner receives a shared ``task_control`` dict from ProcessManager. When
+    the user clicks Stop, ProcessManager sets ``task_control['stop'] = True``.
+    Every group worker thread polls this flag and aborts.
+
+WebSocket events (all carry ``group_id`` so the UI can route to the right column):
+    - planner_run_start       {total_groups, total_iterations}
+    - planner_preload_start   {total}
+    - planner_preload_done    {count}
+    - planner_group_start     {group_id, total}
+    - planner_iteration_start {group_id, iteration, total_iterations}
+    - planner_block_start     {group_id, index, total, block_id, type, name, iteration}
+    - planner_block_end       {group_id, ..., status, error}
+    - planner_group_end       {group_id, status, error}
+    - planner_run_end         {status, error}
 """
 
 import os
 import time
 import threading
 import traceback
-from concurrent.futures import ThreadPoolExecutor
 
 from .checkpoint_test import checkpoint_test
 
 
-def _preload_checkpoints(plan, socketio_instance):
-    """Load every unique checkpoint referenced by the plan into CPU memory.
+def _emit(socketio_instance, event, payload):
+    if socketio_instance is None:
+        return
+    try:
+        socketio_instance.emit(event, payload)
+    except Exception as e:
+        print(f"[ERROR] socketio emit failed ({event}): {e}")
 
-    The actual GPU transfer (.cuda()) happens inside ``checkpoint_test`` when each
-    block runs; this just front-loads the slow part — disk read + model construction
-    + processor/OOD load — so subsequent blocks don't stall the run mid-plan.
 
-    Returns a dict ``{checkpoint_id: {policy, preprocessor, postprocessor, ood}}``.
-    Failures are logged and skipped so the block falls back to the original
-    in-block load path.
+class SyncBarrier:
+    """Generation-counted barrier across groups for the planner sync block.
+
+    - ``expected`` is the set of group_ids whose plan contains this sync_id.
+    - When the last expected group arrives, generation increments and all
+      waiters wake. This lets the same barrier reset cleanly for repeat loops.
+    - Waits poll every 200 ms so a global ``task_control['stop']`` releases
+      everyone.
+    """
+
+    def __init__(self, expected_group_ids):
+        self.expected = set(expected_group_ids)
+        self.arrived = set()
+        self.generation = 0
+        self.cond = threading.Condition()
+
+    def wait(self, group_id, task_control):
+        if group_id not in self.expected:
+            return
+        with self.cond:
+            self.arrived.add(group_id)
+            my_gen = self.generation
+            if self.arrived >= self.expected:
+                self.arrived = set()
+                self.generation += 1
+                self.cond.notify_all()
+                return
+            while self.generation == my_gen and not task_control.get('stop'):
+                self.cond.wait(timeout=0.2)
+
+    def drop(self, group_id):
+        """Called when a group's worker exits — drop it from this barrier so
+        any other group still waiting at this sync_id can be released."""
+        with self.cond:
+            if group_id not in self.expected:
+                return
+            self.expected.discard(group_id)
+            self.arrived.discard(group_id)
+            if self.expected and self.arrived >= self.expected:
+                self.arrived = set()
+                self.generation += 1
+            self.cond.notify_all()
+
+
+def _compute_sync_barriers(groups):
+    """For each sync_id used anywhere, the set of groups whose plan contains it."""
+    sync_groups = {}
+    for grp in groups:
+        for blk in grp.get('blocks') or []:
+            if blk.get('type') != 'sync':
+                continue
+            sid = (blk.get('sync_id') or '').strip()
+            if not sid:
+                continue
+            sync_groups.setdefault(sid, set()).add(grp['id'])
+    return {sid: SyncBarrier(gids) for sid, gids in sync_groups.items()}
+
+
+def _preload_checkpoints(groups, socketio_instance):
+    """Load every unique checkpoint referenced across all groups into CPU memory.
+
+    The actual GPU transfer (.cuda()) happens inside ``checkpoint_test`` when
+    each block runs; this just front-loads disk read + model construction so
+    no group worker stalls mid-plan.
+
+    When 전체 재생 runs N groups in parallel, two policies may share the GPU.
+    PyTorch arbitrates kernel scheduling on the default stream, which is fine
+    for typical 10Hz ACT/Diffusion inference; if VRAM gets tight, swap in
+    explicit ``torch.cuda.Stream`` per group.
     """
     from ...database.models.checkpoint_model import Checkpoint as CheckpointModel
     from ...configs.global_configs import resolve_checkpoint_dir
@@ -40,7 +123,11 @@ def _preload_checkpoints(plan, socketio_instance):
 
     seen = set()
     cache = {}
-    ckpt_blocks = [b for b in (plan or []) if b.get('type') == 'checkpoint']
+    ckpt_blocks = []
+    for grp in groups:
+        for b in grp.get('blocks') or []:
+            if b.get('type') == 'checkpoint':
+                ckpt_blocks.append(b)
     if not ckpt_blocks:
         return cache
 
@@ -78,10 +165,6 @@ def _preload_checkpoints(plan, socketio_instance):
             else:
                 print(f'[PRELOAD][WARN] unsupported policy type {ptype} for checkpoint {cid}, skipping')
                 continue
-            # LeRobot's from_pretrained reads ``device`` from config and defaults
-            # to cuda when available. Force CPU here so the prefetch cache doesn't
-            # pin VRAM for every preloaded model — checkpoint_test will move it
-            # back to cuda when its block actually runs.
             policy.cpu()
             policy.eval()
 
@@ -118,18 +201,7 @@ def _preload_checkpoints(plan, socketio_instance):
     return cache
 
 
-def _emit(socketio_instance, event, payload):
-    if socketio_instance is None:
-        return
-    try:
-        socketio_instance.emit(event, payload)
-    except Exception as e:
-        print(f"[ERROR] socketio emit failed ({event}): {e}")
-
-
 def _resolve_position(positions, robot_id):
-    """Block stores positions keyed by robot id (the JSON layer makes int keys into strings).
-    Look up under both forms so we don't fail on type mismatch."""
     if positions is None:
         return None
     return positions.get(str(robot_id), positions.get(robot_id))
@@ -157,8 +229,6 @@ def _run_joint_position(block, ctx, task_control):
         print(f"[WARN] block '{block.get('name')}' has no joint targets, skipping")
         return
 
-    # 새 move_to 는 비동기 — 호출 즉시 return, 실제 작업은 server-side thread.
-    # 도달 여부는 agent.is_moving 폴링으로 확인. stop 시 cancel_move_to 송신.
     duration = float(block.get('duration', 5.0))
     for agent, pos in targets:
         agent.move_to(pos, duration=duration)
@@ -186,8 +256,6 @@ def _run_joint_position(block, ctx, task_control):
                 except Exception:
                     pass
     finally:
-        # 안전장치: 종료 직전 한 번 더 cancel — block error 등으로 빠져나오는
-        # 경로에서도 background thread 가 남지 않도록.
         if task_control.get('stop'):
             for a in agents_only:
                 try:
@@ -222,7 +290,12 @@ def _run_checkpoint(block, ctx, task_control):
         agents.append(agent)
 
     duration = float(block.get('duration') or 30)
-    sub_control = {'stop': False}
+    until_done = bool(block.get('until_done'))
+    try:
+        done_threshold = float(block.get('done_threshold') if block.get('done_threshold') is not None else 0.5)
+    except (TypeError, ValueError):
+        done_threshold = 0.5
+    sub_control = {'stop': False, 'done': False, 'done_threshold': done_threshold if until_done else None}
     preloaded = (ctx.get('preloaded') or {}).get(block.get('checkpoint_id'))
 
     def _runner():
@@ -251,10 +324,15 @@ def _run_checkpoint(block, ctx, task_control):
     thread = threading.Thread(target=_runner, name=f"planner_ckpt_{block.get('id')}", daemon=True)
     thread.start()
 
-    deadline = time.time() + duration
+    deadline = None if until_done else time.time() + duration
     try:
-        while time.time() < deadline:
+        while True:
             if task_control['stop']:
+                break
+            if sub_control.get('done'):
+                print(f"[PLANNER] checkpoint block '{block.get('name')}' done signal triggered (threshold={done_threshold})")
+                break
+            if deadline is not None and time.time() >= deadline:
                 break
             time.sleep(0.1)
     finally:
@@ -275,27 +353,117 @@ def _run_timesleep(block, ctx, task_control):
         time.sleep(0.1)
 
 
+def _run_sync(block, ctx, task_control, group_id):
+    sync_id = (block.get('sync_id') or '').strip()
+    if not sync_id:
+        return
+    barrier = (ctx.get('sync_barriers') or {}).get(sync_id)
+    # 단일 그룹만 이 sync_id를 가지면 (또는 워크스페이스가 1개라 그룹이 하나뿐이면)
+    # barrier.expected 크기가 1 → wait()이 즉시 통과.
+    if barrier is None:
+        return
+    print(f"[PLANNER] [{group_id}] sync '{sync_id}' waiting "
+          f"(expected={sorted(barrier.expected)})")
+    barrier.wait(group_id, task_control)
+    print(f"[PLANNER] [{group_id}] sync '{sync_id}' passed")
+
+
 _HANDLERS = {
     'joint_position': _run_joint_position,
     'checkpoint': _run_checkpoint,
     'timesleep': _run_timesleep,
+    # 'sync' is dispatched separately in _run_group because it needs group_id;
+    # the lookup just has to not return None so the unknown-type guard passes.
+    'sync': _run_sync,
 }
 
 
-def planner_run(plan, workspaces, app, socketio_instance, task_control,
-                repeat_count=1):
-    """Execute a plan as a sequence of blocks, optionally repeating the whole plan.
-
-    plan: list[dict] — block dicts with at least 'type', 'id', plus type-specific keys.
-    workspaces: list[dict] — task dicts (with assembly+sensors), used to resolve workspace_id.
-    repeat_count:
-      - >= 1: run the plan that many times in a row
-      - <= 0: run infinitely until stopped by user (treated as "loop forever")
-    """
-    plan = list(plan or [])
+def _run_group(group, ctx, task_control, repeat_count, infinite, total_iterations):
+    """Execute a single group's plan in this thread. Returns ``(status, error)``."""
+    socketio_instance = ctx['socketio']
+    group_id = group['id']
+    plan = list(group.get('blocks') or [])
     total = len(plan)
-    # Normalize: <=0 means infinite. We still emit a stable 'total_iterations'
-    # for the UI — None for infinite, the integer otherwise.
+
+    _emit(socketio_instance, 'planner_group_start', {
+        'group_id': group_id,
+        'total': total,
+        'total_iterations': total_iterations,
+    })
+
+    iteration = 0
+    while infinite or iteration < repeat_count:
+        if task_control['stop']:
+            return 'stopped', None
+
+        iteration += 1
+        _emit(socketio_instance, 'planner_iteration_start', {
+            'group_id': group_id,
+            'iteration': iteration,
+            'total_iterations': total_iterations,
+        })
+
+        for index, block in enumerate(plan):
+            if task_control['stop']:
+                return 'stopped', None
+
+            handler = _HANDLERS.get(block.get('type'))
+            block_summary = {
+                'group_id': group_id,
+                'index': index,
+                'total': total,
+                'iteration': iteration,
+                'total_iterations': total_iterations,
+                'block_id': block.get('id'),
+                'type': block.get('type'),
+                'name': block.get('name'),
+            }
+            _emit(socketio_instance, 'planner_block_start', block_summary)
+            print(f"[NOTICE] [{group_id}] [{index + 1}/{total}] {block.get('type')} — {block.get('name')}")
+
+            block_status = 'finished'
+            block_error = None
+            try:
+                if handler is None:
+                    raise RuntimeError(f"unknown block type '{block.get('type')}'")
+                if block.get('type') == 'sync':
+                    _run_sync(block, ctx, task_control, group_id)
+                else:
+                    handler(block, ctx, task_control)
+                if task_control['stop']:
+                    block_status = 'stopped'
+            except Exception as e:
+                block_status = 'error'
+                block_error = str(e)
+                print(f"[ERROR] [{group_id}] block '{block.get('name')}' failed: {traceback.format_exc()}")
+
+            _emit(socketio_instance, 'planner_block_end', {
+                **block_summary,
+                'status': block_status,
+                'error': block_error,
+            })
+
+            if block_status == 'error':
+                return 'error', block_error
+            if block_status == 'stopped':
+                return 'stopped', None
+
+    return 'finished', None
+
+
+def planner_run(groups, workspaces, app, socketio_instance, task_control,
+                repeat_count=1):
+    """Execute one or more group plans in parallel threads.
+
+    groups: list[dict] — each ``{ id, workspace_ids, blocks }``.
+    workspaces: list[dict] — task dicts (with assembly+sensors), referenced by blocks.
+    repeat_count:
+      - >= 1: each group repeats its plan that many times
+      - <= 0: infinite loop until stopped
+    """
+    groups = [g for g in (groups or []) if g.get('blocks')]
+    total_groups = len(groups)
+
     try:
         repeat_count = int(repeat_count)
     except (TypeError, ValueError):
@@ -303,16 +471,19 @@ def planner_run(plan, workspaces, app, socketio_instance, task_control,
     infinite = repeat_count <= 0
     total_iterations = None if infinite else repeat_count
 
-    print(f"[NOTICE] Planner run started ({total} blocks, "
+    print(f"[NOTICE] Planner run started ({total_groups} group(s), "
           f"{'infinite loop' if infinite else f'{repeat_count} iteration(s)'})")
     _emit(socketio_instance, 'planner_run_start', {
-        'total': total,
+        'total_groups': total_groups,
+        'group_ids': [g['id'] for g in groups],
         'total_iterations': total_iterations,
     })
 
-    # Preload all checkpoint models to CPU before iterating blocks. This trades
-    # an upfront stall (only at plan start) for zero mid-plan ckpt-load latency.
-    preloaded = _preload_checkpoints(plan, socketio_instance)
+    preloaded = _preload_checkpoints(groups, socketio_instance)
+    sync_barriers = _compute_sync_barriers(groups)
+    if sync_barriers:
+        print(f"[PLANNER] sync barriers: "
+              f"{ {sid: sorted(b.expected) for sid, b in sync_barriers.items()} }")
 
     ctx = {
         'app': app,
@@ -320,88 +491,41 @@ def planner_run(plan, workspaces, app, socketio_instance, task_control,
         'socketio': socketio_instance,
         'workspaces_by_id': {ws['id']: ws for ws in workspaces},
         'preloaded': preloaded,
+        'sync_barriers': sync_barriers,
     }
 
-    status = 'finished'
-    error_message = None
+    # 그룹별 상태 수집. 한 그룹이 error여도 다른 그룹은 자기 일을 끝내도록 둠
+    # (단, stop은 모두에게 즉시 전파됨).
+    group_results = {}
+
+    def _worker(group):
+        try:
+            status, error = _run_group(group, ctx, task_control, repeat_count, infinite, total_iterations)
+        except Exception as e:
+            status, error = 'error', str(e)
+            print(f"[ERROR] group {group.get('id')} crashed: {traceback.format_exc()}")
+        finally:
+            # Drop this group from every sync barrier so any peer still
+            # waiting at a sync_id can move on.
+            for barrier in (ctx.get('sync_barriers') or {}).values():
+                barrier.drop(group['id'])
+        group_results[group['id']] = (status, error)
+        _emit(socketio_instance, 'planner_group_end', {
+            'group_id': group['id'],
+            'status': status,
+            'error': error,
+        })
+
+    threads = []
+    for group in groups:
+        t = threading.Thread(target=_worker, args=(group,), name=f"planner_group_{group['id']}", daemon=True)
+        t.start()
+        threads.append(t)
+
     try:
-        iteration = 0
-        while infinite or iteration < repeat_count:
-            if task_control['stop']:
-                status = 'stopped'
-                break
-
-            iteration += 1
-            _emit(socketio_instance, 'planner_iteration_start', {
-                'iteration': iteration,
-                'total_iterations': total_iterations,
-            })
-            if infinite:
-                print(f"[NOTICE] === Iteration {iteration} (infinite loop) ===")
-            elif repeat_count > 1:
-                print(f"[NOTICE] === Iteration {iteration}/{repeat_count} ===")
-
-            iter_status = 'finished'
-            iter_error = None
-            for index, block in enumerate(plan):
-                if task_control['stop']:
-                    iter_status = 'stopped'
-                    break
-
-                handler = _HANDLERS.get(block.get('type'))
-                block_summary = {
-                    'index': index,
-                    'total': total,
-                    'iteration': iteration,
-                    'total_iterations': total_iterations,
-                    'block_id': block.get('id'),
-                    'type': block.get('type'),
-                    'name': block.get('name'),
-                }
-                _emit(socketio_instance, 'planner_block_start', block_summary)
-                print(f"[NOTICE] [{index + 1}/{total}] {block.get('type')} — {block.get('name')}")
-
-                block_status = 'finished'
-                block_error = None
-                try:
-                    if handler is None:
-                        raise RuntimeError(f"unknown block type '{block.get('type')}'")
-                    handler(block, ctx, task_control)
-                    if task_control['stop']:
-                        block_status = 'stopped'
-                except Exception as e:
-                    block_status = 'error'
-                    block_error = str(e)
-                    print(f"[ERROR] block '{block.get('name')}' failed: {traceback.format_exc()}")
-
-                _emit(socketio_instance, 'planner_block_end', {
-                    **block_summary,
-                    'status': block_status,
-                    'error': block_error,
-                })
-
-                if block_status == 'error':
-                    iter_status = 'error'
-                    iter_error = block_error
-                    break
-                if block_status == 'stopped':
-                    iter_status = 'stopped'
-                    break
-
-            if iter_status == 'error':
-                status = 'error'
-                error_message = iter_error
-                break
-            if iter_status == 'stopped':
-                status = 'stopped'
-                break
-            # 정상 종료된 iteration은 계속 진행 (또는 반복 횟수 끝)
-        else:
-            # while loop가 정상 종료(=infinite=False고 모두 마침)된 경우.
-            # while-else는 break가 없을 때만 실행됨.
-            status = 'finished'
+        for t in threads:
+            t.join()
     finally:
-        # Drop the prefetch cache so model parameters can be GC'd promptly.
         try:
             preloaded.clear()
         except Exception:
@@ -413,8 +537,20 @@ def planner_run(plan, workspaces, app, socketio_instance, task_control,
         except Exception:
             pass
 
-        print(f'[NOTICE] Planner run {status}')
+        # 전체 상태 = 우선순위(error > stopped > finished).
+        statuses = [s for s, _ in group_results.values()]
+        if 'error' in statuses:
+            overall = 'error'
+            overall_error = next((e for s, e in group_results.values() if s == 'error' and e), None)
+        elif 'stopped' in statuses:
+            overall = 'stopped'
+            overall_error = None
+        else:
+            overall = 'finished'
+            overall_error = None
+
+        print(f'[NOTICE] Planner run {overall}')
         _emit(socketio_instance, 'planner_run_end', {
-            'status': status,
-            'error': error_message,
+            'status': overall,
+            'error': overall_error,
         })

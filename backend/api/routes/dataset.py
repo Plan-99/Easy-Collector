@@ -372,7 +372,7 @@ def complete_episode(id):
     if not task or task['type'] != 'function':
         return {'status': 'error', 'message': 'record_episode is not running'}, 404
     task['obj']['episode_complete'] = True
-    return {'status': 'success', 'message': 'Episode complete signal sent'}, 200
+    return {'status': 'success', 'message': 'Episode finish signal sent'}, 200
 
 @dataset_bp.route('/dataset/<id>/:set_succeed', methods=['POST'])
 def set_succeed(id):
@@ -380,7 +380,7 @@ def set_succeed(id):
     if not task or task['type'] != 'function':
         return {'status': 'error', 'message': 'record_episode is not running'}, 404
     task['obj']['succeed'] = True
-    return {'status': 'success', 'message': 'Succeed flag set'}, 200
+    return {'status': 'success', 'message': 'Done flag set'}, 200
 
 @dataset_bp.route('/dataset/<id>/augment', methods=['POST'])
 def augment_dataset_route(id):

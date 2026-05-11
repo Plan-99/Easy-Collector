@@ -607,6 +607,11 @@ def checkpoint_test(
                 succeed_val = final_action[-1]
                 final_action = final_action[:-1]
                 socketio_instance.emit('inference_succeed', {'succeed': bool(succeed_val > 0.5), 'score': round(float(succeed_val), 4)})
+                # Planner "until done": signal the outer loop when score exceeds threshold.
+                done_threshold = task_control.get('done_threshold') if isinstance(task_control, dict) else None
+                if done_threshold is not None and float(succeed_val) > float(done_threshold):
+                    task_control['done'] = True
+                    break
 
             # prev_qpos 갱신: 다음 스텝에서 실제 delta 계산에 사용
             for agent in env.agents:
