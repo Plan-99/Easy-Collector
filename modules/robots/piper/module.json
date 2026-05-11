@@ -1,7 +1,7 @@
 {
   "id": "robot_piper",
   "name": "Piper",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "category": "robot",
   "description": "Agilex Piper 로봇. SDK 직접 제어와 ROS 토픽 제어 두 가지 모드 모두 제공. CAN 인터페이스는 robot:start 시 자동 감지·구성 (단일팔·양팔 모두 지원).",
   "install": {
