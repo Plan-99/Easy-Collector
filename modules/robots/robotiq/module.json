@@ -1,7 +1,7 @@
 {
   "id": "gripper_robotiq",
   "name": "Robotiq Gripper",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "category": "robot",
   "description": "Robotiq 2F-85 / 2F-140 그리퍼 (pyRobotiqGripper Modbus RTU SDK 직접 제어). ROS action 경유 없이 USB/RS485 직렬로 바로 명령.",
   "install": {
@@ -16,9 +16,9 @@
   "dependencies": {
     "apt": [],
     "pip": [
-      "pyRobotiqGripper>=3.2.0",
-      "pymodbus>=3.12.1",
-      "pyserial>=3.5"
+      "pyRobotiqGripper>=2.0,<3.0",
+      "pymodbus>=3.12.1,<4.0",
+      "pyserial>=3.5,<4.0"
     ]
   },
   "check": {

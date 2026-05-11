@@ -93,8 +93,8 @@ class RobotiqSDKController(BaseSDKController):
         if not self._connected or self._gripper is None:
             return False
         try:
-            # activate는 reset 후 활성화 시퀀스를 수행. 내부적으로 status polling 포함.
-            self._gripper.activate(reset=True, start=True, refreshStatus=True)
+            # pyRobotiqGripper 2.x: activate()는 인자 없이 reset+start 시퀀스 실행.
+            self._gripper.activate()
             print(f"[RobotiqSDK] Activated (speed={self._speed}, force={self._force})", flush=True)
             return True
         except Exception as e:
@@ -103,10 +103,6 @@ class RobotiqSDKController(BaseSDKController):
 
     def disconnect(self) -> None:
         if self._gripper is not None:
-            try:
-                self._gripper.stop()
-            except Exception:
-                pass
             try:
                 self._gripper.disconnect()
             except Exception:
@@ -134,13 +130,13 @@ class RobotiqSDKController(BaseSDKController):
             print(f"[RobotiqSDK] write_joints rad={positions[0]:.4f} → bit={target_bit}", flush=True)
 
         try:
+            # pyRobotiqGripper 2.x: move signature는 (position, speed, force, wait, readStatus).
             self._gripper.move(
                 position=target_bit,
                 speed=self._speed,
                 force=self._force,
                 wait=self._wait,
                 readStatus=False,
-                refreshStatus=False,
             )
         except Exception as e:
             # 200Hz로 호출될 수 있으므로 throttle.
@@ -152,7 +148,8 @@ class RobotiqSDKController(BaseSDKController):
             return JOINT_NAMES, [0.0]
 
         try:
-            bit = self._gripper.position(refreshStatus=True)
+            # pyRobotiqGripper 2.x: getPosition() — 내부 status 갱신 후 bit 반환.
+            bit = self._gripper.getPosition()
             rad = _bit_to_rad(bit)
             if not hasattr(self, '_read_log_count'):
                 self._read_log_count = 0
