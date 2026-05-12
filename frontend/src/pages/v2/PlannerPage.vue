@@ -1,12 +1,12 @@
 <template>
-    <q-page class="q-pt-lg q-pr-lg q-pb-lg">
+    <q-page :class="['q-pt-lg q-pr-lg q-pb-lg', { 'full-height column': isEmptyState }]">
         <TutorialHint class="q-mb-md" :text="$t('tutorialPlannerIntro')" />
         <!-- Planner selection header -->
-        <div class="border-rounded bg-secondary q-pa-lg q-mb-lg row">
+        <div class="border-rounded bg-secondary q-pa-md q-mb-md row">
             <q-img src="images/robot1.png" style="width: 100px" class="q-mr-xl"></q-img>
             <div>
                 <div class="row">
-                    <div class="text-h5 text-primary text-bold q-mb-lg">{{ $t('plannerIntroTitle') }}</div>
+                    <div class="text-h5 text-primary text-bold q-mb-md">{{ $t('plannerIntroTitle') }}</div>
                     <q-select
                         dense
                         outlined
@@ -16,7 +16,7 @@
                         :options="planners"
                         :label="$t('plannerSelectLabel')"
                         style="width: 400px"
-                        class="q-ml-lg"
+                        class="q-ml-md"
                         map-options
                         emit-value
                         option-label="name"
@@ -49,13 +49,13 @@
         </div>
 
         <!-- Page loading -->
-        <div class="q-mb-lg border-rounded border-grey flex-center flex column" v-if="pageLoading" style="min-height: 400px;">
+        <div class="col q-mb-lg border-rounded border-grey flex-center flex column" v-if="pageLoading">
             <q-spinner-gears size="50px" color="primary" class="q-mb-md" />
             <div class="text-h6 text-grey">{{ $t('plannerInitializing') }}</div>
         </div>
 
         <!-- Main content area -->
-        <div class="q-mb-lg border-rounded border-grey text-grey flex-center flex text-h6" v-else-if="!selectedPlannerId" style="min-height: 400px;">
+        <div class="col q-mb-lg border-rounded border-grey text-grey flex-center flex text-h6" v-else-if="!selectedPlannerId">
             {{ $t('plannerSelectFirst') }}
         </div>
         <div class="row q-mb-lg items-stretch" v-else>
@@ -473,7 +473,7 @@
                             <div
                                 v-for="robot in getWorkspaceRobots(blockForm.workspace_id)"
                                 :key="robot.id"
-                                class="q-mb-lg"
+                                class="q-mb-md"
                             >
                                 <div class="row items-center q-mb-sm">
                                     <div class="text-subtitle2">{{ robot.name }}</div>
@@ -747,6 +747,7 @@ function deletePlanner(planner) {
 
 // --- Workspace Selection Logic ---
 const pageLoading = ref(true);
+const isEmptyState = computed(() => pageLoading.value || !selectedPlannerId.value);
 const showAddWorkspacesForm = ref(false);
 const availableWorkspaces = ref([]);
 const addWorkspacesForm = ref([

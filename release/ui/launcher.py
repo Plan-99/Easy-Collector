@@ -4619,6 +4619,12 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         else:
             win.resize(QSize(1280, 800))
         view = QWebEngineView(win)
+        # Browser-level zoom — equivalent to Ctrl+scroll in a normal browser.
+        # Default 1.0 makes the Quasar UI feel oversized inside the embedded
+        # window; 0.9 (= 90%) gives slightly more breathing room without
+        # changing any CSS. The factor is a view property so it survives
+        # page navigations.
+        view.setZoomFactor(0.9)
         view.setUrl(url)
         win.setCentralWidget(view)
         win.showMaximized() if not screen else win.show()

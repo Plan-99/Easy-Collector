@@ -92,8 +92,9 @@
                         v-else-if="data.type === 'checkbox'"
                         v-model="data.value"
                         :label="data.label"
+                        dark
                         dense
-                        class="q-mb-md"
+                        class="q-mb-md text-white"
                     />
                     <slot :name="data.key" v-else-if="data.type === 'custom'"></slot>
                 </div>

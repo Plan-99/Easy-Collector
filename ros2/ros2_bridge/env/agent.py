@@ -121,10 +121,13 @@ class Agent:
 
         from sensor_msgs.msg import JointState as JointStateMsg
 
-        # custom robot 은 외부 ROS2 노드가 명령 처리/평활화를 책임지는 게 정책.
-        # 우리 쪽 interpolation_node 는 끼우지 않으므로 interpolation 플래그가
-        # 켜져 있어도 무시한다 (구버전 DB 행 호환).
-        interpolation_on = bool(robot.get('interpolation')) and self.robot_type != 'custom'
+        # custom robot 은 폼에서 사용자가 interpolation 사용 여부를 직접 고른다.
+        # ON  → 우리 쪽 interpolation_node 가 200Hz 보간해서 write_topic 으로
+        #       publish (write_topic_msg 가 trajectory_msgs/JointTrajectory 면
+        #       JTC 호환 단일-point trajectory 로 직렬화).
+        # OFF → 외부 ROS2 노드(JTC, MoveIt, 직접 작성한 컨트롤러 등)가 보간/명령
+        #       처리를 책임진다는 전제 — agent 는 fallback driver 로 한 번씩만 publish.
+        interpolation_on = bool(robot.get('interpolation'))
 
         if interpolation_on:
             interp_topic = f'{ns}/ec_joint_cmd'
@@ -707,6 +710,13 @@ class Agent:
             # join 잠깐 기다렸다 새로 시작 (전 thread 가 cleanup 할 시간).
             if self._move_to_thread is not None:
                 self._move_to_thread.join(timeout=0.5)
+
+        # role=tool (그리퍼 등) 은 SDK/하드웨어가 자체 velocity profile 로 동작 →
+        # 소프트웨어 보간이 오히려 Modbus 트래픽만 낭비한다. target 을 한 번에 송신.
+        if self.role == 'tool':
+            self._move_target = list(target_pos)
+            self.move_joint_step(target_pos)
+            return
 
         self._move_target = list(target_pos)
         self._move_to_aborted = False

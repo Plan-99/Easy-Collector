@@ -757,6 +757,12 @@ class _VariantWidget(QWidget):
         self.write_msg_edit.addItems(_COMMON_WRITE_MSGS)
         self.write_msg_edit.setCurrentText("")
         ros_form.addRow(_req("kind"), self.driver_kind_combo)
+        # interpolation publish rate (Hz). 0 또는 빈 값이면 interpolation_node default(200Hz).
+        self.ros_interp_hz_spin = QSpinBox()
+        self.ros_interp_hz_spin.setRange(0, 1000)
+        self.ros_interp_hz_spin.setValue(0)
+        self.ros_interp_hz_spin.setSpecialValueText("default (200Hz)")
+        ros_form.addRow("interpolation_hz", self.ros_interp_hz_spin)
         ros_form.addRow(_req("read_topic"), self.read_topic_edit)
         ros_form.addRow(_req("read_topic_msg"), self.read_msg_edit)
         ros_form.addRow(_req("write_topic"), self.write_topic_edit)
@@ -802,6 +808,13 @@ class _VariantWidget(QWidget):
         self.sdk_type_edit = QLineEdit()
         self.sdk_type_edit.setPlaceholderText("vendor 식별자 (예: myarm). 비우면 module id 사용")
         sdk_form.addRow("sdk_type", self.sdk_type_edit)
+        # interpolation publish rate (Hz). 0 또는 빈 값이면 interpolation_node default(200Hz).
+        # Modbus 그리퍼 등 통신 대역이 좁은 SDK 는 5~30Hz 정도가 적당.
+        self.sdk_interp_hz_spin = QSpinBox()
+        self.sdk_interp_hz_spin.setRange(0, 1000)
+        self.sdk_interp_hz_spin.setValue(0)
+        self.sdk_interp_hz_spin.setSpecialValueText("default (200Hz)")
+        sdk_form.addRow("interpolation_hz", self.sdk_interp_hz_spin)
         layout.addWidget(self.sdk_box)
 
         # Pre/post launch hooks (선택)
@@ -1156,6 +1169,9 @@ class _VariantWidget(QWidget):
         if is_sdk:
             sdk_type = self.sdk_type_edit.text().strip() or fallback_sdk_type
             d = {"kind": "sdk", "interpolation": True, "sdk_control": True, "sdk_type": sdk_type}
+            hz = self.sdk_interp_hz_spin.value()
+            if hz > 0:
+                d["interpolation_hz"] = hz
             if pre_hooks:
                 d["pre_launch"] = pre_hooks
             if post_hooks:
@@ -1187,6 +1203,9 @@ class _VariantWidget(QWidget):
             "write_topic_msg": self.write_msg_edit.currentText().strip(),
             "launch": launch_block,
         }
+        hz = self.ros_interp_hz_spin.value()
+        if hz > 0:
+            d["interpolation_hz"] = hz
         if pre_hooks:
             d["pre_launch"] = pre_hooks
         if post_hooks:
@@ -1793,6 +1812,13 @@ class ModuleWizard(QDialog):
 
         # driver
         drv = robot.get("driver", {}) or {}
+        # interpolation_hz (양쪽 폼에 동일 값 채워두면 사용자가 kind 토글 시 혼란 없음)
+        try:
+            hz_val = int(drv.get("interpolation_hz") or 0)
+        except (TypeError, ValueError):
+            hz_val = 0
+        v.sdk_interp_hz_spin.setValue(hz_val)
+        v.ros_interp_hz_spin.setValue(hz_val)
         if drv.get("kind") == "sdk":
             v.sdk_type_edit.setText(drv.get("sdk_type", "") or "")
         else:

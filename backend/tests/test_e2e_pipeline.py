@@ -203,6 +203,64 @@ def fetch_workspace_payload(api: Backend, workspace_id):
     return task
 
 
+def _list_tasks(api: Backend):
+    """GET /tasks를 호출해 task 리스트만 평탄화해 돌려준다."""
+    res = api.get('/tasks')
+    tasks = res.get('tasks', res) if isinstance(res, dict) else res
+    if isinstance(tasks, dict):
+        tasks = tasks.get('tasks', [])
+    return tasks or []
+
+
+def cleanup_test_workspaces(api: Backend, prefix='test_by_code_'):
+    """`prefix`로 시작하는 모든 워크스페이스(=task)를 삭제하고 삭제된 id 목록을 반환."""
+    deleted = []
+    for t in _list_tasks(api):
+        name = t.get('name') or ''
+        if name.startswith(prefix):
+            tid = t.get('id')
+            try:
+                api.delete(f'/task/{tid}')
+                deleted.append(tid)
+            except StageError as e:
+                print(f'  [WARN] failed to delete task {tid}: {e}', flush=True)
+    return deleted
+
+
+def clone_workspace(api: Backend, source_id, new_name):
+    """`source_id` 워크스페이스의 설정(assembly/sensors/home_pose/settings 등)을
+    그대로 복제한 새 워크스페이스를 만들고 새 id를 반환한다.
+
+    POST /api/task 응답이 id를 돌려주지 않으므로 GET /tasks에서 같은 이름으로
+    매칭해 새 id를 찾는다. 같은 이름이 여러 개면 가장 큰 id(가장 최근 생성)를
+    선택.
+    """
+    # 1) 원본 워크스페이스 데이터 가져오기
+    src = fetch_workspace_payload(api, source_id)
+
+    # 2) 새 워크스페이스 생성 (이름만 넣어 빈 row 만들기)
+    api.post('/task', json={'name': new_name})
+
+    # 3) 새 id 매칭
+    matched = [t['id'] for t in _list_tasks(api)
+               if (t.get('name') or '') == new_name]
+    if not matched:
+        raise StageError(f'failed to find newly created workspace {new_name!r}')
+    new_id = max(matched)
+
+    # 4) 원본의 필드 복사 (PUT)
+    payload = {
+        'assembly_id': src.get('assembly_id'),
+        'home_pose': src.get('home_pose'),
+        'image': src.get('image'),
+        'episode_len': src.get('episode_len'),
+        'sensor_ids': src.get('sensor_ids'),
+        'settings': src.get('settings'),
+    }
+    api.put(f'/task/{new_id}', json=payload)
+    return new_id
+
+
 # ---------------------------------------------------------------------------
 # Socket.IO helper — 키보드 텔리옵 입력 모방
 # ---------------------------------------------------------------------------
@@ -294,11 +352,17 @@ class KeyboardInjector:
 
 def record_episodes(api: Backend, backend_url, workspace, dataset_id,
                      robot, episodes, hz, episode_seconds):
-    """tele_type='keyboard' 로 episodes 만큼 짧은 에피소드를 녹화한다.
+    """tele_type='keyboard' 로 episodes 만큼 에피소드를 녹화한다.
 
-    record_episode는 한 번 호출하면 iter 만큼 반복하므로, 우리는 한 에피소드가
-    저장되면(`episode_saved` socketio 이벤트) complete_episode 를 트리거해서
-    바로 끝낸다. 이 테스트에서는 단순화를 위해 두 번을 따로 시작/저장한다.
+    각 에피소드는 workspace.episode_len 만큼 (기본 200 step) 기록되며,
+    record_episode 의 max_timesteps for-loop 이 자연 종료되면 episode_saved
+    이벤트가 발생한다. 강제 complete_episode 는 호출하지 않는다 — 그렇게
+    하면 inner while 의 첫 break 에서 outer for 가 즉시 끝나 length=1 만
+    저장되기 때문 (record_episode.py:300, 312 참고).
+
+    `episode_seconds` 는 이전 호환을 위해 받지만, 자연 종료 timeout 의
+    하한으로만 쓰인다 (실제 대기 시간 = max(episode_len/hz + 60s,
+    episode_seconds + 60s)).
     """
     sensors = workspace['sensors']
     robots = workspace['assembly']['robots']
@@ -330,6 +394,13 @@ def record_episodes(api: Backend, backend_url, workspace, dataset_id,
                                      base_pose=base_pose, hz=hz)
         injector.start()
         try:
+            episode_len = int(workspace.get('episode_len') or 200)
+            # 자연 종료까지 걸리는 시간: keyboard tele_type 은 키 입력 1개당
+            # 1 step 이라 hz 와 무관하게 KeyboardInjector 가 키를 보내는
+            # 페이스에 종속된다. 안전하게 episode_len/hz + 60s, 그리고
+            # 옛 episode_seconds 인자 + 60s 중 큰 쪽으로.
+            natural_secs = episode_len / max(hz, 1)
+            wait_timeout = max(natural_secs, episode_seconds) + 60.0
             for ep_idx in range(episodes):
                 saved_event.clear()
                 payload = {
@@ -341,21 +412,19 @@ def record_episodes(api: Backend, backend_url, workspace, dataset_id,
                     'move_homepose': True,
                     'hz': hz,
                     'language_instruction': 'tutorial keyboard demo',
-                    # 한 번 호출에 한 에피소드만 저장: iter=1 + complete_episode 가
-                    # collection 자체를 break 하지 않도록 명시적 stop 으로 정리.
+                    # 한 번 호출에 한 에피소드만 저장.
                     'iter': 1,
                 }
-                print(f'  [ep {ep_idx + 1}/{episodes}] start_collection')
+                print(f'  [ep {ep_idx + 1}/{episodes}] start_collection '
+                      f'(target {episode_len} steps @ {hz}Hz, timeout {wait_timeout:.0f}s)')
                 api.post(f'/dataset/{dataset_id}/:start_collection', json=payload)
 
-                # episode_seconds 만큼 키 입력 후 complete_episode 신호
-                time.sleep(episode_seconds)
-                print(f'  [ep {ep_idx + 1}/{episodes}] complete_episode')
-                api.post(f'/dataset/{dataset_id}/:complete_episode')
-
-                if not saved_event.wait(timeout=30.0):
+                # complete_episode 를 강제로 보내지 않는다 — record_episode 의
+                # for t in range(max_timesteps) 가 episode_len 만큼 자연
+                # 종료하도록 둔다.
+                if not saved_event.wait(timeout=wait_timeout):
                     raise StageError(
-                        f'episode_saved 이벤트가 30초 내에 오지 않음 (ep {ep_idx + 1})')
+                        f'episode_saved 이벤트가 {wait_timeout:.0f}초 내에 오지 않음 (ep {ep_idx + 1})')
                 saved.append(ep_idx)
 
                 # collection 루프가 자연 종료할 시간 주기
@@ -711,6 +780,16 @@ def _run_pipeline(api: Backend, args):
 
     robot_id = tutorial_info['robot_id']
     workspace_id = tutorial_info['workspace_id']
+
+    with stage('cleanup test_by_code_* workspaces + clone tutorial_env'):
+        deleted = cleanup_test_workspaces(api)
+        if deleted:
+            print(f'  deleted {len(deleted)} stale test_by_code_* workspace(s): {deleted}')
+        else:
+            print('  no stale test_by_code_* workspaces')
+        new_name = f'test_by_code_{time.strftime("%Y%m%d_%H%M%S")}'
+        workspace_id = clone_workspace(api, workspace_id, new_name)
+        print(f'  cloned tutorial_env → {new_name} (id={workspace_id})')
 
     with stage(f'subscribe tutorial robot id={robot_id}'):
         subscribe_robot(api, robot_id)

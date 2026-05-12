@@ -300,16 +300,22 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
             write_topic = settings.get('write_topic', '/joint_states').rsplit('/', 1)[-1]
             params = {'output_topic': write_topic}
 
+        # module.json driver.interpolation_hz 가 명시되면 노드 publish_rate 로 전달.
+        # 미지정 시 interpolation_node 의 ROS param default(200Hz)가 적용된다.
+        hz = settings.get('interpolation_hz')
+        if hz:
+            params['publish_rate'] = float(hz)
+
         cmd = self._build_interpolation_cmd(robot_id, params)
         return self._start_subprocess(interp_id, cmd, log_name=log_name)
 
     def StartInterpolation(self, request, context):
-        """[DEPRECATED] Custom 로봇용 standalone 보간 노드 기동.
+        """Custom 로봇용 standalone 보간 노드 기동.
 
-        custom robot 은 외부 ROS2 노드가 명령 처리를 모두 책임지는 게 정책으로
-        정리되면서 더 이상 backend 에서 호출하지 않는다. proto 호환을 위해 RPC
-        는 남겨두지만 새 코드는 사용하지 말 것 — 다음 cycle 에서 제거 예정.
-        StopInterpolation 도 같이 사라진다.
+        custom robot 은 빌트인 처럼 launch 단계에서 자동 기동되지 않으므로
+        RemoteAgent.__init__ 에서 (interpolation=True 일 때) 명시적으로 이 RPC
+        를 호출한다. ec_joint_cmd → output_topic 으로 200Hz 보간 publish.
+        StopInterpolation 으로 종료.
         """
         robot_id = request.robot_id
         if robot_id <= 0:
@@ -334,10 +340,9 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
         return pb.DriverStatus(success=True, message='Interpolation node started', pid=proc.pid)
 
     def StopInterpolation(self, request, context):
-        """[DEPRECATED] Stop the interpolation node started by StartInterpolation.
+        """Stop the interpolation node started by StartInterpolation.
 
-        StartInterpolation 과 함께 deprecated. 구버전에서 띄워둔 잔존 프로세스
-        cleanup 을 위해 :stop 경로에서 idempotent 호출만 유지한다."""
+        idempotent — 없는 프로세스 이름이면 no-op."""
         self._stop(request.name)
         return pb.StatusResponse(success=True, message='Stopped')
 

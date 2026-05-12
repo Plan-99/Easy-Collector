@@ -345,6 +345,7 @@ def start_collection(id):
         dataset_id=id,
         agents=agents,
         move_homepose=data.get('move_homepose', False),
+        move_homepose_duration=float(data.get('move_homepose_duration') or 5.0),
         assembly_id=data.get('assembly_id'),
         sensors=data.get('sensors'),
         task=data.get('task'),

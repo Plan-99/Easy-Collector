@@ -1,9 +1,9 @@
 <template>
-    <q-page class="q-pt-lg q-pr-lg full-height">
-        <div class="border-rounded bg-secondary q-pa-lg q-mb-lg row">
+    <q-page class="q-pt-md q-pr-md full-height">
+        <div class="border-rounded bg-secondary q-pa-md q-mb-md row">
             <q-img src="images/robot1.png" style="width: 100px" class="q-mr-xl"></q-img>
             <div>
-                <div class="text-h5 text-primary text-bold q-mb-lg">{{ $t('robotIntroTitle') }}</div>
+                <div class="text-h5 text-primary text-bold q-mb-md">{{ $t('robotIntroTitle') }}</div>
                 <div class="text-body text-white">{{ $t('robotIntroBody') }}</div>
                 <div class="text-body text-white">{{ $t('robotIntroBody2') }}</div>
             </div>
@@ -312,12 +312,16 @@ const robotForm = ref([
         options: [
             { label: 'sensor_msgs/JointState', value: 'sensor_msgs/JointState' },
             { label: 'std_msgs/Float64MultiArray', value: 'std_msgs/Float64MultiArray' },
+            { label: 'trajectory_msgs/JointTrajectory', value: 'trajectory_msgs/JointTrajectory' },
             { label: 'control_msgs/action/GripperCommand', value: 'control_msgs/action/GripperCommand' },
         ],
         show: (form) => form.find((e) => e.key === 'type').value === 'custom'
     },
-    // custom robot 은 외부 ROS2 노드가 자체적으로 명령 토픽을 처리한다는 전제이므로
-    // interpolation_node 를 끼워넣지 않는다. 평활화가 필요하면 외부 노드에서 처리.
+    // ON 이면 우리 쪽 interpolation_node 가 200Hz 보간 후 write_topic 으로 publish.
+    // OFF 이면 외부 컨트롤러(JTC/MoveIt/사용자 직접 작성)가 보간을 책임진다.
+    { label: t('robotFieldInterpolation'), key: 'interpolation', type: 'checkbox', value: false, default: false,
+        show: (form) => form.find((e) => e.key === 'type').value === 'custom'
+    },
     { label: t('robotFieldIkSettings'), key: 'ik_json', type: 'custom', value: '', default: '', optional: true,
         show: (form) => form.find((e) => e.key === 'type').value === 'custom'
     },

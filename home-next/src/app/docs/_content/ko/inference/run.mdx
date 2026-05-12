@@ -1,6 +1,6 @@
 ---
 title: 추론 실행
-description: Hz · Home Pose 귀환 · Succeed / OOD 모니터링.
+description: Hz · Home Pose 귀환 · Succeed 모니터링.
 section: inference
 order: 3
 sourceRefs:
@@ -20,15 +20,9 @@ lastVerifiedVersion: 0.0.0
      alt="MonitoringWindow inference — Hz / Home 배지 / Start·Stop 버튼 + 추론 중 카메라 뷰"
    />
 
-2. **상단 두 배지로 추론 품질을 모니터링합니다.**
-
-   <DocsImage
-     src="/docs/inference/run-02-succeed-ood.png"
-     alt="Succeed / OOD 배지 zoom"
-   />
+2. **상단의 Succeed 배지로 추론 품질을 모니터링합니다.**
 
    - **Succeed** — 0.7 이상이면 녹색. 학습된 성공 분포와 닮은 정도
-   - **OOD** — 1.0 초과면 빨강(주황은 경계). 분포 이탈 정도
 </Steps>
 
 ## reinference 주기
@@ -37,5 +31,5 @@ lastVerifiedVersion: 0.0.0
 재추론(reinference) 주기는 정책 학습 시 설정한 chunk_size와 추론 Hz의 관계로 결정됩니다.
 
 <Callout type="warning">
-OOD가 빨강이면 정책이 학습한 분포 밖이라는 뜻입니다. 동작이 안전해 보이더라도 즉시 멈추는 게 안전합니다. 데이터를 더 모으거나 OOD가 낮은 시점의 자세에서 다시 시도하세요.
+Succeed 점수가 낮게 유지되거나 동작이 학습 시연과 동떨어져 보이면 즉시 Stop을 누르고, 데이터를 더 모은 뒤 다시 시도하세요.
 </Callout>

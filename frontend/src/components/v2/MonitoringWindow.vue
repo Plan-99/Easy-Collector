@@ -1,7 +1,7 @@
 <template>
-    <div class="column full-height" :style="{ maxHeight: monitorOnly ? null : '700px' }">
+    <div class="column full-height border-rounded" :style="{ maxHeight: monitorOnly ? null : '700px' }">
         <TutorialHint v-if="!monitorOnly" :text="$t(monitoringHintKey)" class="q-mb-sm" />
-        <div class="bg-secondary border-rounded border-white column q-px-sm col">
+        <div class="bg-secondary border-rounded column q-px-sm col">
         <div :class="[monitorOnly ? 'col' : 'col-6', 'row flex felx-center q-col-gutter-x-sm']" v-if="sensors.length > 0">
             <div v-for="sensor in sensors" :key="sensor.id" class="col q-py-sm relative-position">
                 <web-rtc-video
@@ -175,18 +175,18 @@
                         ></q-btn>
                     </div>
                     <q-space class="col"></q-space>
-                    <div>
-                        <q-input
-                            v-model.number="hz"
-                            dense
-                            outlined
-                            dark
-                            bg-color="dark"
-                            :label="$t('frequencyHz')"
-                        >
-                        </q-input>
-                    </div>
-                    <div v-if="moveHomposeInDataCollection">
+                    <q-input
+                        v-model.number="hz"
+                        dense
+                        outlined
+                        dark
+                        bg-color="dark"
+                        :label="$t('frequencyHz')"
+                        type="number"
+                        :min="1"
+                        style="width: 90px"
+                    />
+                    <div v-if="moveHomposeInDataCollection" class="row q-gutter-x-sm">
                         <q-input
                             v-model.number="inferenceEpisodeLen"
                             dense
@@ -197,6 +197,15 @@
                             :min="1"
                             style="width: 110px"
                             :label="$t('inferenceEpisodeLen')"
+                        />
+                        <q-input
+                            v-model.number="moveHomposeDuration"
+                            dense outlined dark bg-color="dark"
+                            :label="$t('homeposeDurationSec')"
+                            style="width: 90px"
+                            type="number"
+                            :min="0.1"
+                            step="0.5"
                         />
                     </div>
                     <div>
@@ -241,7 +250,7 @@
                     <q-space v-else></q-space>
                     <q-badge
                         v-if="succeedScore !== null"
-                        :color="succeedScore > 0.7 ? 'green' : 'red'"
+                        :color="succeedScore > 0.7 ? 'green' : 'grey-5'"
                         :label="$t('succeedLabel', { score: succeedScore.toFixed(2) })"
                         class="q-mr-sm q-pa-sm text-bold"
                         outline
@@ -315,6 +324,16 @@
                         >
                             <q-tooltip>{{ $t('configureRos2Service') }}</q-tooltip>
                         </q-btn>
+                        <q-input
+                            v-if="moveHomposeInDataCollection"
+                            v-model.number="moveHomposeDuration"
+                            dense outlined dark bg-color="dark"
+                            :label="$t('homeposeDurationSec')"
+                            style="width: 90px"
+                            type="number"
+                            :min="0.1"
+                            step="0.5"
+                        />
                     </div>
                     <q-btn
                         color="red"
@@ -370,6 +389,7 @@
                     />
                     <div class="col q-pr-md">
                         <q-linear-progress
+                            v-if="!savingEpisode"
                             :value="collectingProgress"
                             color="primary"
                             track-color="black"
@@ -380,6 +400,14 @@
                                 <q-badge color="white" text-color="dark" :label="`${Number(collectingProgress * 100).toFixed(0)}%`" />
                             </div>
                         </q-linear-progress>
+                        <div
+                            v-else
+                            class="row items-center justify-center bg-dark text-white rounded-borders"
+                            style="height: 30px;"
+                        >
+                            <q-spinner-dots color="amber" size="22px" class="q-mr-sm" />
+                            <span class="text-caption">{{ $t('savingEpisode') }}<span v-if="savingEpisodeName"> — {{ savingEpisodeName }}</span></span>
+                        </div>
                     </div>
 
                     <q-btn
@@ -390,7 +418,7 @@
                         @click="setSucceed"
                         :disable="succeedFlag"
                         class="q-mr-sm"
-                    ></q-btn>
+                    ><q-tooltip>1 (or F)</q-tooltip></q-btn>
                     <q-btn
                         color="green"
                         text-color="white"
@@ -398,14 +426,14 @@
                         icon="check"
                         @click="completeEpisode"
                         class="q-mr-sm"
-                    ></q-btn>
+                    ><q-tooltip>2</q-tooltip></q-btn>
                     <q-btn
                         color="white"
                         text-color="red"
                         :label="$t('stopCollection')"
                         icon="stop"
                         @click="stopDataCollection"
-                    ></q-btn>
+                    ><q-tooltip>3</q-tooltip></q-btn>
                 </div>
             </div>
         </div>
@@ -666,9 +694,13 @@ function focusSensorRobot(device, type) {
 
 
 const collectingProgress = ref(0);
+const savingEpisode = ref(false);
+const savingEpisodeName = ref('');
 const showProcessConsole = ref(false);
 
 const moveHomposeInDataCollection = ref(false);
+// home pose 로 이동할 때 걸리는 시간(초). agent.move_to 의 duration 으로 그대로 전달.
+const moveHomposeDuration = ref(5);
 
 // home 버튼이 켜진 추론에서만 의미 있는 1 에피소드 길이. 기본값은 task의
 // episode_len * 2이지만 watch로 동기화 — props.workspace가 늦게 도착해도 잡힘.
@@ -752,6 +784,7 @@ function _doStartDataCollection(effectiveTeleType) {
         tele_type: effectiveTeleType,
         assembly_id: props.workspace.assembly_id,
         move_homepose: moveHomposeInDataCollection.value,
+        move_homepose_duration: Number(moveHomposeDuration.value) || 5.0,
         hz: collectionHz.value,
         language_instruction: languageInstruction.value || '',
     };
@@ -813,6 +846,25 @@ function robotForSide(side) {
     return leftArm.value || rightArm.value;
 }
 
+// 별도 그리퍼(role=tool) agent. arm이 tool_inner=false 인데 그리퍼를 함께 텔레옵하고
+// 싶을 때(예: fairino arm + robotiq) 키보드의 tool 축 입력을 이 agent로 라우팅한다.
+// assembly.{left,right}_tool 은 assembly_model.to_dict 가 각 part 마다 별도 dict 로
+// 만들어 보내서 handler 가 안 붙어있다 → props.robots(=handler 부착된 canonical
+// 목록) 에서 id 로 다시 찾는다. leftArm/rightArm 와 동일 패턴.
+function toolForSide(side) {
+    const resolve = (partKey) => {
+        const ref_ = assembly.value[partKey];
+        if (!ref_) return null;
+        return props.robots.find(r => r.id === ref_.id) || ref_;
+    };
+    const left = resolve('left_tool');
+    const right = resolve('right_tool');
+    if (isDualArm.value) {
+        return side === 'right' ? right : left;
+    }
+    return left || right;
+}
+
 function sendDelta(robot, eeDelta) {
     if (!robot?.handler?.moveRobotEEDelta) return;
     try {
@@ -863,13 +915,39 @@ const keyboardHandler = (event) => {
     const entry = map[normKey];
     if (!entry) return;
 
-    const robot = robotForSide(entry.side || 'left');
-    if (!robot) return;
+    const side = entry.side || 'left';
+    const robot = robotForSide(side);
 
     const idx = AXIS_TO_EE_INDEX[entry.axis];
     if (idx === undefined) return;
-    if (entry.axis === 'tool' && !robot.tool_inner) return;
 
+    // tool 축: arm 내장 그리퍼면 EE delta[6] 으로 packing, 별도 gripper agent 가
+    // 있으면 그 agent 의 joint delta 로 라우팅. 둘 다 없으면 무시.
+    if (entry.axis === 'tool') {
+        const delta = stepSize * (Number(entry.scale) || 1) * (Number(entry.sign) || 1);
+        if (robot && robot.tool_inner) {
+            const eeDelta = Array(7).fill(0);
+            eeDelta[idx] = delta;
+            sendDelta(robot, eeDelta);
+            event.preventDefault();
+            return;
+        }
+        const tool = toolForSide(side);
+        if (!tool || !tool.handler || !tool.handler.moveRobotJointDelta) return;
+        const len = Array.isArray(tool.joint_names) && tool.joint_names.length > 0
+            ? tool.joint_names.length : 1;
+        const jointDelta = Array(len).fill(0);
+        jointDelta[0] = delta;
+        try {
+            tool.handler.moveRobotJointDelta(jointDelta);
+        } catch (e) {
+            console.error('moveRobotJointDelta error', e);
+        }
+        event.preventDefault();
+        return;
+    }
+
+    if (!robot) return;
     const len = robot.tool_inner ? 7 : 6;
     if (idx >= len) return;
     const eeDelta = Array(len).fill(0);
@@ -907,8 +985,23 @@ function setSucceed() {
 }
 
 const succeedKeyHandler = (event) => {
-    if (event.key === 'f' || event.key === 'F') {
+    // 폼 입력 중일 땐 무시
+    const ae = document.activeElement;
+    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+    // 1 = Done (success/현재 episode를 성공으로 마크)
+    // 2 = Finish (현재 episode 저장 후 collection 종료)
+    // 3 = Stop (즉시 중단, 현재 episode 미저장)
+    // 'f' 는 기존 호환 유지 (= 1 과 동일)
+    const k = event.key;
+    if (k === '1' || k === 'f' || k === 'F') {
         setSucceed();
+        event.preventDefault();
+    } else if (k === '2') {
+        completeEpisode();
+        event.preventDefault();
+    } else if (k === '3') {
+        stopDataCollection();
+        event.preventDefault();
     }
 };
 
@@ -980,6 +1073,7 @@ function onInferenceSubmit(formData) {
         sensors: props.sensors,
         checkpoint: checkpoint.value,
         move_homepose: moveHomposeInDataCollection.value,
+        move_homepose_duration: Number(moveHomposeDuration.value) || 5.0,
         hz: hz.value,
         re_inference_steps: formData.re_inference_steps,
         temporal_ensemble_coeff: formData.re_inference_steps === 1 ? formData.temporal_ensemble_coeff : null,
@@ -1094,6 +1188,12 @@ onMounted(() => {
         succeedFlag.value = false;
     });
 
+    // lerobot_append_episode 저장 중 — progress bar 대신 spinner 보여주기 위한 신호.
+    socket.on('episode_saving', (data) => {
+        savingEpisode.value = !!data.saving;
+        savingEpisodeName.value = data.saving ? (data.name || '') : '';
+    });
+
     socket.on('inference_succeed', (data) => {
         inferenceSucceed.value = data.succeed;
         succeedScore.value = data.score;
@@ -1126,6 +1226,7 @@ onUnmounted(() => {
     socket.off('inference_succeed');
     socket.off('ood_score');
     socket.off('inference_progress');
+    socket.off('episode_saving');
     removeSucceedKeyListener();
 });
 </script>

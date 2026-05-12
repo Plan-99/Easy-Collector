@@ -6,10 +6,12 @@
 import { onMounted } from 'vue';
 import { useProcessStore } from 'src/stores/processStore';
 import { useTopicStore } from 'src/stores/topicStore';
+import { useModulesStore } from 'src/stores/modulesStore';
 import { api } from 'src/boot/axios';
 
 const processStore = useProcessStore();
 const topicStore = useTopicStore();
+const modulesStore = useModulesStore();
 
 function cleanup() {
   processStore.processIds.forEach((processId) => {
@@ -39,6 +41,12 @@ onMounted(() => {
     console.log('Topic store initialized');
   }).catch((error) => {
     console.error('Error initializing topic store:', error);
+  });
+
+  modulesStore.initialize().then(() => {
+    console.log('Modules store initialized');
+  }).catch((error) => {
+    console.error('Error initializing modules store:', error);
   });
 
   // onMounted(() => {

@@ -20,7 +20,7 @@ def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
 
 
 
-def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors, task, language_instruction, socketio_instance, task_control, tele_type='leader', ros2_service='', iter=100000, hz=20):
+def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors, task, language_instruction, socketio_instance, task_control, tele_type='leader', ros2_service='', iter=100000, hz=20, move_homepose_duration=5.0):
     agents = sorted(agents, key=lambda a: a.id)
     tutorial = any((s.get('settings') or {}).get('is_tutorial') for s in (sensors or []))
     env = Env(agents=agents, sensors=sensors, virtual_agents=(tele_type == 'vive_only'), tutorial=tutorial)
@@ -56,18 +56,23 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
             if task_control['stop']:
                 break
 
+            _outer_t0 = time.monotonic()
+            print(f"[record_episode/T] outer iter start", flush=True)
             task_control['episode_stop'] = False
             task_control['succeed'] = False
 
             # Tutorial mode: snap the MuJoCo world back to its home keyframe
             # at the start of every episode so each recording begins from the
-            # same arm pose AND cube location. No-op if the bundled sim isn't
-            # running, so non-tutorial collections are unaffected.
-            try:
-                from ..routes.tutorial import reset_tutorial_world
-                reset_tutorial_world()
-            except Exception as e:
-                print(f"[record_episode] tutorial reset skipped: {e}")
+            # same arm pose AND cube location.
+            # NOTE: tutorial 이 아닌데도 호출하면 mujoco reset_world ROS service 가
+            # 없어서 gRPC ROSProxy 가 ROS service 기본 timeout(=10초)을 다 채우고
+            # 실패한다 → episode 시작마다 10초 dead time. tutorial 일 때만 호출.
+            if tutorial:
+                try:
+                    from ..routes.tutorial import reset_tutorial_world
+                    reset_tutorial_world()
+                except Exception as e:
+                    print(f"[record_episode] tutorial reset skipped: {e}")
 
             ep_count = get_episode_count(dataset_dir)
             dataset_name = f"episode_{ep_count:06d}"
@@ -86,21 +91,43 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                 )
             home_pose = task.get('home_pose')
 
+            print(f"[record_episode/T] +{(time.monotonic()-_outer_t0)*1000:.0f}ms emit progress=0", flush=True)
             socketio_instance.emit('record_episode_progress', {
                 'progress': 0,
                 'type': 'stdout '
             })
 
+            _ep_t0 = time.monotonic()
             if move_homepose and tele_type not in ('externel', 'vive_only'):
+                print(f"[record_episode/T] +{(time.monotonic()-_outer_t0)*1000:.0f}ms emit moving_homepose=true", flush=True)
                 socketio_instance.emit('moving_homepose', {'moving': True})
-                for agent in agents:
+                # agent별 move_to + reset_ik_solver 를 thread_pool 로 동시 호출.
+                # 이전엔 sequential 이어서 agent마다 gRPC RPC(이전 thread cancel/join
+                # 0.5s 가능 + pinocchio reset 100-200ms) 가 누적 = "0% 후 dead time"
+                # 의 주요 원인이었다.
+                def _start_homepose(agent):
                     if tele_type == 'vive_external' and agent.role == 'tool':
-                        continue  # vive_external의 single_arm은 vive로 이동하므로 home_pose 이동 생략
+                        return
                     agent.move_lock = True
-                    agent.move_to(home_pose[str(agent.id)])
-
+                    _t_mv = time.monotonic()
+                    agent.move_to(home_pose[str(agent.id)], duration=move_homepose_duration)
+                    _t_mv = (time.monotonic() - _t_mv) * 1000
+                    _t_ik = 0.0
                     if agent.ik_solver is not None:
+                        _t = time.monotonic()
                         agent.reset_ik_solver(home_pose[str(agent.id)])
+                        _t_ik = (time.monotonic() - _t) * 1000
+                    print(f"[record_episode] agent {agent.id} move_to={_t_mv:.0f}ms "
+                          f"reset_ik={_t_ik:.0f}ms", flush=True)
+
+                _hp_futures = [thread_pool.submit(_start_homepose, a) for a in agents]
+                for _f in _hp_futures:
+                    try:
+                        _f.result(timeout=10.0)
+                    except Exception as _e:
+                        print(f"[record_episode] homepose start failed: {_e}", flush=True)
+                print(f"[record_episode] homepose dispatch total: "
+                      f"{(time.monotonic()-_ep_t0)*1000:.0f}ms", flush=True)
 
                 # is_moving 플래그로 도달 대기 (타임아웃 30초). move_to 가
                 # 비동기 thread 라 stop 신호 시 cancel_move_to 로 명시 중단해야
@@ -121,7 +148,6 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                         break
                     time.sleep(0.1)
                 socketio_instance.emit('moving_homepose', {'moving': False})
-                time.sleep(0.5)  # 안정화 대기
 
             else:
                 # move_homepose가 아니어도 IK solver 내부 상태를 현재 조인트에 동기화
@@ -130,9 +156,9 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                         js = agent.get_joint_states()
                         if js is not None:
                             agent.reset_ik_solver(js)
-                time.sleep(1)
-
-            time.sleep(2)
+            # NOTE: 이전엔 here 에 time.sleep(0.5) / 1 / 2 hard wait 가 있었는데,
+            # 다음 sensor 첫 프레임 polling / joint state 검증 단계가 어차피 대기를
+            # 강제하므로 redundant. 제거해서 record 시작 latency 단축.
             # --- motion_planning: ROS2 service 호출 (gRPC ROSProxy 경유) ---
             if tele_type == 'motion_planning' and ros2_service:
                 service_result = {'done': False, 'success': None, 'message': ''}
@@ -400,7 +426,10 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                     continue
 
             print(f'Saving Data: {dataset_name}')
+            # UI 가 progress bar 대신 로딩 화면을 띄울 수 있게 saving on/off 신호.
+            socketio_instance.emit('episode_saving', {'saving': True, 'name': dataset_name})
 
+            _save_t0 = time.monotonic()
             try:
                 # --- LeRobot 포맷으로 저장 ---
                 lerobot_append_episode(
@@ -416,6 +445,7 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                     fps=hz,
                 )
 
+                print(f"[record_episode/T] lerobot_append_episode took {(time.monotonic()-_save_t0)*1000:.0f}ms", flush=True)
                 print("Episode recording process ended.")
                 socketio_instance.emit('episode_saved', {'succeed': task_control.get('succeed', False)})
 
@@ -423,13 +453,16 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                 import traceback
                 print(f"[ERROR] Error during episode recording:\n{traceback.format_exc()}")
                 task_control['stop'] = True
+            finally:
+                socketio_instance.emit('episode_saving', {'saving': False})
+                print(f"[record_episode/T] emit episode_saving=false (total save {(time.monotonic()-_save_t0)*1000:.0f}ms)", flush=True)
 
-            # episode_complete로 조기 저장된 경우 전체 collection 종료
+            # Finish 버튼(=episode_complete) 는 "현재 에피소드 즉시 저장 후 다음 에피소드로
+            # 진행" 의미로 바꿈. 전체 collection 종료는 Stop 버튼(stop_collection 라우트)
+            # 에서만 일어난다. flag 만 reset 하고 outer loop 는 계속.
             if task_control.get('episode_complete'):
                 task_control['episode_complete'] = False
-                socketio_instance.emit('stop_process', {'id': 'record_episode', 'episode_saved': True})
-                print("Collection finished (episode completed early).")
-                break
+                print("Episode completed early — proceeding to next episode.")
 
     finally:
         # 0. move_lock 강제 해제 — home pose 이동 중 stop/error로 빠져나간 경우

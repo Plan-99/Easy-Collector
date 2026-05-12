@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
 """
 SDK Controller factory.
-로봇 SDK 컨트롤러를 타입별로 생성한다.
+로봇 SDK 컨트롤러를 sdk_type에 맞춰 동적으로 로드한다.
 
-사용자 모듈은 `ros2/robot_sdk/<id>/controller.py` 안에 BaseSDKController 서브클래스를
-넣으면 자동 인식된다. 모듈 이름이 sdk_type과 같거나, 파일에 `SDK_TYPE = "..."` 또는
-클래스에 `sdk_type = "..."` 어트리뷰트가 있으면 매칭.
+빌트인 컨트롤러는 두지 않는다. 모든 SDK 컨트롤러는 로봇 모듈 안에
+`<module>/sdk/controller.py` 형태로 들어가며, 설치되면
+`ros2/robot_sdk/<module_id>/controller.py`에 풀린다.
+
+controller.py에는 `SDK_TYPE = "..."` 상수와 `BaseSDKController` 서브클래스가
+있어야 한다. (SDK_TYPE이 없으면 폴더명을 fallback으로 사용한다.)
 """
 import os
 import sys
@@ -21,65 +24,74 @@ from .base import BaseSDKController
 sys.modules.setdefault('base', _base_mod)
 
 
-_BUILTIN: dict[str, str] = {
-    'piper': 'piper_controller.PiperSDKController',
-    'fairino': 'fairino_controller.FairinoSDKController',
-}
-
-
 def create_sdk_controller(sdk_type: str, config: dict) -> BaseSDKController:
     """sdk_type에 맞는 SDK 컨트롤러 인스턴스를 생성한다."""
-    cls = _resolve_builtin(sdk_type) or _resolve_user_module(sdk_type)
+    cls = _resolve(sdk_type)
     if cls is None:
         raise ValueError(f"Unknown SDK type: {sdk_type}")
     return cls(config)
 
 
-def _resolve_builtin(sdk_type: str) -> Optional[Type[BaseSDKController]]:
-    spec = _BUILTIN.get(sdk_type)
-    if not spec:
-        return None
-    mod_name, cls_name = spec.split('.')
-    mod = importlib.import_module(f'.{mod_name}', package=__package__)
-    return getattr(mod, cls_name)
+def _controller_dirs() -> list[str]:
+    """controller.py가 들어있을 수 있는 디렉터리 후보들.
 
-
-def _user_sdk_roots() -> list[str]:
-    """사용자 SDK 컨트롤러가 들어갈 수 있는 후보 디렉터리들."""
+    설치/런타임 레이아웃과 호스트 dev 트리(SoT) 둘 다 지원한다.
+    """
     here = os.path.dirname(os.path.abspath(__file__))
-    candidates = [
-        # 호스트 dev 트리: ros2/ros2_bridge/sdk_controllers → ../../robot_sdk
-        os.path.normpath(os.path.join(here, '..', '..', 'robot_sdk')),
-        # 컨테이너 마운트
-        '/root/robot_sdk',
-        # 영속 호스트 경로
-        '/opt/easytrainer/project/ros2/robot_sdk',
+    dirs: list[str] = []
+
+    # 설치 / 런타임: <robot_sdk>/<module_id>/controller.py
+    install_roots = [
+        os.path.normpath(os.path.join(here, '..', '..', 'robot_sdk')),  # 호스트 dev 트리의 설치 결과
+        '/root/robot_sdk',                                              # 컨테이너 마운트
+        '/opt/easytrainer/project/ros2/robot_sdk',                      # 호스트 영속 경로
     ]
-    return [p for p in candidates if os.path.isdir(p)]
-
-
-def _resolve_user_module(sdk_type: str) -> Optional[Type[BaseSDKController]]:
-    """`<root>/<id>/controller.py`를 스캔해 sdk_type이 일치하는 BaseSDKController 서브클래스를 반환."""
-    seen: set[str] = set()
-    for root in _user_sdk_roots():
+    for root in install_roots:
+        if not os.path.isdir(root):
+            continue
         try:
             for entry in os.listdir(root):
-                ctrl_path = os.path.join(root, entry, 'controller.py')
-                if entry in seen or not os.path.isfile(ctrl_path):
-                    continue
-                seen.add(entry)
-                cls = _load_controller(ctrl_path, entry, sdk_type)
-                if cls is not None:
-                    return cls
+                dirs.append(os.path.join(root, entry))
         except OSError:
             continue
+
+    # 호스트 dev 트리 (모듈 SoT): modules/<category>/<id>/sdk/controller.py
+    modules_root = os.path.normpath(os.path.join(here, '..', '..', '..', 'modules'))
+    if os.path.isdir(modules_root):
+        for category in ('robots', 'extensions'):
+            cat_dir = os.path.join(modules_root, category)
+            if not os.path.isdir(cat_dir):
+                continue
+            try:
+                for entry in os.listdir(cat_dir):
+                    dirs.append(os.path.join(cat_dir, entry, 'sdk'))
+            except OSError:
+                continue
+
+    return dirs
+
+
+def _resolve(sdk_type: str) -> Optional[Type[BaseSDKController]]:
+    """후보 디렉터리에서 SDK_TYPE이 일치하는 BaseSDKController 서브클래스를 찾는다."""
+    seen: set[str] = set()
+    for pkg_dir in _controller_dirs():
+        ctrl_path = os.path.join(pkg_dir, 'controller.py')
+        if not os.path.isfile(ctrl_path):
+            continue
+        key = os.path.realpath(ctrl_path)
+        if key in seen:
+            continue
+        seen.add(key)
+        cls = _load_controller(ctrl_path, sdk_type)
+        if cls is not None:
+            return cls
     return None
 
 
-def _load_controller(path: str, module_dir: str, sdk_type: str) -> Optional[Type[BaseSDKController]]:
+def _load_controller(path: str, sdk_type: str) -> Optional[Type[BaseSDKController]]:
     """controller.py 모듈을 임포트하고 sdk_type에 매칭되는 클래스를 찾는다."""
-    sdk_root = os.path.dirname(os.path.dirname(path))   # robot_sdk
-    pkg_dir = os.path.dirname(path)                     # robot_sdk/<id>
+    pkg_dir = os.path.dirname(path)
+    sdk_root = os.path.dirname(pkg_dir)
     here = os.path.dirname(os.path.abspath(__file__))   # ros2_bridge/sdk_controllers
     # 사용자 controller.py에서 `from base import BaseSDKController` 형태로
     # 임포트할 수 있도록 sdk_controllers/ 자체도 sys.path에 추가한다.
@@ -87,7 +99,10 @@ def _load_controller(path: str, module_dir: str, sdk_type: str) -> Optional[Type
         if p not in sys.path:
             sys.path.insert(0, p)
 
-    spec_name = f'_easytrainer_user_sdk__{module_dir}'
+    # 같은 spec name이 robot_sdk/와 modules/ dev 트리에서 충돌하지 않도록
+    # 디렉터리 경로 일부를 포함한 고유 이름을 만든다.
+    tag = '__'.join(os.path.normpath(pkg_dir).strip(os.sep).split(os.sep)[-3:])
+    spec_name = f'_easytrainer_user_sdk__{tag}'
     spec = importlib.util.spec_from_file_location(spec_name, path)
     if spec is None or spec.loader is None:
         return None
@@ -101,7 +116,7 @@ def _load_controller(path: str, module_dir: str, sdk_type: str) -> Optional[Type
         print(f"[sdk_controllers] failed to import {path}: {e}", flush=True)
         return None
 
-    declared = getattr(module, 'SDK_TYPE', None) or module_dir
+    declared = getattr(module, 'SDK_TYPE', None) or os.path.basename(pkg_dir)
     if declared != sdk_type:
         return None
 

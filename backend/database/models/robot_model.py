@@ -43,6 +43,7 @@ class Robot(SoftDeleteModel):
         'ik_available',
         'is_sim',
         'interpolation',
+        'interpolation_hz',
         'sdk_control',
         'sdk_type',
     ]
@@ -165,6 +166,13 @@ class Robot(SoftDeleteModel):
         if self.type != 'custom':
             return self.get_robot_type_info().get('interpolation', False)
         return self._settings.get('interpolation', False)
+
+    @property
+    def interpolation_hz(self):
+        """module.json driver.interpolation_hz. 미지정 시 None → interpolation_node default 사용."""
+        if self.type != 'custom':
+            return self.get_robot_type_info().get('interpolation_hz')
+        return self._settings.get('interpolation_hz')
 
     @property
     def sdk_control(self):

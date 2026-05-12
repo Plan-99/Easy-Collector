@@ -3,30 +3,32 @@
 Piper SDK Controller.
 piper_sdk를 사용하여 Piper 로봇을 직접 제어한다.
 ROS2 드라이버 없이 CAN 통신으로 직접 관절 제어/상태 읽기.
+
+EasyTrainer의 sdk_controllers dispatcher가 SDK_TYPE 상수를 보고 이 파일을 매칭한다.
 """
-import sys
-import os
 import math
+import os
+import sys
 import time
 from typing import Optional
 
-from .base import BaseSDKController
+try:
+    from base import BaseSDKController  # sdk_controllers/base.py가 sys.path에 추가됨
+except ImportError:
+    # dispatcher가 BaseSDKController를 모듈 글로벌에 주입하므로 import 없이도 동작.
+    BaseSDKController = BaseSDKController  # type: ignore[name-defined]
 
-# piper SDK를 import path에 추가.
-# 컨테이너에서는 모듈 인스톨러가 /root/robot_sdk/piper_sdk/로 풀어두고,
-# 호스트 dev 트리에서는 modules/robots/piper/sdk/piper_sdk 가 단일 출처(SoT)다.
-# pip install -e 로 site-packages에 link되면 path 추가 없이도 `import piper_sdk`가
-# 동작하지만, link가 누락된 환경(개발 머신·새 컨테이너)을 위해 fallback 경로를 둔다.
-# 모두 setup.py가 있는 디렉토리를 가리켜야 그 안의 piper_sdk/ 패키지를 import할 수 있다.
-_SDK_PATHS = [
-    '/root/robot_sdk/piper',                                              # 컨테이너 마운트 (모듈 install target)
-    os.path.join(os.path.dirname(__file__), '..', '..', '..', 'modules', 'robots', 'piper', 'sdk'),  # dev 트리 (modules SoT)
-    '/opt/easytrainer/project/ros2/robot_sdk/piper',                      # 호스트 영속 경로 (모듈 설치 결과)
-]
-for _p in _SDK_PATHS:
-    if os.path.isdir(_p) and _p not in sys.path:
-        sys.path.insert(0, _p)
-        break
+
+SDK_TYPE = "piper"
+
+# piper_sdk 패키지는 controller.py와 같은 디렉터리에 위치한다.
+# - dev 트리:     modules/robots/piper/sdk/{controller.py, piper_sdk/, setup.py, ...}
+# - 설치 후:      ros2/robot_sdk/robot_piper/{controller.py, piper_sdk/, setup.py, ...}
+# `pip install -e .`로 site-packages에 link되면 path 추가 없이도 import 가능하지만,
+# link가 누락된 환경(개발 머신·새 컨테이너)을 위해 fallback으로 sys.path에 추가한다.
+_SDK_PATH = os.path.dirname(os.path.abspath(__file__))
+if os.path.isdir(_SDK_PATH) and _SDK_PATH not in sys.path:
+    sys.path.insert(0, _SDK_PATH)
 
 # radian ↔ 0.001° 변환 계수
 _RAD_TO_MILLIDEG = 180.0 / math.pi * 1000.0  # ≈ 57295.78

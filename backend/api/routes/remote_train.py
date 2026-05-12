@@ -471,6 +471,39 @@ def _download_and_install_model(server_url, job_id, checkpoint_id):
             pass
 
 
+def _trigger_ood_features(checkpoint, socketio_instance, log_id):
+    """학습 직후 OOD reference feature를 비동기로 생성.
+
+    실패해도 학습 결과(STATUS_FINISHED)에는 영향을 주지 않는다. ORM row의
+    lazy-loaded 관계(policy, task)는 메인 thread에서 미리 dict로 스냅샷한 뒤
+    worker thread로 넘겨, scheduler가 row를 detach해도 안전하게 동작하게 한다.
+    """
+    import threading
+
+    try:
+        checkpoint_dict = checkpoint.to_dict()
+        policy_dict = checkpoint.policy.to_dict() if checkpoint.policy else {}
+        task_dict = checkpoint.task.to_dict() if checkpoint.task else {}
+    except Exception as e:
+        _emit_log(socketio_instance, log_id,
+                  f'[OOD WARNING] Failed to snapshot checkpoint: {e}', 'warning')
+        return
+
+    def _worker():
+        try:
+            from ..process.generate_ood_features import generate_ood_features
+            _emit_log(socketio_instance, log_id,
+                      '[OOD] Generating reference features...', 'success')
+            generate_ood_features(checkpoint_dict, policy_dict, task_dict)
+            _emit_log(socketio_instance, log_id,
+                      '[OOD] Reference features generated.', 'success')
+        except Exception as e:
+            _emit_log(socketio_instance, log_id,
+                      f'[OOD WARNING] {e}', 'warning')
+
+    threading.Thread(target=_worker, daemon=True, name='ood_features').start()
+
+
 def run_training_job(checkpoint, server_url, callback_url,
                       stop_event, socketio_instance):
     """Pure execution function: dataset upload → start → poll → download model.
@@ -636,6 +669,7 @@ def run_training_job(checkpoint, server_url, callback_url,
                 try:
                     _download_and_install_model(server_url, job_id, checkpoint_id)
                     _emit_log(socketio_instance, log_id, '[SUCCESS] Model installed.', 'success')
+                    _trigger_ood_features(checkpoint, socketio_instance, log_id)
                     return CheckpointModel.STATUS_FINISHED
                 except Exception as e:
                     traceback.print_exc()

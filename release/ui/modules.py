@@ -889,7 +889,17 @@ def _install_robot_sensor_module(tar_path: str, module_id: str) -> None:
                     continue
                 dst = sdk_target / item.name
                 if dst.exists():
-                    shutil.rmtree(dst) if dst.is_dir() else dst.unlink()
+                    # 컨테이너가 root로 생성한 __pycache__ / .egg-info가 남아있으면
+                    # 호스트 launcher가 PermissionError로 막힌다 → docker exec rm으로 fallback.
+                    try:
+                        shutil.rmtree(dst) if dst.is_dir() else dst.unlink()
+                    except PermissionError:
+                        import subprocess as _sp
+                        container_path = f"/root/robot_sdk/{module_id}/{item.name}"
+                        _sp.run(["docker", "exec", _ROS2_CONTAINER, "rm", "-rf", container_path],
+                                check=False, timeout=10)
+                        if dst.exists():
+                            _sp.run(["sudo", "rm", "-rf", str(dst)], check=False, timeout=10)
                 shutil.copytree(item, dst) if item.is_dir() else shutil.copy2(item, dst)
 
         # Copy module.json into ros2 target for dependency resolution.

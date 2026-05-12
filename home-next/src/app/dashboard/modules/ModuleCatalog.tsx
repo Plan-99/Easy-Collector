@@ -26,6 +26,7 @@ const MODULE_IMAGE: Record<string, string> = {
   robot_unitree: "/modules/unitree.png",
   robot_rbpodo: "/modules/rainbow.png",
   robot_kinova: "/modules/kinova.png",
+  robot_fairino: "/modules/fairino.png",
   gripper_robotiq: "/modules/robotiq.png",
   gripper_onrobot: "/modules/onrobot.png",
   gripper_generic: "/modules/custom.png",

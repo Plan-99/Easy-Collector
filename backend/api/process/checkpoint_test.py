@@ -29,20 +29,32 @@ import gc
 import threading
 
 
-def _move_to_homepose(agents, home_pose, task_control, socketio_instance, timeout=30.0):
+def _move_to_homepose(agents, home_pose, task_control, socketio_instance, timeout=30.0, duration=5.0):
     """home_pose가 None이거나 매핑이 없으면 즉시 리턴.
 
-    record_episode와 동일 패턴: agent.is_moving 폴링 + 안정화 대기.
     moving_homepose 이벤트로 프론트엔드 오버레이를 켰다 끈다.
+
+    NOTE: 이전엔 폴링 후 `time.sleep(0.5)` 안정화 + sequential move_to 호출이 있었는데,
+    호출 측에서 어차피 wait_for_images + joint_states polling 으로 자연 대기하므로
+    redundant. agent.move_to 는 thread_pool로 동시 호출해 RPC 누적 시간을 단축.
     """
     if home_pose is None:
         return
     socketio_instance.emit('moving_homepose', {'moving': True})
     try:
-        for agent in agents:
-            target = home_pose.get(str(agent.id))
-            if target is not None:
-                agent.move_to(target)
+        # agent별 move_to를 동시 호출 (sequential RPC 누적 방지)
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=max(1, len(agents))) as _pool:
+            _futs = []
+            for agent in agents:
+                target = home_pose.get(str(agent.id))
+                if target is not None:
+                    _futs.append(_pool.submit(agent.move_to, target, duration=duration))
+            for _f in _futs:
+                try:
+                    _f.result(timeout=5.0)
+                except Exception as _e:
+                    print(f"[checkpoint_test] move_to dispatch failed: {_e}", flush=True)
         start_wait = time.time()
         while time.time() - start_wait < timeout:
             if task_control.get('stop'):
@@ -56,7 +68,6 @@ def _move_to_homepose(agents, home_pose, task_control, socketio_instance, timeou
             if not any(a.is_moving for a in agents):
                 break
             time.sleep(0.1)
-        time.sleep(0.5)  # 안정화 대기 (record_episode와 동일)
     finally:
         socketio_instance.emit('moving_homepose', {'moving': False})
 
@@ -72,6 +83,7 @@ def checkpoint_test(
     task_control,
     max_timesteps,
     move_homepose=False,
+    move_homepose_duration=5.0,
     hz=10,
     re_inference_steps=1,
     temporal_ensemble_coeff=0.01,
@@ -294,7 +306,7 @@ def checkpoint_test(
 
         policy.reset()
         if go_home_first:
-            _move_to_homepose(env.agents, home_pose, task_control, socketio_instance)
+            _move_to_homepose(env.agents, home_pose, task_control, socketio_instance, duration=move_homepose_duration)
             if task_control['stop']:
                 return
             print('Robot moved to homepose')
@@ -331,7 +343,7 @@ def checkpoint_test(
                 policy.reset()
                 rel_action_queue.clear()
                 pi05_chunk_queue.clear()  # PI0.5 chunk queue도 reset 시 비우기
-                _move_to_homepose(env.agents, home_pose, task_control, socketio_instance)
+                _move_to_homepose(env.agents, home_pose, task_control, socketio_instance, duration=move_homepose_duration)
                 if task_control['stop']:
                     return
                 ts = env.reset()

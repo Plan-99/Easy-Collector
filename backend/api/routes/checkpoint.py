@@ -103,6 +103,7 @@ def start_test(id):
         socketio_instance=current_app.pm.socketio,
         name=f"checkpoint_test",
         move_homepose=data.get('move_homepose', False),
+        move_homepose_duration=float(data.get('move_homepose_duration') or 5.0),
         hz=data.get('hz', 10),
         re_inference_steps=data.get('re_inference_steps', 1),
         temporal_ensemble_coeff=data.get('temporal_ensemble_coeff', 0.01),

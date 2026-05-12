@@ -79,6 +79,9 @@ def start_robot():
     if robot_model:
         robot_dict = robot_model.to_dict()
         settings['interpolation'] = robot_dict.get('interpolation', False)
+        # module.json driver.interpolation_hz (없으면 None → interp_node default 200Hz).
+        if robot_dict.get('interpolation_hz') is not None:
+            settings['interpolation_hz'] = robot_dict.get('interpolation_hz')
         settings['write_topic'] = robot_dict.get('write_topic', '')
         settings['sdk_control'] = robot_dict.get('sdk_control', False)
         settings['sdk_type'] = robot_dict.get('sdk_type', '')

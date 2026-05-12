@@ -1,10 +1,10 @@
 <template>
-    <q-page class="q-pt-lg full-height column q-pr-lg">
-        <div class="border-rounded bg-secondary q-pa-lg q-mb-lg row">
+    <q-page class="q-pt-md full-height column q-pr-md">
+        <div class="border-rounded bg-secondary q-pa-md q-mb-md row">
             <q-img src="images/robot1.png" style="width: 100px" class="q-mr-xl"></q-img>
             <div>
                 <div class="row">
-                    <div class="text-h5 text-primary text-bold q-mb-lg">{{ $t('trainIntroTitle') }}</div>
+                    <div class="text-h5 text-primary text-bold q-mb-md">{{ $t('trainIntroTitle') }}</div>
                     <q-select
                         dense
                         outlined
@@ -14,7 +14,7 @@
                         :options="workspaces"
                         :label="$t('workspaceSelectLabel')"
                         style="width: 400px"
-                        class="q-ml-lg"
+                        class="q-ml-md"
                         map-options
                         emit-value
                         option-label="name"
@@ -29,7 +29,7 @@
 
         <TutorialHint class="q-mb-md" :text="$t('tutorialTrainIntro')" />
 
-        <div class="col q-mb-lg border-rounded border-grey text-grey flex-center flex text-h6" v-if="!selectedWorkspaceId">
+        <div class="col q-mb-md border-rounded border-grey text-grey flex-center flex text-h6" v-if="!selectedWorkspaceId">
             {{ $t('selectWorkspaceFirst') }}
         </div>
         <q-stepper v-model="step" ref="stepper" animated dark v-else flat class="col" active-color="accent" done-color="accent" >
@@ -38,7 +38,7 @@
                 :title="$t('trainStep1Title')"
                 icon="collections_bookmark"
                 :done="step > 1"
-                class="border-white border-rounded q-mt-lg bg-secondary col"
+                class="border-white border-rounded q-mt-md bg-secondary col"
             >
                 <div class="text-h6 q-mb-md">{{ $t('trainStep1Heading') }}</div>
                 <TutorialHint step="1" class="q-mb-md" :text="$t('tutorialTrainStep1')" />
@@ -83,7 +83,7 @@
                 :title="$t('trainStep2Title')"
                 icon="policy"
                 :done="step > 2"
-                class="border-white border-rounded q-mt-lg bg-secondary col"
+                class="border-white border-rounded q-mt-md bg-secondary col"
             >
                 <div class="text-h6 q-mb-md">{{ $t('trainStep2Heading') }}</div>
                 <TutorialHint step="2" class="q-mb-md" :text="$t('tutorialTrainStep2')" />
@@ -302,7 +302,7 @@
                 :name="3"
                 :title="$t('trainStep3Title')"
                 icon="model_training"
-                class="border-white border-rounded q-mt-lg bg-secondary col"
+                class="border-white border-rounded q-mt-md bg-secondary col"
 
             >
                 <div class="text-h6 q-mb-md">{{ $t('trainStep3Heading') }}</div>

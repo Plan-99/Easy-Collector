@@ -124,6 +124,18 @@ function robotForSide(side) {
     return leftArm.value || rightArm.value
 }
 
+// 별도 그리퍼(role=tool) agent. arm이 tool_inner=false 인데 그리퍼를 함께 텔레옵하고
+// 싶을 때(예: fairino arm + robotiq) 키보드의 tool 축 입력을 이 agent로 라우팅한다.
+function toolForSide(side) {
+    const left = props.assembly.left_tool || null
+    const right = props.assembly.right_tool || null
+    if (isDualArm.value) {
+        return side === 'right' ? right : left
+    }
+    // 단일 팔: 어느 쪽 키 binding 이든 존재하는 tool 로 fallback.
+    return left || right
+}
+
 function toggleRobot(robot) {
     if (!robot.handler) return
     if (robot.status === 'on') {
@@ -232,12 +244,51 @@ function keyboardHandler(event) {
 
     const side = entry.side || 'left'
     const robot = robotForSide(side)
-    if (!robot) return
 
     const idx = AXIS_TO_EE_INDEX[entry.axis]
     if (idx === undefined) return
-    if (entry.axis === 'tool' && !robot.tool_inner) return
 
+    // tool 축: arm 내장 그리퍼면 EE delta[6] 으로 packing, 별도 gripper agent 가
+    // 있으면 그 agent 의 joint delta 로 라우팅. 둘 다 없으면 무시.
+    if (entry.axis === 'tool') {
+        const delta = stepSize * (Number(entry.scale) || 1) * (Number(entry.sign) || 1)
+        if (robot && robot.tool_inner) {
+            const eeDelta = Array(7).fill(0)
+            eeDelta[idx] = delta
+            sendDelta(robot, eeDelta)
+            pushLog(t('teleopLogKeyDelta', {
+                side, name: robot.name,
+                key: displayKey(normKey), axis: entry.axis,
+                sign: entry.sign > 0 ? '+' : '-',
+                delta: eeDelta[idx].toFixed(5),
+            }))
+            event.preventDefault()
+            return
+        }
+        const tool = toolForSide(side)
+        if (!tool || !tool.handler || !tool.handler.moveRobotJointDelta) return
+        const len = Array.isArray(tool.joint_names) && tool.joint_names.length > 0
+            ? tool.joint_names.length : 1
+        const jointDelta = Array(len).fill(0)
+        jointDelta[0] = delta  // 단일 knuckle / 단일 finger joint 가정
+        try {
+            tool.handler.moveRobotJointDelta(jointDelta)
+        } catch (e) {
+            pushLog(t('teleopLogSendError', { name: tool.name, error: e.message }), 'error')
+            return
+        }
+        pushLog(t('teleopLogKeyDelta', {
+            side, name: tool.name,
+            key: displayKey(normKey), axis: entry.axis,
+            sign: entry.sign > 0 ? '+' : '-',
+            delta: delta.toFixed(5),
+        }))
+        event.preventDefault()
+        return
+    }
+
+    // 비-tool 축: 기존 EE delta 경로
+    if (!robot) return
     const len = robot.tool_inner ? 7 : 6
     if (idx >= len) return
     const eeDelta = Array(len).fill(0)

@@ -1,7 +1,7 @@
 {
   "id": "sensor_realsense",
   "name": "Intel RealSense",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "category": "sensor",
   "description": "Intel RealSense 색상 카메라 (D435 / D405 — 색상 스트림 사용).",
   "install": {
@@ -31,7 +31,7 @@
         "read_topic": "/camera/color/image_raw/compressed",
         "read_topic_msg": "sensor_msgs/CompressedImage",
         "custom_fields": ["serial_number"],
-        "resolution": [1280, 720]
+        "resolution": [640, 480]
       },
       "driver": {
         "kind": "topic",

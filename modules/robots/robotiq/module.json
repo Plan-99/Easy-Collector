@@ -1,9 +1,9 @@
 {
   "id": "gripper_robotiq",
   "name": "Robotiq Gripper",
-  "version": "1.1.1",
+  "version": "1.2.2",
   "category": "robot",
-  "description": "Robotiq 그리퍼 드라이버",
+  "description": "Robotiq 2F-85 / 2F-140 그리퍼 (pyRobotiqGripper Modbus RTU SDK 직접 제어). ROS action 경유 없이 USB/RS485 직렬로 바로 명령.",
   "install": {
     "ros2": {
       "target": "ros2/ros2_ws/src",
@@ -14,10 +14,12 @@
     }
   },
   "dependencies": {
-    "apt": [
-      "ros-humble-ros2-control"
-    ],
-    "pip": []
+    "apt": [],
+    "pip": [
+      "pyRobotiqGripper>=2.0,<3.0",
+      "pymodbus>=3.12.1,<4.0",
+      "pyserial>=3.5,<4.0"
+    ]
   },
   "check": {
     "type": "path"
@@ -40,25 +42,17 @@
         ],
         "tool_inner": false,
         "tool_index": [],
+        "ik_available": false,
         "custom_fields": [
           "serial_port"
         ]
       },
       "driver": {
-        "kind": "action",
-        "read_topic": "/joint_states",
-        "read_topic_msg": "sensor_msgs/JointState",
-        "write_type": "action",
-        "write_topic": "/robotiq_gripper_controller/gripper_cmd",
-        "write_topic_msg": "control_msgs/action/GripperCommand",
-        "launch": {
-          "package": "robotiq_description",
-          "launch_file": "robotiq_control.launch.py",
-          "args": {
-            "namespace": "{namespace}",
-            "com_port": "{serial_port|/dev/ttyUSB0}"
-          }
-        }
+        "kind": "sdk",
+        "interpolation": true,
+        "interpolation_hz": 5,
+        "sdk_control": true,
+        "sdk_type": "robotiq"
       }
     }
   ]

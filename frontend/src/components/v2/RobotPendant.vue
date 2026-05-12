@@ -146,9 +146,6 @@ function jointReading(i) {
 }
 
 function moveOneJoint(index, delta) {
-    if (props.robot.role === 'tool') {
-        delta = 0.12 * (delta > 0 ? 1 : -1)
-    }
     const deltaAction = new Array(props.robot.joint_names.length).fill(0)
     deltaAction[index] = delta
     props.robot.handler.moveRobotJointDelta(deltaAction)
@@ -159,8 +156,6 @@ function moveOneEE(tool_index, p_index, delta) {
         delta = delta * 1
     } else if (p_index < 6) {
         delta = delta * 4
-    } else {
-        delta = 0.12 * (delta > 0 ? 1 : -1)
     }
     const deltaPos = {}
     const toolName = props.robot.role === 'dual_arm' ? (tool_index === 0 ? 'L_ee' : 'R_ee') : 'ee'

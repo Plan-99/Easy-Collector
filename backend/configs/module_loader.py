@@ -166,6 +166,24 @@ def load_all_sensors() -> list[dict]:
     return out
 
 
+def load_installed_modules() -> list[dict]:
+    """설치된 모듈 manifest 목록을 lightweight 형태로 반환.
+
+    프론트엔드는 이 목록을 받아 `id` 기반으로 extension 별 UI 노출 여부를 판단한다.
+    경로/드라이버 같은 내부 디테일은 생략하고 표시에 필요한 필드만 추린다.
+    """
+    out: list[dict] = []
+    for manifest in _iter_manifests():
+        out.append({
+            'id': manifest.get('id'),
+            'name': manifest.get('name'),
+            'version': manifest.get('version'),
+            'category': manifest.get('category'),
+            'description': manifest.get('description'),
+        })
+    return out
+
+
 def get_default_ee_definitions(robot_type: str) -> list[dict]:
     """frontend RobotPage 의 IK 폼 default 표시용. 각 정의는
     {name, parent, offset} dict. offset 은 list 또는 None."""

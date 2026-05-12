@@ -60,9 +60,41 @@ class RemoteAgent:
         )
         self._agent_id = result.id
 
+        # custom robot + interpolation=True 면 ec_joint_cmd → write_topic 으로
+        # 200Hz 보간 publish 해줄 standalone interpolation_node 가 필요하다.
+        # (빌트인 robot 은 StartRobotDriver 안에서 자동 기동되므로 여기서 안 띄움.)
+        self._interp_started = False
+        if (self.robot_type == 'custom'
+                and bool(robot.get('interpolation'))
+                and (robot.get('write_topic') or '')):
+            try:
+                # robot.interpolation_hz 가 명시되면 노드 publish_rate 로 전달.
+                # 미지정/0 이면 0.0 을 보내고 interpolation_node 의 default(200Hz)가 적용.
+                interp_hz = robot.get('interpolation_hz') or 0
+                client.driver.StartInterpolation(pb.InterpolationConfig(
+                    robot_id=int(self.id),
+                    output_topic=robot.get('write_topic') or '',
+                    output_msg_type=robot.get('write_topic_msg')
+                                    or 'sensor_msgs/JointState',
+                    publish_rate=float(interp_hz),
+                ))
+                self._interp_started = True
+            except Exception as e:
+                print(f"[RemoteAgent] StartInterpolation failed for "
+                      f"robot {self.id}: {e}", flush=True)
+
     def destroy(self):
         try:
             client = get_bridge_client()
+            if self._interp_started:
+                try:
+                    client.driver.StopInterpolation(
+                        pb.ProcessId(name=f'interp_{int(self.id)}')
+                    )
+                except Exception as e:
+                    print(f"[RemoteAgent] StopInterpolation failed for "
+                          f"robot {self.id}: {e}", flush=True)
+                self._interp_started = False
             client.agent.DestroyAgent(pb.AgentId(id=self._agent_id))
         except Exception as e:
             print(f"[RemoteAgent] destroy error: {e}")

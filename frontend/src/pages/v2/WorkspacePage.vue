@@ -1,6 +1,6 @@
 <template>
-    <q-page class="q-pt-lg q-pr-lg full-height column">
-        <div class="border-rounded bg-secondary q-pa-lg q-mb-lg row">
+    <q-page class="q-pt-md q-pr-md full-height column">
+        <div class="border-rounded bg-secondary q-pa-md q-mb-md row">
             <q-img src="images/robot1.png" style="width: 100px" class="q-mr-xl"></q-img>
             <div>
                 <!-- <div class="float-right">
@@ -20,7 +20,7 @@
                     </div>
                 </div> -->
                 <div class="row">
-                    <div class="text-h5 text-primary text-bold q-mb-lg">{{ $t('workspaceIntroTitle') }}</div>
+                    <div class="text-h5 text-primary text-bold q-mb-md">{{ $t('workspaceIntroTitle') }}</div>
                     <q-select
                         dense
                         outlined
@@ -30,7 +30,7 @@
                         :options="workspaces"
                         :label="$t('workspaceSelectLabel')"
                         style="width: 400px"
-                        class="q-ml-lg"
+                        class="q-ml-md"
                         map-options
                         emit-value
                         option-label="name"
@@ -63,11 +63,11 @@
 
         <TutorialHint class="q-mb-md" :text="$t('tutorialWorkspaceIntro')" />
 
-        <div class="col q-mb-lg border-rounded border-grey text-grey flex-center flex text-h6" v-if="!selectedWorkspaceId">
+        <div class="col q-mb-md border-rounded border-grey text-grey flex-center flex text-h6" v-if="!selectedWorkspaceId">
             {{ $t('selectWorkspaceFirst') }}
         </div>
-        <div class="col row q-mb-lg" v-else>
-            <div class="col-3 bg-secondary q-mr-lg border-rounded q-pa-sm" v-if="status === 'pending'">
+        <div class="col row q-mb-md" v-else>
+            <div class="col-3 bg-secondary q-mr-md border-rounded q-pa-sm" v-if="status === 'pending'">
                 <q-tabs
                     dense
                     v-model="selectedTab"
@@ -283,8 +283,12 @@
                                     });"
                                 ></q-select>
                             </div>
-                            <div class="q-mt-md q-pa-sm border-rounded bg-grey-10">
-                                <div class="row items-center q-mb-xs">
+                            <div
+                                v-if="modulesStore.has('sam3')"
+                                class="col-12 q-mt-md q-pt-sm"
+                                style="border-top: 1px solid rgba(255,255,255,0.12);"
+                            >
+                                <div class="row items-center q-mb-sm">
                                     <q-icon name="auto_fix_high" class="q-mr-xs" />
                                     <div class="text-caption text-bold">{{ $t('workspaceSam3Title') }}</div>
                                     <q-space />
@@ -438,7 +442,7 @@
                                 header-class="text-white"
                             >
                                 <template v-slot:header>
-                                    <q-icon name="folder" class="q-mr-lg" size="lg"></q-icon>
+                                    <q-icon name="folder" class="q-mr-md" size="lg"></q-icon>
                                     <div class="col">
                                         <div>{{ dataset.name }} ({{ dataset.id }})</div>
                                         <div class="text-caption">{{ dataset.episodes.length }} episodes</div>
@@ -531,12 +535,6 @@
                                             <q-item-section>{{ $t('workspaceCheckpointEdit') }}</q-item-section>
                                             <q-item-section side>
                                                 <q-icon name="edit" size="xs" />
-                                            </q-item-section>
-                                        </q-item>
-                                        <q-item clickable v-ripple v-close-popup @click="generateOodFeatures(checkpoint)">
-                                            <q-item-section>{{ $t('workspaceCheckpointOod') }}</q-item-section>
-                                            <q-item-section side>
-                                                <q-icon name="analytics" size="xs" />
                                             </q-item-section>
                                         </q-item>
                                         <q-item clickable v-ripple v-close-popup @click="exportCheckpoint(checkpoint)">
@@ -693,7 +691,7 @@
                     />
                 </q-card-section>
                 <q-card-section class="bg-secondary q-px-xl q-pt-none" align="right">
-                    <div>{{ $t('checkpointLossEpoch', { loss: selectedCheckpoint.loss.toFixed(4), epoch: selectedCheckpoint.best_epoch }) }}</div>
+                    <div>{{ $t('checkpointLossEpoch', { loss: selectedCheckpoint.loss?.toFixed(4) ?? '-', epoch: selectedCheckpoint.best_epoch ?? '-' }) }}</div>
                 </q-card-section>
             </q-card>
         </q-dialog>
@@ -711,12 +709,14 @@ import { useI18n } from 'vue-i18n';
 import DataAugmentationDialog from 'src/components/v2/DataAugmentationDialog.vue';
 import { useSocket } from 'src/composables/useSocket.js';
 import { useProcessStore } from 'src/stores/processStore';
+import { useModulesStore } from 'src/stores/modulesStore';
 import MonitoringWindow from 'src/components/v2/MonitoringWindow.vue';
 import CheckpointInfo from 'src/components/v2/CheckpointInfo.vue';
 import WebRtcVideo from 'src/components/v2/WebRtcVideo.vue';
 import TutorialHint from 'src/components/v2/TutorialHint.vue';
 
 const processStore = useProcessStore();
+const modulesStore = useModulesStore();
 
 const { socket } = useSocket();
 
@@ -1198,14 +1198,6 @@ function openCheckpointForm(checkpoint) {
         field.value = checkpoint[field.key] || field.default;
     });
 }
-function generateOodFeatures(checkpoint) {
-    api.post(`/checkpoint/${checkpoint.id}/:generate_ood_features`).then(() => {
-        Notify.create({ color: 'positive', message: t('workspaceOodStarted') });
-    }).catch((err) => {
-        Notify.create({ color: 'negative', message: t('workspaceOodFailed', { error: err }) });
-    });
-}
-
 async function exportCheckpoint(checkpoint) {
     Loading.show({ message: t('workspaceCheckpointExporting', { name: checkpoint.name }) });
     try {

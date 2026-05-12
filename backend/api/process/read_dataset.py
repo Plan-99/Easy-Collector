@@ -175,6 +175,15 @@ def read_dataset(node, episode_path, socketio_instance, sid, task_control, move_
         loop_start = max(1, int(start_frame or 0))
         if loop_start >= total_steps:
             loop_start = 1
+
+        # 재생할 프레임이 없거나(예: num_frames==1) start_frame이 끝에 닿아 루프가
+        # 빈 경우에도 viewer 가 비어 보이지 않도록 가용한 프레임 하나를 정적으로 emit.
+        if loop_start >= total_steps:
+            preview_idx = max(0, total_steps - 1)
+            _encode_and_emit(preview_idx, dict(config))
+            socketio_instance.emit('replay_progress', {'progress': 1.0})
+            break
+
         for i in range(loop_start, total_steps):
             now = time.time()
             dt = now - last_tick_time

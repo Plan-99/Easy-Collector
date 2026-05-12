@@ -11,6 +11,8 @@ Interpolation node가 control_mode='sdk'로 띄워졌을 때:
 
 ServoJ는 RPC가 아닌 UDP transparent path (cmdType=1)를 사용해 200Hz 송신에서도
 XML-RPC overhead를 피한다. 첫 명령 전 ServoMoveStart, disconnect 시 ServoMoveEnd.
+
+EasyTrainer의 sdk_controllers dispatcher가 SDK_TYPE 상수를 보고 이 파일을 매칭한다.
 """
 import math
 import os
@@ -18,20 +20,21 @@ import sys
 import time
 from typing import Optional
 
-from .base import BaseSDKController
+try:
+    from base import BaseSDKController  # sdk_controllers/base.py가 sys.path에 추가됨
+except ImportError:
+    # dispatcher가 BaseSDKController를 모듈 글로벌에 주입하므로 import 없이도 동작.
+    BaseSDKController = BaseSDKController  # type: ignore[name-defined]
 
-# fairino SDK를 import path에 추가 (`from fairino import Robot`).
-# 컨테이너에서는 모듈 인스톨러가 /root/robot_sdk/fairino/로 풀어두고,
-# 호스트 dev 트리에서는 modules/robots/fairino/sdk/ 가 단일 출처(SoT)다.
-_SDK_PATHS = [
-    '/root/robot_sdk/fairino/linux',                          # ros2 컨테이너 마운트 경로
-    os.path.join(os.path.dirname(__file__), '..', '..', '..', 'modules', 'robots', 'fairino', 'sdk', 'linux'),  # dev 트리 (modules SoT)
-    '/opt/easytrainer/project/ros2/robot_sdk/fairino/linux',  # 호스트 영속 경로 (모듈 설치 결과)
-]
-for _p in _SDK_PATHS:
-    if os.path.isdir(_p) and _p not in sys.path:
-        sys.path.insert(0, _p)
-        break
+
+SDK_TYPE = "fairino"
+
+# fairino python sdk(`from fairino import Robot`)는 controller.py 옆 `linux/` 하위에 있다.
+# - dev 트리:     modules/robots/fairino/sdk/{controller.py, linux/fairino/...}
+# - 설치 후:      ros2/robot_sdk/robot_fairino/{controller.py, linux/fairino/...}
+_SDK_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'linux')
+if os.path.isdir(_SDK_PATH) and _SDK_PATH not in sys.path:
+    sys.path.insert(0, _SDK_PATH)
 
 # 라디안 ↔ 도 변환
 _RAD_TO_DEG = 180.0 / math.pi

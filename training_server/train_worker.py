@@ -580,9 +580,13 @@ def main(args):
     num_workers = train_settings.get('num_workers', 4)
     n_obs_steps = policy['settings'].get('n_obs_steps', 1)
 
-    # Detect succeed flag
+    # Detect succeed flag.
+    # NOTE: LeRobot v2 layout 은 `data/chunk-XXX/...` (옛 v1 은 `parquet/chunk-XXX/...`).
+    # 여기 inline path 가 v1 으로 남아있어서 sucess column 이 있는 데이터셋에도
+    # has_succeed flag 가 set 되지 않았음. policies/utils.py 의 PARQUET_PATH_TEMPLATE
+    # 와 같은 v2 layout 으로 통일.
     import pyarrow.parquet as pq
-    PARQUET_PATH_TEMPLATE = "parquet/chunk-{chunk:03d}/episode_{ep:06d}.parquet"
+    PARQUET_PATH_TEMPLATE = "data/chunk-{chunk:03d}/episode_{ep:06d}.parquet"
     first_parquet = os.path.join(actual_dataset_dir, PARQUET_PATH_TEMPLATE.format(chunk=0, ep=0))
     if os.path.exists(first_parquet):
         _first_table = pq.read_table(first_parquet)

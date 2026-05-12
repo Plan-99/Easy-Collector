@@ -1,11 +1,11 @@
 <template>
-    <q-page class="q-pt-lg q-pr-lg text-white">
+    <q-page class="q-pt-md q-pr-md text-white full-height column">
         <!-- Header / workspace selector -->
-        <div class="border-rounded bg-secondary q-pa-lg q-mb-lg row">
+        <div class="border-rounded bg-secondary q-pa-md q-mb-md row">
             <q-img src="images/robot1.png" style="width: 100px" class="q-mr-xl"></q-img>
             <div>
                 <div class="row">
-                    <div class="text-h5 text-primary text-bold q-mb-lg">{{ $t('datasetPageTitle') }}</div>
+                    <div class="text-h5 text-primary text-bold q-mb-md">{{ $t('datasetPageTitle') }}</div>
                     <q-select
                         dense
                         outlined
@@ -16,7 +16,7 @@
                         :options="workspaces"
                         :label="$t('workspaceSelectLabel')"
                         style="width: 400px"
-                        class="q-ml-lg"
+                        class="q-ml-md"
                         map-options
                         emit-value
                         option-label="name"
@@ -31,17 +31,15 @@
         </div>
 
         <div
-            class="q-mb-lg border-rounded border-grey text-grey-5 flex-center flex text-h6"
-            style="min-height: 400px;"
+            class="col q-mb-md border-rounded border-grey text-grey-5 flex-center flex text-h6"
             v-if="!selectedWorkspaceId"
         >
             {{ $t('selectWorkspaceFirst') }}
         </div>
 
-        <div class="row q-mb-lg" v-else>
+        <div class="col row q-mb-md items-stretch" style="min-height: 0;" v-else>
             <!-- LEFT: dataset list with episodes -->
-            <div class="col-4 bg-secondary q-mr-lg border-rounded">
-                <div class="q-pa-sm column" style="height: calc(100vh - 280px); position: sticky; top: 16px;">
+            <div class="col-4 bg-secondary q-mr-md border-rounded q-pa-sm column" style="min-height: 0;">
                 <q-btn
                     outline
                     rounded
@@ -239,11 +237,10 @@
                         </q-expansion-item>
                     </q-list>
                 </q-scroll-area>
-                </div>
             </div>
 
             <!-- RIGHT: Episode viewer -->
-            <div class="col bg-secondary border-rounded q-pa-md column" style="min-width: 0;">
+            <div class="col bg-secondary border-rounded q-pa-md column" style="min-width: 0; min-height: 0; overflow: auto;">
                 <div
                     v-if="!currentEpisode"
                     class="flex flex-center text-grey-5 text-h6"

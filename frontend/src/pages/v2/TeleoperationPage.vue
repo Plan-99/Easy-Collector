@@ -1,9 +1,9 @@
 <template>
-    <q-page class="q-pt-lg q-pr-lg full-height">
-        <div class="border-rounded bg-secondary q-pa-lg q-mb-lg row">
+    <q-page class="q-pt-md q-pr-md full-height">
+        <div class="border-rounded bg-secondary q-pa-md q-mb-md row">
             <q-img src="images/robot1.png" style="width: 100px" class="q-mr-xl"></q-img>
             <div>
-                <div class="text-h5 text-primary text-bold q-mb-lg">{{ $t('teleopIntroTitle') }}</div>
+                <div class="text-h5 text-primary text-bold q-mb-md">{{ $t('teleopIntroTitle') }}</div>
                 <div class="text-body text-white">{{ $t('teleopIntroBody') }}</div>
             </div>
         </div>
