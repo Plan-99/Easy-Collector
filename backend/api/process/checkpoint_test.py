@@ -357,6 +357,14 @@ def checkpoint_test(
         # inference. Subsequent loop iterations pop from here without re-inferring or
         # re-postprocessing, so the state-add-back stays anchored to chunk-inference time.
         pi05_chunk_queue = deque()
+        # Soft start: 첫 추론 cycle 의 cmd 는 정책의 raw 첫 chunk[0] 이라 학습 home
+        # 을 가리킬 수 있고, 추론 cadence(100ms) 안에서 큰 delta 가 되어 ServoJ
+        # cmdT=5ms 안에 큰 가속도 요구 → 덜컹. 첫 cycle 만 move_to 의 smoothstep 으로
+        # 부드럽게 도달시킨 뒤, main loop 2 번째 cycle 부터는 robot 이 이미 target 근처
+        # 라 작은 delta 가 만들어져 keyboard teleop 처럼 자연스러움. qaction 경로만
+        # 해당 — ee_delta/relative_ee_pos 는 본질적으로 delta 라 첫 cmd 가 작음.
+        first_step = True
+        first_step_duration = 0.3
         start = time.time()
         while not task_control['stop']:
             if step_num % episode_len == 0 and step_num != 0 and move_homepose:
@@ -372,6 +380,8 @@ def checkpoint_test(
                 for agent in agents:
                     if agent.role != 'tool' and agent.ik_solver is not None:
                         prev_qpos_dict[agent.id] = ts.observation['robot_states'][agent.id]['qpos']
+                # 새 episode 시작 — soft start 다시 활성화 (홈에서 정책 첫 cmd 까지 부드럽게).
+                first_step = True
                 print('Robot moved to homepose')
                 socketio_instance.emit('inference_progress', {
                     'progress': 0.0, 'step': 0, 'episode_len': episode_len,
@@ -672,8 +682,34 @@ def checkpoint_test(
                     start_action_id += total_dim
                 else:
                     target_qpos = final_action[start_action_id : start_action_id + agent.joint_len]
-                    thread_pool.submit(agent.move_joint_step, target_qpos)
+                    if first_step and agent.role != 'tool':
+                        # 첫 cycle 만 move_to (smoothstep) 로 부드럽게. tool(그리퍼) 은
+                        # SDK 자체 velocity profile 이라 그대로 step.
+                        target_list = target_qpos.tolist() if hasattr(target_qpos, 'tolist') else list(target_qpos)
+                        agent.move_to(target_list, duration=first_step_duration)
+                    else:
+                        thread_pool.submit(agent.move_joint_step, target_qpos)
                     start_action_id += agent.joint_len
+
+            # Soft start: 첫 cycle 의 move_to 가 완료될 때까지 대기. 이후 cycle 들은
+            # step_num 진행대로 normal loop 진행.
+            if first_step:
+                _soft_start_deadline = time.time() + first_step_duration + 2.0
+                while time.time() < _soft_start_deadline:
+                    if task_control['stop']:
+                        for a in env.agents:
+                            try:
+                                a.cancel_move_to()
+                            except Exception:
+                                pass
+                        return
+                    if not any(a.is_moving for a in env.agents):
+                        break
+                    time.sleep(0.05)
+                first_step = False
+                start = time.time()  # loop cadence 재기준
+                print('[INFER] Soft start 완료 — 정상 추론 loop 진입')
+
             ts_next = env.record_step()
 
             # === d. OTI-RL 학습 ===
