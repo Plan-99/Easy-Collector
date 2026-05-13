@@ -25,7 +25,7 @@ BLOCK_CONFIGS = {
         'label': 'Checkpoint',
         'icon': 'psychology',
         'color': 'purple',
-        'keys': ['workspace_id', 'checkpoint_id', 'checkpoint_name', 'duration', 'until_done', 'done_threshold', 'hz', 're_inference_steps', 'temporal_ensemble_coeff', 'name'],
+        'keys': ['workspace_id', 'checkpoint_id', 'checkpoint_name', 'duration', 'until_done', 'done_threshold', 'hz', 're_inference_steps', 'temporal_ensemble_coeff', 'move_homepose', 'move_homepose_duration', 'move_homepose_settle_sec', 'name'],
     },
     'timesleep': {
         'label': 'Time Sleep',

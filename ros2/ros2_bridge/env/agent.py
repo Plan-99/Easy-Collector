@@ -744,7 +744,9 @@ class Agent:
                         print(f"[move_to] aborted at step {step}/{n_steps}")
                         return
                     t = step / n_steps
-                    next_pos = [c + t * d for c, d in zip(current_pos, deltas)]
+                    # smoothstep ease-in-out: 양 끝점 속도 0, 중간에서 최대 속도
+                    s = t * t * (3.0 - 2.0 * t)
+                    next_pos = [c + s * d for c, d in zip(current_pos, deltas)]
                     self.move_joint_step(next_pos)
                     time.sleep(period)
             finally:

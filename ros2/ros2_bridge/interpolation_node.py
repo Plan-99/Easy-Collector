@@ -69,8 +69,27 @@ class JointInterpolationNode(Node):
         self._cmd_interval = 0.1
         self._interp_progress = 1.0
 
+        # idle gap 후 첫 segment 한정 cubic ease-in. linear 는 정지→이동 전이에서
+        # velocity step 을 만들어 Fairino ServoJ 가 cmdT=5ms 안에 큰 가속도로
+        # 따라가려다 덜컹. s(t)=t²(2-t) 는 s'(0)=0, s'(1)=1 이라 정지에서 부드럽게
+        # 가속하고 끝점 속도는 linear 와 동일 → 다음 segment(linear) 와 매끄럽게 연결.
+        self._smooth_first_segment = False
+
+        # Software acceleration limiter (SDK 모드 한정).
+        # interp_node 의 output position 변화율을 강제로 제한해서 ServoJ stream 에
+        # 큰 velocity step 이 실리지 않게 한다. Fairino ServoJ 의 acc 파라미터가
+        # 비공개라 SDK 단에서 가속도 제어 불가 → 우리가 인위적으로 step 을 매끈하게.
+        # max_accel: 관절당 최대 가속도 (rad/s²). 5~15 사이에서 튜닝.
+        self._max_accel = 8.0
+        self._prev_step = None  # 직전 tick 의 (current_pos - prev_current_pos)
+
         # SDK 컨트롤러
         self._sdk_controller = None
+
+        # SDK 모드에서 _read_state_callback 이 50Hz 로 채우는 '실제 로봇 위치' 캐시.
+        # idle gap 후 첫 cmd 의 보간 시작점을 이걸로 잡아 drift gap 을 흡수한다.
+        self._latest_actual_pos = None
+        self._latest_actual_names = None
 
         # ROS2 sub (공통: ec_joint_cmd 수신)
         self._sub = self.create_subscription(
@@ -147,6 +166,11 @@ class JointInterpolationNode(Node):
         # 관절 상태 읽기 타이머 (50Hz)
         self._state_timer = self.create_timer(0.02, self._read_state_callback)
 
+    # 큰 jump (예: inference 첫 step) 감지 임계값과 그 때 보장할 최소 보간 시간.
+    # teleop 의 작은 step (0.003~0.05) 보다 충분히 위라 일반 텔레옵에는 영향 없음.
+    _JUMP_THRESHOLD_RAD = 0.05  # 한 cmd 에 0.05 rad(≈2.9°) 이상 변화 = jump (이전 0.1)
+    _JUMP_MIN_INTERVAL = 0.5    # jump 인 경우 cmd_interval 의 floor (s) — 0.2 는 짧아서 여전히 jerky
+
     def _cmd_callback(self, msg: JointState):
         """새 관절 명령 수신 시 보간 시작."""
         target = np.array(msg.position, dtype=np.float64)
@@ -157,10 +181,63 @@ class JointInterpolationNode(Node):
             if interval > 0.001:
                 # 단발 명령 시 너무 느리게 보간되지 않도록 상한 설정
                 self._cmd_interval = min(interval, 0.2)
+        else:
+            interval = 0.0
         self._cmd_time = now
 
         if self._current_pos is None:
             self._current_pos = target.copy()
+
+        # 매 cmd 마다 ease-in 모드를 새로 결정 (mid-segment 새 cmd 가 와도 잘못된
+        # ease-in 이 carry over 되지 않도록). 아래 활성화 조건에서만 True 로 켠다.
+        self._smooth_first_segment = False
+
+        # SDK 모드 + idle gap 후 첫 cmd: 보간 시작점을 '마지막 commanded 위치'(_current_pos)
+        # 대신 '실제 로봇 위치'(read_joints 캐시)로 잡고, 정지→이동 velocity step 을
+        # cubic ease-in 으로 흡수한다. 평상시 cadence(10~100ms)는 무시하기 위해 0.3s 임계.
+        # 이름 순서가 cmd 와 다르면 fallback (안전).
+        if (self.control_mode == 'sdk'
+                and interval > 0.3
+                and self._latest_actual_pos is not None
+                and self._latest_actual_pos.shape == target.shape
+                and self._latest_actual_names is not None
+                and list(msg.name) == self._latest_actual_names):
+            _drift = float(np.max(np.abs(self._latest_actual_pos - self._current_pos)))
+            _delta_to_target = target - self._latest_actual_pos
+            _max_delta = float(np.max(np.abs(_delta_to_target)))
+            _argmax = int(np.argmax(np.abs(_delta_to_target)))
+            self._current_pos = self._latest_actual_pos.copy()
+            self._smooth_first_segment = True
+            # idle gap = 정지 상태 → 직전 step (velocity) 도 0 으로 리셋해야
+            # acceleration limiter 가 0 부터 부드럽게 ramp up 함. 안 하면 이전
+            # 세션의 step 잔여가 carry over 됨.
+            self._prev_step = None
+            self.get_logger().info(
+                f'[interp] idle gap {interval:.2f}s | drift={_drift:.4f} rad | '
+                f'max_delta_to_target={_max_delta:.4f} rad (joint {_argmax}) | '
+                f'home={[f"{v:.4f}" for v in self._latest_actual_pos.tolist()]} | '
+                f'target={[f"{v:.4f}" for v in target.tolist()]}'
+            )
+
+        # 큰 jump 감지 — home pose 직후 inference 첫 cmd 처럼 _cmd_interval 이 짧게
+        # 잡힌 상태에서 큰 차이의 target 이 들어오면 수십 ms 안에 점프해서 모터가
+        # "덜컹". 이 경우만 _cmd_interval 을 _JUMP_MIN_INTERVAL 로 floor 해서
+        # 첫 보간을 부드럽게.
+        if self._current_pos.shape == target.shape:
+            try:
+                max_delta = float(np.max(np.abs(target - self._current_pos)))
+                _orig_interval = self._cmd_interval
+                if (max_delta > self._JUMP_THRESHOLD_RAD
+                        and self._cmd_interval < self._JUMP_MIN_INTERVAL):
+                    self._cmd_interval = self._JUMP_MIN_INTERVAL
+                # debug: 어느 정도 변화에서 floor 가 발화하는지 추적
+                if max_delta > 0.02:
+                    self.get_logger().info(
+                        f'[interp] cmd Δmax={max_delta:.4f} rad cmd_interval '
+                        f'{_orig_interval:.3f}→{self._cmd_interval:.3f}s'
+                    )
+            except Exception:
+                pass
 
         self._start_pos = self._current_pos.copy()
         self._target_pos = target
@@ -190,22 +267,60 @@ class JointInterpolationNode(Node):
             self._publish_topic(target.tolist(), names, vel)
 
     def _timer_callback(self):
-        """고주파 타이머: 선형 보간으로 목표 추종."""
+        """고주파 타이머: 선형 보간으로 목표 추종 + 유휴 시 SDK hold."""
+        # 1) 보간 완료/대기 상태:
+        #    - SDK 모드면 _current_pos 를 계속 ServoJ 로 흘려보낸다 (continuous hold).
+        #      ServoJ stream 이 끊기면 Fairino 등은 internal trajectory state 가
+        #      "done" 으로 떨어졌다가 다음 cmd 에서 fresh start 로 처리해 큰 가속도
+        #      적용 → 덜컹. 같은 위치 반복 ServoJ 는 정지 명령과 동일하므로 안전.
+        #    - topic 모드는 외부 컨트롤러가 hold 를 책임지므로 publish 안함.
         if not self._has_target or self._interp_progress >= 1.0:
+            if self.control_mode == 'sdk' and self._current_pos is not None:
+                self._output_sdk()
             return
 
-        # 0.3초 이상 명령이 없으면 이전 상태 폐기 (텔레옵 중지 시 잔여 동작 방지)
+        # 0.3초 이상 명령이 없으면 이전 상태 폐기 (텔레옵 중지 시 잔여 동작 방지).
+        # 이 분기는 보간 진행 중인 경우에만 도달 (위 early-return 통과).
         if self._cmd_time is not None and (time.monotonic() - self._cmd_time) > 0.3:
             self._has_target = False
             self._cmd_time = None
             self.get_logger().info('Stale command discarded (>0.3s idle)')
+            # SDK 모드: stale 폐기 후에도 _current_pos hold 는 다음 tick 의 위쪽
+            # 분기에서 계속 ServoJ 로 흘려보낸다.
             return
 
         self._interp_progress += self._dt / self._cmd_interval
         self._interp_progress = min(self._interp_progress, 1.0)
         t = self._interp_progress
 
-        self._current_pos = self._start_pos + t * (self._target_pos - self._start_pos)
+        # idle 후 첫 segment 만 cubic ease-in. s(t)=t²(2-t) 는 s'(0)=0, s'(1)=1.
+        # 정지에서 부드럽게 가속, 끝점은 linear 와 같은 속도로 마무리해서 다음
+        # segment(linear) 와 속도 연속성 유지.
+        if self._smooth_first_segment:
+            s = t * t * (2.0 - t)
+        else:
+            s = t
+        desired_pos = self._start_pos + s * (self._target_pos - self._start_pos)
+
+        # Software acceleration limit (SDK 모드만). 직전 step 대비 step 변화량을
+        # 가속도 한계로 클램프해서 output velocity 가 매끈하게 변하도록 강제한다.
+        # max_step_change = max_accel * dt²  (= 한 tick 사이에 step 이 변할 수 있는 양).
+        if self.control_mode == 'sdk':
+            desired_step = desired_pos - self._current_pos
+            if self._prev_step is None or self._prev_step.shape != desired_step.shape:
+                self._prev_step = np.zeros_like(desired_step)
+            step_change = desired_step - self._prev_step
+            max_step_change = self._max_accel * self._dt * self._dt
+            step_change = np.clip(step_change, -max_step_change, max_step_change)
+            actual_step = self._prev_step + step_change
+            self._current_pos = self._current_pos + actual_step
+            self._prev_step = actual_step
+        else:
+            self._current_pos = desired_pos
+
+        # 첫 segment 끝나면 ease-in 모드 해제 (이후 cmd 들은 평소대로 linear).
+        if self._interp_progress >= 1.0 and self._smooth_first_segment:
+            self._smooth_first_segment = False
 
         if self.control_mode == 'sdk':
             self._output_sdk()
@@ -277,6 +392,9 @@ class JointInterpolationNode(Node):
             msg.name = names
             msg.position = positions
             self._state_pub.publish(msg)
+            # _cmd_callback 에서 idle gap 후 보간 시작점으로 쓰기 위한 캐시.
+            self._latest_actual_names = list(names)
+            self._latest_actual_pos = np.array(positions, dtype=np.float64)
         except Exception as e:
             self.get_logger().warn(f'SDK read error: {e}', throttle_duration_sec=5.0)
 

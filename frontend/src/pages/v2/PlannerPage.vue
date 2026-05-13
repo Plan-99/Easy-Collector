@@ -1,5 +1,5 @@
 <template>
-    <q-page :class="['q-pt-lg q-pr-lg q-pb-lg', { 'full-height column': isEmptyState }]">
+    <q-page class="q-pt-md q-pr-md full-height column">
         <TutorialHint class="q-mb-md" :text="$t('tutorialPlannerIntro')" />
         <!-- Planner selection header -->
         <div class="border-rounded bg-secondary q-pa-md q-mb-md row">
@@ -49,16 +49,16 @@
         </div>
 
         <!-- Page loading -->
-        <div class="col q-mb-lg border-rounded border-grey flex-center flex column" v-if="pageLoading">
+        <div class="col q-mb-md border-rounded border-grey flex-center flex column" v-if="pageLoading">
             <q-spinner-gears size="50px" color="primary" class="q-mb-md" />
             <div class="text-h6 text-grey">{{ $t('plannerInitializing') }}</div>
         </div>
 
         <!-- Main content area -->
-        <div class="col q-mb-lg border-rounded border-grey text-grey flex-center flex text-h6" v-else-if="!selectedPlannerId">
+        <div class="col q-mb-md border-rounded border-grey text-grey flex-center flex text-h6" v-else-if="!selectedPlannerId">
             {{ $t('plannerSelectFirst') }}
         </div>
-        <div class="row q-mb-lg items-stretch" v-else>
+        <div class="col row q-mb-md" v-else>
             <!-- First Column: Workspace Selection -->
             <div class="col-2 bg-secondary q-mr-sm border-rounded q-pa-sm">
                 <div class="text-h6 text-white q-mb-md">{{ $t('plannerWorkspacesTitle') }}</div>
@@ -336,11 +336,12 @@
                     </div>
                 </div>
 
-                <!-- Monitoring (bottom): 페이지가 자라는 만큼만 보이도록 고정 높이 -->
-                <div style="height: 600px;">
+                <!-- Monitoring (bottom): 좌측 사이드바 높이에 맞춰 늘어나도록 flex-grow -->
+                <div class="col" style="min-height: 600px;">
                     <monitoring-window
                         class="full-height"
                         :workspace="monitorWorkspace"
+                        :workspaces="selectedWorkspaces"
                         :robots="allSelectedRobots"
                         :sensors="allSelectedSensors"
                         v-model:focused="focused"
@@ -566,14 +567,33 @@
                             option-label="name"
                             option-value="id"
                         ></q-select>
-                        <q-input
-                            dense outlined dark bg-color="dark"
-                            v-model.number="blockForm.duration"
-                            :label="$t('plannerDurationSeconds')"
-                            type="number"
-                            class="q-mb-md"
-                            :disable="blockForm.until_done"
-                        ></q-input>
+                        <q-toggle
+                            v-model="blockForm.move_homepose"
+                            :label="$t('plannerMoveHomepose')"
+                            color="primary"
+                            dark
+                            class="q-mb-xs"
+                        ></q-toggle>
+                        <div v-if="blockForm.move_homepose" class="row q-gutter-x-sm q-mb-md">
+                            <q-input
+                                dense outlined dark bg-color="dark"
+                                v-model.number="blockForm.move_homepose_duration"
+                                :label="$t('homeposeDurationSec')"
+                                type="number"
+                                step="0.5"
+                                min="0.1"
+                                style="width: 130px"
+                            />
+                            <q-input
+                                dense outlined dark bg-color="dark"
+                                v-model.number="blockForm.move_homepose_settle_sec"
+                                :label="$t('homeposeSettleSec')"
+                                type="number"
+                                step="0.5"
+                                min="0"
+                                style="width: 130px"
+                            />
+                        </div>
                         <q-toggle
                             v-model="blockForm.until_done"
                             :label="$t('plannerUntilDone')"
@@ -585,6 +605,14 @@
                         <div class="text-caption text-grey q-mb-md">
                             {{ selectedCheckpointHasSucceed ? $t('plannerUntilDoneHint') : $t('plannerCheckpointNoSucceed') }}
                         </div>
+                        <q-input
+                            v-if="!blockForm.until_done"
+                            dense outlined dark bg-color="dark"
+                            v-model.number="blockForm.duration"
+                            :label="$t('plannerDurationSeconds')"
+                            type="number"
+                            class="q-mb-md"
+                        ></q-input>
                         <q-input
                             v-if="blockForm.until_done"
                             dense outlined dark bg-color="dark"
@@ -747,7 +775,6 @@ function deletePlanner(planner) {
 
 // --- Workspace Selection Logic ---
 const pageLoading = ref(true);
-const isEmptyState = computed(() => pageLoading.value || !selectedPlannerId.value);
 const showAddWorkspacesForm = ref(false);
 const availableWorkspaces = ref([]);
 const addWorkspacesForm = ref([
@@ -992,12 +1019,15 @@ const blockForm = ref({
     workspace_id: null,
     checkpoint_id: null,
     duration: 5,
-    until_done: false,
+    until_done: true,
     done_threshold: 0.5,
     sync_id: '',
     hz: 10,
     re_inference_steps: 1,
     temporal_ensemble_coeff: 0.01,
+    move_homepose: true,
+    move_homepose_duration: 5,
+    move_homepose_settle_sec: 0,
     positions: {},
 });
 
@@ -1035,9 +1065,14 @@ function openBlockForm(group) {
         workspace_id: wsIds.length === 1 ? wsIds[0] : null,
         checkpoint_id: null,
         duration: 5,
+        until_done: true,
+        done_threshold: 0.5,
+        sync_id: '',
         hz: 10,
         re_inference_steps: 1,
         temporal_ensemble_coeff: 0.01,
+        move_homepose: true,
+        move_homepose_duration: 5,
         positions: {},
     };
     showBlockForm.value = true;
@@ -1052,12 +1087,16 @@ function openEditBlockForm(group, block, index) {
         workspace_id: block.workspace_id || null,
         checkpoint_id: block.checkpoint_id || null,
         duration: block.duration || 5,
-        until_done: !!block.until_done,
+        // 기존 block 에 필드가 없으면 기본값(true)으로 채워 호환성 유지.
+        until_done: block.until_done === undefined ? true : !!block.until_done,
         done_threshold: typeof block.done_threshold === 'number' ? block.done_threshold : 0.5,
         sync_id: block.sync_id || '',
         hz: typeof block.hz === 'number' ? block.hz : 10,
         re_inference_steps: typeof block.re_inference_steps === 'number' ? block.re_inference_steps : 1,
         temporal_ensemble_coeff: typeof block.temporal_ensemble_coeff === 'number' ? block.temporal_ensemble_coeff : 0.01,
+        move_homepose: block.move_homepose === undefined ? true : !!block.move_homepose,
+        move_homepose_duration: typeof block.move_homepose_duration === 'number' ? block.move_homepose_duration : 5,
+        move_homepose_settle_sec: typeof block.move_homepose_settle_sec === 'number' ? block.move_homepose_settle_sec : 0,
         positions: block.positions ? JSON.parse(JSON.stringify(block.positions)) : {},
     };
     showBlockForm.value = true;

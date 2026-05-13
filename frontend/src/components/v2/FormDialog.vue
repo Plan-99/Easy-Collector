@@ -13,7 +13,7 @@
                 <slot></slot>
                 <div v-for="(data, index) in form.filter((d) => d.show === undefined || d.show(form))" :key="index"
                 >
-                    <div class="text-white row">
+                    <div class="text-white row" v-if="data.type !== 'checkbox'">
                         <div class="q-mr-md col">{{ data.label }}</div>
                         <q-icon name="error" size="xs" v-if="data.validated === false" color="red"></q-icon>
                     </div>

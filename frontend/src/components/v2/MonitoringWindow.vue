@@ -2,29 +2,30 @@
     <div class="column full-height border-rounded" :style="{ maxHeight: monitorOnly ? null : '700px' }">
         <TutorialHint v-if="!monitorOnly" :text="$t(monitoringHintKey)" class="q-mb-sm" />
         <div class="bg-secondary border-rounded column q-px-sm col">
-        <div :class="[monitorOnly ? 'col' : 'col-6', 'row flex felx-center q-col-gutter-x-sm']" v-if="sensors.length > 0">
-            <div v-for="sensor in sensors" :key="sensor.id" class="col q-py-sm relative-position">
+        <div :class="[monitorOnly ? 'col' : 'col-6', 'row flex felx-center q-col-gutter-x-sm']" v-if="sensorViewports.length > 0">
+            <div v-for="vp in sensorViewports" :key="vp.key" class="col q-py-sm relative-position">
                 <web-rtc-video
-                    :process-id="`sensor_${sensor.id}`"
-                    :topic="sensor.read_topic"
-                    :msg-type="sensor.read_topic_msg"
-                    :sensor-id="sensor.id"
+                    :process-id="`sensor_${vp.sensor.id}`"
+                    :topic="vp.sensor.read_topic"
+                    :msg-type="vp.sensor.read_topic_msg"
+                    :sensor-id="vp.sensor.id"
                     class="full-height border-rounded cursor-pointer"
-                    :key="sensor.id"
-                    :loading="sensor.status !== 'on'"
-                    v-if="sensor.status !== 'off'"
+                    :loading="vp.sensor.status !== 'on'"
+                    v-if="vp.sensor.status !== 'off'"
                     :class="{
-                        'border-primary': focused.id === sensor.id && focused.device_type === 'sensor',
+                        'border-primary': focused.id === vp.sensor.id && focused.device_type === 'sensor',
                     }"
-                    @click="focusSensorRobot(sensor, 'sensor')"
-                    :resize="workspace.sensor_img_size[sensor.id] || [640, 480]"
-                    :cropped_area="workspace.sensor_cropped_area[sensor.id] || {}"
-                    :rotate="workspace.sensor_rotate[sensor.id] || 0"
+                    @click="focusSensorRobot(vp.sensor, 'sensor')"
+                    :resize="viewportImgSize(vp.workspace, vp.sensor.id)"
+                    :cropped_area="viewportCropArea(vp.workspace, vp.sensor.id)"
+                    :rotate="viewportRotate(vp.workspace, vp.sensor.id)"
                 ></web-rtc-video>
                 <div class="full-height border-white bg-dark border-rounded flex flex-center" v-else>
-                    <q-btn round flat icon="play_arrow" text-color="white" size="xl" @click="sensor.handler.startSensor(sensor)"></q-btn>
+                    <q-btn round flat icon="play_arrow" text-color="white" size="xl" @click="vp.sensor.handler.startSensor(vp.sensor)"></q-btn>
                 </div>
-                <q-chip color="blue-10" text-color="white" class="absolute-top-left" style="top: 20px; left: 15px">{{ sensor.name }} {{ $t('sensorSuffix') }}</q-chip>
+                <q-chip color="blue-10" text-color="white" class="absolute-top-left" style="top: 20px; left: 15px">
+                    {{ vp.sensor.name }} {{ $t('sensorSuffix') }}<span v-if="vp.workspaceName"> · {{ vp.workspaceName }}</span>
+                </q-chip>
             </div>
         </div>
         <div v-else :class="[monitorOnly ? 'col' : 'col-6', 'q-py-sm']">
@@ -175,39 +176,6 @@
                         ></q-btn>
                     </div>
                     <q-space class="col"></q-space>
-                    <q-input
-                        v-model.number="hz"
-                        dense
-                        outlined
-                        dark
-                        bg-color="dark"
-                        :label="$t('frequencyHz')"
-                        type="number"
-                        :min="1"
-                        style="width: 90px"
-                    />
-                    <div v-if="moveHomposeInDataCollection" class="row q-gutter-x-sm">
-                        <q-input
-                            v-model.number="inferenceEpisodeLen"
-                            dense
-                            outlined
-                            dark
-                            bg-color="dark"
-                            type="number"
-                            :min="1"
-                            style="width: 110px"
-                            :label="$t('inferenceEpisodeLen')"
-                        />
-                        <q-input
-                            v-model.number="moveHomposeDuration"
-                            dense outlined dark bg-color="dark"
-                            :label="$t('homeposeDurationSec')"
-                            style="width: 90px"
-                            type="number"
-                            :min="0.1"
-                            step="0.5"
-                        />
-                    </div>
                     <div>
                         <q-btn
                             color="red"
@@ -216,14 +184,7 @@
                             icon="play_arrow"
                             @click="startInference"
                             v-if="status === 'pending'"
-                        >
-                            <q-badge
-                                @click.stop="moveHomposeInDataCollection = !moveHomposeInDataCollection"
-                                :color="moveHomposeInDataCollection ? 'blue' : 'grey-5'"
-                                floating>
-                                <q-icon name="home" size="xs" class="cursor-pointer" />
-                            </q-badge>
-                        </q-btn>
+                        />
                     </div>
                 </div>
                 <div
@@ -583,12 +544,58 @@ const props = defineProps({
         type: Boolean,
         default: false,
     },
+    // (선택) 여러 workspace 가 같은 sensor 를 공유하지만 crop/resize/rotate 설정이
+    // 서로 다른 경우 각 (workspace, sensor) 쌍마다 별도 viewport 를 렌더링하기 위한
+    // 입력. 미지정 시 기존처럼 단일 `workspace` 의 sensor 설정으로 sensor 당 1 viewport.
+    workspaces: {
+        type: Array,
+        default: null,
+    },
 });
 
 const focused = defineModel('focused', {
     type: Object,
     default: () => ({ id: null, device_type: null })
 });
+
+// 각 viewport 가 (workspace, sensor) 쌍을 표현. 다중 workspace 인 Planner 모드에서
+// 같은 sensor 라도 workspace 마다 crop/resize/rotate 가 다르면 별개 viewport 로 분리.
+// 단일 workspace 모드(WorkspacePage 등)에선 기존과 동일하게 sensor 당 1 viewport.
+const sensorViewports = computed(() => {
+    const sensorById = new Map(props.sensors.map(s => [s.id, s]));
+    if (props.workspaces && props.workspaces.length > 0) {
+        const items = [];
+        props.workspaces.forEach((ws) => {
+            (ws.sensors || []).forEach((wsSensor) => {
+                const live = sensorById.get(wsSensor.id);
+                if (!live) return;
+                items.push({
+                    key: `${ws.id}-${live.id}`,
+                    workspace: ws,
+                    workspaceName: ws.name || '',
+                    sensor: live,
+                });
+            });
+        });
+        return items;
+    }
+    return props.sensors.map((s) => ({
+        key: String(s.id),
+        workspace: props.workspace || {},
+        workspaceName: '',
+        sensor: s,
+    }));
+});
+
+function viewportCropArea(ws, sensorId) {
+    return (ws && ws.sensor_cropped_area && ws.sensor_cropped_area[sensorId]) || {};
+}
+function viewportImgSize(ws, sensorId) {
+    return (ws && ws.sensor_img_size && ws.sensor_img_size[sensorId]) || [640, 480];
+}
+function viewportRotate(ws, sensorId) {
+    return (ws && ws.sensor_rotate && ws.sensor_rotate[sensorId]) || 0;
+}
 const selectedDatasetId = defineModel('selectedDatasetId', {
     type: [String, Number],
     default: null
@@ -1033,8 +1040,42 @@ function stopDataCollection() {
 }
 
 const hz = ref(10);
+const moveHomposeSettleSec = ref(0);
 const showInferenceDialog = ref(false);
 const inferenceForm = ref([
+    {
+        key: 'hz',
+        label: t('frequencyHz'),
+        type: 'number',
+        value: 10,
+    },
+    {
+        key: 'move_homepose',
+        label: t('plannerMoveHomepose'),
+        type: 'checkbox',
+        value: false,
+    },
+    {
+        key: 'inference_episode_len',
+        label: t('inferenceEpisodeLen'),
+        type: 'number',
+        value: null,
+        show: (form) => form.find(f => f.key === 'move_homepose')?.value === true,
+    },
+    {
+        key: 'move_homepose_duration',
+        label: t('homeposeDurationSec'),
+        type: 'number',
+        value: 5,
+        show: (form) => form.find(f => f.key === 'move_homepose')?.value === true,
+    },
+    {
+        key: 'move_homepose_settle_sec',
+        label: t('homeposeSettleSec'),
+        type: 'number',
+        value: 0,
+        show: (form) => form.find(f => f.key === 'move_homepose')?.value === true,
+    },
     {
         key: 're_inference_steps',
         label: t('reInferenceSteps'),
@@ -1060,10 +1101,27 @@ const inferenceForm = ref([
 ]);
 
 function startInference() {
+    // 다이얼로그 열기 직전, 현재 ref 값으로 form 초기값을 동기화 — 이전에 바꾼 설정이 유지된다.
+    const setField = (key, value) => {
+        const f = inferenceForm.value.find(x => x.key === key);
+        if (f) f.value = value;
+    };
+    setField('hz', hz.value);
+    setField('move_homepose', moveHomposeInDataCollection.value);
+    setField('inference_episode_len', inferenceEpisodeLen.value);
+    setField('move_homepose_duration', Number(moveHomposeDuration.value) || 5.0);
+    setField('move_homepose_settle_sec', Number(moveHomposeSettleSec.value) || 0);
     showInferenceDialog.value = true;
 }
 
 function onInferenceSubmit(formData) {
+    // form 값을 ref 에 반영해 다음 호출/데이터 수집과 공유한다.
+    hz.value = Number(formData.hz) || 10;
+    moveHomposeInDataCollection.value = !!formData.move_homepose;
+    inferenceEpisodeLen.value = formData.inference_episode_len;
+    moveHomposeDuration.value = Number(formData.move_homepose_duration) || 5.0;
+    moveHomposeSettleSec.value = Number(formData.move_homepose_settle_sec) || 0;
+
     showProcessConsole.value = true;
     inferenceProgress.value = { progress: 0, step: 0, episodeLen: 0 };
     api.post(`/checkpoint/${selectedCheckpointId.value}/:start_test`, {
@@ -1072,15 +1130,16 @@ function onInferenceSubmit(formData) {
         robot_ids: props.robots.map(r => r.id),
         sensors: props.sensors,
         checkpoint: checkpoint.value,
-        move_homepose: moveHomposeInDataCollection.value,
-        move_homepose_duration: Number(moveHomposeDuration.value) || 5.0,
-        hz: hz.value,
+        move_homepose: !!formData.move_homepose,
+        move_homepose_duration: Number(formData.move_homepose_duration) || 5.0,
+        move_homepose_settle_sec: Number(formData.move_homepose_settle_sec) || 0,
+        hz: Number(formData.hz) || 10,
         re_inference_steps: formData.re_inference_steps,
         temporal_ensemble_coeff: formData.re_inference_steps === 1 ? formData.temporal_ensemble_coeff : null,
         // PI0.5 / VLA prompt; backend uses task.name as fallback if empty
         language_instruction: formData.language_instruction || '',
         // Planner feature: inference 시 episode_len 지정
-        inference_episode_len: moveHomposeInDataCollection.value ? inferenceEpisodeLen.value : null,
+        inference_episode_len: formData.move_homepose ? formData.inference_episode_len : null,
     }).catch((error) => {
         console.error('Error starting test:', error);
         Notify.create({

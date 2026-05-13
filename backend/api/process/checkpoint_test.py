@@ -29,10 +29,13 @@ import gc
 import threading
 
 
-def _move_to_homepose(agents, home_pose, task_control, socketio_instance, timeout=30.0, duration=5.0):
+def _move_to_homepose(agents, home_pose, task_control, socketio_instance, timeout=30.0, duration=5.0, settle_sec=0.0):
     """home_pose가 None이거나 매핑이 없으면 즉시 리턴.
 
     moving_homepose 이벤트로 프론트엔드 오버레이를 켰다 끈다.
+
+    settle_sec: home 도달 후 추가로 대기할 시간 (s). 기본 0. 그리퍼/팔 안정화나
+    물체가 정착할 시간이 필요한 시나리오에서 사용. stop 신호 시엔 무시.
 
     NOTE: 이전엔 폴링 후 `time.sleep(0.5)` 안정화 + sequential move_to 호출이 있었는데,
     호출 측에서 어차피 wait_for_images + joint_states polling 으로 자연 대기하므로
@@ -68,6 +71,13 @@ def _move_to_homepose(agents, home_pose, task_control, socketio_instance, timeou
             if not any(a.is_moving for a in agents):
                 break
             time.sleep(0.1)
+        # 도달 후 추가 안정화 대기. stop 신호가 들어오면 즉시 빠져나감.
+        if settle_sec and settle_sec > 0:
+            _settle_end = time.time() + float(settle_sec)
+            while time.time() < _settle_end:
+                if task_control.get('stop'):
+                    return
+                time.sleep(min(0.1, _settle_end - time.time()))
     finally:
         socketio_instance.emit('moving_homepose', {'moving': False})
 
@@ -84,6 +94,7 @@ def checkpoint_test(
     max_timesteps,
     move_homepose=False,
     move_homepose_duration=5.0,
+    move_homepose_settle_sec=0.0,
     hz=10,
     re_inference_steps=1,
     temporal_ensemble_coeff=0.01,
@@ -306,7 +317,7 @@ def checkpoint_test(
 
         policy.reset()
         if go_home_first:
-            _move_to_homepose(env.agents, home_pose, task_control, socketio_instance, duration=move_homepose_duration)
+            _move_to_homepose(env.agents, home_pose, task_control, socketio_instance, duration=move_homepose_duration, settle_sec=move_homepose_settle_sec)
             if task_control['stop']:
                 return
             print('Robot moved to homepose')
@@ -315,9 +326,20 @@ def checkpoint_test(
         env.wait_for_images(timeout=10.0)
         # Robots may not have published their first joint_states yet either —
         # poll until each agent has one before the inference loop reads it.
+        # NOTE: `agent.joint_states` (cache) 는 subscribe_state_stream gRPC stream
+        # 의 callback 에서만 채워진다. planner 가 그 stream 을 구독하지 않은 채로
+        # checkpoint block 에 들어오면 캐시가 영원히 None 이라 10s timeout 까지
+        # idle. 캐시 대신 get_joint_states() RPC 결과로 판정 → 구독 여부와 무관.
         _deadline = time.time() + 10.0
         while time.time() < _deadline:
-            if all(getattr(a, 'joint_states', None) is not None for a in agents):
+            ok = True
+            for a in agents:
+                js = a.get_joint_states()
+                if js is None:
+                    ok = False
+                    break
+                a.joint_states = js  # cache 도 채워둠 (다른 컴포넌트 호환)
+            if ok:
                 break
             time.sleep(0.05)
         ts = env.reset()
@@ -343,7 +365,7 @@ def checkpoint_test(
                 policy.reset()
                 rel_action_queue.clear()
                 pi05_chunk_queue.clear()  # PI0.5 chunk queue도 reset 시 비우기
-                _move_to_homepose(env.agents, home_pose, task_control, socketio_instance, duration=move_homepose_duration)
+                _move_to_homepose(env.agents, home_pose, task_control, socketio_instance, duration=move_homepose_duration, settle_sec=move_homepose_settle_sec)
                 if task_control['stop']:
                     return
                 ts = env.reset()

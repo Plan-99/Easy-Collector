@@ -291,6 +291,17 @@ def _run_checkpoint(block, ctx, task_control):
 
     duration = float(block.get('duration') or 30)
     until_done = bool(block.get('until_done'))
+    # block 단위 home pose 토글: 기본 True (frontend default 와 일치).
+    # move_homepose 가 켜져있을 때만 checkpoint_test 의 go_home_first / move_homepose 가 True.
+    move_homepose = bool(block.get('move_homepose', True))
+    try:
+        move_homepose_duration = float(block.get('move_homepose_duration') or 5.0)
+    except (TypeError, ValueError):
+        move_homepose_duration = 5.0
+    try:
+        move_homepose_settle_sec = float(block.get('move_homepose_settle_sec') or 0.0)
+    except (TypeError, ValueError):
+        move_homepose_settle_sec = 0.0
     try:
         done_threshold = float(block.get('done_threshold') if block.get('done_threshold') is not None else 0.5)
     except (TypeError, ValueError):
@@ -310,13 +321,15 @@ def _run_checkpoint(block, ctx, task_control):
                 socketio_instance=ctx['socketio'],
                 task_control=sub_control,
                 max_timesteps=int(duration * 100),
-                move_homepose=False,
+                move_homepose=move_homepose,
+                move_homepose_duration=move_homepose_duration,
+                move_homepose_settle_sec=move_homepose_settle_sec,
                 hz=block.get('hz', 10),
                 re_inference_steps=block.get('re_inference_steps', 1),
                 temporal_ensemble_coeff=block.get('temporal_ensemble_coeff', 0.01),
                 action_type=block.get('action_type'),
                 preloaded=preloaded,
-                go_home_first=False,
+                go_home_first=move_homepose,
             )
         except Exception:
             print(f"[ERROR] checkpoint_test failed: {traceback.format_exc()}")

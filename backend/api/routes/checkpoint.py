@@ -104,6 +104,7 @@ def start_test(id):
         name=f"checkpoint_test",
         move_homepose=data.get('move_homepose', False),
         move_homepose_duration=float(data.get('move_homepose_duration') or 5.0),
+        move_homepose_settle_sec=float(data.get('move_homepose_settle_sec') or 0.0),
         hz=data.get('hz', 10),
         re_inference_steps=data.get('re_inference_steps', 1),
         temporal_ensemble_coeff=data.get('temporal_ensemble_coeff', 0.01),
