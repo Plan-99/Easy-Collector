@@ -121,6 +121,12 @@ def checkpoint_test(
         ckpt_dir = resolve_checkpoint_dir(checkpoint['id'])
 
         action_key = action_type or policy_obj.get('settings', {}).get('action_type') or checkpoint.get('train_settings', {}).get('action_type', 'qaction')
+        # 신/구 action_key 별칭 통일: 'qaction'→'joint', 'ee_delta_action'→'ee_delta'.
+        # 아래에서 분기 비교할 때 양쪽 모두 인식되도록 normalize.
+        _ACTION_KEY_ALIAS = {'qaction': 'joint', 'joint': 'joint',
+                              'ee_delta_action': 'ee_delta', 'ee_delta': 'ee_delta',
+                              'relative_ee_pos': 'relative_ee_pos'}
+        action_key_norm = _ACTION_KEY_ALIAS.get(action_key, action_key)
         _obs_keys = policy_obj.get('settings', {}).get('obs_state_keys')
         if _obs_keys is None:
             _obs_keys = checkpoint.get('train_settings', {}).get('obs_state_keys')
@@ -406,7 +412,7 @@ def checkpoint_test(
             obs_t = ts.observation
 
             # relative_ee_pos: queue에 남은 delta가 있으면 추론 없이 꺼내 씀
-            if action_key == 'relative_ee_pos' and len(rel_action_queue) > 0:
+            if action_key_norm == 'relative_ee_pos' and len(rel_action_queue) > 0:
                 state_t = rel_action_queue.popleft()
             # PI05+use_relative_actions: 같은 chunk의 나머지 absolute action 사용
             # (chunk-inference 시점의 state로 이미 더해진 상태). 재추론/재postprocess
@@ -417,9 +423,9 @@ def checkpoint_test(
                 with torch.no_grad():
                     # UMI relative trajectory: 매 step마다 현재 EE pose 기준으로 재예측.
                     # temporal ensemble이 다른 기준 frame의 waypoint를 섞지 않도록 policy를 reset.
-                    if use_relative_trajectory and action_key == 'ee_delta_action':
+                    if use_relative_trajectory and action_key_norm == 'ee_delta':
                         policy.reset()
-                    if action_key in ('ee_delta_action', 'relative_ee_pos'):
+                    if action_key_norm in ('ee_delta', 'relative_ee_pos'):
                         # single_arm: 실제 EE 포즈 변화량 (closed-loop) + tool qpos, tool-only: 현재 qpos
                         obs_parts = []
                         for agent in env.agents:
@@ -447,12 +453,24 @@ def checkpoint_test(
                     # qpos가 obs_state_keys에 없으면 0으로 채움
                     if 'qpos' not in obs_state_keys:
                         qpos_np = np.zeros_like(qpos_np)
-                    # obs_state_keys에 따라 qvel, qeffort append
+                    # obs_state_keys 에 따라 qvel, qeffort, eepos append.
+                    # 학습 시 _build_obs_state 와 동일한 순서로 concat 해야 dim 맞음:
+                    # qpos → qvel → qeffort → eepos.
                     extra_obs = []
                     if 'qvel' in obs_state_keys:
                         extra_obs.extend([np.array(agent.get_joint_vel()) for agent in env.agents])
                     if 'qeffort' in obs_state_keys:
                         extra_obs.extend([np.array(agent.get_joint_effort()) for agent in env.agents])
+                    if 'eepos' in obs_state_keys:
+                        # EE 절대좌표 (x,y,z,rx,ry,rz). tool_inner면 tool joint 도 append.
+                        for agent in env.agents:
+                            if agent.role == 'tool' or agent.ik_solver is None:
+                                continue
+                            ee_dict = agent.get_ee_position() or {}
+                            for ee_name in (agent.ee_names or []):
+                                vals = ee_dict.get(ee_name)
+                                if vals:
+                                    extra_obs.append(np.array(vals, dtype=np.float32))
                     if extra_obs:
                         qpos_np = np.concatenate([qpos_np] + extra_obs)
                     qpos_t = torch.from_numpy(qpos_np).float().cuda().unsqueeze(0)
@@ -516,7 +534,7 @@ def checkpoint_test(
                             policy_input_t['task'] = _lang
                         policy_input_t = preprocessor(policy_input_t)
 
-                    if action_key == 'relative_ee_pos':
+                    if action_key_norm == 'relative_ee_pos':
                         # full chunk를 한번에 받아서 delta로 변환 후 queue에 넣음
                         policy.reset()
                         if hasattr(policy, 'predict_action_chunk'):
@@ -536,7 +554,19 @@ def checkpoint_test(
                         if postprocessor is not None:
                             raw_actions = postprocessor(raw_actions)
                         raw_np = raw_actions.cpu().numpy()
-                        deltas = relative_trajectory_to_delta(raw_np)
+                        # DexUMI 학습 — relative trajectory 는 current EE local frame
+                        # 이라 world frame 으로 풀려면 현재 EE pose 가 필요. 단일 arm 가정
+                        # (multi-EE 는 추후). tool_inner 면 tool joint 차원도 append.
+                        _curr_eepos = None
+                        for _agent in env.agents:
+                            if _agent.role == 'tool' or _agent.ik_solver is None:
+                                continue
+                            _ee_dict = _agent.get_ee_position() or {}
+                            _ee_name = _agent.ee_names[0] if _agent.ee_names else None
+                            if _ee_name and _ee_name in _ee_dict:
+                                _curr_eepos = np.array(_ee_dict[_ee_name], dtype=np.float32)
+                                break
+                        deltas = relative_trajectory_to_delta(raw_np, current_eepos=_curr_eepos)
                         state_t = deltas[0]
                         for i in range(1, len(deltas)):
                             rel_action_queue.append(deltas[i])
@@ -664,7 +694,7 @@ def checkpoint_test(
 
             start_action_id = 0
             for agent in env.agents:
-                if action_key in ('ee_delta_action', 'relative_ee_pos') and agent.role != 'tool' and agent.ik_solver is not None:
+                if action_key_norm in ('ee_delta', 'relative_ee_pos') and agent.role != 'tool' and agent.ik_solver is not None:
                     ee_delta_dim = len(agent.ee_names) * 6
                     # tool_inner: ee_delta(6) + tool_abs 차원 추가
                     _, sample_tool = agent.get_joint_and_tool_pos([0.0] * agent.joint_len)

@@ -192,3 +192,57 @@ class FairinoSDKController(BaseSDKController):
         except Exception as e:
             print(f"[FairinoSDK] read_joints error: {e}", flush=True)
             return JOINT_NAMES, [0.0] * 6
+
+    def read_joints_extended(self) -> tuple:
+        """positions(rad) + velocities(rad/s) + efforts(Nm) 까지 같이 반환.
+
+        Fairino SDK 는 robot_state_pkg 캐시에서 직접 읽어 RPC 비용이 거의 없다.
+        - GetActualJointSpeedsDegree → deg/s 라 rad/s 로 변환.
+        - GetJointTorques → Fairino 가 반환하는 단위 그대로 (Nm 추정).
+        """
+        names, positions = self.read_joints()
+        if not self._connected or self._robot is None:
+            return names, positions, [], []
+
+        # SDK 의 GetActualJointSpeedsDegree / GetJointTorques 는 robot_state_pkg
+        # (CNDE 포트 20005) 캐시를 읽도록 수정돼있어, 네트워크에서 CNDE 가 안 되면
+        # 항상 0 반환 (실제 그런 환경. f307f57 commit 참고). XML-RPC ServerProxy
+        # (self._robot.robot) 로 직접 호출하면 CNDE 우회 가능 — position 도 동일
+        # 경로(GetActualJointPosRadian XML-RPC)로 잘 받아오고 있음.
+        velocities = []
+        efforts = []
+        xmlrpc = getattr(self._robot, 'robot', None)
+        try:
+            if xmlrpc is not None:
+                ret_v = xmlrpc.GetActualJointSpeedsDegree(1)
+                # XML-RPC 응답: [err, j1, j2, j3, j4, j5, j6]
+                if isinstance(ret_v, (list, tuple)) and len(ret_v) >= 7 and ret_v[0] == 0:
+                    velocities = [ret_v[i + 1] * _DEG_TO_RAD for i in range(min(6, len(positions)))]
+        except Exception as e:
+            if not hasattr(self, '_vel_err_log') or self._vel_err_log % 250 == 0:
+                print(f"[FairinoSDK] GetActualJointSpeedsDegree XMLRPC error: {e}", flush=True)
+            self._vel_err_log = getattr(self, '_vel_err_log', 0) + 1
+
+        try:
+            if xmlrpc is not None:
+                ret_t = xmlrpc.GetJointTorques(1)
+                if isinstance(ret_t, (list, tuple)) and len(ret_t) >= 7 and ret_t[0] == 0:
+                    efforts = [ret_t[i + 1] for i in range(min(6, len(positions)))]
+        except Exception as e:
+            if not hasattr(self, '_tor_err_log') or self._tor_err_log % 250 == 0:
+                print(f"[FairinoSDK] GetJointTorques XMLRPC error: {e}", flush=True)
+            self._tor_err_log = getattr(self, '_tor_err_log', 0) + 1
+
+        # DEBUG: 처음 몇 번 + 250 step 마다 결과 출력
+        if not hasattr(self, '_ext_log_count'):
+            self._ext_log_count = 0
+        self._ext_log_count += 1
+        if self._ext_log_count <= 5 or self._ext_log_count % 250 == 0:
+            print(
+                f"[FairinoSDK] read_joints_extended #{self._ext_log_count} | "
+                f"velocities={[f'{v:.4f}' for v in velocities]} | "
+                f"efforts={[f'{e:.4f}' for e in efforts]}",
+                flush=True
+            )
+
+        return names, positions, velocities, efforts

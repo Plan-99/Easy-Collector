@@ -100,13 +100,13 @@
                             <span class="text-caption text-grey">{{ $t('replayActionType') }}:</span>
                             <q-radio
                                 v-model="replayActionType"
-                                val="qaction"
+                                val="joint"
                                 :label="$t('replayActionQaction')"
                                 dense dark color="primary"
                             />
                             <q-radio
                                 v-model="replayActionType"
-                                val="ee_delta_action"
+                                val="ee_delta"
                                 :label="$t('replayActionEeDelta')"
                                 dense dark color="primary"
                             />
@@ -608,7 +608,7 @@ const selectedEpisode = defineModel('selectedEpisode', {
     type: Object,
     default: {}
 });
-const replayActionType = ref('qaction');
+const replayActionType = ref('joint');
 const isReplaying = ref(false);
 const selectedEpisodeFrames = ref(0);
 

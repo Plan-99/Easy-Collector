@@ -30,15 +30,45 @@ class RemoteAgent:
         self.robot_type = robot['type']
         self.robot_company = robot['company']
         self.is_sim = robot.get('is_sim', False)
-        self.ik_solver = True if robot.get('ik_available', False) else None
         self.last_ee_delta = None
 
-        # ee_names: IK가 있으면 ik_setting의 ee_definitions에서 추출
+        # ik_solver / ee_names 는 두 출처에서 결정:
+        #   1) DB robot record (user-editable: settings.ik_setting, ik_available 등)
+        #   2) module.json manifest (spec.ik_available, ik.ee_definitions)
+        # DB 에 안 들어있는 경우 manifest 로 fallback — module-based robot 은 IK 설정이
+        # manifest 에만 있고 DB 에는 ip_address 등 사용자 편집값만 저장되므로 이게 없으면
+        # RemoteAgent.ik_solver=None 이 되어 record_episode 의 ee_delta_action 수집이
+        # skip 됨. ROS2 측 Agent 는 이미 module manifest 를 직접 보지만, backend 측
+        # RemoteAgent 는 그러지 않아 비대칭이 있었음.
+        has_ik = bool(robot.get('ik_available', False))
+        if not has_ik:
+            try:
+                from ..configs.module_loader import load_all_robots
+                for r in load_all_robots():
+                    # module_loader._flatten 은 'type' 을 'name' 으로 저장.
+                    if r.get('name') == self.robot_type:
+                        has_ik = bool(r.get('ik_available', False))
+                        break
+            except Exception as e:
+                print(f"[RemoteAgent] module manifest lookup failed: {e}")
+        self.ik_solver = True if has_ik else None
+
+        # ee_names 채우기:
+        # 1) DB settings.ik_setting (사용자가 직접 편집한 경우 — custom robot)
+        # 2) module manifest 의 ik.ee_definitions (모듈 기본값)
         self.ee_names = []
         if self.ik_solver:
             ik_setting = robot.get('ik_setting') or (robot.get('settings') or {}).get('ik_setting')
             if ik_setting and 'ee_definitions' in ik_setting:
+                # ik_setting.ee_definitions 는 list of (name, parent, offset) tuple/list
                 self.ee_names = [ed[0] for ed in ik_setting['ee_definitions']]
+            if not self.ee_names:
+                try:
+                    from ..configs.module_loader import get_default_ee_definitions
+                    ee_defs = get_default_ee_definitions(self.robot_type)
+                    self.ee_names = [d.get('name') for d in ee_defs if d.get('name')]
+                except Exception as e:
+                    print(f"[RemoteAgent] ee_definitions lookup failed: {e}")
 
         # 상태 캐시 (subscribe 스트리밍에서 업데이트)
         self.joint_states = None
@@ -130,6 +160,21 @@ class RemoteAgent:
         client.agent.MoveEEStep(req)
 
     def move_ee_delta_step(self, delta_ee_dict, vel_arg=None, tool_positions=None):
+        # record_episode (keyboard tele) 가 agent.last_ee_delta 를 읽어 ee_delta_action
+        # 으로 저장한다. ROS2 측 Agent 는 자기쪽에서 last_ee_delta 를 갱신하지만 backend
+        # 의 RemoteAgent 인스턴스는 따로 안 갱신하면 항상 None → action.ee_delta=0.
+        # 여기서 ee_names 와 매칭해 첫 6 dim (xyz+rpy) 만 캐싱 — ROS2 측과 동일 형식.
+        try:
+            if isinstance(delta_ee_dict, dict):
+                ee_names = self.ee_names or list(delta_ee_dict.keys())
+                self.last_ee_delta = {
+                    name: list(delta_ee_dict[name][:6])
+                    for name in ee_names
+                    if name in delta_ee_dict
+                }
+        except Exception as e:
+            print(f"[RemoteAgent] last_ee_delta cache failed: {e}")
+
         client = get_bridge_client()
         req = pb.MoveEEDeltaRequest(
             agent_id=self._agent_id,

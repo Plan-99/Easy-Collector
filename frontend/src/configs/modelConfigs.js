@@ -33,8 +33,8 @@ export const POLICY_CONFIGS = {
         'use_vae': { 'label': 'Use VAE', 'value': true, 'type': 'boolean' },
         'latent_dim': { 'label': 'Latent Dimension', 'value': 32, 'type': 'number' },
         'n_vae_encoder_layers': { 'label': 'Number of VAE Encoder Layers', 'value': 4, 'type': 'number' },
-        'action_type': { 'label': 'Action Type', 'value': 'qaction', 'type': 'select', 'options': ['qaction', 'ee_delta_action', 'relative_ee_pos'] },
-        'obs_state_keys': { 'label': 'Observation State Keys', 'value': ['qpos'], 'type': 'multiselect', 'options': ['qpos', 'qvel', 'qeffort'] },
+        'action_type': { 'label': 'Action Type', 'value': 'joint', 'type': 'select', 'options': ['joint', 'ee_delta', 'relative_ee_pos'] },
+        'obs_state_keys': { 'label': 'Observation State Keys', 'value': ['qpos'], 'type': 'multiselect', 'options': ['qpos', 'qvel', 'qeffort', 'eepos'] },
     },
     'Diffusion': {
         // --- 데이터 형식 및 시퀀스 관련 ---
@@ -69,8 +69,8 @@ export const POLICY_CONFIGS = {
 
         // --- Loss 계산 ---
         'do_mask_loss_for_padding': { 'label': 'Mask Loss for Padding', 'value': false, 'type': 'boolean' },
-        'action_type': { 'label': 'Action Type', 'value': 'qaction', 'type': 'select', 'options': ['qaction', 'ee_delta_action', 'relative_ee_pos'] },
-        'obs_state_keys': { 'label': 'Observation State Keys', 'value': ['qpos'], 'type': 'multiselect', 'options': ['qpos', 'qvel', 'qeffort'] },
+        'action_type': { 'label': 'Action Type', 'value': 'joint', 'type': 'select', 'options': ['joint', 'ee_delta', 'relative_ee_pos'] },
+        'obs_state_keys': { 'label': 'Observation State Keys', 'value': ['qpos'], 'type': 'multiselect', 'options': ['qpos', 'qvel', 'qeffort', 'eepos'] },
     },
     'PI05': {
         // HuggingFace access token for gated PaliGemma/Gemma models
@@ -114,8 +114,8 @@ export const POLICY_CONFIGS = {
             'nullable': true,
             'showIf': 'use_relative_actions',
         },
-        'action_type': { 'label': 'Action Type', 'value': 'qaction', 'type': 'select', 'options': ['qaction', 'ee_delta_action', 'relative_ee_pos'] },
-        'obs_state_keys': { 'label': 'Observation State Keys', 'value': ['qpos'], 'type': 'multiselect', 'options': ['qpos', 'qvel', 'qeffort'] },
+        'action_type': { 'label': 'Action Type', 'value': 'joint', 'type': 'select', 'options': ['joint', 'ee_delta', 'relative_ee_pos'] },
+        'obs_state_keys': { 'label': 'Observation State Keys', 'value': ['qpos'], 'type': 'multiselect', 'options': ['qpos', 'qvel', 'qeffort', 'eepos'] },
     }
     // 'VLAsEn': {
     //     'n_obs_steps': { 'label': 'Number of Observation Steps', 'value': 1, 'type': 'number' },

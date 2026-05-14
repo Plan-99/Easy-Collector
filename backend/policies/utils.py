@@ -19,6 +19,100 @@ from ..utils.lerobot_io import (
 )
 
 
+def _eepos_to_homogeneous(eepos6: np.ndarray) -> np.ndarray:
+    """[x, y, z, rx, ry, rz] (axis-angle) → 4x4 homogeneous matrix."""
+    T = np.eye(4, dtype=np.float64)
+    T[:3, :3] = Rotation.from_rotvec(eepos6[3:6]).as_matrix()
+    T[:3, 3] = eepos6[:3]
+    return T
+
+
+def _homogeneous_to_eepos(T: np.ndarray) -> np.ndarray:
+    """4x4 homogeneous → [x, y, z, rx, ry, rz]."""
+    rotvec = Rotation.from_matrix(T[:3, :3]).as_rotvec()
+    return np.concatenate([T[:3, 3], rotvec]).astype(np.float32)
+
+
+def compute_relative_trajectory_in_local_frame(
+    future_eepos: np.ndarray, current_eepos: np.ndarray
+) -> np.ndarray:
+    """DexUMI 스타일 — chunk_size 만큼의 future eepos 를 current eepos 의 local
+    frame 으로 변환 (action target 으로 사용).
+
+    `T_relative[i] = invert(T_current) @ T_future[i]` 후 6dof 로 직렬화.
+
+    Args:
+        future_eepos: [N, D] 미래 N 개 step 의 eepos. D = 6 또는 6+tool.
+        current_eepos: [D] 현재 step 의 eepos.
+
+    Returns:
+        [N, D] relative trajectory. 앞 6 차원은 current local frame, tool 차원은
+        absolute 값 그대로 pass-through.
+    """
+    future_eepos = np.asarray(future_eepos, dtype=np.float32)
+    current_eepos = np.asarray(current_eepos, dtype=np.float32)
+    if future_eepos.ndim == 1:
+        future_eepos = future_eepos[None, :]
+    N, D = future_eepos.shape
+
+    T_curr = _eepos_to_homogeneous(current_eepos)
+    T_curr_inv = np.eye(4, dtype=np.float64)
+    R_curr = T_curr[:3, :3]
+    t_curr = T_curr[:3, 3]
+    T_curr_inv[:3, :3] = R_curr.T
+    T_curr_inv[:3, 3] = -R_curr.T @ t_curr
+
+    out = np.zeros_like(future_eepos)
+    for i in range(N):
+        T_i = _eepos_to_homogeneous(future_eepos[i])
+        T_rel = T_curr_inv @ T_i
+        out[i, :6] = _homogeneous_to_eepos(T_rel)
+        if D > 6:
+            out[i, 6:] = future_eepos[i, 6:]  # tool 차원: absolute 유지
+    return out
+
+
+def relative_trajectory_in_local_frame_to_world_deltas(
+    relative_traj: np.ndarray, current_eepos: np.ndarray
+) -> np.ndarray:
+    """역변환 (inference). current EE local frame 의 trajectory → world frame
+    sequential deltas (move_ee_delta_step 으로 적용 가능한 형태).
+
+    각 waypoint 를 world 로 풀고, 연속 waypoint 간 차분 (회전은 합성) 으로 step
+    별 delta 계산. 첫 delta 는 current → world[0], 이후는 world[i-1] → world[i].
+    Tool 차원은 absolute 값 그대로 (한 step 내 절대 위치로 보냄).
+    """
+    relative_traj = np.asarray(relative_traj, dtype=np.float32)
+    current_eepos = np.asarray(current_eepos, dtype=np.float32)
+    if relative_traj.ndim == 1:
+        relative_traj = relative_traj[None, :]
+    N, D = relative_traj.shape
+
+    T_curr = _eepos_to_homogeneous(current_eepos)
+
+    # 모든 waypoint 를 world frame 으로 변환
+    T_world_list = []
+    for i in range(N):
+        T_rel = _eepos_to_homogeneous(relative_traj[i, :6])
+        T_world_list.append(T_curr @ T_rel)
+
+    deltas = np.zeros_like(relative_traj)
+    T_prev = T_curr  # 첫 delta 는 current → world[0]
+    for i in range(N):
+        T_i = T_world_list[i]
+        # Position delta in world
+        delta_t = T_i[:3, 3] - T_prev[:3, 3]
+        # Rotation delta: R_delta = R_i @ R_prev^T
+        R_delta = T_i[:3, :3] @ T_prev[:3, :3].T
+        rotvec_delta = Rotation.from_matrix(R_delta).as_rotvec()
+        deltas[i, :3] = delta_t
+        deltas[i, 3:6] = rotvec_delta
+        if D > 6:
+            deltas[i, 6:] = relative_traj[i, 6:]  # tool absolute pass-through
+        T_prev = T_i
+    return deltas
+
+
 def delta_to_relative_trajectory(deltas: np.ndarray) -> np.ndarray:
     """UMI 방식의 relative trajectory 라벨로 변환.
 
@@ -49,13 +143,28 @@ def delta_to_relative_trajectory(deltas: np.ndarray) -> np.ndarray:
     return relative
 
 
-def relative_trajectory_to_delta(waypoints: np.ndarray) -> np.ndarray:
+def relative_trajectory_to_delta(waypoints: np.ndarray, current_eepos=None) -> np.ndarray:
     """relative trajectory → sequential delta 역변환 (inference 시 사용).
 
-    waypoints: [T, D] relative trajectory. 앞 6차원은 (T_now→t+i),
-               7차원 이후는 tool joint (absolute 값)으로 변환 없이 그대로 유지.
-    반환값: [T, D] sequential deltas + tool
+    current_eepos 가 주어지면 DexUMI 스타일 (current EE local frame trajectory → world
+    sequential deltas). None 이면 legacy 동작 (waypoints 를 world cumsum 으로 간주,
+    naive 차분). 옛 학습 모델 호환 위해 기본 None.
+
+    Args:
+        waypoints: [T, D] relative trajectory. 앞 6 차원이 EE pose, D > 6 일 때 6 이후는
+                   tool joint (absolute).
+        current_eepos: [D] 현재 EE pose. 주어지면 local-frame waypoints 를 world 로
+                       풀고 sequential delta 계산.
+
+    Returns:
+        [T, D] sequential deltas (+ tool absolute).
     """
+    waypoints = np.asarray(waypoints, dtype=np.float32)
+    if current_eepos is not None:
+        # DexUMI 스타일 역변환: utils 의 helper 사용.
+        return relative_trajectory_in_local_frame_to_world_deltas(waypoints, current_eepos)
+
+    # Legacy 경로 (current_eepos 없을 때) — naive 누적합 모델용.
     T = len(waypoints)
     deltas = np.zeros_like(waypoints)
 
@@ -77,6 +186,125 @@ def relative_trajectory_to_delta(waypoints: np.ndarray) -> np.ndarray:
     return deltas
 
 
+# ─── action_key / obs_state_keys 통일 헬퍼 ───────────────────────────────
+#
+# 데이터 스키마 정합성:
+#   action.joint     ← qaction (절대 joint position target).
+#   action.ee_delta  ← ee_delta_action (t+1 shift, legacy 'action' 컬럼과 동일).
+#   observation.qpos ← 현재 frame joint 위치 (= legacy observation.state).
+#   observation.qvel/qeffort/eepos ← 그 외 관측치.
+#
+# action_key 값:
+#   - 'joint' 또는 'qaction' → action.joint 컬럼 사용.
+#   - 'ee_delta' 또는 'ee_delta_action' → action.ee_delta 컬럼 사용.
+#   - 'relative_ee_pos' / 기타 → 기존 legacy 'action' 컬럼 (특수 전처리 분기 유지).
+#
+# obs_state_keys 값: ['qpos', 'qvel', 'qeffort', 'eepos'] 중 임의 부분집합.
+# 학습/추론 모두 같은 순서로 concat 해서 observation state 구성.
+
+_ACTION_KEY_ALIASES = {
+    'qaction': 'joint',
+    'joint': 'joint',
+    'ee_delta_action': 'ee_delta',
+    'ee_delta': 'ee_delta',
+    'relative_ee_pos': 'relative_ee_pos',
+}
+
+
+def _normalize_action_key(action_key):
+    """레거시 / 신규 값 모두 받아 신규 표준명으로 변환."""
+    if action_key is None:
+        return 'joint'
+    return _ACTION_KEY_ALIASES.get(action_key, action_key)
+
+
+def _select_action_column(df, action_key):
+    """action_key → 데이터프레임에서 읽을 컬럼명. 컬럼 없으면 legacy 'action' fallback.
+
+    NOTE: ee_delta / relative_ee_pos 는 컬럼이 아닌 derive (eepos 차분) 가 우선되므로
+    호출자가 직접 컬럼명을 읽기 보다 `_get_action_data` 를 쓰는 게 일반적이다.
+    """
+    norm = _normalize_action_key(action_key)
+    if norm == 'joint' and 'action.joint' in df.columns:
+        return 'action.joint'
+    if norm == 'ee_delta' and 'action.ee_delta' in df.columns:
+        return 'action.ee_delta'
+    return 'action'
+
+
+def _get_action_data(df, action_key):
+    """action_key → 학습/통계용 action 배열 (T, D) 반환.
+
+    action_key 분기:
+      - 'joint'(/'qaction'): action.joint 컬럼 우선, 없으면 legacy 'action'.
+      - 'ee_delta'(/'ee_delta_action'): observation.eepos 시간 차분 (t+1 - t,
+        마지막 0 padding) 으로 derive. eepos 없으면 legacy action.ee_delta 또는
+        'action' fallback.
+      - 'relative_ee_pos': ee_delta 와 동일하게 derive (호출자가 추후
+        delta_to_relative_trajectory 적용).
+
+    eepos diff 로 derive 하는 이유: action.ee_delta 컬럼은 record_episode 의
+    tele-type 별 분기에 의존해 텔레옵별로 값이 달라지거나 0 으로 떨어졌음.
+    eepos 는 실제 robot motion 의 절대 EE 좌표라 시간 차분이 신뢰할 수 있는
+    "다음 step delta" 가 됨. 회전(rxryrz axis-angle) 은 per-step 변화 작아
+    naive 차분으로 충분.
+    """
+    norm = _normalize_action_key(action_key)
+
+    if norm == 'joint':
+        col = 'action.joint' if 'action.joint' in df.columns else 'action'
+        return np.array(df[col].tolist(), dtype=np.float32)
+
+    if norm in ('ee_delta', 'relative_ee_pos'):
+        if 'observation.eepos' in df.columns:
+            eepos = np.array(df['observation.eepos'].tolist(), dtype=np.float32)
+            delta = np.zeros_like(eepos)
+            if len(eepos) > 1:
+                delta[:-1] = eepos[1:] - eepos[:-1]
+            return delta
+        # 옛 dataset 호환: 저장된 action.ee_delta 또는 legacy 'action' 사용.
+        if 'action.ee_delta' in df.columns:
+            return np.array(df['action.ee_delta'].tolist(), dtype=np.float32)
+        if 'action' in df.columns:
+            return np.array(df['action'].tolist(), dtype=np.float32)
+        # 마지막 fallback: action.joint (옛 ee_delta 가 없으면 joint 라도 반환).
+        return np.array(df['action.joint'].tolist(), dtype=np.float32)
+
+    # 기타 / 미지의 action_key: 새/옛 schema 모두 대응.
+    col = 'action' if 'action' in df.columns else 'action.joint'
+    return np.array(df[col].tolist(), dtype=np.float32)
+
+
+def _build_obs_state(df, obs_state_keys):
+    """obs_state_keys 순서대로 컬럼을 concat 해 (T, total_dim) state 행렬 반환.
+
+    누락된 컬럼 (예: 옛 dataset 에 observation.qpos 가 없으면 observation.state 사용)
+    은 가능한 한 fallback 으로 메우고, 정말 없으면 skip.
+    """
+    if not obs_state_keys:
+        obs_state_keys = ['qpos']
+
+    parts = []
+    for key in obs_state_keys:
+        # qpos: 신규 컬럼 observation.qpos 우선, 옛 dataset 은 observation.state 사용.
+        if key == 'qpos':
+            col = 'observation.qpos' if 'observation.qpos' in df.columns else 'observation.state'
+        else:
+            col = f'observation.{key}'
+        if col in df.columns:
+            arr = np.array(df[col].tolist(), dtype=np.float32)
+            if arr.ndim == 1:
+                arr = arr.reshape(-1, 1)
+            parts.append(arr)
+    if not parts:
+        # 최후의 fallback — observation.state 가 있으면 그것만.
+        if 'observation.state' in df.columns:
+            arr = np.array(df['observation.state'].tolist(), dtype=np.float32)
+            if arr.ndim == 1:
+                arr = arr.reshape(-1, 1)
+            return arr
+        raise ValueError("No observation column found in dataset")
+    return np.concatenate(parts, axis=1)
 
 
 class EpisodicDataset(torch.utils.data.Dataset):
@@ -155,8 +383,17 @@ class EpisodicDataset(torch.utils.data.Dataset):
         table = pq.read_table(parquet_path)
         df = table.to_pandas()
 
-        state_data = np.array(df["observation.state"].tolist(), dtype=np.float32)
-        action_data = np.array(df["action"].tolist(), dtype=np.float32)
+        # obs_state_keys 와 action_key 에 따라 state/action 구성. action_key 가
+        # ee_delta/relative_ee_pos 면 _get_action_data 가 observation.eepos 시간
+        # 차분으로 derive — action.ee_delta 컬럼 저장 안 함.
+        state_data = _build_obs_state(df, self.obs_state_keys)
+        action_data = _get_action_data(df, self.action_key)
+        # eepos sequence — relative_ee_pos 학습에서 __getitem__ 이 chunk 별
+        # current EE local frame trajectory 를 계산하는 데 사용. 없으면 None.
+        eepos_data = (
+            np.array(df['observation.eepos'].tolist(), dtype=np.float32)
+            if 'observation.eepos' in df.columns else None
+        )
 
         # Language instruction from episodes.jsonl (per-episode `tasks` list).
         # Use the first entry; most datasets have a single task per episode.
@@ -223,6 +460,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
         result = {
             "state_data": state_data,
             "action_data": action_data,
+            "eepos_data": eepos_data,
             "language_instruction": language_instruction,
             "image_data": image_data,
             "succeed": succeed,
@@ -292,8 +530,19 @@ class EpisodicDataset(torch.utils.data.Dataset):
         action_len = min(self.chunk_size, episode_len - start_ts)
 
         padded_action = np.zeros(original_action_shape, dtype=np.float32)
-        if self.action_key == 'relative_ee_pos' or (self.use_relative_trajectory and self.action_key == 'ee_delta_action'):
-            padded_action[:action_len] = delta_to_relative_trajectory(action[:action_len])
+        if _normalize_action_key(self.action_key) == 'relative_ee_pos' or (self.use_relative_trajectory and _normalize_action_key(self.action_key) == 'ee_delta'):
+            # DexUMI style: chunk 의 미래 N 개 eepos 를 현재 eepos local frame 으로
+            # 변환. eepos 가 없으면 (옛 dataset) legacy naive cumsum 으로 fallback.
+            eepos_data = ep.get("eepos_data")
+            if eepos_data is not None and len(eepos_data) > start_ts:
+                future_idx = np.arange(start_ts + 1, start_ts + self.chunk_size + 1)
+                future_idx = np.clip(future_idx, 0, episode_len - 1)
+                future_eepos = eepos_data[future_idx]
+                current_eepos = eepos_data[start_ts]
+                rel_traj = compute_relative_trajectory_in_local_frame(future_eepos, current_eepos)
+                padded_action[:action_len, :rel_traj.shape[1]] = rel_traj[:action_len]
+            else:
+                padded_action[:action_len] = delta_to_relative_trajectory(action[:action_len])
         else:
             padded_action[:action_len] = action
         is_pad = np.zeros(self.chunk_size)
@@ -419,8 +668,10 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
         table = pq.read_table(parquet_path)
         df = table.to_pandas()
 
-        state_data = np.array(df["observation.state"].tolist(), dtype=np.float32)
-        action_data = np.array(df["action"].tolist(), dtype=np.float32)
+        # obs_state_keys / action_key 에 따라 state/action 구성. ee_delta 등은
+        # observation.eepos 차분으로 derive.
+        state_data = _build_obs_state(df, obs_state_keys)
+        action_data = _get_action_data(df, action_key)
 
         # Check succeed
         if "succeed" in df.columns:
@@ -435,8 +686,8 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
         table = pq.read_table(parquet_path)
         df = table.to_pandas()
 
-        qpos = np.array(df["observation.state"].tolist(), dtype=np.float32)
-        action = np.array(df["action"].tolist(), dtype=np.float32)
+        qpos = _build_obs_state(df, obs_state_keys)
+        action = _get_action_data(df, action_key)
 
         if qpos.ndim == 1:
             qpos = qpos.reshape(1, -1)
@@ -458,8 +709,32 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
             skipped_episodes.append(episode_idx)
             continue
 
-        if action_key == 'relative_ee_pos' or (use_relative_trajectory and action_key == 'ee_delta_action'):
-            action = delta_to_relative_trajectory(action)
+        if _normalize_action_key(action_key) == 'relative_ee_pos' or (use_relative_trajectory and _normalize_action_key(action_key) == 'ee_delta'):
+            # eepos 있으면 DexUMI 스타일 — 매 frame 을 chunk 시작점으로 보고 그
+            # 시점부터 chunk_size step 의 trajectory in local frame 으로 stats 누적.
+            # action 변수를 chunk-flattened 로 갈아끼우면 뒤의 use_relative_actions
+            # 분기가 깨지므로, stats 계산 전용 별도 변수로 처리.
+            if 'observation.eepos' in df.columns:
+                eepos_arr = np.array(df['observation.eepos'].tolist(), dtype=np.float32)
+                T_total = len(eepos_arr)
+                if T_total >= 2 and chunk_size > 0:
+                    rel_chunks = []
+                    for start in range(T_total - 1):
+                        future_idx = np.clip(
+                            np.arange(start + 1, start + chunk_size + 1), 0, T_total - 1
+                        )
+                        rel_chunks.append(compute_relative_trajectory_in_local_frame(
+                            eepos_arr[future_idx], eepos_arr[start]
+                        ))
+                    action = np.concatenate(rel_chunks, axis=0)
+                    # relative_ee_pos 는 PI05+use_relative_actions 와 결합 안 함
+                    # (PI05 의 joint-relative 모드는 qaction 기반). use_relative_actions
+                    # 분기를 건너뛰도록 강제로 False 설정.
+                    use_relative_actions = False
+                else:
+                    action = delta_to_relative_trajectory(action)
+            else:
+                action = delta_to_relative_trajectory(action)
 
         # use_relative_actions: stats MUST match what RelativeActionsProcessorStep
         # actually produces during training/inference, not naive per-timestep deltas.
@@ -675,8 +950,19 @@ class FullScanDataset(EpisodicDataset):
         action_len = min(self.chunk_size, episode_len - start_ts)
 
         padded_action = np.zeros(original_action_shape, dtype=np.float32)
-        if self.action_key == 'relative_ee_pos' or (self.use_relative_trajectory and self.action_key == 'ee_delta_action'):
-            padded_action[:action_len] = delta_to_relative_trajectory(action[:action_len])
+        if _normalize_action_key(self.action_key) == 'relative_ee_pos' or (self.use_relative_trajectory and _normalize_action_key(self.action_key) == 'ee_delta'):
+            # DexUMI style: chunk 의 미래 N 개 eepos 를 현재 eepos local frame 으로
+            # 변환. eepos 가 없으면 (옛 dataset) legacy naive cumsum 으로 fallback.
+            eepos_data = ep.get("eepos_data")
+            if eepos_data is not None and len(eepos_data) > start_ts:
+                future_idx = np.arange(start_ts + 1, start_ts + self.chunk_size + 1)
+                future_idx = np.clip(future_idx, 0, episode_len - 1)
+                future_eepos = eepos_data[future_idx]
+                current_eepos = eepos_data[start_ts]
+                rel_traj = compute_relative_trajectory_in_local_frame(future_eepos, current_eepos)
+                padded_action[:action_len, :rel_traj.shape[1]] = rel_traj[:action_len]
+            else:
+                padded_action[:action_len] = delta_to_relative_trajectory(action[:action_len])
         else:
             padded_action[:action_len] = action
         is_pad = np.zeros(self.chunk_size)

@@ -268,14 +268,22 @@ class JointInterpolationNode(Node):
             self._current_pos.tolist(), self._target_names)
 
     def _read_state_callback(self):
-        """SDK에서 관절 상태를 읽어 ROS2 토픽으로 퍼블리시."""
+        """SDK에서 관절 상태를 읽어 ROS2 토픽으로 퍼블리시. 지원하는 SDK 는
+        velocity/effort 도 같이 채워서 dataset 수집/추론 시 qvel, qeffort 가
+        실제 값으로 들어오게 한다. 미지원 SDK 는 빈 배열 → JointState 호환."""
         if self._sdk_controller is None or self._state_pub is None:
             return
         try:
-            names, positions = self._sdk_controller.read_joints()
+            names, positions, velocities, efforts = (
+                self._sdk_controller.read_joints_extended()
+            )
             msg = JointState()
             msg.name = names
             msg.position = positions
+            if velocities:
+                msg.velocity = velocities
+            if efforts:
+                msg.effort = efforts
             self._state_pub.publish(msg)
         except Exception as e:
             self.get_logger().warn(f'SDK read error: {e}', throttle_duration_sec=5.0)

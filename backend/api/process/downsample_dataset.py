@@ -196,7 +196,8 @@ def downsample_dataset(dataset_id, new_dataset_id, keep, every,
             # ── Compute episode stats ──
             ep_stats = {}
             stat_columns = [
-                "observation.state", "action",
+                "observation.qpos", "observation.state",  # 새/옛 schema 둘 다
+                "action", "action.joint",
                 "observation.qvel", "observation.qeffort",
                 "observation.eepos", "observation.ee_delta", "action.ee_delta",
             ]

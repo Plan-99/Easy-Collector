@@ -40,6 +40,19 @@ class BaseSDKController(ABC):
         """
         ...
 
+    def read_joints_extended(self) -> tuple:
+        """
+        관절 상태 읽기 (확장: 속도/토크 포함). 기본 구현은 read_joints() 결과에
+        빈 velocity/effort 를 붙여 반환. 지원하는 SDK 는 override.
+
+        Returns:
+            (names: list[str], positions: list[float],
+             velocities: list[float] (rad/s, 미지원이면 []),
+             efforts: list[float] (Nm 등, 미지원이면 []))
+        """
+        names, positions = self.read_joints()
+        return names, positions, [], []
+
     @abstractmethod
     def disconnect(self) -> None:
         """SDK 연결 해제 및 리소스 정리."""

@@ -469,7 +469,9 @@ def get_episode_data(id, episode_ref):
 
     # Numeric channels — frontend graphs build datasets from these.
     numeric_keys = [
-        'observation.state', 'action', 'observation.qvel', 'observation.qeffort',
+        'observation.qpos', 'observation.state',  # 새/옛 schema
+        'action', 'action.joint',
+        'observation.qvel', 'observation.qeffort',
         'observation.eepos', 'observation.ee_delta', 'action.ee_delta',
     ]
     channels = {}

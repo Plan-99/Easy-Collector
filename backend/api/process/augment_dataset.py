@@ -289,9 +289,13 @@ def augment_dataset(dataset_id, aug_dataset_id, lightness, rectangles, salt_and_
             aug_info_current = _read_json(os.path.join(aug_dataset_path, INFO_PATH))
             global_start = aug_info_current["total_frames"]
 
-            # Read source non-image data from parquet
-            state_data = np.array(df["observation.state"].tolist(), dtype=np.float32)
-            action_data = np.array(df["action"].tolist(), dtype=np.float32)
+            # Read source non-image data from parquet. observation.qpos 우선,
+            # 옛 dataset 호환으로 observation.state fallback.
+            qpos_col = 'observation.qpos' if 'observation.qpos' in df.columns else 'observation.state'
+            state_data = np.array(df[qpos_col].tolist(), dtype=np.float32)
+            # action.joint 가 새 표준 — 옛 dataset 호환으로 action fallback.
+            _action_col = 'action.joint' if 'action.joint' in df.columns else 'action'
+            action_data = np.array(df[_action_col].tolist(), dtype=np.float32)
 
             def _as_seq(arr, dtype):
                 # feature shape=[1]인 스칼라 필드는 length-1 리스트로 wrap해야 한다.
@@ -306,9 +310,16 @@ def augment_dataset(dataset_id, aug_dataset_id, lightness, rectangles, salt_and_
                 "frame_index": _as_seq(np.arange(num_frames), np.int64),
                 "timestamp": _as_seq(df["timestamp"].tolist(), np.float32),
                 "task_index": _as_seq(df["task_index"].tolist(), np.int64),
-                "observation.state": state_data,
-                "action": action_data,
+                # 새 schema 는 observation.qpos 사용. features 에 observation.state 가
+                # 있으면 옛 schema dataset 이므로 그쪽 키로 저장.
+                ("observation.state" if "observation.state" in features and "observation.qpos" not in features
+                                       else "observation.qpos"): state_data,
             }
+            # action 의 source 가 새 schema 면 action.joint, 옛 schema 면 action.
+            if "action.joint" in features:
+                episode_dict["action.joint"] = action_data
+            else:
+                episode_dict["action"] = action_data
 
             # Copy all additional fields from source parquet
             for col_name in ["observation.qvel", "observation.qeffort", "observation.eepos",
@@ -327,11 +338,13 @@ def augment_dataset(dataset_id, aug_dataset_id, lightness, rectangles, salt_and_
             os.makedirs(os.path.dirname(aug_parquet), exist_ok=True)
             ep_dataset.to_parquet(aug_parquet)
 
-            # Compute episode stats for all numerical fields
+            # Compute episode stats for all numerical fields. 새 / 옛 schema 모두 처리.
             ep_stats = {}
-            stat_pairs = [("observation.state", state_data), ("action", action_data)]
+            qpos_key = "observation.qpos" if "observation.qpos" in episode_dict else "observation.state"
+            action_key_for_stats = "action.joint" if "action.joint" in features else "action"
+            stat_pairs = [(qpos_key, state_data), (action_key_for_stats, action_data)]
             for col_name in ["observation.qvel", "observation.qeffort", "observation.eepos",
-                             "observation.ee_delta", "action.ee_delta"]:
+                             "observation.ee_delta", "action.joint", "action.ee_delta"]:
                 if col_name in episode_dict:
                     stat_pairs.append((col_name, episode_dict[col_name]))
 

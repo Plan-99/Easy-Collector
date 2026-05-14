@@ -107,7 +107,7 @@ def _json_default(obj):
 
 # ─── Dataset creation ────────────────────────────────────────────────────────
 
-def create_dataset(dataset_dir, agents, sensors, task, fps=20, action_key="qaction"):
+def create_dataset(dataset_dir, agents, sensors, task, fps=20, action_key="joint"):
     """Create an empty LeRobot dataset directory structure.
 
     Args:
@@ -144,7 +144,7 @@ def create_dataset(dataset_dir, agents, sensors, task, fps=20, action_key="qacti
     return features
 
 
-def build_features(agents, sensors, task, action_key="qaction"):
+def build_features(agents, sensors, task, action_key="joint"):
     """Build the LeRobot features dict from agent/sensor configuration.
 
     The observation.state and action are concatenated across all agents (sorted by id).
@@ -186,12 +186,18 @@ def build_features(agents, sensors, task, action_key="qaction"):
                 ee_dim += per_ee_dim
 
     features = {
-        "observation.state": {
+        # observation.qpos: 절대 joint position. 학습/추론 모두 _build_obs_state 헬퍼가
+        # 이 컬럼을 우선으로 읽음 (옛 dataset 호환으로 observation.state fallback 도 지원).
+        "observation.qpos": {
             "dtype": "float32",
             "shape": (state_dim,),
             "names": state_names,
         },
-        "action": {
+        # action.joint: 절대 joint position target (qaction). 항상 저장. ee_delta /
+        # relative_ee_pos action 은 학습 시 _get_action_data 가 observation.eepos
+        # 차분으로 derive. 따라서 dataset 에는 action 의 source 한 가지 (joint) 만
+        # 필요하고 'action' 이라는 redundant alias 컬럼은 더 이상 만들지 않음.
+        "action.joint": {
             "dtype": "float32",
             "shape": (action_dim,),
             "names": action_names,
@@ -213,19 +219,12 @@ def build_features(agents, sensors, task, action_key="qaction"):
         },
     }
 
-    # EE features (only if any agent has ik_solver)
+    # EE features (only if any agent has ik_solver). observation.eepos 만 저장하고
+    # ee_delta / relative_ee_pos action 은 학습/추론 시 eepos 시간 차분 (eepos[t+1] -
+    # eepos[t]) 으로 derive — 별도 컬럼 필요 없음. observation.ee_delta 도 같은
+    # 이유로 미저장.
     if ee_dim > 0:
         features["observation.eepos"] = {
-            "dtype": "float32",
-            "shape": (ee_dim,),
-            "names": ee_names_list,
-        }
-        features["observation.ee_delta"] = {
-            "dtype": "float32",
-            "shape": (ee_dim,),
-            "names": ee_names_list,
-        }
-        features["action.ee_delta"] = {
             "dtype": "float32",
             "shape": (ee_dim,),
             "names": ee_names_list,
@@ -266,7 +265,7 @@ def build_features(agents, sensors, task, action_key="qaction"):
 # ─── Episode append ──────────────────────────────────────────────────────────
 
 def append_episode(dataset_dir, timesteps, agents, sensors, task,
-                   language_instruction="", action_key="qaction",
+                   language_instruction="", action_key="joint",
                    succeed_flags=None, fetch_image_fn=None, fps=20):
     """Append an episode to a LeRobot dataset.
 
@@ -302,12 +301,10 @@ def append_episode(dataset_dir, timesteps, agents, sensors, task,
 
     # ── Build per-frame data ─────────────────────────────────────────────
     states = []
-    actions = []
+    actions_joint = []  # action.joint = qaction (always)
     qvels = []
     qefforts = []
     eepos_list = []
-    ee_delta_list = []
-    ee_delta_action_list = []
     succeed_list = []
     frame_indices = []
     timestamps_list = []
@@ -326,8 +323,6 @@ def append_episode(dataset_dir, timesteps, agents, sensors, task,
         qvel_parts = []
         qeffort_parts = []
         eepos_parts = []
-        ee_delta_parts = []
-        ee_delta_action_parts = []
 
         for agent in agents_sorted:
             robot_state = ts.observation['robot_states'][agent.id]
@@ -357,49 +352,24 @@ def append_episode(dataset_dir, timesteps, agents, sensors, task,
                 for ee_name in sorted(eepos.keys()):
                     eepos_parts.append(np.array(eepos[ee_name], dtype=np.float32))
 
-            # observation.ee_delta — flatten dict {ee_name: [6+tool]}
-            ee_delta = robot_state.get('ee_delta')
-            if ee_delta is not None and isinstance(ee_delta, dict):
-                for ee_name in sorted(ee_delta.keys()):
-                    ee_delta_parts.append(np.array(ee_delta[ee_name], dtype=np.float32))
+            # action.ee_delta 는 더 이상 robot_state['ee_delta_action'] 을 직접 쓰지 않고,
+            # 루프 끝난 뒤 eepos 시간 차분으로 derive (모든 tele-type 통일).
 
-            # action.ee_delta (ee_delta_action) — flatten dict {ee_name: [6+tool]}
-            ee_delta_act = robot_state.get('ee_delta_action')
-            if ee_delta_act is not None and isinstance(ee_delta_act, dict):
-                for ee_name in sorted(ee_delta_act.keys()):
-                    ee_delta_action_parts.append(np.array(ee_delta_act[ee_name], dtype=np.float32))
-
-        # action: concatenate qaction across agents
-        action_parts = []
+        # action.joint: 절대 joint position target (qaction). 항상 모든 agent
+        # 에 대해 채움. action_key 와 무관.
+        action_joint_parts = []
         for agent in agents_sorted:
             robot_state = ts.observation['robot_states'][agent.id]
-            if action_key == 'ee_delta_action':
-                ee_delta_a = robot_state.get('ee_delta_action')
-                if ee_delta_a is not None:
-                    if isinstance(ee_delta_a, dict):
-                        for ee_name in sorted(ee_delta_a.keys()):
-                            if t + 1 < num_frames:
-                                next_val = timesteps[t + 1].observation['robot_states'][agent.id]['ee_delta_action'][ee_name]
-                            else:
-                                next_val = [0.0] * len(ee_delta_a[ee_name])
-                            action_parts.append(np.array(next_val, dtype=np.float32))
-                    else:
-                        if t + 1 < num_frames:
-                            next_val = timesteps[t + 1].observation['robot_states'][agent.id]['ee_delta_action']
-                        else:
-                            next_val = [0.0] * len(ee_delta_a)
-                        action_parts.append(np.array(next_val, dtype=np.float32))
-                else:
-                    qact = robot_state.get('qaction')
-                    if qact is not None:
-                        action_parts.append(np.array(qact, dtype=np.float32))
-            else:
-                qact = robot_state.get('qaction')
-                if qact is not None:
-                    action_parts.append(np.array(qact, dtype=np.float32))
+            qact = robot_state.get('qaction')
+            if qact is not None:
+                action_joint_parts.append(np.array(qact, dtype=np.float32))
+
+        # action 컬럼은 더 이상 만들지 않음. action.joint 가 single source of truth.
+        # ee_delta / relative_ee_pos action 은 학습 시 _get_action_data 가
+        # observation.eepos 시간 차분으로 derive.
 
         states.append(np.concatenate(qpos_parts) if qpos_parts else np.array([], dtype=np.float32))
-        actions.append(np.concatenate(action_parts) if action_parts else np.array([], dtype=np.float32))
+        actions_joint.append(np.concatenate(action_joint_parts) if action_joint_parts else np.array([], dtype=np.float32))
         qvels.append(np.concatenate(qvel_parts) if qvel_parts else np.array([], dtype=np.float32))
         qefforts.append(np.concatenate(qeffort_parts) if qeffort_parts else np.array([], dtype=np.float32))
 
@@ -407,16 +377,7 @@ def append_episode(dataset_dir, timesteps, agents, sensors, task,
             eepos_list.append(np.concatenate(eepos_parts))
         elif ee_dim > 0:
             eepos_list.append(np.zeros(ee_dim, dtype=np.float32))
-
-        if ee_delta_parts:
-            ee_delta_list.append(np.concatenate(ee_delta_parts))
-        elif ee_dim > 0:
-            ee_delta_list.append(np.zeros(ee_dim, dtype=np.float32))
-
-        if ee_delta_action_parts:
-            ee_delta_action_list.append(np.concatenate(ee_delta_action_parts))
-        elif ee_dim > 0:
-            ee_delta_action_list.append(np.zeros(ee_dim, dtype=np.float32))
+        # ee_delta_action_parts 는 더 이상 사용 안 함 — 아래에서 eepos diff 로 derive.
 
         # succeed flag
         if succeed_flags is not None and t < len(succeed_flags):
@@ -425,10 +386,14 @@ def append_episode(dataset_dir, timesteps, agents, sensors, task,
             succeed_list.append(0.0)
 
     states = np.array(states, dtype=np.float32)
-    actions = np.array(actions, dtype=np.float32)
+    actions_joint_arr = np.array(actions_joint, dtype=np.float32)
     qvels_arr = np.array(qvels, dtype=np.float32)
     qefforts_arr = np.array(qefforts, dtype=np.float32)
     succeed_arr = np.array(succeed_list, dtype=np.float32)
+
+    # action.ee_delta / relative_ee_pos 는 더 이상 dataset 컬럼으로 저장하지 않음.
+    # 학습/추론 시 observation.eepos 시간 차분 (eepos[t+1] - eepos[t]) 으로 derive.
+    # policies/utils.py 의 _get_action_data 가 action_key 별 분기 처리.
 
     # ── Save frames as temporary PNGs, then encode to MP4 ────────────────
     num_videos = 0
@@ -543,11 +508,18 @@ def append_episode(dataset_dir, timesteps, agents, sensors, task,
         "frame_index": np.array(frame_indices, dtype=np.int64),
         "timestamp": np.array(timestamps_list, dtype=np.float32),
         "task_index": np.full(num_frames, task_index, dtype=np.int64),
-        "observation.state": np.stack(states),
-        "action": np.stack(actions),
     }
+    # action 은 더 이상 컬럼으로 저장 안 함 (action.joint 가 single source of truth).
 
-    # Add new fields only if features define them (backward compat with old datasets)
+    # Add new fields only if features define them (backward compat with old datasets).
+    # observation.qpos 가 새 표준 — 옛 dataset 의 observation.state 와 동일 의미.
+    if "observation.qpos" in features:
+        episode_dict["observation.qpos"] = np.stack(states)
+    elif "observation.state" in features:
+        # 옛 schema 호환 (이전 코드로 만든 dataset 에 append 할 때).
+        episode_dict["observation.state"] = np.stack(states)
+    if "action.joint" in features and len(actions_joint_arr) > 0:
+        episode_dict["action.joint"] = np.stack(actions_joint_arr)
     if "observation.qvel" in features:
         episode_dict["observation.qvel"] = np.stack(qvels_arr)
     if "observation.qeffort" in features:
@@ -556,10 +528,9 @@ def append_episode(dataset_dir, timesteps, agents, sensors, task,
         episode_dict["succeed"] = succeed_arr
     if "observation.eepos" in features and eepos_list:
         episode_dict["observation.eepos"] = np.stack(eepos_list)
-    if "observation.ee_delta" in features and ee_delta_list:
-        episode_dict["observation.ee_delta"] = np.stack(ee_delta_list)
-    if "action.ee_delta" in features and ee_delta_action_list:
-        episode_dict["action.ee_delta"] = np.stack(ee_delta_action_list)
+    # action.ee_delta / observation.ee_delta 컬럼은 더 이상 저장 안 함. ee_delta /
+    # relative_ee_pos action 은 학습/추론 시 _get_action_data 가 observation.eepos
+    # 시간 차분으로 derive 한다 (모든 tele-type 통일).
 
     # Build parquet directly with pyarrow (avoids HF datasets encode_nested_example
     # compatibility issues with numpy scalars across different HF datasets versions)
@@ -587,17 +558,13 @@ def append_episode(dataset_dir, timesteps, agents, sensors, task,
     # ── Compute episode stats ────────────────────────────────────────────
     ep_stats = {}
     stat_pairs = [
-        ("observation.state", states),
-        ("action", actions),
+        ("observation.qpos", states),
+        ("action.joint", actions_joint_arr),
         ("observation.qvel", qvels_arr),
         ("observation.qeffort", qefforts_arr),
     ]
     if eepos_list:
         stat_pairs.append(("observation.eepos", np.stack(eepos_list)))
-    if ee_delta_list:
-        stat_pairs.append(("observation.ee_delta", np.stack(ee_delta_list)))
-    if ee_delta_action_list:
-        stat_pairs.append(("action.ee_delta", np.stack(ee_delta_action_list)))
 
     for key, arr in stat_pairs:
         if arr.size > 0:
@@ -659,14 +626,18 @@ def read_episode(dataset_dir, episode_index):
 
     num_frames = len(df)
 
-    # Read states and actions from parquet
-    state_data = np.array(df["observation.state"].tolist(), dtype=np.float32)
-    action_data = np.array(df["action"].tolist(), dtype=np.float32)
+    # 새 schema 는 observation.qpos / action.joint, 옛 schema 는 observation.state /
+    # action. 두 가지 모두 지원.
+    features = info["features"]
+    qpos_col = 'observation.qpos' if 'observation.qpos' in df.columns else 'observation.state'
+    action_col = 'action.joint' if 'action.joint' in df.columns else 'action'
+
+    state_data = np.array(df[qpos_col].tolist(), dtype=np.float32)
+    action_data = np.array(df[action_col].tolist(), dtype=np.float32)
 
     # Parse robot-specific data from concatenated state/action
-    features = info["features"]
-    state_names = features["observation.state"]["names"]
-    action_names = features["action"]["names"]
+    state_names = features.get(qpos_col, {}).get("names") or features.get("observation.state", {}).get("names", [])
+    action_names = features.get(action_col, {}).get("names") or features.get("action", {}).get("names", [])
 
     # Group by robot
     states_by_robot = {}
@@ -802,23 +773,25 @@ def get_dataset_metadata(dataset_dir):
     sensors = []
     robots = set()
 
+    # observation.qpos (신규 표준) 우선 검사, 없으면 observation.state (옛 dataset)
+    # 로 fallback. 둘 다 names 형식이 동일: "robot_{id}_{joint_name}" 또는 prefix
+    # 없으면 single-robot dataset 으로 간주.
+    qpos_feat = features.get("observation.qpos") or features.get("observation.state")
+
     for key, feat in features.items():
         if key.startswith("observation.images."):
             sensors.append(key.replace("observation.images.", ""))
-        elif key == "observation.state":
-            # names can be:
-            #   - "robot_{id}_{joint_name}" (EasyTrainer format)
-            #   - "joint_1", "joint_2", ... (convert_hdf5_package format, no robot prefix)
-            has_robot_prefix = False
-            for name in feat.get("names", []):
-                m = re.match(r'^(robot_\d+)_', name)
-                if m:
-                    robots.add(m.group(1))
-                    has_robot_prefix = True
-            # If no robot_ prefix found, treat as single-robot dataset
-            # Robot name is unknown, just report dimension info
-            if not has_robot_prefix and feat.get("names"):
-                robots.add("robot_0")
+
+    if qpos_feat is not None:
+        has_robot_prefix = False
+        for name in qpos_feat.get("names", []):
+            m = re.match(r'^(robot_\d+)_', name)
+            if m:
+                robots.add(m.group(1))
+                has_robot_prefix = True
+        # If no robot_ prefix found, treat as single-robot dataset.
+        if not has_robot_prefix and qpos_feat.get("names"):
+            robots.add("robot_0")
 
     return {"sensors": sorted(sensors), "robots": sorted(robots)}
 
@@ -1148,8 +1121,11 @@ def _compute_episode_stats(df, features, num_frames):
     """Recompute per-episode stats over the parquet df."""
     stats = {}
     numeric_keys = [
-        "observation.state", "action", "observation.qvel", "observation.qeffort",
-        "observation.eepos", "observation.ee_delta", "action.ee_delta",
+        "observation.qpos", "observation.state",  # 옛 dataset 호환
+        "action", "action.joint",
+        "observation.qvel", "observation.qeffort",
+        "observation.eepos",
+        "action.ee_delta",  # 옛 dataset 호환 (신규는 미저장)
     ]
     for key in numeric_keys:
         if key not in features or key not in df.columns:

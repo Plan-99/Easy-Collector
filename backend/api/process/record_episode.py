@@ -432,6 +432,9 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
             _save_t0 = time.monotonic()
             try:
                 # --- LeRobot 포맷으로 저장 ---
+                # action_key 인자 안 보냄 — record 시점엔 모든 raw 데이터를 다 저장
+                # 하고 학습 시 _get_action_data 가 action_key 에 따라 적절한 컬럼을
+                # 선택/derive 함. action_key 는 info.json 메타용 (default 'joint').
                 lerobot_append_episode(
                     dataset_dir=dataset_dir,
                     timesteps=timesteps,
@@ -439,7 +442,6 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                     sensors=sensors,
                     task=task,
                     language_instruction=language_instruction if language_instruction else "",
-                    action_key='qaction',
                     succeed_flags=succeed_flags,
                     fetch_image_fn=fetch_image_with_config,
                     fps=hz,

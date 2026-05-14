@@ -744,8 +744,12 @@ class Agent:
                         print(f"[move_to] aborted at step {step}/{n_steps}")
                         return
                     t = step / n_steps
-                    # smoothstep ease-in-out: 양 끝점 속도 0, 중간에서 최대 속도
-                    s = t * t * (3.0 - 2.0 * t)
+                    # smootherstep (5차 polynomial) ease-in-out: 양 끝점에서 속도/
+                    # 가속도/jerk 모두 0. 일반 smoothstep(t²(3-2t)) 보다 한 단계 더
+                    # 부드럽고, ServoJ 처럼 짧은 cmdT 에 민감한 컨트롤러에서 양 끝
+                    # 의 "덜컹"을 추가로 흡수. 피크 속도는 평균의 1.875배 (smoothstep
+                    # 의 1.5배보다 약간 높음).
+                    s = t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
                     next_pos = [c + s * d for c, d in zip(current_pos, deltas)]
                     self.move_joint_step(next_pos)
                     time.sleep(period)
