@@ -19,6 +19,7 @@
                         emit-value
                         option-label="name"
                         option-value="id"
+                        :disable="pageLoading"
                     >
                     </q-select>
                 </div>
@@ -29,7 +30,11 @@
 
         <TutorialHint class="q-mb-md" :text="$t('tutorialTrainIntro')" />
 
-        <div class="col q-mb-md border-rounded border-grey text-grey flex-center flex text-h6" v-if="!selectedWorkspaceId">
+        <div class="col q-mb-md border-rounded border-grey flex-center flex column" v-if="pageLoading">
+            <q-spinner-gears size="50px" color="primary" class="q-mb-md" />
+            <div class="text-h6 text-grey">{{ $t('plannerInitializing') }}</div>
+        </div>
+        <div class="col q-mb-md border-rounded border-grey text-grey flex-center flex text-h6" v-else-if="!selectedWorkspaceId">
             {{ $t('selectWorkspaceFirst') }}
         </div>
         <q-stepper v-model="step" ref="stepper" animated dark v-else flat class="col" active-color="accent" done-color="accent" >
@@ -506,6 +511,7 @@ const policyTypes = Object.keys(POLICY_CONFIGS);
 const { socket } = useSocket();
 
 const selectedWorkspaceId = ref(null);
+const pageLoading = ref(true);
 const workspaces = ref([]);
 watch(selectedWorkspaceId, (newVal) => {
     if (newVal) {
@@ -1010,7 +1016,12 @@ const isPolicyFormChanged = computed(() => {
 
 
 onMounted(async () => {
-    listWorkspaces();
+    pageLoading.value = true;
+    try {
+        await listWorkspaces();
+    } finally {
+        pageLoading.value = false;
+    }
     // listDatasets();
     // await listPolicies(); // Wait for policies to load first
     // await listCheckpoints();

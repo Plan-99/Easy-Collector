@@ -23,6 +23,7 @@
                         option-value="id"
                         input-class="text-white"
                         label-color="grey-5"
+                        :disable="pageLoading"
                     />
                 </div>
                 <div class="text-body2 text-grey-5">{{ $t('datasetPageBody') }}</div>
@@ -31,8 +32,15 @@
         </div>
 
         <div
+            class="col q-mb-md border-rounded border-grey flex-center flex column"
+            v-if="pageLoading"
+        >
+            <q-spinner-gears size="50px" color="primary" class="q-mb-md" />
+            <div class="text-h6 text-grey">{{ $t('plannerInitializing') }}</div>
+        </div>
+        <div
             class="col q-mb-md border-rounded border-grey text-grey-5 flex-center flex text-h6"
-            v-if="!selectedWorkspaceId"
+            v-else-if="!selectedWorkspaceId"
         >
             {{ $t('selectWorkspaceFirst') }}
         </div>
@@ -350,6 +358,7 @@ const { socket } = useSocket();
 // ─── Workspaces ─────────────────────────────────────────────────────────────
 const workspaces = ref([]);
 const selectedWorkspaceId = ref(null);
+const pageLoading = ref(true);
 
 function listWorkspaces() {
     return api.get('/tasks').then((res) => {
@@ -819,8 +828,13 @@ async function downsampleDataset(form) {
 }
 
 // ─── Lifecycle ─────────────────────────────────────────────────────────────
-onMounted(() => {
-    listWorkspaces();
+onMounted(async () => {
+    pageLoading.value = true;
+    try {
+        await listWorkspaces();
+    } finally {
+        pageLoading.value = false;
+    }
     socket.on('augmentation_complete', () => {
         showAugmentationForm.value = false;
         listDatasets();

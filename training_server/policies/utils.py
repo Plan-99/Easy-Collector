@@ -609,14 +609,17 @@ def read_episode(dataset_dir, episode_index):
 
     num_frames = len(df)
 
-    # Read states and actions from parquet
-    state_data = np.array(df["observation.state"].tolist(), dtype=np.float32)
-    action_data = np.array(df["action"].tolist(), dtype=np.float32)
+    # Read states and actions from parquet. 새 schema (observation.qpos / action.joint)
+    # 와 옛 schema (observation.state / action) 모두 지원.
+    features = info["features"]
+    qpos_col = 'observation.qpos' if 'observation.qpos' in df.columns else 'observation.state'
+    action_col = 'action.joint' if 'action.joint' in df.columns else 'action'
+    state_data = np.array(df[qpos_col].tolist(), dtype=np.float32)
+    action_data = np.array(df[action_col].tolist(), dtype=np.float32)
 
     # Parse robot-specific data from concatenated state/action
-    features = info["features"]
-    state_names = features["observation.state"]["names"]
-    action_names = features["action"]["names"]
+    state_names = features.get(qpos_col, {}).get("names") or features.get("observation.state", {}).get("names", [])
+    action_names = features.get(action_col, {}).get("names") or features.get("action", {}).get("names", [])
 
     # Group by robot
     states_by_robot = {}
@@ -752,23 +755,21 @@ def get_dataset_metadata(dataset_dir):
     sensors = []
     robots = set()
 
+    qpos_feat = features.get("observation.qpos") or features.get("observation.state")
+
     for key, feat in features.items():
         if key.startswith("observation.images."):
             sensors.append(key.replace("observation.images.", ""))
-        elif key == "observation.state":
-            # names can be:
-            #   - "robot_{id}_{joint_name}" (EasyTrainer format)
-            #   - "joint_1", "joint_2", ... (convert_hdf5_package format, no robot prefix)
-            has_robot_prefix = False
-            for name in feat.get("names", []):
-                m = re.match(r'^(robot_\d+)_', name)
-                if m:
-                    robots.add(m.group(1))
-                    has_robot_prefix = True
-            # If no robot_ prefix found, treat as single-robot dataset
-            # Robot name is unknown, just report dimension info
-            if not has_robot_prefix and feat.get("names"):
-                robots.add("robot_0")
+
+    if qpos_feat is not None:
+        has_robot_prefix = False
+        for name in qpos_feat.get("names", []):
+            m = re.match(r'^(robot_\d+)_', name)
+            if m:
+                robots.add(m.group(1))
+                has_robot_prefix = True
+        if not has_robot_prefix and qpos_feat.get("names"):
+            robots.add("robot_0")
 
     return {"sensors": sorted(sensors), "robots": sorted(robots)}
 
@@ -1054,8 +1055,11 @@ class EpisodicDataset(torch.utils.data.Dataset):
         table = pq.read_table(parquet_path)
         df = table.to_pandas()
 
-        state_data = np.array(df["observation.state"].tolist(), dtype=np.float32)
-        action_data = np.array(df["action"].tolist(), dtype=np.float32)
+        # 새/옛 schema 모두 지원
+        _qpos_col = 'observation.qpos' if 'observation.qpos' in df.columns else 'observation.state'
+        _action_col = 'action.joint' if 'action.joint' in df.columns else 'action'
+        state_data = np.array(df[_qpos_col].tolist(), dtype=np.float32)
+        action_data = np.array(df[_action_col].tolist(), dtype=np.float32)
 
         # Get language instruction from pre-loaded task map
         task_index = int(df["task_index"].iloc[0])
@@ -1298,8 +1302,11 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
         table = pq.read_table(parquet_path)
         df = table.to_pandas()
 
-        state_data = np.array(df["observation.state"].tolist(), dtype=np.float32)
-        action_data = np.array(df["action"].tolist(), dtype=np.float32)
+        # 새/옛 schema 모두 지원
+        _qpos_col = 'observation.qpos' if 'observation.qpos' in df.columns else 'observation.state'
+        _action_col = 'action.joint' if 'action.joint' in df.columns else 'action'
+        state_data = np.array(df[_qpos_col].tolist(), dtype=np.float32)
+        action_data = np.array(df[_action_col].tolist(), dtype=np.float32)
 
         # Check succeed
         if "succeed" in df.columns:
@@ -1314,8 +1321,10 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
         table = pq.read_table(parquet_path)
         df = table.to_pandas()
 
-        qpos = np.array(df["observation.state"].tolist(), dtype=np.float32)
-        action = np.array(df["action"].tolist(), dtype=np.float32)
+        _qpos_col = 'observation.qpos' if 'observation.qpos' in df.columns else 'observation.state'
+        _action_col = 'action.joint' if 'action.joint' in df.columns else 'action'
+        qpos = np.array(df[_qpos_col].tolist(), dtype=np.float32)
+        action = np.array(df[_action_col].tolist(), dtype=np.float32)
 
         if qpos.ndim == 1:
             qpos = qpos.reshape(1, -1)

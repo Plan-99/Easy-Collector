@@ -383,6 +383,17 @@ def set_succeed(id):
     task['obj']['succeed'] = True
     return {'status': 'success', 'message': 'Done flag set'}, 200
 
+@dataset_bp.route('/dataset/<id>/:throw_episode', methods=['POST'])
+def throw_episode(id):
+    """현재 에피소드를 저장하지 않고 버리고 다음 에피소드로 진행."""
+    task = current_app.pm.processes.get('record_episode')
+    if not task or task['type'] != 'function':
+        return {'status': 'error', 'message': 'record_episode is not running'}, 404
+    # throw 플래그 + episode_complete 로 inner loop 즉시 break.
+    task['obj']['throw'] = True
+    task['obj']['episode_complete'] = True
+    return {'status': 'success', 'message': 'Episode throw signal sent'}, 200
+
 @dataset_bp.route('/dataset/<id>/augment', methods=['POST'])
 def augment_dataset_route(id):
     data = request.json

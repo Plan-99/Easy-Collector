@@ -1,24 +1,24 @@
 <template>
-    <div class="column" style="min-width: 0; max-width: 100%;">
+    <div style="width: 100%; min-width: 0; box-sizing: border-box; display: flex; flex-direction: column;">
         <div v-if="languageInstruction" class="text-white text-caption q-pb-sm">
             {{ $t('hdf5LanguagePrefix', { value: languageInstruction }) }}
         </div>
-        <div
-            class="row q-py-sm q-gutter-sm justify-center items-center"
-            style="min-width: 0; max-width: 100%; flex-wrap: wrap;"
-        >
-            <img
+        <div class="q-py-sm" :style="imagesGridStyle">
+            <div
                 v-for="(image, name) in images"
                 :key="name"
-                :src="image"
-                alt=""
-                :style="imageStyle"
+                :style="cellStyle"
                 :class="imageClass"
             >
+                <img :src="image" alt="" :style="imageStyle">
+            </div>
         </div>
 
         <!-- Playback controls -->
-        <div class="row items-center q-gutter-sm q-px-sm q-pt-sm">
+        <div
+            class="q-pt-sm items-center"
+            style="display: flex; gap: 8px; width: 100%; box-sizing: border-box; min-width: 0;"
+        >
             <q-btn
                 round
                 flat
@@ -35,13 +35,13 @@
                 :step="1"
                 color="primary"
                 track-color="grey-8"
-                class="col"
+                style="flex: 1 1 0; min-width: 0;"
                 dense
                 :disable="disableSeek || sliderMax === 0"
                 @pan="onSliderPan"
                 @update:model-value="onSliderInput"
             />
-            <div class="text-caption text-grey-5" style="min-width: 80px; text-align: right;">
+            <div class="text-caption text-grey-5" style="min-width: 60px; text-align: right; flex-shrink: 0;">
                 {{ sliderFrame }} / {{ sliderMax }}
             </div>
         </div>
@@ -100,22 +100,40 @@ const sliderFrame = ref(0);
 
 const sliderMax = computed(() => Math.max(0, (props.totalFrames || 0) - 1));
 
-const imageStyle = computed(() => {
-    const count = Object.keys(images.value || {}).length;
-    let maxHeight;
-    if (count <= 1) maxHeight = 'min(380px, 38vh)';
-    else if (count === 2) maxHeight = 'min(220px, 20vh)';
-    else if (count === 3) maxHeight = 'min(190px, 18vh)';
-    else maxHeight = 'min(170px, 16vh)';
-    return {
-        flex: '1 1 200px',
-        minWidth: 0,
-        maxWidth: '100%',
-        maxHeight,
-        height: 'auto',
-        objectFit: 'contain',
-    };
+const imageCount = computed(() => Object.keys(images.value || {}).length);
+
+const cellHeight = computed(() => {
+    const count = imageCount.value;
+    if (count <= 1) return 'min(380px, 38vh)';
+    if (count === 2) return 'min(220px, 20vh)';
+    if (count === 3) return 'min(190px, 18vh)';
+    return 'min(170px, 16vh)';
 });
+
+const cellStyle = computed(() => ({
+    height: cellHeight.value,
+    width: '100%',
+    minWidth: 0,
+    overflow: 'hidden',
+    borderRadius: '4px',
+    background: '#000',
+    position: 'relative',
+}));
+
+const imageStyle = computed(() => ({
+    width: '100%',
+    height: '100%',
+    objectFit: 'contain',
+    display: 'block',
+}));
+
+const imagesGridStyle = computed(() => ({
+    display: 'grid',
+    gridTemplateColumns: `repeat(${Math.max(imageCount.value, 1)}, minmax(0, 1fr))`,
+    gap: '8px',
+    width: '100%',
+    boxSizing: 'border-box',
+}));
 
 const playbackIcon = computed(() => {
     if (finished.value) return 'replay';

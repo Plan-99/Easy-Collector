@@ -60,6 +60,7 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
             print(f"[record_episode/T] outer iter start", flush=True)
             task_control['episode_stop'] = False
             task_control['succeed'] = False
+            task_control['throw'] = False
 
             # Tutorial mode: snap the MuJoCo world back to its home keyframe
             # at the start of every episode so each recording begins from the
@@ -425,46 +426,53 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                     print(f'[WARNING] ROS2 service did not complete within timeout, restarting episode...')
                     continue
 
-            print(f'Saving Data: {dataset_name}')
-            # UI 가 progress bar 대신 로딩 화면을 띄울 수 있게 saving on/off 신호.
-            socketio_instance.emit('episode_saving', {'saving': True, 'name': dataset_name})
-
-            _save_t0 = time.monotonic()
-            try:
-                # --- LeRobot 포맷으로 저장 ---
-                # action_key 인자 안 보냄 — record 시점엔 모든 raw 데이터를 다 저장
-                # 하고 학습 시 _get_action_data 가 action_key 에 따라 적절한 컬럼을
-                # 선택/derive 함. action_key 는 info.json 메타용 (default 'joint').
-                lerobot_append_episode(
-                    dataset_dir=dataset_dir,
-                    timesteps=timesteps,
-                    agents=agents,
-                    sensors=sensors,
-                    task=task,
-                    language_instruction=language_instruction if language_instruction else "",
-                    succeed_flags=succeed_flags,
-                    fetch_image_fn=fetch_image_with_config,
-                    fps=hz,
-                )
-
-                print(f"[record_episode/T] lerobot_append_episode took {(time.monotonic()-_save_t0)*1000:.0f}ms", flush=True)
-                print("Episode recording process ended.")
-                socketio_instance.emit('episode_saved', {'succeed': task_control.get('succeed', False)})
-
-            except Exception:
-                import traceback
-                print(f"[ERROR] Error during episode recording:\n{traceback.format_exc()}")
-                task_control['stop'] = True
-            finally:
-                socketio_instance.emit('episode_saving', {'saving': False})
-                print(f"[record_episode/T] emit episode_saving=false (total save {(time.monotonic()-_save_t0)*1000:.0f}ms)", flush=True)
-
-            # Finish 버튼(=episode_complete) 는 "현재 에피소드 즉시 저장 후 다음 에피소드로
-            # 진행" 의미로 바꿈. 전체 collection 종료는 Stop 버튼(stop_collection 라우트)
-            # 에서만 일어난다. flag 만 reset 하고 outer loop 는 계속.
-            if task_control.get('episode_complete'):
+            # Throw 버튼: 현재 에피소드를 저장하지 않고 버리고 다음 에피소드로.
+            if task_control.get('throw'):
+                print("Episode thrown — discarding without save.")
+                socketio_instance.emit('episode_thrown', {'name': dataset_name})
+                task_control['throw'] = False
                 task_control['episode_complete'] = False
-                print("Episode completed early — proceeding to next episode.")
+            else:
+                print(f'Saving Data: {dataset_name}')
+                # UI 가 progress bar 대신 로딩 화면을 띄울 수 있게 saving on/off 신호.
+                socketio_instance.emit('episode_saving', {'saving': True, 'name': dataset_name})
+
+                _save_t0 = time.monotonic()
+                try:
+                    # --- LeRobot 포맷으로 저장 ---
+                    # action_key 인자 안 보냄 — record 시점엔 모든 raw 데이터를 다 저장
+                    # 하고 학습 시 _get_action_data 가 action_key 에 따라 적절한 컬럼을
+                    # 선택/derive 함. action_key 는 info.json 메타용 (default 'joint').
+                    lerobot_append_episode(
+                        dataset_dir=dataset_dir,
+                        timesteps=timesteps,
+                        agents=agents,
+                        sensors=sensors,
+                        task=task,
+                        language_instruction=language_instruction if language_instruction else "",
+                        succeed_flags=succeed_flags,
+                        fetch_image_fn=fetch_image_with_config,
+                        fps=hz,
+                    )
+
+                    print(f"[record_episode/T] lerobot_append_episode took {(time.monotonic()-_save_t0)*1000:.0f}ms", flush=True)
+                    print("Episode recording process ended.")
+                    socketio_instance.emit('episode_saved', {'succeed': task_control.get('succeed', False)})
+
+                except Exception:
+                    import traceback
+                    print(f"[ERROR] Error during episode recording:\n{traceback.format_exc()}")
+                    task_control['stop'] = True
+                finally:
+                    socketio_instance.emit('episode_saving', {'saving': False})
+                    print(f"[record_episode/T] emit episode_saving=false (total save {(time.monotonic()-_save_t0)*1000:.0f}ms)", flush=True)
+
+                # Finish 버튼(=episode_complete) 는 "현재 에피소드 즉시 저장 후 다음 에피소드로
+                # 진행" 의미로 바꿈. 전체 collection 종료는 Stop 버튼(stop_collection 라우트)
+                # 에서만 일어난다. flag 만 reset 하고 outer loop 는 계속.
+                if task_control.get('episode_complete'):
+                    task_control['episode_complete'] = False
+                    print("Episode completed early — proceeding to next episode.")
 
     finally:
         # 0. move_lock 강제 해제 — home pose 이동 중 stop/error로 빠져나간 경우

@@ -379,7 +379,7 @@
                         @click="setSucceed"
                         :disable="succeedFlag"
                         class="q-mr-sm"
-                    ><q-tooltip>1 (or F)</q-tooltip></q-btn>
+                    ></q-btn>
                     <q-btn
                         color="green"
                         text-color="white"
@@ -387,14 +387,22 @@
                         icon="check"
                         @click="completeEpisode"
                         class="q-mr-sm"
-                    ><q-tooltip>2</q-tooltip></q-btn>
+                    ></q-btn>
+                    <q-btn
+                        color="orange"
+                        text-color="white"
+                        :label="$t('throwEpisode')"
+                        icon="delete_outline"
+                        @click="throwEpisode"
+                        class="q-mr-sm"
+                    ></q-btn>
                     <q-btn
                         color="white"
                         text-color="red"
                         :label="$t('stopCollection')"
                         icon="stop"
                         @click="stopDataCollection"
-                    ><q-tooltip>3</q-tooltip></q-btn>
+                    ></q-btn>
                 </div>
             </div>
         </div>
@@ -442,9 +450,9 @@
             >
             </process-console>
         </div>
-        <div style="position: fixed; top: 10px; right: 20px; z-index: 10000; width: 600px" 
+        <div style="position: fixed; top: 10px; right: 20px; z-index: 10000; width: 600px; overflow: hidden;"
                 v-if="selectedEpisode.name && selectedDatasetId"
-                class="border-white border-rounded bg-dark p-md relative-position"
+                class="border-white border-rounded bg-dark q-pa-md relative-position"
         >
             <q-btn
                 class="absolute-top-right"
@@ -991,22 +999,31 @@ function setSucceed() {
     });
 }
 
+function throwEpisode() {
+    api.post(`/dataset/${selectedDatasetId.value}/:throw_episode`).catch((error) => {
+        console.error('Error throwing episode:', error);
+    });
+}
+
 const succeedKeyHandler = (event) => {
     // 폼 입력 중일 땐 무시
     const ae = document.activeElement;
     if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
-    // 1 = Done (success/현재 episode를 성공으로 마크)
-    // 2 = Finish (현재 episode 저장 후 collection 종료)
-    // 3 = Stop (즉시 중단, 현재 episode 미저장)
-    // 'f' 는 기존 호환 유지 (= 1 과 동일)
+    // 1 = Done (현재 episode 를 succeed 로 마크)
+    // 2 = Finish (현재 episode 저장 후 다음 에피소드)
+    // 3 = Throw (현재 episode 저장 없이 버리고 다음 에피소드)
+    // 4 = Stop (전체 collection 중단)
     const k = event.key;
-    if (k === '1' || k === 'f' || k === 'F') {
+    if (k === '1') {
         setSucceed();
         event.preventDefault();
     } else if (k === '2') {
         completeEpisode();
         event.preventDefault();
     } else if (k === '3') {
+        throwEpisode();
+        event.preventDefault();
+    } else if (k === '4') {
         stopDataCollection();
         event.preventDefault();
     }
@@ -1247,6 +1264,10 @@ onMounted(() => {
         succeedFlag.value = false;
     });
 
+    socket.on('episode_thrown', () => {
+        succeedFlag.value = false;
+    });
+
     // lerobot_append_episode 저장 중 — progress bar 대신 spinner 보여주기 위한 신호.
     socket.on('episode_saving', (data) => {
         savingEpisode.value = !!data.saving;
@@ -1286,6 +1307,8 @@ onUnmounted(() => {
     socket.off('ood_score');
     socket.off('inference_progress');
     socket.off('episode_saving');
+    socket.off('episode_saved');
+    socket.off('episode_thrown');
     removeSucceedKeyListener();
 });
 </script>

@@ -35,6 +35,7 @@
                         emit-value
                         option-label="name"
                         option-value="id"
+                        :disable="pageLoading"
                     >
                         <template v-slot:option="scope">
                             <q-item :props="scope.props" v-if="scope.opt.id === 'new'" v-bind="scope.itemProps" @click="openCreateWorkspaceForm">
@@ -63,7 +64,11 @@
 
         <TutorialHint class="q-mb-md" :text="$t('tutorialWorkspaceIntro')" />
 
-        <div class="col q-mb-md border-rounded border-grey text-grey flex-center flex text-h6" v-if="!selectedWorkspaceId">
+        <div class="col q-mb-md border-rounded border-grey flex-center flex column" v-if="pageLoading">
+            <q-spinner-gears size="50px" color="primary" class="q-mb-md" />
+            <div class="text-h6 text-grey">{{ $t('plannerInitializing') }}</div>
+        </div>
+        <div class="col q-mb-md border-rounded border-grey text-grey flex-center flex text-h6" v-else-if="!selectedWorkspaceId">
             {{ $t('selectWorkspaceFirst') }}
         </div>
         <div class="col row q-mb-md" v-else>
@@ -724,6 +729,7 @@ const { t } = useI18n()
 
 const workspaces = ref([]);
 const selectedWorkspaceId = ref(null);
+const pageLoading = ref(true);
 
 const showWorkspaceForm = ref(false);
 const workspaceForm = ref([
@@ -1461,11 +1467,17 @@ onUnmounted(() => {
     }
 });
 
-onMounted(() => {
-    listWorkspaces();
-    listSensors();
-    // listRobots();
-    listAssemblies();
+onMounted(async () => {
+    pageLoading.value = true;
+    try {
+        await Promise.all([
+            listWorkspaces(),
+            listSensors(),
+            listAssemblies(),
+        ]);
+    } finally {
+        pageLoading.value = false;
+    }
     socket.on('augmentation_complete', (data) => {
         showAugmentationForm.value = false
         listDatasets().then(() => {
