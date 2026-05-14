@@ -1,0 +1,61 @@
+---
+title: 에피소드 편집
+description: 데이터셋 탭에서 에피소드를 골라 영상/센서 그래프 확인, trim, 자연어 지시 수정.
+section: datasets
+order: 4
+sourceRefs:
+  - frontend/src/pages/v2/DatasetPage.vue
+  - frontend/src/components/v2/EpisodePanel.vue
+  - frontend/src/components/v2/EpisodeViewer.vue
+related:
+  - /docs/datasets/edit
+  - /docs/data-collection/replay
+lastVerifiedVersion: 0.0.0
+---
+
+에피소드 편집은 한 에피소드 단위로 구간을 잘라내거나(trim) 자연어 지시(language prompt)를 수정하는 작업입니다. **데이터셋 탭**의 우측 패널에서 진행합니다.
+
+## 데이터셋 탭 진입
+
+좌측 네비게이션의 **데이터셋** 탭을 누르면 워크스페이스에 묶인 데이터셋 목록과 에피소드가 보입니다. 에피소드를 클릭하면 우측에 편집 패널이 펼쳐집니다.
+
+<DocsImage
+  src="/docs/datasets/episode-edit-01-panel.png"
+  alt="데이터셋 탭 — 에피소드 클릭 시 우측 EpisodePanel"
+  status="missing"
+/>
+
+## 영상 / 센서 미리보기
+
+상단의 **영상** 섹션은 에피소드의 카메라 프레임을 스트리밍 재생합니다. 재생/일시정지 버튼과 슬라이더로 원하는 프레임으로 이동할 수 있습니다.
+
+하단 **센서 데이터** 섹션은 채널(예: `observation.state`, `action`)을 골라 시계열 그래프로 확인합니다. 시리즈가 많을 때는 멀티 셀렉트로 표시할 항목만 추릴 수 있습니다.
+
+## 구간 자르기 (Trim)
+
+**Trim 범위** 섹션의 슬라이더로 시작/끝 프레임을 잡고 **적용**을 누릅니다.
+
+<Steps>
+1. 슬라이더 양 끝 핸들을 잡고 자르려는 구간을 지정합니다.
+   - 핸들을 움직이는 동안 영상이 해당 프레임으로 자동 점프해 미리보기가 됩니다.
+2. 우측 상단의 amber 배지에서 `start → end · N frames`로 결과 프레임 수를 확인합니다.
+3. **Apply** 버튼을 누르면 해당 구간만 남기고 에피소드가 갱신됩니다.
+
+   <DocsImage
+     src="/docs/datasets/episode-edit-02-trim.png"
+     alt="Trim 슬라이더 + Apply 버튼"
+     status="missing"
+   />
+</Steps>
+
+<Callout type="warning">
+Trim은 원본 에피소드 파일을 직접 수정합니다. 되돌릴 수 없으므로 먼저 [데이터셋 편집](/docs/datasets/edit)의 백업·복제를 활용하거나, 별도로 [내보내기](/docs/installation)해 두는 것을 권장합니다.
+</Callout>
+
+## 자연어 지시(Language Prompt)
+
+**언어 프롬프트** 섹션의 텍스트박스에서 에피소드의 자연어 지시를 수정하고, 헤더의 **저장** 버튼으로 반영합니다. 빈 값에서 시작하는 경우 placeholder(`예: pick up the red block...`)가 안내합니다.
+
+<Callout type="info">
+language prompt는 학습 시 task description으로 함께 묶여 정책에 입력될 수 있습니다. 에피소드별로 약간씩 다르게 적어 두면 일반화에 도움이 됩니다.
+</Callout>

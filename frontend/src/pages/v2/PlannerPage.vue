@@ -284,6 +284,9 @@
                                             <span v-else-if="block.type === 'sync'">
                                                 ID: {{ block.sync_id || '—' }}
                                             </span>
+                                            <span v-else-if="block.type === 'query_pose'">
+                                                {{ block.service_name || '—' }}
+                                            </span>
                                         </div>
                                         <q-space />
                                         <div class="row q-mt-xs" v-if="block.type === 'sync' || block.duration != null || block.until_done">
@@ -410,10 +413,65 @@
                     <template v-if="detailBlock.type === 'sync'">
                         <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerSyncId') }}:</span> {{ detailBlock.sync_id }}</div>
                     </template>
+                    <template v-if="detailBlock.type === 'query_pose'">
+                        <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerBlockDetailsWorkspace') }}:</span> {{ getWorkspaceName(detailBlock.workspace_id) }}</div>
+                        <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerPoseTypeLabel') }}:</span>
+                            {{ detailBlock.pose_type === 'end_effector_position' ? $t('plannerPoseTypeEE') : $t('plannerPoseTypeJoint') }}
+                        </div>
+                        <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerServiceNameLabel') }}:</span> {{ detailBlock.service_name }}</div>
+                        <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerBlockDetailsDuration') }}:</span> {{ detailBlock.duration }}s</div>
+                    </template>
                 </q-card-section>
                 <q-card-actions align="right">
                     <q-btn flat :label="$t('close')" color="grey" v-close-popup />
                 </q-card-actions>
+            </q-card>
+        </q-dialog>
+
+        <!-- Query Pose: External Node Example Dialog -->
+        <q-dialog v-model="showExampleNode">
+            <q-card style="min-width: 640px; max-width: 880px;" class="bg-secondary text-white">
+                <q-card-section class="row items-center q-pb-none">
+                    <q-icon name="terminal" size="sm" class="q-mr-sm" />
+                    <div class="text-h6">{{ $t('plannerExampleNodeTitle') }}</div>
+                    <q-space />
+                    <q-btn flat round dense icon="close" v-close-popup />
+                </q-card-section>
+                <q-card-section class="q-pt-sm">
+                    <div class="text-caption text-grey-4 q-mb-sm">
+                        {{ $t('plannerExampleNodeIntro') }}
+                    </div>
+                    <q-tabs
+                        v-model="exampleTab"
+                        dense
+                        align="left"
+                        active-color="primary"
+                        indicator-color="primary"
+                        class="text-grey-4"
+                    >
+                        <q-tab name="joint" :label="$t('plannerPoseTypeJoint')" />
+                        <q-tab name="ee" :label="$t('plannerPoseTypeEE')" />
+                    </q-tabs>
+                    <q-separator dark />
+                    <div class="terminal-block q-mt-md">
+                        <div class="row items-center q-mb-xs">
+                            <q-icon name="circle" size="8px" color="red" class="q-mr-xs" />
+                            <q-icon name="circle" size="8px" color="amber" class="q-mr-xs" />
+                            <q-icon name="circle" size="8px" color="green" />
+                            <q-space />
+                            <q-btn
+                                dense flat size="sm" icon="content_copy" color="grey-4"
+                                @click="copyExampleNode"
+                            >
+                                <q-tooltip>{{ $t('plannerExampleCopy') }}</q-tooltip>
+                            </q-btn>
+                        </div>
+                        <pre class="terminal-code">{{ exampleNodeCode }}</pre>
+                    </div>
+                    <div class="text-caption text-grey-5 q-mt-md">
+                        {{ $t('plannerExampleNodeRunHint') }}
+                    </div>
+                </q-card-section>
             </q-card>
         </q-dialog>
 
@@ -673,6 +731,88 @@
                             :hint="$t('plannerSyncIdHint')"
                             class="q-mb-md"
                         ></q-input>
+                    </template>
+
+                    <!-- Query Pose Fields -->
+                    <template v-if="blockForm.type === 'query_pose'">
+                        <q-select
+                            v-if="formWorkspaceOptions.length > 1"
+                            dense outlined dark bg-color="dark"
+                            v-model="blockForm.workspace_id"
+                            :options="formWorkspaceOptions"
+                            :label="$t('plannerWorkspaceLabel')"
+                            class="q-mb-md"
+                            map-options
+                            emit-value
+                        ></q-select>
+                        <q-select
+                            dense outlined dark bg-color="dark"
+                            v-model="blockForm.pose_type"
+                            :options="poseTypeOptions"
+                            :label="$t('plannerPoseTypeLabel')"
+                            :hint="$t('plannerPoseTypeHint')"
+                            class="q-mb-md"
+                            map-options
+                            emit-value
+                        ></q-select>
+                        <q-input
+                            dense outlined dark bg-color="dark"
+                            v-model="blockForm.service_name"
+                            :label="$t('plannerServiceNameLabel')"
+                            :hint="$t('plannerServiceNameHint')"
+                            class="q-mb-md"
+                        ></q-input>
+                        <div class="q-mb-md">
+                            <q-btn
+                                outline dense
+                                color="primary"
+                                icon="terminal"
+                                :label="$t('plannerExampleNodeBtn')"
+                                @click="showExampleNode = true"
+                                size="sm"
+                            />
+                        </div>
+                        <q-input
+                            dense outlined dark bg-color="dark"
+                            v-model.number="blockForm.duration"
+                            :label="$t('plannerDurationSeconds')"
+                            type="number"
+                            min="0.1"
+                            step="0.1"
+                            class="q-mb-md"
+                        ></q-input>
+                        <div class="q-mb-md">
+                            <q-btn
+                                outline dense
+                                color="indigo-4"
+                                icon="play_circle"
+                                :label="$t('plannerTestQueryPoseBtn')"
+                                :loading="testingQueryPose"
+                                :disable="!blockForm.service_name"
+                                @click="testQueryPose"
+                                size="sm"
+                            />
+                            <div
+                                v-if="queryPoseTestResult"
+                                class="terminal-block q-mt-sm q-pa-sm"
+                            >
+                                <div
+                                    :class="queryPoseTestResult.ok ? 'text-positive' : 'text-negative'"
+                                    class="text-caption q-mb-xs"
+                                >
+                                    <q-icon
+                                        :name="queryPoseTestResult.ok ? 'check_circle' : 'error'"
+                                        size="xs"
+                                        class="q-mr-xs"
+                                    />
+                                    {{ queryPoseTestResult.message }}
+                                </div>
+                                <pre
+                                    v-if="queryPoseTestResult.pose"
+                                    class="terminal-code"
+                                >{{ JSON.stringify(queryPoseTestResult.pose, null, 2) }}</pre>
+                            </div>
+                        </div>
                     </template>
                 </q-card-section>
 
@@ -937,6 +1077,170 @@ const blockTypeOptions = computed(() => {
     }));
 });
 
+const poseTypeOptions = computed(() => ([
+    { label: t('plannerPoseTypeJoint'), value: 'joint_position' },
+    { label: t('plannerPoseTypeEE'), value: 'end_effector_position' },
+]));
+
+// --- Query Pose: external node example modal ---
+const showExampleNode = ref(false);
+const exampleTab = ref('joint');
+
+// --- Query Pose: in-form service test ---
+const testingQueryPose = ref(false);
+const queryPoseTestResult = ref(null);
+
+async function testQueryPose() {
+    const serviceName = (blockForm.value.service_name || '').trim();
+    if (!serviceName) return;
+    testingQueryPose.value = true;
+    queryPoseTestResult.value = null;
+    try {
+        const { data } = await api.post('/planner/:test_query_pose', {
+            service_name: serviceName,
+            pose_type: blockForm.value.pose_type,
+            workspace_id: blockForm.value.workspace_id,
+            duration: blockForm.value.duration,
+        });
+        queryPoseTestResult.value = {
+            ok: true,
+            message: data.message || t('plannerTestQueryPoseOk'),
+            pose: data.pose || null,
+        };
+    } catch (err) {
+        queryPoseTestResult.value = {
+            ok: false,
+            message: err?.response?.data?.message || err.message || t('plannerTestQueryPoseFailed'),
+            pose: null,
+        };
+    } finally {
+        testingQueryPose.value = false;
+    }
+}
+
+const EXAMPLE_NODE_JOINT = `# my_target_server.py
+# Run: python3 my_target_server.py
+#
+# ROS2 service that returns target joint configurations when called by
+# the EasyTrainer planner's "Query Pose" block (joint mode).
+# Uses only the stock std_srvs/srv/Trigger — no custom message build needed.
+#
+# A workspace is an ASSEMBLY (a combination of robots, e.g. arm + tool),
+# so 'positions' is keyed by assembly slot — not a flat list.
+# Slots: left_arm / right_arm / left_tool / right_tool / mobile_base
+# Only the slots you include get moved.
+
+import json
+import rclpy
+from rclpy.node import Node
+from std_srvs.srv import Trigger
+
+
+class MyJointTargetServer(Node):
+    def __init__(self):
+        super().__init__('my_joint_target_server')
+        self.create_service(Trigger, '/my_target', self.handle)
+        self.get_logger().info('service ready at /my_target')
+
+    def handle(self, request, response):
+        # Compute the targets at request time — vision, planner, DB, etc.
+        # Each slot value must include EVERY joint of that robot (gripper
+        # included); a count mismatch makes the robot stay still.
+        payload = {
+            'positions': {
+                'left_arm': [0.0, 0.5, -0.5, 0.0, 0.5, 0.0, 0.3],
+                # 'left_tool': [0.4],   # add if your assembly has a tool slot
+            }
+        }
+
+        response.success = True
+        response.message = json.dumps(payload)
+        return response
+
+
+def main():
+    rclpy.init()
+    rclpy.spin(MyJointTargetServer())
+
+
+if __name__ == '__main__':
+    main()
+`;
+
+const EXAMPLE_NODE_EE = `# my_target_server.py
+# Run: python3 my_target_server.py
+#
+# ROS2 service that returns target end-effector poses when called by the
+# EasyTrainer planner's "Query Pose" block (end-effector mode).
+#
+# A workspace is an ASSEMBLY (a combination of robots, e.g. arm + tool),
+# so 'poses' is keyed by assembly slot — not a single pose.
+# Slots: left_arm / right_arm / left_tool / right_tool / mobile_base
+# Only the slots you include get moved.
+
+import json
+import rclpy
+from rclpy.node import Node
+from std_srvs.srv import Trigger
+
+
+class MyEETargetServer(Node):
+    def __init__(self):
+        super().__init__('my_ee_target_server')
+        self.create_service(Trigger, '/my_target', self.handle)
+        self.get_logger().info('service ready at /my_target')
+
+    def handle(self, request, response):
+        # Compute the target EE poses at request time.
+        payload = {
+            'poses': {
+                'left_arm': {
+                    'position':    [0.30, 0.00, 0.25],  # x, y, z (m, base frame)
+                    'orientation': [0.0,  1.57, 0.0],   # rx, ry, rz (Euler, rad)
+                    'gripper':     0.5,                 # driver-specific unit
+                },
+            }
+        }
+
+        response.success = True
+        response.message = json.dumps(payload)
+        return response
+
+
+def main():
+    rclpy.init()
+    rclpy.spin(MyEETargetServer())
+
+
+if __name__ == '__main__':
+    main()
+`;
+
+const exampleNodeCode = computed(() =>
+    exampleTab.value === 'ee' ? EXAMPLE_NODE_EE : EXAMPLE_NODE_JOINT
+);
+
+function copyExampleNode() {
+    const text = exampleNodeCode.value;
+    const finish = () => Notify.create({ color: 'positive', message: t('plannerExampleCopied'), timeout: 1500 });
+    if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(text).then(finish).catch(() => {
+            Notify.create({ color: 'negative', message: t('plannerExampleCopyFailed') });
+        });
+    } else {
+        // Fallback for non-secure contexts.
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); finish(); }
+        catch { Notify.create({ color: 'negative', message: t('plannerExampleCopyFailed') }); }
+        document.body.removeChild(ta);
+    }
+}
+
 // --- Plans (groups) ---
 const plans = ref([]);
 
@@ -960,6 +1264,7 @@ const BLOCK_TYPE_COLORS = {
     checkpoint: '#9C27B0',
     timesleep: '#FF9800',
     sync: '#009688',
+    query_pose: '#3F51B5',
 };
 
 function blockTypeColor(type) {
@@ -1022,6 +1327,8 @@ const blockForm = ref({
     until_done: true,
     done_threshold: 0.5,
     sync_id: '',
+    service_name: '',
+    pose_type: 'joint_position',
     hz: 10,
     re_inference_steps: 1,
     temporal_ensemble_coeff: 0.01,
@@ -1044,6 +1351,10 @@ watch(() => blockForm.value.checkpoint_id, () => {
     }
 });
 
+watch(() => blockForm.value.pose_type, (val) => {
+    exampleTab.value = val === 'end_effector_position' ? 'ee' : 'joint';
+});
+
 // 폼이 특정 그룹에 묶여있을 때 그 그룹의 워크스페이스들만 보여줌.
 const formWorkspaceOptions = computed(() => {
     const grp = formGroup.value;
@@ -1057,6 +1368,7 @@ const formWorkspaceOptions = computed(() => {
 function openBlockForm(group) {
     editingBlockIndex.value = null;
     formGroupId.value = group ? group.id : null;
+    queryPoseTestResult.value = null;
     const wsIds = group?.workspace_ids || [];
     // 그룹이 워크스페이스 1개만 가지면 자동 선택 — 다이얼로그에서 드롭다운을 숨김.
     blockForm.value = {
@@ -1068,6 +1380,8 @@ function openBlockForm(group) {
         until_done: true,
         done_threshold: 0.5,
         sync_id: '',
+        service_name: '',
+        pose_type: 'joint_position',
         hz: 10,
         re_inference_steps: 1,
         temporal_ensemble_coeff: 0.01,
@@ -1081,6 +1395,7 @@ function openBlockForm(group) {
 function openEditBlockForm(group, block, index) {
     editingBlockIndex.value = index;
     formGroupId.value = group.id;
+    queryPoseTestResult.value = null;
     blockForm.value = {
         type: block.type,
         name: block.name || '',
@@ -1091,6 +1406,8 @@ function openEditBlockForm(group, block, index) {
         until_done: block.until_done === undefined ? true : !!block.until_done,
         done_threshold: typeof block.done_threshold === 'number' ? block.done_threshold : 0.5,
         sync_id: block.sync_id || '',
+        service_name: block.service_name || '',
+        pose_type: block.pose_type || 'joint_position',
         hz: typeof block.hz === 'number' ? block.hz : 10,
         re_inference_steps: typeof block.re_inference_steps === 'number' ? block.re_inference_steps : 1,
         temporal_ensemble_coeff: typeof block.temporal_ensemble_coeff === 'number' ? block.temporal_ensemble_coeff : 0.01,
@@ -1200,6 +1517,8 @@ function saveBlock() {
             block.name = t('plannerNameAutoSleep', { duration: block.duration });
         } else if (block.type === 'sync') {
             block.name = t('plannerNameAutoSync', { sync_id: block.sync_id });
+        } else if (block.type === 'query_pose') {
+            block.name = t('plannerNameAutoQueryPose', { service: block.service_name });
         }
     }
 
@@ -1486,5 +1805,21 @@ onMounted(async () => {
 }
 .planner-block-card.block-card-active {
     border-color: var(--q-primary);
+}
+.terminal-block {
+    background: #0c1116;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    padding: 10px 12px;
+}
+.terminal-code {
+    margin: 0;
+    color: #d6deeb;
+    font-family: 'JetBrains Mono', 'Fira Code', Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.55;
+    white-space: pre;
+    overflow-x: auto;
+    max-height: 480px;
 }
 </style>

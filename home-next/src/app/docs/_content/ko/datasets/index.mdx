@@ -1,19 +1,26 @@
 ---
 title: 데이터셋 관리
-description: 수집된 에피소드를 리플레이·증강·편집·병합하는 방법.
+description: 수집된 데이터셋과 에피소드를 편집·증강·정리하는 방법.
 section: datasets
 order: 1
 sourceRefs:
+  - frontend/src/pages/v2/DatasetPage.vue
   - frontend/src/pages/v2/WorkspacePage.vue
   - frontend/src/components/v2/DataAugmentationDialog.vue
+  - frontend/src/components/v2/EpisodePanel.vue
 related:
   - /docs/data-collection
+  - /docs/data-collection/replay
   - /docs/training/dataset-select
 lastVerifiedVersion: 0.0.0
 ---
 
-수집한 에피소드는 워크스페이스의 **data 탭**에서 관리합니다.
-한 워크스페이스에 여러 데이터셋을 둘 수 있고, 각각을 학습에 다른 조합으로 사용할 수 있습니다.
+수집한 데이터셋과 에피소드는 좌측 네비의 **데이터셋 탭**에서 한 곳에 모아 관리합니다.
+워크스페이스의 **data 탭**에서도 같은 작업을 할 수 있어, 수집 직후 바로 정리하는 흐름에 편합니다.
+
+<Callout type="info">
+**리플레이는 어디로?** 에피소드를 실제 로봇으로 다시 흘려보내는 리플레이는 [데이터 수집 → 에피소드 리플레이](/docs/data-collection/replay)로 옮겼습니다. 수집 직후 결과 확인용이라 데이터 수집 섹션 안에 두는 편이 자연스럽기 때문입니다.
+</Callout>
 
 ## 데이터셋을 분리해야 할 때
 
@@ -26,9 +33,9 @@ lastVerifiedVersion: 0.0.0
 
 ## 가능한 작업
 
-- [리플레이](/docs/datasets/replay) — 에피소드를 재생, 액션 형식 비교, 다른 데이터셋으로 다시 캡처
-- [증강](/docs/datasets/augment) — 색상·크롭 변형으로 데이터 양 늘리기
-- [편집](/docs/datasets/edit) — 이름 변경, 병합, sensor/robot 매핑 재지정, 삭제
+- [데이터셋 편집](/docs/datasets/edit) — 이름 변경, 병합, sensor/robot 매핑 재지정, 삭제 (데이터셋 단위)
+- [데이터셋 증강](/docs/datasets/augment) — 색상·크롭 변형으로 데이터 양 늘리기 (데이터셋 단위)
+- [에피소드 편집](/docs/datasets/episode-edit) — 영상/센서 미리보기, trim, 자연어 지시 수정 (에피소드 단위)
 
 ## 다음 단계
 

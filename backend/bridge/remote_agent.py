@@ -185,6 +185,18 @@ class RemoteAgent:
             req.velocity_arg = vel_arg
         client.agent.MoveEEDeltaStep(req)
 
+    def move_ee_to(self, target_ee_dict, duration=5.0, hz=100.0):
+        """Async — EE 좌표를 IK 로 풀어 move_to 와 동일하게 보간 이동.
+        즉시 return. is_moving 폴링 또는 cancel_move_to 로 제어."""
+        client = get_bridge_client()
+        client.agent.MoveEETo(pb.MoveEEToRequest(
+            agent_id=self._agent_id,
+            target_ee_json=json.dumps(target_ee_dict),
+            duration=float(duration),
+            hz=float(hz),
+        ))
+        self._move_deadline = time.monotonic() + float(duration)
+
     def move_to(self, target_pos, duration=5.0, hz=100.0, step_size=None):
         """Async — 즉시 return. is_moving 폴링 또는 cancel_move_to 로 제어.
 

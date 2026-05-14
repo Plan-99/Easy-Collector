@@ -139,6 +139,14 @@ message MoveToRequest {
   double hz = 5;         // 명령 송신 주기 (Hz). 0 이면 default 100Hz.
 }
 
+message MoveEEToRequest {
+  int32 agent_id = 1;
+  // JSON-encoded target_ee_dict: {"L_ee": [x,y,z,r,p,y,tool], ...}
+  string target_ee_json = 2;
+  double duration = 3;   // 도달까지 목표 시간 (초). 0 이면 default 5s.
+  double hz = 4;         // 명령 송신 주기 (Hz). 0 이면 default 100Hz.
+}
+
 message ResetIKRequest {
   int32 agent_id = 1;
   repeated double q = 2;
@@ -181,6 +189,8 @@ service AgentService {
   // MoveTo: 비동기 — 별도 thread 에서 보간 진행. 호출자는 즉시 return 받고
   // is_moving 폴링 또는 CancelMoveTo 로 중단.
   rpc MoveTo(MoveToRequest) returns (StatusResponse);
+  // MoveEETo: EE 좌표를 IK 로 풀어 MoveTo 와 동일하게 비동기 보간 이동.
+  rpc MoveEETo(MoveEEToRequest) returns (StatusResponse);
   rpc CancelMoveTo(AgentId) returns (StatusResponse);
 
   // State queries

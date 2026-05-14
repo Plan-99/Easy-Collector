@@ -3,12 +3,44 @@
 ROSProxy gRPC 서비스 구현.
 ROS2 서비스를 동적으로 호출하는 프록시.
 """
+import array
 import json
 import importlib
 import grpc
 
 from ..generated import robot_bridge_pb2 as pb
 from ..generated import robot_bridge_pb2_grpc as pb_grpc
+
+
+def _to_jsonable(val):
+    """Best-effort conversion of a ROS msg field value into a json-serialisable
+    Python primitive.
+
+    ROS IDL maps ``float64[]`` to ``array.array('d', ...)`` (or numpy arrays
+    when numpy is available), and nested messages to generated Python classes
+    whose fields are themselves ROS types. ``json.dumps`` does not know how to
+    handle either, so we recursively unwrap them here.
+    """
+    if isinstance(val, (str, int, float, bool)) or val is None:
+        return val
+    if isinstance(val, (list, tuple)):
+        return [_to_jsonable(v) for v in val]
+    if isinstance(val, dict):
+        return {k: _to_jsonable(v) for k, v in val.items()}
+    if isinstance(val, array.array):
+        return list(val)
+    # numpy.ndarray (optional dep — guard the import)
+    tolist = getattr(val, 'tolist', None)
+    if callable(tolist):
+        try:
+            return _to_jsonable(tolist())
+        except Exception:
+            pass
+    # ROS message: walk its fields.
+    get_fields = getattr(val, 'get_fields_and_field_types', None)
+    if callable(get_fields):
+        return {f: _to_jsonable(getattr(val, f, None)) for f in get_fields()}
+    return str(val)
 
 
 class ROSProxyServicer(pb_grpc.ROSProxyServicer):
@@ -81,15 +113,11 @@ class ROSProxyServicer(pb_grpc.ROSProxyServicer):
 
         result = future.result()
 
-        # 응답을 JSON으로 직렬화
-        response_dict = {}
-        for field in result.get_fields_and_field_types():
-            val = getattr(result, field, None)
-            try:
-                json.dumps(val)
-                response_dict[field] = val
-            except (TypeError, ValueError):
-                response_dict[field] = str(val)
+        # 응답을 JSON으로 직렬화 (array.array, numpy, nested msg 모두 처리)
+        response_dict = {
+            field: _to_jsonable(getattr(result, field, None))
+            for field in result.get_fields_and_field_types()
+        }
 
         return pb.ROSServiceResponse(
             success=True,

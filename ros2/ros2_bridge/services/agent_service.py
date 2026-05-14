@@ -99,6 +99,19 @@ class AgentServiceServicer(pb_grpc.AgentServiceServicer):
         )
         return pb.StatusResponse(success=True, message='Move started (async)')
 
+    def MoveEETo(self, request, context):
+        agent = self._get_agent(request.agent_id, context)
+        if agent is None:
+            return pb.StatusResponse(success=False, message='Agent not found')
+        target_ee = json.loads(request.target_ee_json)
+        # 비동기 — agent.move_ee_to 가 IK 푼 뒤 move_to thread 띄우고 즉시 return.
+        agent.move_ee_to(
+            target_ee,
+            duration=request.duration or 5.0,
+            hz=request.hz or 100,
+        )
+        return pb.StatusResponse(success=True, message='Move started (async)')
+
     def CancelMoveTo(self, request, context):
         agent = self._get_agent(request.id, context)
         if agent is None:

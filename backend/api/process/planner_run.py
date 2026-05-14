@@ -366,6 +366,271 @@ def _run_timesleep(block, ctx, task_control):
         time.sleep(0.1)
 
 
+ASSEMBLY_SLOTS = ('left_arm', 'right_arm', 'left_tool', 'right_tool', 'mobile_base')
+
+
+def _assembly_slot_map(workspace):
+    """Map filled assembly slot names → robot dict for a workspace.
+
+    A workspace's assembly is a *combination* of robots in named slots
+    (left_arm, left_tool, ...), so query_pose targets are keyed by slot rather
+    than being a single flat list.
+    """
+    assembly = workspace.get('assembly') or {}
+    slot_map = {}
+    for slot in ASSEMBLY_SLOTS:
+        robot = assembly.get(slot)
+        if robot:
+            slot_map[slot] = robot
+    return slot_map
+
+
+def _run_query_pose(block, ctx, task_control):
+    """Query a ROS service at execution time for target poses, then drive the
+    workspace's assembly robots to those poses over ``duration`` seconds.
+
+    Service: ``std_srvs/srv/Trigger`` (stock ROS — no custom build needed on
+    the external node side). The server JSON-encodes the target in the
+    response ``message`` field, keyed by assembly slot
+    (left_arm / right_arm / left_tool / right_tool / mobile_base). Only the
+    slots present in the response are moved.
+
+    Joint mode payload (response.message):
+        {"positions": {
+            "left_arm":  [j1, j2, ..., gripper],   # every joint of that robot
+            "left_tool": [g1]
+        }}
+
+    End-effector mode payload (response.message):
+        {"poses": {
+            "left_arm": {"position": [x, y, z],
+                         "orientation": [rx, ry, rz],   # Euler radians
+                         "gripper": <value>}            # optional
+        }}
+    """
+    import json
+    from ...bridge.client import get_bridge_client
+    from ...bridge.generated import robot_bridge_pb2 as pb
+
+    workspace = ctx['workspaces_by_id'].get(block.get('workspace_id'))
+    if workspace is None:
+        raise RuntimeError(f"workspace_id={block.get('workspace_id')} not found")
+
+    service_name = (block.get('service_name') or '').strip()
+    if not service_name:
+        raise RuntimeError("service_name is empty")
+
+    pose_type = block.get('pose_type')
+    if pose_type not in ('joint_position', 'end_effector_position'):
+        raise RuntimeError(f"invalid pose_type: {pose_type}")
+
+    duration = float(block.get('duration') or 5.0)
+    slot_map = _assembly_slot_map(workspace)
+    if not slot_map:
+        print(f"[WARN] query_pose block '{block.get('name')}' has no robots in workspace, skipping")
+        return
+
+    def _resolve(slot_key):
+        """slot name from the service response → (robot dict, agent)."""
+        robot = slot_map.get(slot_key)
+        if robot is None:
+            raise RuntimeError(
+                f"service '{service_name}' returned slot '{slot_key}', but the workspace "
+                f"assembly has no such slot (available: {sorted(slot_map)})"
+            )
+        agent = ctx['agents'].get(int(robot['id']))
+        if agent is None:
+            raise RuntimeError(
+                f"robot '{robot.get('name')}' (slot '{slot_key}') is not running"
+            )
+        return robot, agent
+
+    client = get_bridge_client()
+    print(f"[QUERY_POSE] calling service '{service_name}' (pose_type={pose_type})")
+    resp = client.ros_proxy.CallService(pb.ROSServiceRequest(
+        service_type='std_srvs/srv/Trigger',
+        service_name=service_name,
+        request_json='',
+    ))
+    if not resp.success:
+        raise RuntimeError(f"service '{service_name}' transport failure: {resp.response_json}")
+
+    # ros_proxy wraps the srv response as {"success": ..., "message": ...}.
+    try:
+        outer = json.loads(resp.response_json)
+    except (TypeError, ValueError) as e:
+        raise RuntimeError(f"service '{service_name}' response is not valid JSON: {e}")
+
+    if isinstance(outer, dict) and outer.get('success') is False:
+        raise RuntimeError(
+            f"service '{service_name}' reported failure: {outer.get('message') or 'no message'}"
+        )
+
+    message_str = outer.get('message') if isinstance(outer, dict) else None
+    if not isinstance(message_str, str) or not message_str:
+        raise RuntimeError(
+            f"service '{service_name}' response.message is empty — expected a JSON-encoded pose"
+        )
+    try:
+        payload = json.loads(message_str)
+    except (TypeError, ValueError) as e:
+        raise RuntimeError(f"service '{service_name}' response.message is not valid JSON: {e}")
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"service '{service_name}' payload is not an object: {payload!r}")
+
+    if pose_type == 'joint_position':
+        positions = payload.get('positions')
+        if not isinstance(positions, dict) or not positions:
+            raise RuntimeError(
+                f"service '{service_name}' must return "
+                '{"positions": {"<slot>": [j1, j2, ...]}} keyed by assembly slot '
+                f"(got: {payload!r})"
+            )
+
+        targets = []
+        for slot_key, joints in positions.items():
+            if not isinstance(joints, list) or not joints:
+                raise RuntimeError(
+                    f"service '{service_name}' slot '{slot_key}' has no joint values"
+                )
+            robot, agent = _resolve(slot_key)
+            # The response must carry every joint the robot has (including the
+            # gripper); a count mismatch makes MoveTo a silent no-op.
+            current = agent.get_joint_states()
+            if current is not None and len(current) != len(joints):
+                raise RuntimeError(
+                    f"service '{service_name}' slot '{slot_key}' returned {len(joints)} joint "
+                    f"values, but robot '{robot.get('name')}' has {len(current)} joints — "
+                    f"include every joint (gripper included)"
+                )
+            targets.append((agent, [float(j) for j in joints]))
+
+        for agent, pos in targets:
+            agent.move_to(pos, duration=duration)
+
+        agents_only = [a for a, _ in targets]
+        timeout_at = time.time() + max(duration + 5.0, 30.0)
+        try:
+            while time.time() < timeout_at:
+                if task_control['stop']:
+                    print('[NOTICE] query_pose interrupted by stop signal')
+                    for a in agents_only:
+                        try:
+                            a.cancel_move_to()
+                        except Exception as e:
+                            print(f"[WARN] cancel_move_to failed: {e}")
+                    break
+                if not any(a.is_moving for a in agents_only):
+                    break
+                time.sleep(0.1)
+            else:
+                print('[WARNING] query_pose timed out — moving on')
+                for a in agents_only:
+                    try:
+                        a.cancel_move_to()
+                    except Exception:
+                        pass
+        finally:
+            if task_control.get('stop'):
+                for a in agents_only:
+                    try:
+                        a.cancel_move_to()
+                    except Exception:
+                        pass
+        return payload
+
+    # end_effector_position: per-slot duration-based move_ee_to (IK + interpolated).
+    poses = payload.get('poses')
+    if not isinstance(poses, dict) or not poses:
+        raise RuntimeError(
+            f"service '{service_name}' must return "
+            '{"poses": {"<slot>": {"position": [...], "orientation": [...]}}} '
+            f"keyed by assembly slot (got: {payload!r})"
+        )
+
+    ee_targets = []
+    for slot_key, pose in poses.items():
+        if not isinstance(pose, dict):
+            raise RuntimeError(
+                f"service '{service_name}' slot '{slot_key}' pose is not an object: {pose!r}"
+            )
+        position = pose.get('position') or []
+        orientation = pose.get('orientation') or []
+        if len(position) != 3:
+            raise RuntimeError(
+                f"service '{service_name}' slot '{slot_key}' position must have 3 values "
+                f"(got {position!r})"
+            )
+        if len(orientation) != 3:
+            raise RuntimeError(
+                f"service '{service_name}' slot '{slot_key}' orientation must have 3 values "
+                f"(got {orientation!r})"
+            )
+        robot, agent = _resolve(slot_key)
+
+        # move_ee_to expects {<ee_name>: [x, y, z, r, p, y, tool]} keyed by the
+        # robot's IK end-effector name (e.g. 'L_ee'/'ee'), NOT a {x, y, z, ...}
+        # dict. Discover the actual key from the live EE state.
+        ee_state = agent.get_ee_position()
+        if not isinstance(ee_state, dict) or not ee_state:
+            raise RuntimeError(
+                f"robot '{robot.get('name')}' (slot '{slot_key}') does not support "
+                f"end-effector control"
+            )
+        if len(ee_state) > 1:
+            raise RuntimeError(
+                f"robot '{robot.get('name')}' (slot '{slot_key}') has multiple "
+                f"end-effectors ({sorted(ee_state)}) — EE-mode Query Pose supports "
+                f"single-EE robots only"
+            )
+        ee_key = next(iter(ee_state))
+        target_ee = {ee_key: [
+            float(position[0]), float(position[1]), float(position[2]),
+            float(orientation[0]), float(orientation[1]), float(orientation[2]),
+            float(pose.get('gripper', 0.0)),
+        ]}
+        ee_targets.append((robot, agent, slot_key, target_ee))
+
+    for robot, agent, slot_key, target_ee in ee_targets:
+        try:
+            agent.move_ee_to(target_ee, duration=duration)
+        except Exception as e:
+            raise RuntimeError(
+                f"move_ee_to for '{robot.get('name')}' (slot '{slot_key}') failed: {e}"
+            )
+
+    agents_only = [a for _, a, _, _ in ee_targets]
+    timeout_at = time.time() + max(duration + 5.0, 30.0)
+    try:
+        while time.time() < timeout_at:
+            if task_control['stop']:
+                print('[NOTICE] query_pose interrupted by stop signal')
+                for a in agents_only:
+                    try:
+                        a.cancel_move_to()
+                    except Exception as e:
+                        print(f"[WARN] cancel_move_to failed: {e}")
+                break
+            if not any(a.is_moving for a in agents_only):
+                break
+            time.sleep(0.1)
+        else:
+            print('[WARNING] query_pose timed out — moving on')
+            for a in agents_only:
+                try:
+                    a.cancel_move_to()
+                except Exception:
+                    pass
+    finally:
+        if task_control.get('stop'):
+            for a in agents_only:
+                try:
+                    a.cancel_move_to()
+                except Exception:
+                    pass
+    return payload
+
+
 def _run_sync(block, ctx, task_control, group_id):
     sync_id = (block.get('sync_id') or '').strip()
     if not sync_id:
@@ -385,6 +650,7 @@ _HANDLERS = {
     'joint_position': _run_joint_position,
     'checkpoint': _run_checkpoint,
     'timesleep': _run_timesleep,
+    'query_pose': _run_query_pose,
     # 'sync' is dispatched separately in _run_group because it needs group_id;
     # the lookup just has to not return None so the unknown-type guard passes.
     'sync': _run_sync,
