@@ -89,16 +89,20 @@ class RobotiqSDKController(BaseSDKController):
             return False
 
     def enable(self) -> bool:
-        """그리퍼 activate (reset + start). 시간이 좀 걸리는 절차다."""
+        """그리퍼 activate. resetActivate()로 rACT 비트 rising edge 보장 — 이전 세션의
+        stuck/fault 상태를 회복하기 위해 항상 reset 후 activate."""
         if not self._connected or self._gripper is None:
             return False
         try:
-            # pyRobotiqGripper 2.x: activate()는 인자 없이 reset+start 시퀀스 실행.
-            self._gripper.activate()
+            self._gripper.resetActivate()
             print(f"[RobotiqSDK] Activated (speed={self._speed}, force={self._force})", flush=True)
             return True
         except Exception as e:
             print(f"[RobotiqSDK] Enable failed: {e}", flush=True)
+            try:
+                self._gripper.printStatus()
+            except Exception:
+                pass
             return False
 
     def disconnect(self) -> None:
