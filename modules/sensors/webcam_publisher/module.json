@@ -1,9 +1,9 @@
 {
   "id": "sensor_webcam",
   "name": "Webcam",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "category": "sensor",
-  "description": "USB 웹캠 (Logitech 등). v4l2 device_index 로 카메라 식별.",
+  "description": "USB 웹캠 (Logitech, APC 등). v4l2 device_index 로 카메라 식별.",
   "install": {
     "ros2": {
       "target": "ros2/ros2_ws/src",
@@ -31,6 +31,29 @@
         "read_topic_msg": "sensor_msgs/CompressedImage",
         "custom_fields": ["device_index"],
         "resolution": [600, 480]
+      },
+      "driver": {
+        "kind": "topic",
+        "launch": {
+          "package": "webcam_publisher",
+          "launch_file": "webcam_publisher.launch.py",
+          "args": {
+            "namespace": "{namespace}",
+            "device_index": "{device_index|0}"
+          }
+        }
+      }
+    },
+    {
+      "type": "webcam_color",
+      "spec": {
+        "company": "APC",
+        "role": "rgb_camera",
+        "topic_type": "color",
+        "read_topic": "/image_raw/compressed",
+        "read_topic_msg": "sensor_msgs/CompressedImage",
+        "custom_fields": ["device_index"],
+        "resolution": [640, 480]
       },
       "driver": {
         "kind": "topic",
