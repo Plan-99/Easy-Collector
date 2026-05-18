@@ -48,10 +48,13 @@ class RobotiqSDKController(BaseSDKController):
     """Robotiq 2F gripper SDK 직접 제어 컨트롤러 (Modbus RTU)."""
 
     def __init__(self, config: dict):
-        # custom_fields에서 들어오는 serial_port. 비어있으면 pyRobotiqGripper의
-        # auto-detection에 맡긴다 ("auto" 전달 시 USB serial을 자동 탐지).
-        port = config.get('serial_port') or config.get('com_port') or 'auto'
-        self._com_port = port
+        # serial_port 는 robot DB 의 custom_fields 로 들어옴 — UI 에서 사용자가
+        # 명시적으로 설정해야 한다. 옛 코드는 비어있을 때 'auto' 로 fallback 했지만,
+        # 그러면 pyRobotiqGripper 가 /dev/ttyS0~S31 (가짜 시리얼 포트) 까지 다
+        # 스캔해서 "Input/output error" 가 32 줄 찍히고, 진짜 응답 없는 USB 포트의
+        # 에러가 로그에 묻힘. → 명시 안 됐으면 즉시 실패 (사용자에게 설정 안 됐다고 알림).
+        port = (config.get('serial_port') or config.get('com_port') or '').strip()
+        self._com_port = port  # 빈 문자열이면 connect() 에서 명시적 에러 발생
         # Modbus device ID — 그리퍼 기본값 9. 직렬 연결된 그리퍼가 여러 대인 경우만 변경.
         self._device_id = int(config.get('device_id', 9))
         # 기본 속도/힘 (0~255). 너무 빠르거나 강하면 위험하니 보수적으로 둔다.
@@ -68,6 +71,14 @@ class RobotiqSDKController(BaseSDKController):
     # Lifecycle
     # ------------------------------------------------------------------
     def connect(self) -> bool:
+        if not self._com_port:
+            print(
+                "[RobotiqSDK] Connect failed: serial_port not set. "
+                "Set the robot's serial_port custom field in the UI (e.g. /dev/ttyUSB0).",
+                flush=True,
+            )
+            return False
+
         try:
             from pyrobotiqgripper import RobotiqGripper
         except Exception as e:
@@ -75,7 +86,7 @@ class RobotiqSDKController(BaseSDKController):
             return False
 
         try:
-            # com_port='auto'를 명시적으로 전달하면 라이브러리가 USB 직렬 포트를 탐색.
+            # 명시적 포트만 전달 — auto-detection (/dev/ttyS* 32 개 스캔) 우회.
             self._gripper = RobotiqGripper(
                 com_port=self._com_port,
                 device_id=self._device_id,
@@ -85,7 +96,7 @@ class RobotiqSDKController(BaseSDKController):
             print(f"[RobotiqSDK] Connected on {self._com_port}", flush=True)
             return True
         except Exception as e:
-            print(f"[RobotiqSDK] Connect failed: {e}", flush=True)
+            print(f"[RobotiqSDK] Connect failed on {self._com_port}: {e}", flush=True)
             return False
 
     def enable(self) -> bool:
