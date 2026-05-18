@@ -14,6 +14,8 @@ bundled inference code.
 ├── inference.py              # CheckpointInference single-step API
 ├── planner_meta.json         # planner structure: groups, workspaces, checkpoints
 ├── requirements.txt          # Python dependencies
+├── Dockerfile                # ROS 2 Humble + deps for the test container
+├── docker-compose.yml        # convenience compose file (GPU + host network)
 ├── easytrainer_runtime/      # SimpleAgent / SimpleEnv / image_parser / planner_engine / interpolation_node
 ├── lerobot/                  # vendored lerobot (do not pip-install a different one)
 └── checkpoints/
@@ -35,6 +37,37 @@ bundled inference code.
 - The robot drivers and camera drivers must already be running and publishing
   on the same ROS 2 topics the planner was built with (see `planner_meta.json`
   → `workspaces.<id>.assembly.robots` and `.sensors`).
+
+## Run inside the bundled Docker container (recommended)
+
+The bundle ships a `Dockerfile` + `docker-compose.yml` so you can run the
+planner in a fresh, isolated environment without polluting the host. Host
+needs Docker, Docker Compose, and (for GPU inference) the
+`nvidia-container-toolkit`.
+
+```bash
+docker compose build                  # build the image once
+docker compose run --rm test          # open an interactive shell inside it
+# inside the container:
+python3 run_planner.py --help
+python3 run_planner.py --dry-run      # safe first check (no robot motion)
+```
+
+The compose file uses `network_mode: host` so the container sees the same
+ROS 2 graph as the rest of your system (same `ROS_DOMAIN_ID`). The bundle
+folder is mounted at `/workspace`, so you can re-export the planner from
+EasyTrainer, unzip over the same folder, and the next `docker compose run`
+picks up the new code immediately — **no rebuild needed unless
+`requirements.txt` changes**.
+
+To run a one-shot command without dropping into a shell:
+
+```bash
+docker compose run --rm test python3 run_planner.py --dry-run
+```
+
+If you'd rather skip Docker, the next two sections cover running directly on
+the host.
 
 ## 1. Run the planner directly
 
@@ -100,21 +133,35 @@ for any smoothing.
 | `checkpoint`     | ✅ closed-loop inference; `until_done` / `move_homepose` honored |
 | `timesleep`      | ✅                                                              |
 | `sync`           | ✅ cross-group barrier                                          |
-| `query_pose`     | ✅ joint-position mode · ❌ end-effector mode (needs IK solver)  |
+| `query_pose`     | ✅ joint-position mode · ✅ end-effector mode (bundled Pinocchio IK) |
+
+## End-effector query_pose (Pinocchio IK)
+
+`query_pose` blocks in **end_effector_position** mode resolve target EE poses
+to joint angles using a Pinocchio + `pink` IK solver. The exporter bundles, for
+every robot with IK enabled, its URDF + mesh package directory under
+`urdfs/<robot_id>/` and records the `joints_to_lock` + `ee_definitions` in
+`planner_meta.json`. At startup `SimpleAgent` constructs a `Common_ArmIK`
+(``easytrainer_runtime/ik_solver.py``) per robot using those paths.
+
+The bundled Dockerfile installs Pinocchio via the `robotpkg` apt repo (same as
+the in-container EasyTrainer ros2 image); `pin-pink` and a QP backend are
+installed via `requirements.txt`. If you skip Docker and install on the host,
+make sure Pinocchio (`pip install pin` or apt `robotpkg-py310-pinocchio`) and
+`pin-pink` are reachable from your Python environment.
 
 ## Limitations vs in-container planner execution
 
 - Robot `write_type` must be `topic`. Service / action-goal robots are skipped
   at startup; a block that needs one fails with a clear error.
-- `query_pose` end-effector mode needs the Pinocchio IK solver, which is not
-  bundled. Re-author the block in joint-position mode, or run the planner
-  inside EasyTrainer.
 - Checkpoint blocks require `action_key='qaction'` and
   `vision_backbone='resnet18'` — the exporter rejects other checkpoints up
   front.
 - `move_homepose` moves robots to the workspace home pose **before** the
   checkpoint runs (the in-container per-episode re-homing loop is not
   replicated).
+- EE-mode `query_pose` supports single-EE robots only (the same constraint as
+  the in-container planner).
 - No socketio progress broadcasts, no OOD scoring, no Grad-CAM, no OTI-RL.
 
 If a planner needs any of the unsupported features, run it inside EasyTrainer

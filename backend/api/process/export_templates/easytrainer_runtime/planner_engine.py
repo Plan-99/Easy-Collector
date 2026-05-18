@@ -15,8 +15,8 @@ types:
     timesleep      : pause
     sync           : cross-group barrier
     query_pose     : call a ROS 2 std_srvs/Trigger service, drive robots to the
-                     returned pose (joint mode only — EE mode needs an IK solver
-                     which is not bundled)
+                     returned pose (joint mode or end_effector_position mode;
+                     EE mode uses the bundled Pinocchio IK solver)
 
 Stop semantics: a shared ``task_control`` dict carries ``{'stop': bool}``; every
 group worker polls it and aborts when set.
@@ -180,7 +180,7 @@ def build_context(node, bundle_dir, meta: dict, device: str = "cuda",
                 continue
             seen_robot_ids.add(rid)
             try:
-                ctx.agents[rid] = SimpleAgent(node, robot)
+                ctx.agents[rid] = SimpleAgent(node, robot, bundle_dir=ctx.bundle_dir)
                 if bool(robot.get("interpolation", False)):
                     interp_robots.append(robot)
             except NotImplementedError as e:
@@ -350,8 +350,11 @@ def _run_sync(block: dict, ctx: PlannerContext, task_control: dict, group_id: st
 
 def _run_query_pose(block: dict, ctx: PlannerContext, task_control: dict):
     """Call a std_srvs/Trigger service and drive the workspace's assembly to the
-    returned pose. Joint mode is fully supported; EE mode needs an IK solver,
-    which is not bundled — raise a clear error so the user runs it in-container."""
+    returned pose. Joint mode and EE mode are both supported — EE mode uses the
+    bundled Pinocchio IK solver attached to each agent (urdf + ee_definitions
+    come from planner_meta.json, see ``Common_ArmIK`` in
+    ``easytrainer_runtime.ik_solver``).
+    """
     from std_srvs.srv import Trigger
 
     ws_id = block.get("workspace_id")
@@ -362,13 +365,6 @@ def _run_query_pose(block: dict, ctx: PlannerContext, task_control: dict):
     pose_type = block.get("pose_type")
     if pose_type not in ("joint_position", "end_effector_position"):
         raise RuntimeError(f"invalid pose_type: {pose_type}")
-    if pose_type == "end_effector_position":
-        raise RuntimeError(
-            "end_effector_position query_pose is not supported in an exported "
-            "planner — it needs the Pinocchio IK solver, which only runs inside "
-            "EasyTrainer. Re-author this block in joint_position mode, or run "
-            "the planner in-container."
-        )
 
     duration = float(block.get("duration") or 5.0)
     slot_map = _assembly_slot_map(workspace)
@@ -401,7 +397,8 @@ def _run_query_pose(block: dict, ctx: PlannerContext, task_control: dict):
                 f"service '{service_name}' is not available (waited 5s) — is the "
                 f"pose-provider node running?"
             )
-        print(f"[planner_engine] calling query_pose service '{service_name}'")
+        print(f"[planner_engine] calling query_pose service '{service_name}' "
+              f"(pose_type={pose_type})")
         future = client.call_async(Trigger.Request())
         deadline = time.time() + 30.0
         while not future.done():
@@ -429,33 +426,101 @@ def _run_query_pose(block: dict, ctx: PlannerContext, task_control: dict):
     if not isinstance(payload, dict):
         raise RuntimeError(f"service '{service_name}' payload is not an object: {payload!r}")
 
-    positions = payload.get("positions")
-    if not isinstance(positions, dict) or not positions:
+    if pose_type == "joint_position":
+        positions = payload.get("positions")
+        if not isinstance(positions, dict) or not positions:
+            raise RuntimeError(
+                f"service '{service_name}' must return "
+                '{"positions": {"<slot>": [j1, j2, ...]}} keyed by assembly slot '
+                f"(got: {payload!r})"
+            )
+
+        targets = []
+        for slot_key, joints in positions.items():
+            if not isinstance(joints, list) or not joints:
+                raise RuntimeError(
+                    f"service '{service_name}' slot '{slot_key}' has no joint values"
+                )
+            robot, agent = _resolve(slot_key)
+            current = agent.get_joint_states()
+            if current is not None and len(current) != len(joints):
+                raise RuntimeError(
+                    f"service '{service_name}' slot '{slot_key}' returned "
+                    f"{len(joints)} joint values, but robot '{robot.get('name')}' has "
+                    f"{len(current)} joints — include every joint (gripper included)"
+                )
+            targets.append((agent, [float(j) for j in joints]))
+
+        for agent, pos in targets:
+            agent.move_to(pos, duration=duration)
+        _wait_for_agents([a for a, _ in targets], task_control,
+                         max_wait=max(duration + 5.0, 30.0))
+        return payload
+
+    # ── end_effector_position: per-slot duration-based move_ee_to ───────
+    poses = payload.get("poses")
+    if not isinstance(poses, dict) or not poses:
         raise RuntimeError(
             f"service '{service_name}' must return "
-            '{"positions": {"<slot>": [j1, j2, ...]}} keyed by assembly slot '
-            f"(got: {payload!r})"
+            '{"poses": {"<slot>": {"position": [...], "orientation": [...]}}} '
+            f"keyed by assembly slot (got: {payload!r})"
         )
 
-    targets = []
-    for slot_key, joints in positions.items():
-        if not isinstance(joints, list) or not joints:
+    ee_targets = []
+    for slot_key, pose in poses.items():
+        if not isinstance(pose, dict):
             raise RuntimeError(
-                f"service '{service_name}' slot '{slot_key}' has no joint values"
+                f"service '{service_name}' slot '{slot_key}' pose is not an "
+                f"object: {pose!r}"
+            )
+        position = pose.get("position") or []
+        orientation = pose.get("orientation") or []
+        if len(position) != 3:
+            raise RuntimeError(
+                f"service '{service_name}' slot '{slot_key}' position must have "
+                f"3 values (got {position!r})"
+            )
+        if len(orientation) != 3:
+            raise RuntimeError(
+                f"service '{service_name}' slot '{slot_key}' orientation must "
+                f"have 3 values (got {orientation!r})"
             )
         robot, agent = _resolve(slot_key)
-        current = agent.get_joint_states()
-        if current is not None and len(current) != len(joints):
+        if agent.ik_solver is None:
             raise RuntimeError(
-                f"service '{service_name}' slot '{slot_key}' returned "
-                f"{len(joints)} joint values, but robot '{robot.get('name')}' has "
-                f"{len(current)} joints — include every joint (gripper included)"
+                f"robot '{robot.get('name')}' (slot '{slot_key}') has no IK "
+                f"solver bundled — re-export the planner from EasyTrainer or "
+                f"author this block in joint_position mode"
             )
-        targets.append((agent, [float(j) for j in joints]))
+        if not agent.ee_names:
+            raise RuntimeError(
+                f"robot '{robot.get('name')}' (slot '{slot_key}') has no "
+                f"end-effectors defined in its ik_setting"
+            )
+        if len(agent.ee_names) > 1:
+            raise RuntimeError(
+                f"robot '{robot.get('name')}' (slot '{slot_key}') has multiple "
+                f"end-effectors ({agent.ee_names}) — EE-mode Query Pose "
+                f"supports single-EE robots only"
+            )
+        ee_key = agent.ee_names[0]
+        target_ee = {ee_key: [
+            float(position[0]), float(position[1]), float(position[2]),
+            float(orientation[0]), float(orientation[1]), float(orientation[2]),
+            float(pose.get("gripper", 0.0)),
+        ]}
+        ee_targets.append((robot, agent, slot_key, target_ee))
 
-    for agent, pos in targets:
-        agent.move_to(pos, duration=duration)
-    _wait_for_agents([a for a, _ in targets], task_control,
+    for robot, agent, slot_key, target_ee in ee_targets:
+        try:
+            agent.move_ee_to(target_ee, duration=duration)
+        except Exception as e:
+            raise RuntimeError(
+                f"move_ee_to for '{robot.get('name')}' (slot '{slot_key}') "
+                f"failed: {e}"
+            )
+
+    _wait_for_agents([a for _, a, _, _ in ee_targets], task_control,
                      max_wait=max(duration + 5.0, 30.0))
     return payload
 

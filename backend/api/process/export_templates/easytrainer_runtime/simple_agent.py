@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import threading
 import time
+from pathlib import Path
 from typing import List, Optional
 
 import numpy as np
@@ -36,13 +37,14 @@ from sensor_msgs.msg import JointState as _JointStateMsg
 class SimpleAgent:
     """Single-arm ROS agent for closed-loop inference outside EasyTrainer."""
 
-    def __init__(self, node: Node, robot: dict):
+    def __init__(self, node: Node, robot: dict, bundle_dir: Optional[Path] = None):
         self.node = node
         self.id = robot['id']
         self.name = robot.get('name', f"robot_{self.id}")
         self.joint_names: List[str] = robot.get('joint_names', []) or []
         self.joint_len = len(self.joint_names) or robot.get('joint_dim') or 7
         self.role = robot.get('role', 'single_arm')
+        self.tool_inner: bool = bool(robot.get('tool_inner', False))
 
         self.read_topic: str = robot['read_topic']
         self.read_topic_msg: str = robot['read_topic_msg']
@@ -111,6 +113,37 @@ class SimpleAgent:
             self._interp_pub = None
             self._direct_pub = None
             self._write_pub = node.create_publisher(self._write_cls, self.write_topic, 10)
+
+        # ── IK solver (optional) ─────────────────────────────────────────
+        # When the planner exporter found IK info for this robot it attaches a
+        # ``robot['ik']`` dict with the in-zip URDF paths and the ik_setting
+        # block (joints_to_lock + ee_definitions). We build a Common_ArmIK
+        # lazily on first EE call — except we do it here at startup to fail
+        # fast if Pinocchio can't load the URDF.
+        self.ik_solver = None
+        self.ik_lock = threading.RLock()
+        self.ee_names: List[str] = []
+        ik_meta = robot.get('ik')
+        if ik_meta:
+            try:
+                from .ik_solver import Common_ArmIK, normalize_ee_definitions
+                ik_setting = dict(ik_meta.get('ik_setting') or {})
+                ik_setting['ee_definitions'] = normalize_ee_definitions(
+                    ik_setting.get('ee_definitions') or []
+                )
+                self.ik_solver = Common_ArmIK(
+                    urdf_path=ik_meta['urdf_path'],
+                    urdf_package_dir=ik_meta.get('urdf_package_dir'),
+                    bundle_dir=bundle_dir,
+                    **ik_setting,
+                )
+                self.ee_names = list(self.ik_solver.ee_names)
+                print(f"[SimpleAgent {self.name}] IK solver ready "
+                      f"(ee_names={self.ee_names})")
+            except Exception as e:
+                print(f"[SimpleAgent {self.name}] IK init failed: {e}. "
+                      f"end_effector_position blocks will not run for this robot.")
+                self.ik_solver = None
 
         self._read_sub = node.create_subscription(
             self._read_cls, self.read_topic, self._joint_state_cb, 10
@@ -293,6 +326,93 @@ class SimpleAgent:
     def cancel_move_to(self) -> None:
         """Signal the in-flight move_to thread to stop publishing."""
         self._cancel_move = True
+
+    # ────────────────────────────────────────────────────────────────────
+    # End-effector control (Pinocchio IK)
+    # ────────────────────────────────────────────────────────────────────
+    def _split_arm_tool(self, full_qpos: List[float]):
+        """Split ``full_qpos`` into ``(arm_joints, tool_joints)``. Mirrors the
+        in-container Agent.get_joint_and_tool_pos for the single-arm /
+        tool_inner case (the only configurations IK supports here)."""
+        if full_qpos is None:
+            return None, None
+        if self.role == 'tool':
+            return None, list(full_qpos)
+        if self.tool_inner:
+            return list(full_qpos[:-1]), [full_qpos[-1]]
+        return list(full_qpos), None
+
+    def _solve_ee_to_joints(self, target_ee_dict: dict) -> Optional[List[float]]:
+        """Run IK on ``target_ee_dict`` (``{ee_name: [x,y,z,r,p,y,(gripper)]}``)
+        and return the joint vector to publish, or None if IK is unavailable."""
+        if self.ik_solver is None:
+            return None
+        if not self.ee_names:
+            return None
+
+        full_js = self.get_joint_states()
+        arm_js, tool_js = self._split_arm_tool(full_js)
+
+        ik_targets: dict = {}
+        gripper_values: dict = {}
+        for name in self.ee_names:
+            vec = target_ee_dict.get(name)
+            if vec is None:
+                continue
+            vec = list(vec)
+            if len(vec) >= 7:
+                ik_targets[name] = vec[:6]
+                gripper_values[name] = vec[6]
+            else:
+                ik_targets[name] = vec[:6]
+                gripper_values[name] = None
+        if not ik_targets:
+            return None
+
+        with self.ik_lock:
+            sol_q, _ = self.ik_solver.solve_ik(
+                ik_targets,
+                current_lr_arm_motor_q=np.array(arm_js) if arm_js is not None else None,
+            )
+
+        if sol_q is None:
+            return None
+        sol_q_list = list(map(float, sol_q.tolist()))
+
+        if self.tool_inner:
+            primary_ee = self.ee_names[0]
+            t_val = gripper_values.get(primary_ee)
+            if t_val is None:
+                t_val = (tool_js or [0.0])[0]
+            return sol_q_list + [float(t_val)]
+        return sol_q_list
+
+    def move_ee_to(self, target_ee_dict: dict, duration: float = 5.0, hz: float = 100.0) -> None:
+        """IK + duration-based move to an EE pose. Non-blocking — runs the
+        existing move_to worker on the resolved joint target."""
+        joints = self._solve_ee_to_joints(target_ee_dict)
+        if joints is None:
+            raise RuntimeError(
+                f"robot '{self.name}' has no usable IK solver — cannot move_ee_to"
+            )
+        self.move_to(joints, duration=duration, hz=hz)
+
+    def get_ee_position(self) -> Optional[dict]:
+        """Forward-kinematics on the current qpos. Returns
+        ``{ee_name: [x,y,z,ax,ay,az,(gripper)]}`` or None when IK is unavailable."""
+        if self.ik_solver is None:
+            return None
+        full_js = self.get_joint_states()
+        arm_js, tool_js = self._split_arm_tool(full_js)
+        if arm_js is None:
+            return None
+        with self.ik_lock:
+            ee_poses = self.ik_solver.get_ee_position(arm_js)
+        if tool_js is not None:
+            for i, name in enumerate(self.ee_names):
+                if i < len(tool_js) and name in ee_poses:
+                    ee_poses[name].append(tool_js[i])
+        return ee_poses
 
     def _build_command_message(self, positions: List[float]):
         """Construct a write message of the configured type with positions filled in."""

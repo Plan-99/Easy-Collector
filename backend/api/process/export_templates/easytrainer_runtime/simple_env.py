@@ -20,6 +20,7 @@ import time
 from typing import List
 
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image, CompressedImage
 
 from .image_parser import ros_image_to_numpy
@@ -41,11 +42,15 @@ class SimpleEnv:
             if sensor.get('read_topic_msg') == 'sensor_msgs/Image':
                 msg_type = Image
 
+            # Most camera drivers publish with BEST_EFFORT reliability + VOLATILE
+            # durability (sensor_data profile). Subscribing with the default
+            # (RELIABLE) silently drops every message — the publisher and
+            # subscriber are QoS-incompatible. Use sensor_data so we match.
             sub = node.create_subscription(
                 msg_type,
                 sensor['read_topic'],
                 lambda msg, _sid=sid: self._image_cb(msg, _sid),
-                10,
+                qos_profile_sensor_data,
             )
             self._sensor_subs.append(sub)
             print(f"[SimpleEnv] sensor_{sid}: {sensor['read_topic']} "

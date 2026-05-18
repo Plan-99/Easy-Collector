@@ -1,0 +1,39 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Compose file for the isolated exported-planner test container.
+#
+# Usage:
+#   docker compose build                # build the image
+#   docker compose run --rm test        # open an interactive shell in it
+#                                       # inside: python3 run_planner.py
+#
+# Notes:
+# - network_mode: host so this container sees the same ROS 2 graph as whatever
+#   robot/sensor drivers are running on the host (or in other host-network
+#   containers).
+# - GPU is requested via `gpus: all` — host needs nvidia-container-toolkit.
+#   To run on CPU only, pass `--device cpu` to run_planner.py.
+# ──────────────────────────────────────────────────────────────────────────────
+services:
+  test:
+    build: .
+    image: et-planner-test:latest
+    container_name: et_planner_test
+    network_mode: host
+    ipc: host
+    privileged: true
+    runtime: nvidia
+    environment:
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      # Use CycloneDDS — usually more reliable than the default Fast DDS on
+      # host-network setups. Override at runtime if you have a reason to.
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+    volumes:
+      # Mount the whole bundle directory so edits on the host (re-export, new
+      # checkpoint, etc.) are picked up without rebuilding the image.
+      - .:/workspace
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    command: /bin/bash

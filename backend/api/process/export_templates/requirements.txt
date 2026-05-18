@@ -14,7 +14,12 @@
 torch>=2.0
 torchvision>=0.15
 safetensors>=0.4
-numpy>=1.24
+# numpy is capped below 2.0 because the osrf/ros:humble-desktop base image
+# ships apt-installed scipy at /usr/lib/python3/dist-packages that requires
+# numpy<1.25. numpy 2.x also removed `numpy.Inf` which transformers/scipy
+# transitively reference. If you run on a host without apt scipy, you can
+# loosen this safely.
+numpy>=1.24,<2.0
 einops>=0.7
 
 # Image / video I/O
@@ -39,3 +44,10 @@ pyarrow>=14.0
 draccus>=0.10
 packaging>=23.0
 typing_extensions>=4.10
+
+# IK solver — used by end_effector_position query_pose blocks.
+# Pinocchio itself is installed via apt (robotpkg-py310-pinocchio) in the
+# bundled Dockerfile. If you're running on a host without robotpkg, you can
+# pip install `pin` instead (PyPI wheel), but the apt path is more reliable.
+pin-pink>=2.0
+qpsolvers[proxqp]>=4.0
