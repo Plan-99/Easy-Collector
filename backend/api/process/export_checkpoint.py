@@ -74,7 +74,7 @@ def _query_task_sensors(task: dict) -> list:
         return []
     rows = {
         s.id: s.to_dict()
-        for s in SensorModel.where_in("id", sensor_ids).get()
+        for s in SensorModel.select().where(SensorModel.id.in_(sensor_ids))
     }
     # Preserve task.sensor_ids ordering; drop any ids that can't be resolved.
     return [rows[sid] for sid in sensor_ids if sid in rows]

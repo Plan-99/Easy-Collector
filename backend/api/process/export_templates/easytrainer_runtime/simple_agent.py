@@ -30,6 +30,7 @@ from typing import List, Optional
 import numpy as np
 from rosidl_runtime_py.utilities import get_message
 from rclpy.node import Node
+from sensor_msgs.msg import JointState as _JointStateMsg
 
 
 class SimpleAgent:
@@ -49,6 +50,14 @@ class SimpleAgent:
         self.write_topic_msg: str = robot['write_topic_msg']
         self.write_type: str = robot.get('write_type', 'topic')
 
+        # When ``interpolation`` is true the agent does NOT publish to the
+        # robot's write_topic directly — instead it publishes JointState goals
+        # to /ec_robot_<id>/ec_joint_cmd (low rate) and the bundled
+        # JointInterpolationNode smooths them to ``write_topic`` at 200Hz.
+        # ``move_to`` bypasses smoothing via /ec_robot_<id>/ec_joint_cmd_direct
+        # (it already does its own smoothstep interpolation).
+        self.interpolation: bool = bool(robot.get('interpolation', False))
+
         if self.write_type != 'topic':
             raise NotImplementedError(
                 f"SimpleAgent only supports write_type='topic'. "
@@ -60,6 +69,18 @@ class SimpleAgent:
         self._joint_states: Optional[List[float]] = None
         self._last_joint_update: Optional[float] = None
 
+        # ── move_to interpolation state ──────────────────────────────────
+        # SimpleAgent.move_joint_step publishes a single command with no
+        # smoothing. The planner's joint_position / query_pose / homepose
+        # blocks need a duration-based interpolated move, so move_to() spins a
+        # background thread that smoothsteps from the current qpos to the
+        # target over `duration` seconds. is_moving / cancel_move_to mirror the
+        # EasyTrainer RemoteAgent API the planner engine expects.
+        self._move_lock = threading.Lock()
+        self._move_thread: Optional[threading.Thread] = None
+        self._cancel_move = False
+        self._is_moving = False
+
         # Resolve message classes
         try:
             self._read_cls = get_message(self.read_topic_msg)
@@ -69,23 +90,40 @@ class SimpleAgent:
                 f"robot {self.name}. Is the corresponding ROS package installed? "
                 f"Original error: {e}"
             )
-        try:
-            self._write_cls = get_message(self.write_topic_msg)
-        except Exception as e:
-            raise RuntimeError(
-                f"Could not resolve write_topic_msg='{self.write_topic_msg}' for "
-                f"robot {self.name}. Is the corresponding ROS package installed? "
-                f"Original error: {e}"
-            )
+        # Resolve / open the write path. With interpolation on we ALWAYS use
+        # JointState on the in-process bridge topics — the interpolation node
+        # handles serialization to the robot's actual write_topic_msg.
+        if self.interpolation:
+            self._write_cls = _JointStateMsg
+            ns = f"/ec_robot_{self.id}"
+            self._interp_pub = node.create_publisher(_JointStateMsg, f"{ns}/ec_joint_cmd", 10)
+            self._direct_pub = node.create_publisher(_JointStateMsg, f"{ns}/ec_joint_cmd_direct", 10)
+            self._write_pub = None
+        else:
+            try:
+                self._write_cls = get_message(self.write_topic_msg)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Could not resolve write_topic_msg='{self.write_topic_msg}' for "
+                    f"robot {self.name}. Is the corresponding ROS package installed? "
+                    f"Original error: {e}"
+                )
+            self._interp_pub = None
+            self._direct_pub = None
+            self._write_pub = node.create_publisher(self._write_cls, self.write_topic, 10)
 
         self._read_sub = node.create_subscription(
             self._read_cls, self.read_topic, self._joint_state_cb, 10
         )
-        self._write_pub = node.create_publisher(self._write_cls, self.write_topic, 10)
 
-        print(f"[SimpleAgent] {self.name}: read {self.read_topic} ({self.read_topic_msg}) "
-              f"→ write {self.write_topic} ({self.write_topic_msg}) "
-              f"joint_names={self.joint_names}")
+        if self.interpolation:
+            print(f"[SimpleAgent] {self.name}: read {self.read_topic} ({self.read_topic_msg}) "
+                  f"→ interpolation_node → {self.write_topic} ({self.write_topic_msg}) "
+                  f"joint_names={self.joint_names}")
+        else:
+            print(f"[SimpleAgent] {self.name}: read {self.read_topic} ({self.read_topic_msg}) "
+                  f"→ write {self.write_topic} ({self.write_topic_msg}) "
+                  f"joint_names={self.joint_names}")
 
     # ────────────────────────────────────────────────────────────────────
     def _joint_state_cb(self, msg) -> None:
@@ -169,14 +207,92 @@ class SimpleAgent:
         )
 
     def move_joint_step(self, target_qpos) -> None:
-        """Publish a single joint command. Mirrors EasyTrainer Agent.move_joint_step
-        but with no smoothing / no internal interpolation — that lives in the
-        robot driver."""
+        """Publish a single joint command. Mirrors EasyTrainer Agent.move_joint_step.
+        With interpolation on, the goal is sent to the bridge topic and the
+        JointInterpolationNode smooths it to ``write_topic`` at 200Hz; with
+        interpolation off, it goes straight to ``write_topic``."""
         target = list(map(float, target_qpos[: self.joint_len]))
+        if self.interpolation:
+            msg = _JointStateMsg()
+            if self.joint_names:
+                msg.name = list(self.joint_names)
+            msg.position = target
+            self._interp_pub.publish(msg)
+            return
         msg = self._build_command_message(target)
         if msg is None:
             return
         self._write_pub.publish(msg)
+
+    # ────────────────────────────────────────────────────────────────────
+    # Duration-based interpolated motion (move_to / cancel / is_moving)
+    # ────────────────────────────────────────────────────────────────────
+    @property
+    def is_moving(self) -> bool:
+        return self._is_moving
+
+    def move_to(self, target_qpos, duration: float = 5.0, hz: float = 100.0) -> None:
+        """Smoothly interpolate from the current qpos to ``target_qpos`` over
+        ``duration`` seconds, publishing joint commands at ``hz``.
+
+        Non-blocking — the interpolation runs in a background thread. Poll
+        ``is_moving`` to know when it finishes, or call ``cancel_move_to`` to
+        abort. Mirrors EasyTrainer's RemoteAgent.move_to so the planner engine
+        can treat SimpleAgent the same way.
+        """
+        target = list(map(float, list(target_qpos)[: self.joint_len]))
+        with self._move_lock:
+            # Pre-empt any in-flight move.
+            if self._move_thread is not None and self._move_thread.is_alive():
+                self._cancel_move = True
+                self._move_thread.join(timeout=1.0)
+            self._cancel_move = False
+            self._is_moving = True
+            self._move_thread = threading.Thread(
+                target=self._move_to_worker,
+                args=(target, float(duration), float(hz)),
+                daemon=True,
+            )
+            self._move_thread.start()
+
+    def _move_to_worker(self, target: List[float], duration: float, hz: float) -> None:
+        try:
+            start_qpos = list(map(float, self.get_joint_states()[: self.joint_len]))
+            n = min(len(start_qpos), len(target))
+            if n == 0:
+                return
+            start_qpos = start_qpos[:n]
+            target = target[:n]
+            hz = max(hz, 1.0)
+            steps = max(1, int(duration * hz))
+            period = 1.0 / hz
+            for i in range(1, steps + 1):
+                if self._cancel_move:
+                    break
+                t = i / steps
+                # smoothstep easing — soft accel/decel, no jerk at the ends.
+                s = t * t * (3.0 - 2.0 * t)
+                interp = [sp + (tp - sp) * s for sp, tp in zip(start_qpos, target)]
+                # With interpolation on, bypass the smoothing node — the
+                # smoothstep above is already a smooth trajectory; routing it
+                # through the 200Hz linear smoother would just add lag.
+                if self.interpolation:
+                    msg = _JointStateMsg()
+                    if self.joint_names:
+                        msg.name = list(self.joint_names)
+                    msg.position = interp
+                    self._direct_pub.publish(msg)
+                else:
+                    self.move_joint_step(interp)
+                time.sleep(period)
+        except Exception as e:  # noqa: BLE001
+            print(f"[SimpleAgent {self.name}] move_to worker error: {e}")
+        finally:
+            self._is_moving = False
+
+    def cancel_move_to(self) -> None:
+        """Signal the in-flight move_to thread to stop publishing."""
+        self._cancel_move = True
 
     def _build_command_message(self, positions: List[float]):
         """Construct a write message of the configured type with positions filled in."""

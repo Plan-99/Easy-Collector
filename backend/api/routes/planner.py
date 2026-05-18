@@ -1,11 +1,12 @@
 import json
 
-from flask import Blueprint, request, current_app
+from flask import Blueprint, request, current_app, send_file
 
 from ...database.models.planner_model import Planner as PlannerModel
 from ...database.models.task_model import Task as TaskModel
 from ...database.models.checkpoint_model import Checkpoint as CheckpointModel
 from ..process.planner_run import planner_run
+from ..process.export_planner import bundle_planner_zip
 
 
 planner_bp = Blueprint('planner_bp', __name__)
@@ -524,3 +525,33 @@ def planner_run_status(id):
         'status': 'success',
         'is_running': is_running,
     }, 200
+
+
+@planner_bp.route('/planner/<id>/:export', methods=['POST', 'GET'])
+def export_planner(id):
+    """Bundle the planner + every checkpoint it references + standalone
+    execution code (run_planner.py / ros_planner_service.py) into a zip
+    download that runs outside the EasyTrainer container."""
+    planner = PlannerModel.find(id)
+    if not planner:
+        return {'status': 'error', 'message': 'Planner not found'}, 404
+
+    plans = _ensure_plans_loaded(planner)
+    if not plans:
+        return {'status': 'error', 'message': 'Planner has no groups to export'}, 400
+
+    try:
+        buf, filename = bundle_planner_zip(planner=planner.to_dict(), groups=plans)
+    except (ValueError, FileNotFoundError) as e:
+        return {'status': 'error', 'message': str(e)}, 400
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {'status': 'error', 'message': f'Export failed: {e}'}, 500
+
+    return send_file(
+        buf,
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name=filename,
+    )

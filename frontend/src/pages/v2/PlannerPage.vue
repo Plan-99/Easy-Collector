@@ -147,6 +147,18 @@
                         <TutorialHint step="3" :text="$t('tutorialPlannerRun')" class="q-mr-sm" />
                         <q-space />
                         <q-btn
+                            outline
+                            color="white"
+                            icon="download"
+                            :label="$t('plannerExport')"
+                            size="sm"
+                            class="q-mr-sm"
+                            :disable="!hasAnyBlock || plans.length === 0 || isRunning"
+                            @click="exportPlanner"
+                        >
+                            <q-tooltip>{{ $t('plannerExportTooltip') }}</q-tooltip>
+                        </q-btn>
+                        <q-btn
                             v-if="!isRunning"
                             unelevated
                             color="positive"
@@ -834,7 +846,7 @@ import FormDialog from 'src/components/v2/FormDialog.vue';
 import MonitoringWindow from 'src/components/v2/MonitoringWindow.vue';
 import RobotPendant from 'src/components/v2/RobotPendant.vue';
 import TutorialHint from 'src/components/v2/TutorialHint.vue';
-import { Notify } from 'quasar';
+import { Notify, Loading } from 'quasar';
 import { useSensor } from '../../composables/useSensor';
 import { useRobot } from 'src/composables/useRobot';
 import { useSocket } from 'src/composables/useSocket';
@@ -1633,6 +1645,101 @@ function stopRun() {
     api.post(`/planner/${selectedPlannerId.value}/:stop_run`).catch((error) => {
         console.error('Error stopping planner run:', error);
     });
+}
+
+async function exportPlanner() {
+    if (!selectedPlannerId.value) return;
+
+    // Suggest a filename from the planner's name; sanitize like the backend does.
+    const rawName = (selectedPlanner.value?.name || 'planner').trim();
+    const safeName = rawName.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 60);
+    const suggestedName = `planner_${selectedPlannerId.value}_${safeName}.zip`;
+
+    // If the browser supports the File System Access API, let the user pick
+    // the save path BEFORE we hit the backend (the picker requires user
+    // activation, which would be consumed by an awaited request).
+    let fileHandle = null;
+    if (typeof window.showSaveFilePicker === 'function') {
+        try {
+            fileHandle = await window.showSaveFilePicker({
+                suggestedName,
+                types: [{
+                    description: 'Zip archive',
+                    accept: { 'application/zip': ['.zip'] },
+                }],
+            });
+        } catch (err) {
+            // User cancelled the picker — abort silently.
+            if (err && err.name === 'AbortError') return;
+            // Any other error: fall back to the anchor-click download path.
+            console.warn('showSaveFilePicker failed, falling back:', err);
+            fileHandle = null;
+        }
+    }
+
+    Loading.show({ message: t('plannerExporting') });
+    try {
+        const res = await api.post(
+            `/planner/${selectedPlannerId.value}/:export`,
+            null,
+            { responseType: 'blob' }
+        );
+
+        // Backend may return a JSON error inside a blob; sniff content-type.
+        const contentType = res.headers['content-type'] || '';
+        if (!contentType.includes('application/zip')) {
+            const text = await res.data.text();
+            let message = text;
+            try {
+                message = JSON.parse(text).message || text;
+            } catch { /* not JSON */ }
+            throw new Error(message);
+        }
+
+        const cd = res.headers['content-disposition'] || '';
+        const match = cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/);
+        const filename = match
+            ? decodeURIComponent(match[1])
+            : suggestedName;
+
+        if (fileHandle) {
+            // Write the blob through the picker handle — saved exactly where
+            // the user chose.
+            const writable = await fileHandle.createWritable();
+            await writable.write(res.data);
+            await writable.close();
+            Notify.create({
+                color: 'positive',
+                message: t('plannerExported', { filename: fileHandle.name || filename }),
+                timeout: 4000,
+            });
+        } else {
+            // Fallback: classic anchor-click download (goes to the browser's
+            // default downloads folder).
+            const url = URL.createObjectURL(res.data);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+            Notify.create({
+                color: 'positive',
+                message: t('plannerExported', { filename }),
+                timeout: 4000,
+            });
+        }
+    } catch (err) {
+        console.error('exportPlanner failed:', err);
+        Notify.create({
+            color: 'negative',
+            message: t('plannerExportFailed', { error: err.message || err }),
+            timeout: 6000,
+        });
+    } finally {
+        Loading.hide();
+    }
 }
 
 function onPlannerRunStart(payload) {
