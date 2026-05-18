@@ -67,6 +67,7 @@ services:
     volumes:
       - ./ros2/ros2_ws:/root/ros2_ws
       - ./ros2/ros2_bridge:/root/ros2/ros2_bridge
+      - ./ros2/examples:/root/ros2/examples
       - /opt/easytrainer:/opt/easytrainer
       - /dev:/dev
       - /dev/shm:/dev/shm

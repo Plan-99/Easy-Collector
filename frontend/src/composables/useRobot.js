@@ -42,6 +42,15 @@ export function useRobot(robot, robotOnCallback = () => {}) {
   if (!robot.lastError) robot.lastError = null;
 
   let subscribed = false;
+  let startWatchdog = null;
+  const START_TIMEOUT_MS = 20000;
+
+  function clearStartWatchdog() {
+    if (startWatchdog) {
+      clearTimeout(startWatchdog);
+      startWatchdog = null;
+    }
+  }
 
   function ensureSocketSubscription() {
     if (subscribed) return;
@@ -74,6 +83,7 @@ export function useRobot(robot, robotOnCallback = () => {}) {
     () => topicStore.isPublished(robot.read_topic),
     (isPublished, wasPublished) => {
       if (isPublished && !wasPublished) {
+        clearStartWatchdog();
         robot.status = 'on';
         robot.lastError = null;
         ensureSocketSubscription();
@@ -100,23 +110,39 @@ export function useRobot(robot, robotOnCallback = () => {}) {
   }
 
   function startRobot() {
+    clearStartWatchdog();
     robot.status = 'loading';
     robot.lastError = null;
+    startWatchdog = setTimeout(() => {
+      if (robot.status === 'loading') {
+        const msg = t('errorStartRobotTimeout', { name: robot.name });
+        robot.lastError = msg;
+        robot.status = 'error';
+        Notify.create({ color: 'negative', message: msg });
+      }
+      startWatchdog = null;
+    }, START_TIMEOUT_MS);
     return api
       .post('/robot:start', robot)
       .then(() => {
         // 토픽이 발행되면 store watcher가 자동으로 status='on' + subscribe.
-        // 만약 일정 시간 안에 토픽이 안 보이면 사용자가 직접 stop 가능.
+        // 토픽이 안 올라오면 위 watchdog가 status='error' 로 전환.
       })
       .catch((error) => {
+        clearStartWatchdog();
         const msg = formatError(error);
         console.error('Error starting robot:', msg);
         robot.lastError = msg;
-        robot.status = 'off';
+        robot.status = 'error';
+        Notify.create({
+          color: 'negative',
+          message: t('errorStartRobotFailed', { name: robot.name, error: msg }),
+        });
       });
   }
 
   function stopRobot() {
+    clearStartWatchdog();
     robot.status = 'loading';
     return api
       .post('/robot:stop', robot)

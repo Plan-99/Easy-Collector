@@ -172,6 +172,18 @@ class MoveToRequest(_message.Message):
     hz: float
     def __init__(self, agent_id: _Optional[int] = ..., target_pos: _Optional[_Iterable[float]] = ..., step_size: _Optional[float] = ..., duration: _Optional[float] = ..., hz: _Optional[float] = ...) -> None: ...
 
+class MoveEEToRequest(_message.Message):
+    __slots__ = ("agent_id", "target_ee_json", "duration", "hz")
+    AGENT_ID_FIELD_NUMBER: _ClassVar[int]
+    TARGET_EE_JSON_FIELD_NUMBER: _ClassVar[int]
+    DURATION_FIELD_NUMBER: _ClassVar[int]
+    HZ_FIELD_NUMBER: _ClassVar[int]
+    agent_id: int
+    target_ee_json: str
+    duration: float
+    hz: float
+    def __init__(self, agent_id: _Optional[int] = ..., target_ee_json: _Optional[str] = ..., duration: _Optional[float] = ..., hz: _Optional[float] = ...) -> None: ...
+
 class ResetIKRequest(_message.Message):
     __slots__ = ("agent_id", "q")
     AGENT_ID_FIELD_NUMBER: _ClassVar[int]

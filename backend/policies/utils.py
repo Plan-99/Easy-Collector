@@ -266,7 +266,7 @@ def _select_action_column(df, action_key):
     return 'action'
 
 
-def _get_action_data(df, action_key):
+def _get_action_data(df, action_key, eepos_tool_qpos_indices=None):
     """action_key → 학습/통계용 action 배열 (T, D) 반환.
 
     action_key 분기:
@@ -276,6 +276,9 @@ def _get_action_data(df, action_key):
         'action' fallback.
       - 'relative_ee_pos': ee_delta 와 동일하게 derive (호출자가 추후
         delta_to_relative_trajectory 적용).
+
+    eepos_tool_qpos_indices: backward-compat. 옛 dataset 의 eepos 에 별도 그리퍼
+    joint 가 빠진 경우, qpos 의 해당 인덱스를 eepos 끝에 append 한 뒤 diff 계산.
 
     eepos diff 로 derive 하는 이유: action.ee_delta 컬럼은 record_episode 의
     tele-type 별 분기에 의존해 텔레옵별로 값이 달라지거나 0 으로 떨어졌음.
@@ -295,6 +298,11 @@ def _get_action_data(df, action_key):
     if norm in ('ee_delta', 'relative_ee_pos'):
         if 'observation.eepos' in df.columns:
             eepos = np.array(df['observation.eepos'].tolist(), dtype=np.float32)
+            if eepos_tool_qpos_indices:
+                _qpos_col = 'observation.qpos' if 'observation.qpos' in df.columns else 'observation.state'
+                if _qpos_col in df.columns:
+                    _qpos_arr = np.array(df[_qpos_col].tolist(), dtype=np.float32)
+                    eepos = np.concatenate([eepos, _qpos_arr[:, eepos_tool_qpos_indices]], axis=1)
             delta = np.zeros_like(eepos)
             if len(eepos) > 1:
                 delta[:-1] = eepos[1:] - eepos[:-1]
@@ -310,6 +318,48 @@ def _get_action_data(df, action_key):
     # 기타 / 미지의 action_key: 새/옛 schema 모두 대응.
     col = 'action' if 'action' in df.columns else 'action.joint'
     return np.array(df[col].tolist(), dtype=np.float32)
+
+
+def _compute_eepos_tool_augment_indices(dataset_info):
+    """옛 dataset 호환: observation.eepos 에 별도 tool agent (그리퍼) joint 가 빠진
+    경우, qpos 의 어느 인덱스를 끝에 append 해야 하는지 계산.
+
+    판별 로직: features 의 column names 파싱.
+      - eepos.names 의 'robot_<id>_...' prefix 들 → eepos 에 이미 표현된 robot id 집합
+        (arm EE 또는 'tool_' 표기 포함)
+      - qpos.names 중 그 집합에 없는 robot id 는 'separate tool agent' (그리퍼 등)
+      - 해당 robot id 의 qpos 인덱스가 augment 대상
+
+    Returns:
+        list[int] — qpos 의 추가 인덱스. 비어 있으면 augment 불필요
+        (eepos 가 이미 tool 포함하거나, tool agent 가 없는 경우).
+    """
+    features = dataset_info.get("features", {}) if dataset_info else {}
+    qpos_names = features.get("observation.qpos", {}).get("names") or []
+    eepos_names = features.get("observation.eepos", {}).get("names") or []
+    if not qpos_names or not eepos_names:
+        return []
+
+    # robot ID 추출. joint 이름에 underscore 가 있을 수 있어 ([^_]+) 로 limit.
+    # 예: 'robot_1_knuckle_joint' → '1' (greedy \w+_ 쓰면 '1_knuckle' 로 잘못 잡힘)
+    import re as _re
+    _robot_re = _re.compile(r'^robot_([^_]+)_')
+    def _rid(name):
+        m = _robot_re.match(name)
+        return m.group(1) if m else None
+
+    eepos_robot_ids = set()
+    for name in eepos_names:
+        rid = _rid(name)
+        if rid is not None:
+            eepos_robot_ids.add(rid)
+
+    tool_indices = []
+    for i, name in enumerate(qpos_names):
+        rid = _rid(name)
+        if rid is not None and rid not in eepos_robot_ids:
+            tool_indices.append(i)
+    return tool_indices
 
 
 def _build_obs_state(df, obs_state_keys):
@@ -386,6 +436,15 @@ class EpisodicDataset(torch.utils.data.Dataset):
         # Pre-load episode metadata (lengths) for efficient sampling
         self._ep_cache = {}
         self._dataset_info = get_dataset_info(dataset_dir)
+        # Backward-compat: 옛 dataset 의 eepos 에 별도 tool agent joint 가 빠져 있으면
+        # qpos 의 해당 인덱스를 매 episode 로드 시 eepos 뒤에 append.
+        self._eepos_tool_qpos_indices = _compute_eepos_tool_augment_indices(self._dataset_info)
+        if self._eepos_tool_qpos_indices:
+            print(
+                f"[EpisodicDataset] Augmenting eepos with qpos indices "
+                f"{self._eepos_tool_qpos_indices} (backward-compat for separate tool agents).",
+                flush=True,
+            )
 
         # Pre-load episode → tasks mapping from episodes.jsonl (lerobot standard).
         # Each line: {"episode_index": N, "length": L, "tasks": ["pick up the cup", ...]}
@@ -424,7 +483,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
         # ee_delta/relative_ee_pos 면 _get_action_data 가 observation.eepos 시간
         # 차분으로 derive — action.ee_delta 컬럼 저장 안 함.
         state_data = _build_obs_state(df, self.obs_state_keys)
-        action_data = _get_action_data(df, self.action_key)
+        action_data = _get_action_data(df, self.action_key, self._eepos_tool_qpos_indices)
         # eepos sequence — relative_ee_pos 학습에서 __getitem__ 이 chunk 별
         # current EE local frame trajectory 를 계산하는 데 사용. 없으면 None.
         eepos_data = (
@@ -443,6 +502,14 @@ class EpisodicDataset(torch.utils.data.Dataset):
         )
         if qpos_anchor_data is not None and qpos_anchor_data.ndim == 1:
             qpos_anchor_data = qpos_anchor_data.reshape(-1, 1)
+        # Backward-compat: 옛 dataset 의 eepos 에 별도 그리퍼 joint 가 없으면 qpos
+        # 에서 뽑아 append (absolute pass-through 형태).
+        if eepos_data is not None and self._eepos_tool_qpos_indices:
+            _qpos_col2 = 'observation.qpos' if 'observation.qpos' in df.columns else 'observation.state'
+            if _qpos_col2 in df.columns:
+                _qpos_arr = np.array(df[_qpos_col2].tolist(), dtype=np.float32)
+                _tool_cols = _qpos_arr[:, self._eepos_tool_qpos_indices]
+                eepos_data = np.concatenate([eepos_data, _tool_cols], axis=1)
 
         # Language instruction from episodes.jsonl (per-episode `tasks` list).
         # Use the first entry; most datasets have a single task per episode.
@@ -591,6 +658,10 @@ class EpisodicDataset(torch.utils.data.Dataset):
                 current_eepos = eepos_data[start_ts]
                 rel_traj = compute_relative_trajectory_in_local_frame(future_eepos, current_eepos)
                 padded_action[:action_len, :rel_traj.shape[1]] = rel_traj[:action_len]
+                # any_has_succeed 면 action 의 마지막 컬럼이 succeed flag — rel_traj
+                # 는 eepos 차원만 다루므로 succeed slot 을 따로 복사.
+                if any_has_succeed and action.shape[1] > rel_traj.shape[1]:
+                    padded_action[:action_len, rel_traj.shape[1]:] = action[:action_len, rel_traj.shape[1]:]
             else:
                 padded_action[:action_len] = delta_to_relative_trajectory(action[:action_len])
         elif _normalize_action_key(self.action_key) == 'relative_joint_pos':
@@ -723,6 +794,10 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
         obs_state_keys = ['qpos']
 
     dataset_info = get_dataset_info(dataset_dir)
+    # Backward-compat: 옛 dataset 에 별도 그리퍼 joint 가 eepos 에 없으면 qpos 에서
+    # 보강. dataset 클래스와 동일한 logic 으로 stats 도 7-dim 으로 계산해야 학습/추론
+    # dim 이 일치.
+    eepos_tool_qpos_indices = _compute_eepos_tool_augment_indices(dataset_info)
     all_qpos_data = []
     all_action_data = []
     observation_image_keys = []
@@ -746,7 +821,7 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
         # obs_state_keys / action_key 에 따라 state/action 구성. ee_delta 등은
         # observation.eepos 차분으로 derive.
         state_data = _build_obs_state(df, obs_state_keys)
-        action_data = _get_action_data(df, action_key)
+        action_data = _get_action_data(df, action_key, eepos_tool_qpos_indices)
 
         # Check succeed
         if "succeed" in df.columns:
@@ -762,7 +837,7 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
         df = table.to_pandas()
 
         qpos = _build_obs_state(df, obs_state_keys)
-        action = _get_action_data(df, action_key)
+        action = _get_action_data(df, action_key, eepos_tool_qpos_indices)
 
         if qpos.ndim == 1:
             qpos = qpos.reshape(1, -1)
@@ -789,9 +864,22 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
             # 시점부터 chunk_size step 의 trajectory in local frame 으로 stats 누적.
             if 'observation.eepos' in df.columns:
                 eepos_arr = np.array(df['observation.eepos'].tolist(), dtype=np.float32)
+                # Backward-compat: dataset class __getitem__ 과 동일 차원이 되도록
+                # eepos 끝에 tool qpos append.
+                if eepos_tool_qpos_indices:
+                    _qpos_col = 'observation.qpos' if 'observation.qpos' in df.columns else 'observation.state'
+                    if _qpos_col in df.columns:
+                        _qpos_arr = np.array(df[_qpos_col].tolist(), dtype=np.float32)
+                        eepos_arr = np.concatenate(
+                            [eepos_arr, _qpos_arr[:, eepos_tool_qpos_indices]], axis=1
+                        )
                 T_total = len(eepos_arr)
                 if T_total >= 2 and chunk_size > 0:
                     rel_chunks = []
+                    succeed_chunks = []
+                    succeed_arr = None
+                    if any_has_succeed and 'succeed' in df.columns:
+                        succeed_arr = np.array(df['succeed'].tolist(), dtype=np.float32).reshape(-1, 1)
                     for start in range(T_total - 1):
                         future_idx = np.clip(
                             np.arange(start + 1, start + chunk_size + 1), 0, T_total - 1
@@ -799,7 +887,15 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
                         rel_chunks.append(compute_relative_trajectory_in_local_frame(
                             eepos_arr[future_idx], eepos_arr[start]
                         ))
+                        if succeed_arr is not None:
+                            succeed_chunks.append(succeed_arr[future_idx])
                     action = np.concatenate(rel_chunks, axis=0)
+                    # 옛 코드는 여기서 action 을 rel_chunks 로 통째 overwrite 해서
+                    # 앞에서 붙여둔 succeed dim 이 사라졌다 → 모델이 succeed 차원을
+                    # 학습 못 하고, 추론 시 inference_succeed 이벤트가 안 뜸.
+                    if succeed_chunks:
+                        succeed_concat = np.concatenate(succeed_chunks, axis=0)
+                        action = np.concatenate([action, succeed_concat], axis=1)
                 else:
                     action = delta_to_relative_trajectory(action)
             else:
@@ -1018,6 +1114,10 @@ class FullScanDataset(EpisodicDataset):
                 current_eepos = eepos_data[start_ts]
                 rel_traj = compute_relative_trajectory_in_local_frame(future_eepos, current_eepos)
                 padded_action[:action_len, :rel_traj.shape[1]] = rel_traj[:action_len]
+                # any_has_succeed 면 action 의 마지막 컬럼이 succeed flag — rel_traj
+                # 는 eepos 차원만 다루므로 succeed slot 을 따로 복사.
+                if any_has_succeed and action.shape[1] > rel_traj.shape[1]:
+                    padded_action[:action_len, rel_traj.shape[1]:] = action[:action_len, rel_traj.shape[1]:]
             else:
                 padded_action[:action_len] = delta_to_relative_trajectory(action[:action_len])
         elif _normalize_action_key(self.action_key) == 'relative_joint_pos':

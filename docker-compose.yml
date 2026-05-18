@@ -86,6 +86,7 @@ services:
       - ./ros2/ros2_ws:/root/ros2_ws
       - ./ros2/robot_sdk:/root/robot_sdk
       - ./ros2/ros2_bridge:/root/ros2/ros2_bridge
+      - ./ros2/examples:/root/ros2/examples
       - ./ros2/start_ros2_services.sh:/usr/local/bin/start_ros2_services.sh
       - ./modules:/opt/easytrainer/project/modules:ro
       - /opt/easytrainer:/opt/easytrainer

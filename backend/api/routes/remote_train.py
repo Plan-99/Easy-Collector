@@ -219,6 +219,7 @@ def remote_train_receive_model():
     ckpt = CheckpointModel.find(checkpoint_id)
     if ckpt is not None:
         ckpt.status = 'finished'
+        _apply_result_json(ckpt, ckpt_dir)
         ckpt.save()
 
     return {'status': 'success', 'checkpoint_id': checkpoint_id}, 200
@@ -471,6 +472,46 @@ def _download_and_install_model(server_url, job_id, checkpoint_id):
             pass
 
 
+def _apply_result_json(checkpoint, ckpt_dir):
+    """Read result.json (best_epoch, loss) into the checkpoint row in-place.
+
+    Caller is responsible for .save(). Returns True if values were applied.
+    """
+    result_path = os.path.join(ckpt_dir, 'result.json')
+    if not os.path.exists(result_path):
+        return False
+    with open(result_path) as f:
+        data = json.load(f)
+    loss = data.get('loss')
+    best_epoch = data.get('best_epoch')
+    if loss is not None:
+        checkpoint.loss = float(loss)
+    if best_epoch is not None:
+        checkpoint.best_epoch = int(best_epoch)
+    return True
+
+
+def _persist_train_result(checkpoint, socketio_instance, log_id):
+    """학습 종료 후 result.json의 best_epoch/loss를 DB에 반영.
+
+    실패해도 학습 결과 자체에는 영향을 주지 않는다 — 단순 메타 기록이므로
+    경고만 emit하고 넘어간다.
+    """
+    ckpt_dir = get_checkpoint_dir(checkpoint.id)
+    try:
+        if _apply_result_json(checkpoint, ckpt_dir):
+            checkpoint.save()
+            _emit_log(socketio_instance, log_id,
+                      f'[INFO] Saved result: loss={checkpoint.loss}, best_epoch={checkpoint.best_epoch}',
+                      'success')
+        else:
+            _emit_log(socketio_instance, log_id,
+                      '[WARNING] result.json not found in checkpoint dir', 'warning')
+    except Exception as e:
+        _emit_log(socketio_instance, log_id,
+                  f'[WARNING] Failed to persist result.json: {e}', 'warning')
+
+
 def _trigger_ood_features(checkpoint, socketio_instance, log_id):
     """학습 직후 OOD reference feature를 비동기로 생성.
 
@@ -669,6 +710,7 @@ def run_training_job(checkpoint, server_url, callback_url,
                 try:
                     _download_and_install_model(server_url, job_id, checkpoint_id)
                     _emit_log(socketio_instance, log_id, '[SUCCESS] Model installed.', 'success')
+                    _persist_train_result(checkpoint, socketio_instance, log_id)
                     _trigger_ood_features(checkpoint, socketio_instance, log_id)
                     return CheckpointModel.STATUS_FINISHED
                 except Exception as e:

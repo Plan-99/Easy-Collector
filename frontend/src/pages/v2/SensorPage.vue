@@ -42,8 +42,9 @@
                     </q-card-section>
                     <q-card-section class="q-pa-none q-mt-sm row" v-if="sensor.type !== 'custom'">
                         <div class="text-primary text-caption" v-if="sensor.status === 'on'">{{ $t('statusOnline') }}</div>
-                        <div class="text-orange text-caption" v-if="sensor.status === 'loading'">{{ $t('statusLoading') }}</div>
-                        <div class="text-grey-7 text-caption" v-if="sensor.status === 'off'">{{ $t('statusOffline') }}</div>
+                        <div class="text-orange text-caption" v-else-if="sensor.status === 'loading'">{{ $t('statusLoading') }}</div>
+                        <div class="text-negative text-caption" v-else-if="sensor.status === 'error'">{{ $t('statusError') }}</div>
+                        <div class="text-grey-7 text-caption" v-else>{{ $t('statusOffline') }}</div>
                         <q-space></q-space>
                         <q-toggle
                             :model-value="sensor.status === 'on'"
@@ -54,6 +55,7 @@
                     </q-card-section>
                     <q-card-section class="q-pa-none q-mt-sm row" v-else>
                         <div class="text-primary text-caption" v-if="sensor.status === 'on'">{{ $t('topicOn') }}</div>
+                        <div class="text-negative text-caption" v-else-if="sensor.status === 'error'">{{ $t('statusError') }}</div>
                         <div class="text-grey-7 text-caption" v-else-if="sensor.status === 'off'">{{ $t('topicOff') }}</div>
                         <div class="text-grey-7 text-caption" v-else>{{ $t('statusLoading') }}</div>
                     </q-card-section>
@@ -259,14 +261,23 @@ function deleteSensor(sensor) {
 }
 
 function toggleSensor(sensor) {
+    const startFlow = () => {
+        sensor.handler.startSensor().then(() => {
+            watchSensor(sensor); // Start watching the sensor after it is started
+        });
+    };
+
     if (sensor.status === 'on') {
         sensor.handler.stopSensor().then(() => {
             watchingSensor.value = null; // Stop watching if sensor is stopped
-        })
+        });
+    } else if (sensor.status === 'error') {
+        // clean up lingering processes then retry start
+        sensor.handler.stopSensor().finally(() => {
+            startFlow();
+        });
     } else {
-        sensor.handler.startSensor().then(() => {
-            watchSensor(sensor); // Start watching the sensor after it is started
-        })
+        startFlow();
     }
 }
 

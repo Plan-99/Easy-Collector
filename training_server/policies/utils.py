@@ -982,13 +982,16 @@ def delta_to_relative_trajectory(deltas: np.ndarray) -> np.ndarray:
     return relative
 
 
-def relative_trajectory_to_delta(waypoints: np.ndarray) -> np.ndarray:
+def relative_trajectory_to_delta(waypoints: np.ndarray, current_eepos=None) -> np.ndarray:
     """relative trajectory → sequential delta 역변환 (inference 시 사용).
 
-    waypoints: [T, D] relative trajectory. 앞 6차원은 (T_now→t+i),
-               7차원 이후는 tool joint (absolute 값)으로 변환 없이 그대로 유지.
-    반환값: [T, D] sequential deltas + tool
+    current_eepos 가 주어지면 DexUMI 스타일 (current EE local frame trajectory → world
+    sequential deltas). None 이면 legacy 동작 (naive 차분).
     """
+    waypoints = np.asarray(waypoints, dtype=np.float32)
+    if current_eepos is not None:
+        return relative_trajectory_in_local_frame_to_world_deltas(waypoints, current_eepos)
+
     T = len(waypoints)
     deltas = np.zeros_like(waypoints)
 
@@ -1010,6 +1013,191 @@ def relative_trajectory_to_delta(waypoints: np.ndarray) -> np.ndarray:
     return deltas
 
 
+# ─── DexUMI relative trajectory 헬퍼 (current EE local frame 변환) ───────
+
+def _eepos_to_homogeneous(eepos6: np.ndarray) -> np.ndarray:
+    """[x, y, z, rx, ry, rz] (axis-angle) → 4x4 homogeneous matrix."""
+    T = np.eye(4, dtype=np.float64)
+    T[:3, :3] = Rotation.from_rotvec(eepos6[3:6]).as_matrix()
+    T[:3, 3] = eepos6[:3]
+    return T
+
+
+def _homogeneous_to_eepos(T: np.ndarray) -> np.ndarray:
+    rotvec = Rotation.from_matrix(T[:3, :3]).as_rotvec()
+    return np.concatenate([T[:3, 3], rotvec]).astype(np.float32)
+
+
+def compute_relative_trajectory_in_local_frame(
+    future_eepos: np.ndarray, current_eepos: np.ndarray
+) -> np.ndarray:
+    """DexUMI 스타일 — future eepos chunk 를 current eepos local frame 으로.
+    `T_relative[i] = invert(T_current) @ T_future[i]`.
+    """
+    future_eepos = np.asarray(future_eepos, dtype=np.float32)
+    current_eepos = np.asarray(current_eepos, dtype=np.float32)
+    if future_eepos.ndim == 1:
+        future_eepos = future_eepos[None, :]
+    N, D = future_eepos.shape
+
+    T_curr = _eepos_to_homogeneous(current_eepos)
+    T_curr_inv = np.eye(4, dtype=np.float64)
+    R_curr = T_curr[:3, :3]
+    t_curr = T_curr[:3, 3]
+    T_curr_inv[:3, :3] = R_curr.T
+    T_curr_inv[:3, 3] = -R_curr.T @ t_curr
+
+    out = np.zeros_like(future_eepos)
+    for i in range(N):
+        T_i = _eepos_to_homogeneous(future_eepos[i])
+        T_rel = T_curr_inv @ T_i
+        out[i, :6] = _homogeneous_to_eepos(T_rel)
+        if D > 6:
+            out[i, 6:] = future_eepos[i, 6:]
+    return out
+
+
+def relative_trajectory_in_local_frame_to_world_deltas(
+    relative_traj: np.ndarray, current_eepos: np.ndarray
+) -> np.ndarray:
+    """역변환 (inference)."""
+    relative_traj = np.asarray(relative_traj, dtype=np.float32)
+    current_eepos = np.asarray(current_eepos, dtype=np.float32)
+    if relative_traj.ndim == 1:
+        relative_traj = relative_traj[None, :]
+    N, D = relative_traj.shape
+
+    T_curr = _eepos_to_homogeneous(current_eepos)
+    T_world_list = []
+    for i in range(N):
+        T_rel = _eepos_to_homogeneous(relative_traj[i, :6])
+        T_world_list.append(T_curr @ T_rel)
+
+    deltas = np.zeros_like(relative_traj)
+    T_prev = T_curr
+    for i in range(N):
+        T_i = T_world_list[i]
+        delta_t = T_i[:3, 3] - T_prev[:3, 3]
+        R_delta = T_i[:3, :3] @ T_prev[:3, :3].T
+        rotvec_delta = Rotation.from_matrix(R_delta).as_rotvec()
+        deltas[i, :3] = delta_t
+        deltas[i, 3:6] = rotvec_delta
+        if D > 6:
+            deltas[i, 6:] = relative_traj[i, 6:]
+        T_prev = T_i
+    return deltas
+
+
+# ─── action_key / obs_state_keys 통일 헬퍼 ───────────────────────────────
+
+_ACTION_KEY_ALIASES = {
+    'qaction': 'joint',
+    'joint': 'joint',
+    'ee_delta_action': 'ee_delta',
+    'ee_delta': 'ee_delta',
+    'relative_ee_pos': 'relative_ee_pos',
+}
+
+
+def _normalize_action_key(action_key):
+    if action_key is None:
+        return 'joint'
+    return _ACTION_KEY_ALIASES.get(action_key, action_key)
+
+
+def _get_action_data(df, action_key, eepos_tool_qpos_indices=None):
+    """action_key 에 따라 dataset 에서 action 배열 (T, D) 반환.
+
+    - 'joint'(/'qaction'): action.joint 컬럼 우선, 없으면 legacy 'action'.
+    - 'ee_delta' / 'relative_ee_pos': observation.eepos 시간 차분 derive (NOTE:
+      relative_ee_pos 의 진짜 학습 target 은 chunk relative trajectory 라 __getitem__
+      이 eepos 로부터 직접 계산. 여기 반환은 norm_stats 등의 폴백/통계용 placeholder.)
+
+    eepos_tool_qpos_indices: backward-compat. 옛 dataset 의 eepos 에 별도 그리퍼
+    joint 가 빠진 경우 qpos 에서 augment.
+    """
+    norm = _normalize_action_key(action_key)
+    if norm == 'joint':
+        col = 'action.joint' if 'action.joint' in df.columns else 'action'
+        return np.array(df[col].tolist(), dtype=np.float32)
+    if norm in ('ee_delta', 'relative_ee_pos'):
+        if 'observation.eepos' in df.columns:
+            eepos = np.array(df['observation.eepos'].tolist(), dtype=np.float32)
+            if eepos_tool_qpos_indices:
+                _qpos_col = 'observation.qpos' if 'observation.qpos' in df.columns else 'observation.state'
+                if _qpos_col in df.columns:
+                    _qpos_arr = np.array(df[_qpos_col].tolist(), dtype=np.float32)
+                    eepos = np.concatenate([eepos, _qpos_arr[:, eepos_tool_qpos_indices]], axis=1)
+            delta = np.zeros_like(eepos)
+            if len(eepos) > 1:
+                delta[:-1] = eepos[1:] - eepos[:-1]
+            return delta
+        if 'action.ee_delta' in df.columns:
+            return np.array(df['action.ee_delta'].tolist(), dtype=np.float32)
+        if 'action' in df.columns:
+            return np.array(df['action'].tolist(), dtype=np.float32)
+        return np.array(df['action.joint'].tolist(), dtype=np.float32)
+    col = 'action' if 'action' in df.columns else 'action.joint'
+    return np.array(df[col].tolist(), dtype=np.float32)
+
+
+def _compute_eepos_tool_augment_indices(dataset_info):
+    """옛 dataset 호환: observation.eepos 에 별도 tool agent (그리퍼) joint 가 빠진
+    경우, qpos 의 어느 인덱스를 끝에 append 해야 하는지 계산.
+
+    backend/policies/utils.py 와 동일 로직.
+    """
+    features = dataset_info.get("features", {}) if dataset_info else {}
+    qpos_names = features.get("observation.qpos", {}).get("names") or []
+    eepos_names = features.get("observation.eepos", {}).get("names") or []
+    if not qpos_names or not eepos_names:
+        return []
+
+    # robot ID 추출. joint 이름에 underscore 가 있을 수 있어 ([^_]+) 로 limit.
+    # 예: 'robot_1_knuckle_joint' → '1' (greedy \w+_ 쓰면 '1_knuckle' 로 잘못 잡힘)
+    import re as _re
+    _robot_re = _re.compile(r'^robot_([^_]+)_')
+    def _rid(name):
+        m = _robot_re.match(name)
+        return m.group(1) if m else None
+
+    eepos_robot_ids = set()
+    for name in eepos_names:
+        rid = _rid(name)
+        if rid is not None:
+            eepos_robot_ids.add(rid)
+
+    tool_indices = []
+    for i, name in enumerate(qpos_names):
+        rid = _rid(name)
+        if rid is not None and rid not in eepos_robot_ids:
+            tool_indices.append(i)
+    return tool_indices
+
+
+def _build_obs_state(df, obs_state_keys):
+    """obs_state_keys 순서대로 컬럼 concat. 옛 dataset 도 호환 (qpos→state fallback)."""
+    if not obs_state_keys:
+        obs_state_keys = ['qpos']
+    parts = []
+    for key in obs_state_keys:
+        if key == 'qpos':
+            col = 'observation.qpos' if 'observation.qpos' in df.columns else 'observation.state'
+        else:
+            col = f'observation.{key}'
+        if col in df.columns:
+            arr = np.array(df[col].tolist(), dtype=np.float32)
+            if arr.ndim == 1:
+                arr = arr.reshape(-1, 1)
+            parts.append(arr)
+    if not parts:
+        if 'observation.state' in df.columns:
+            arr = np.array(df['observation.state'].tolist(), dtype=np.float32)
+            if arr.ndim == 1:
+                arr = arr.reshape(-1, 1)
+            return arr
+        raise ValueError("No observation column found in dataset")
+    return np.concatenate(parts, axis=1)
 
 
 class EpisodicDataset(torch.utils.data.Dataset):
@@ -1051,6 +1239,15 @@ class EpisodicDataset(torch.utils.data.Dataset):
         # Pre-load episode metadata (lengths) for efficient sampling
         self._ep_cache = {}
         self._dataset_info = get_dataset_info(dataset_dir)
+        # Backward-compat: 옛 dataset 의 eepos 에 별도 tool agent joint 가 빠져 있으면
+        # qpos 의 해당 인덱스를 매 episode 로드 시 eepos 뒤에 append.
+        self._eepos_tool_qpos_indices = _compute_eepos_tool_augment_indices(self._dataset_info)
+        if self._eepos_tool_qpos_indices:
+            print(
+                f"[EpisodicDataset] Augmenting eepos with qpos indices "
+                f"{self._eepos_tool_qpos_indices} (backward-compat for separate tool agents).",
+                flush=True,
+            )
 
         # Pre-load tasks once (avoid re-reading jsonl every __getitem__)
         # _read_jsonl / TASKS_PATH는 본 파일 상단(line 31~)에 inline돼 있어 import 불필요.
@@ -1075,11 +1272,23 @@ class EpisodicDataset(torch.utils.data.Dataset):
         table = pq.read_table(parquet_path)
         df = table.to_pandas()
 
-        # 새/옛 schema 모두 지원
-        _qpos_col = 'observation.qpos' if 'observation.qpos' in df.columns else 'observation.state'
-        _action_col = 'action.joint' if 'action.joint' in df.columns else 'action'
-        state_data = np.array(df[_qpos_col].tolist(), dtype=np.float32)
-        action_data = np.array(df[_action_col].tolist(), dtype=np.float32)
+        # obs_state_keys + action_key 에 따라 state/action 구성. ee_delta /
+        # relative_ee_pos 면 _get_action_data 가 eepos 차분으로 derive (relative_ee_pos
+        # 의 chunk 변환은 __getitem__ 에서 eepos_data 로 직접 처리).
+        state_data = _build_obs_state(df, self.obs_state_keys)
+        action_data = _get_action_data(df, self.action_key, self._eepos_tool_qpos_indices)
+        eepos_data = (
+            np.array(df['observation.eepos'].tolist(), dtype=np.float32)
+            if 'observation.eepos' in df.columns else None
+        )
+        # Backward-compat: 옛 dataset 의 eepos 에 별도 그리퍼 joint 가 없으면 qpos
+        # 에서 뽑아 append (absolute pass-through).
+        if eepos_data is not None and self._eepos_tool_qpos_indices:
+            _qpos_col = 'observation.qpos' if 'observation.qpos' in df.columns else 'observation.state'
+            if _qpos_col in df.columns:
+                _qpos_arr = np.array(df[_qpos_col].tolist(), dtype=np.float32)
+                _tool_cols = _qpos_arr[:, self._eepos_tool_qpos_indices]
+                eepos_data = np.concatenate([eepos_data, _tool_cols], axis=1)
 
         # Get language instruction from pre-loaded task map
         task_index = int(df["task_index"].iloc[0])
@@ -1145,6 +1354,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
         result = {
             "state_data": state_data,
             "action_data": action_data,
+            "eepos_data": eepos_data,
             "language_instruction": language_instruction,
             "image_data": image_data,
             "succeed": succeed,
@@ -1214,9 +1424,25 @@ class EpisodicDataset(torch.utils.data.Dataset):
         action_len = min(self.chunk_size, episode_len - start_ts)
 
         padded_action = np.zeros(original_action_shape, dtype=np.float32)
-        if self.action_key == 'relative_ee_pos' or (self.use_relative_trajectory and self.action_key == 'ee_delta_action'):
-            padded_action[:action_len] = delta_to_relative_trajectory(action[:action_len])
-        elif self.action_key == 'relative_joint_pos':
+        if _normalize_action_key(self.action_key) == 'relative_ee_pos' or (self.use_relative_trajectory and _normalize_action_key(self.action_key) == 'ee_delta'):
+            # DexUMI: chunk 의 미래 N 개 eepos 를 현재 eepos local frame 으로 변환.
+            # eepos 없으면 (옛 dataset) legacy naive cumsum fallback.
+            eepos_data = ep.get("eepos_data")
+            if eepos_data is not None and len(eepos_data) > start_ts:
+                future_idx = np.arange(start_ts + 1, start_ts + self.chunk_size + 1)
+                future_idx = np.clip(future_idx, 0, episode_len - 1)
+                future_eepos = eepos_data[future_idx]
+                current_eepos = eepos_data[start_ts]
+                rel_traj = compute_relative_trajectory_in_local_frame(future_eepos, current_eepos)
+                padded_action[:action_len, :rel_traj.shape[1]] = rel_traj[:action_len]
+                # any_has_succeed 면 action 의 마지막 컬럼이 succeed flag — rel_traj
+                # 는 eepos 차원만 다루므로 succeed slot 을 따로 복사해야 모델이 그
+                # dim 을 학습할 수 있다. (get_norm_stats 와 동일 layout).
+                if any_has_succeed and action.shape[1] > rel_traj.shape[1]:
+                    padded_action[:action_len, rel_traj.shape[1]:] = action[:action_len, rel_traj.shape[1]:]
+            else:
+                padded_action[:action_len] = delta_to_relative_trajectory(action[:action_len])
+        elif _normalize_action_key(self.action_key) == 'relative_joint_pos':
             # chunk-anchored joint delta: action[t in chunk] - qpos[chunk_start].
             # anchor를 ep["state_data"]에서 직접 읽음 (training_server에서 state_data
             # 가 곧 qpos이므로 anchor source로 직접 사용). obs_state_keys와 별개 채널.
@@ -1366,6 +1592,8 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
         obs_state_keys = ['qpos']
 
     dataset_info = get_dataset_info(dataset_dir)
+    # Backward-compat: 옛 dataset 의 eepos 에 그리퍼 joint 가 없으면 qpos 에서 보강.
+    eepos_tool_qpos_indices = _compute_eepos_tool_augment_indices(dataset_info)
     all_qpos_data = []
     all_action_data = []
     observation_image_keys = []
@@ -1386,11 +1614,9 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
         table = pq.read_table(parquet_path)
         df = table.to_pandas()
 
-        # 새/옛 schema 모두 지원
-        _qpos_col = 'observation.qpos' if 'observation.qpos' in df.columns else 'observation.state'
-        _action_col = 'action.joint' if 'action.joint' in df.columns else 'action'
-        state_data = np.array(df[_qpos_col].tolist(), dtype=np.float32)
-        action_data = np.array(df[_action_col].tolist(), dtype=np.float32)
+        # obs_state_keys / action_key 에 따른 컬럼 선택
+        state_data = _build_obs_state(df, obs_state_keys)
+        action_data = _get_action_data(df, action_key, eepos_tool_qpos_indices)
 
         # Check succeed
         if "succeed" in df.columns:
@@ -1405,10 +1631,8 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
         table = pq.read_table(parquet_path)
         df = table.to_pandas()
 
-        _qpos_col = 'observation.qpos' if 'observation.qpos' in df.columns else 'observation.state'
-        _action_col = 'action.joint' if 'action.joint' in df.columns else 'action'
-        qpos = np.array(df[_qpos_col].tolist(), dtype=np.float32)
-        action = np.array(df[_action_col].tolist(), dtype=np.float32)
+        qpos = _build_obs_state(df, obs_state_keys)
+        action = _get_action_data(df, action_key, eepos_tool_qpos_indices)
 
         if qpos.ndim == 1:
             qpos = qpos.reshape(1, -1)
@@ -1430,8 +1654,49 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
             skipped_episodes.append(episode_idx)
             continue
 
-        if action_key == 'relative_ee_pos' or (use_relative_trajectory and action_key == 'ee_delta_action'):
-            action = delta_to_relative_trajectory(action)
+        if _normalize_action_key(action_key) == 'relative_ee_pos' or (use_relative_trajectory and _normalize_action_key(action_key) == 'ee_delta'):
+            # DexUMI 스타일 — 매 frame 을 chunk 시작점으로 보고 chunk_size step 의
+            # local-frame trajectory 누적해서 stats 계산. 옛 dataset (eepos 없음) 만
+            # legacy naive cumsum fallback.
+            if 'observation.eepos' in df.columns:
+                eepos_arr = np.array(df['observation.eepos'].tolist(), dtype=np.float32)
+                # Backward-compat: dataset class __getitem__ 과 동일 차원이 되도록
+                # eepos 끝에 tool qpos append.
+                if eepos_tool_qpos_indices:
+                    _qpos_col = 'observation.qpos' if 'observation.qpos' in df.columns else 'observation.state'
+                    if _qpos_col in df.columns:
+                        _qpos_arr = np.array(df[_qpos_col].tolist(), dtype=np.float32)
+                        eepos_arr = np.concatenate(
+                            [eepos_arr, _qpos_arr[:, eepos_tool_qpos_indices]], axis=1
+                        )
+                T_total = len(eepos_arr)
+                if T_total >= 2 and chunk_size > 0:
+                    rel_chunks = []
+                    succeed_chunks = []
+                    succeed_arr = None
+                    if any_has_succeed and 'succeed' in df.columns:
+                        succeed_arr = np.array(df['succeed'].tolist(), dtype=np.float32).reshape(-1, 1)
+                    for start in range(T_total - 1):
+                        future_idx = np.clip(
+                            np.arange(start + 1, start + chunk_size + 1), 0, T_total - 1
+                        )
+                        rel_chunks.append(compute_relative_trajectory_in_local_frame(
+                            eepos_arr[future_idx], eepos_arr[start]
+                        ))
+                        if succeed_arr is not None:
+                            succeed_chunks.append(succeed_arr[future_idx])
+                    action = np.concatenate(rel_chunks, axis=0)
+                    # 옛 코드는 여기서 action 을 rel_chunks 로 통째 overwrite 해서
+                    # 앞에서 붙여둔 succeed dim 이 사라졌다 → 모델이 succeed 차원을
+                    # 학습 못 하고, 추론 시 inference_succeed 이벤트가 안 뜸.
+                    # rel_chunks 차원 뒤에 succeed dim 도 같이 붙여 복원.
+                    if succeed_chunks:
+                        succeed_concat = np.concatenate(succeed_chunks, axis=0)
+                        action = np.concatenate([action, succeed_concat], axis=1)
+                else:
+                    action = delta_to_relative_trajectory(action)
+            else:
+                action = delta_to_relative_trajectory(action)
 
         # relative_joint_pos: obs_state_keys와 독립. observation.qpos 컬럼을 직접
         # anchor로 사용. relative_ee_pos가 observation.eepos를 anchor로 쓰는 패턴
@@ -1634,9 +1899,25 @@ class FullScanDataset(EpisodicDataset):
         action_len = min(self.chunk_size, episode_len - start_ts)
 
         padded_action = np.zeros(original_action_shape, dtype=np.float32)
-        if self.action_key == 'relative_ee_pos' or (self.use_relative_trajectory and self.action_key == 'ee_delta_action'):
-            padded_action[:action_len] = delta_to_relative_trajectory(action[:action_len])
-        elif self.action_key == 'relative_joint_pos':
+        if _normalize_action_key(self.action_key) == 'relative_ee_pos' or (self.use_relative_trajectory and _normalize_action_key(self.action_key) == 'ee_delta'):
+            # DexUMI: chunk 의 미래 N 개 eepos 를 현재 eepos local frame 으로 변환.
+            # eepos 없으면 (옛 dataset) legacy naive cumsum fallback.
+            eepos_data = ep.get("eepos_data")
+            if eepos_data is not None and len(eepos_data) > start_ts:
+                future_idx = np.arange(start_ts + 1, start_ts + self.chunk_size + 1)
+                future_idx = np.clip(future_idx, 0, episode_len - 1)
+                future_eepos = eepos_data[future_idx]
+                current_eepos = eepos_data[start_ts]
+                rel_traj = compute_relative_trajectory_in_local_frame(future_eepos, current_eepos)
+                padded_action[:action_len, :rel_traj.shape[1]] = rel_traj[:action_len]
+                # any_has_succeed 면 action 의 마지막 컬럼이 succeed flag — rel_traj
+                # 는 eepos 차원만 다루므로 succeed slot 을 따로 복사해야 모델이 그
+                # dim 을 학습할 수 있다. (get_norm_stats 와 동일 layout).
+                if any_has_succeed and action.shape[1] > rel_traj.shape[1]:
+                    padded_action[:action_len, rel_traj.shape[1]:] = action[:action_len, rel_traj.shape[1]:]
+            else:
+                padded_action[:action_len] = delta_to_relative_trajectory(action[:action_len])
+        elif _normalize_action_key(self.action_key) == 'relative_joint_pos':
             # chunk-anchored joint delta: action[t in chunk] - qpos[chunk_start].
             # anchor를 ep["state_data"]에서 직접 읽음 (training_server에서 state_data
             # 가 곧 qpos이므로 anchor source로 직접 사용). obs_state_keys와 별개 채널.

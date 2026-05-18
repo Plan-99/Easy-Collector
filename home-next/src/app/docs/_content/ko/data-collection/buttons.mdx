@@ -1,27 +1,27 @@
 ---
-title: Stop · Done · Success 버튼
+title: Stop · Done · Finish 버튼
 description: 수집 중 세 가지 버튼의 의미와 사용 시점.
 section: data-collection
 order: 5
 sourceRefs:
   - frontend/src/components/v2/MonitoringWindow.vue
-lastVerifiedVersion: 0.0.0
+lastVerifiedVersion: 4.2.0
 ---
 
 수집 중 화면 하단에는 색이 다른 3개 버튼이 나타납니다. 각각의 의미가 다르므로 구분해서 사용해야 합니다.
 
 <DocsImage
   src="/docs/data-collection/btn-01-toolbar.png"
-  alt="수집 중 화면 하단 — 성공(C) / 완료 / 중지 3개 버튼"
+  alt="수집 중 화면 하단 — 완료(C) / 종료 / 중지 3개 버튼"
 />
 
-## SUCCESS (C)
+## DONE (C)
 
 작업이 잘 진행된 시점에 누릅니다. 단축키는 **C**.
 
-해당 프레임에 **성공 라벨**이 붙습니다. 학습 시 Succeed 점수 계산에 활용됩니다. 같은 에피소드 안에서 한 번만 누르면 됩니다 (이후 비활성화).
+해당 프레임에 **성공 라벨**이 붙습니다. 학습 시 Succeed 점수 계산에 활용됩니다. 같은 에피소드 안에서 한 번만 누르면 됩니다 (이후 비활성화). 이 라벨이 찍힌 체크포인트만 [플래너 Checkpoint 블록의 "Done 신호까지 실행"](/docs/planner/blocks-and-run#checkpoint-블록)을 사용할 수 있습니다.
 
-## DONE
+## FINISH
 
 한 에피소드를 정상 완료할 때 누릅니다.
 
@@ -34,5 +34,5 @@ lastVerifiedVersion: 0.0.0
 지금까지 녹화된 프레임이 모두 폐기되고 데이터셋에 저장되지 않습니다. 실수로 잘못 시연했거나 작업이 실패했을 때 사용합니다.
 
 <Callout type="tip">
-"실패도 학습에 좋다"는 통념이 있지만, **명백히 잘못된 동작**은 STOP으로 빼는 게 정책 수렴에 도움이 됩니다. 단순히 느리거나 거칠었던 시연은 그대로 DONE으로 살리세요.
+"실패도 학습에 좋다"는 통념이 있지만, **명백히 잘못된 동작**은 STOP으로 빼는 게 정책 수렴에 도움이 됩니다. 단순히 느리거나 거칠었던 시연은 그대로 FINISH로 살리세요.
 </Callout>

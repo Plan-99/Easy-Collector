@@ -1,14 +1,25 @@
 ---
-title: 데이터 편집
-description: 데이터셋 이름 변경, 병합, sensor/robot 매핑 재지정, 삭제.
+title: 데이터셋 편집
+description: 데이터셋 단위 작업 — 이름 변경, 병합, sensor/robot 매핑 재지정, 삭제.
 section: datasets
-order: 4
+order: 2
 sourceRefs:
+  - frontend/src/pages/v2/DatasetPage.vue
   - frontend/src/pages/v2/WorkspacePage.vue
 lastVerifiedVersion: 0.0.0
 ---
 
-데이터셋 우클릭 메뉴에는 **Edit / Augment / Merge / Delete** 4개 항목이 있습니다.
+데이터셋 단위로 이름을 바꾸거나, 여러 데이터셋을 합치거나, sensor/robot 매핑을 재지정하거나, 삭제하는 작업입니다.
+
+## 어디서 하나
+
+기본 진입점은 좌측 네비의 **데이터셋 탭**이고, 워크스페이스의 **data 탭**에서도 동일하게 가능합니다. 어느 쪽이든 데이터셋을 우클릭하면 **Edit / Augment / Merge / Delete** 메뉴가 나옵니다.
+
+<DocsImage
+  src="/docs/datasets/edit-00-context-menu.png"
+  alt="데이터셋 우클릭 메뉴"
+  status="missing"
+/>
 
 ## Edit
 

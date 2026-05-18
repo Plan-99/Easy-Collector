@@ -1,3 +1,15 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# ROS 2 is intentionally NOT listed here — rclpy / std_srvs / sensor_msgs /
+# trajectory_msgs are not pip-installable. Install ROS 2 (Humble or newer) via
+# your distro's package manager and source it before running:
+#
+#   sudo apt install ros-humble-desktop ros-humble-trajectory-msgs
+#   source /opt/ros/humble/setup.bash
+#
+# (Only ros_planner_service.py and run_planner.py need ROS 2 at runtime —
+# inference.py alone can run without it.)
+# ─────────────────────────────────────────────────────────────────────────────
+
 # Core ML stack
 torch>=2.0
 torchvision>=0.15

@@ -179,7 +179,12 @@
                                             :label="config.label"
                                             class="full-height bg-secondary"
                                             dark
-                                        />
+                                        >
+                                            <template v-slot:label>
+                                                <span>{{ config.label }}</span>
+                                                <HyperparamHelp :policy-type="policyForm.type" :param-key="key" />
+                                            </template>
+                                        </q-select>
                                         <q-select
                                             v-else-if="config.type === 'select'"
                                             dense
@@ -193,7 +198,12 @@
                                             map-options
                                             class="full-height bg-secondary"
                                             dark
-                                        />
+                                        >
+                                            <template v-slot:label>
+                                                <span>{{ config.label }}</span>
+                                                <HyperparamHelp :policy-type="policyForm.type" :param-key="key" />
+                                            </template>
+                                        </q-select>
                                         <q-select
                                             v-else-if="config.type === 'multiselect'"
                                             dense
@@ -209,7 +219,12 @@
                                             use-chips
                                             class="full-height bg-secondary"
                                             dark
-                                        />
+                                        >
+                                            <template v-slot:label>
+                                                <span>{{ config.label }}</span>
+                                                <HyperparamHelp :policy-type="policyForm.type" :param-key="key" />
+                                            </template>
+                                        </q-select>
                                         <q-select
                                             v-else-if="config.type === 'wrist_sensor_select'"
                                             dense
@@ -225,7 +240,12 @@
                                             use-chips
                                             class="full-height bg-secondary"
                                             dark
-                                        />
+                                        >
+                                            <template v-slot:label>
+                                                <span>{{ config.label }}</span>
+                                                <HyperparamHelp :policy-type="policyForm.type" :param-key="key" />
+                                            </template>
+                                        </q-select>
                                         <q-input
                                             dense
                                             outlined
@@ -237,21 +257,27 @@
                                             type="number"
                                             class="full-height bg-secondary"
                                             dark
-                                        />
-                                        <q-btn-toggle
-                                            v-else-if="config.type === 'boolean'"
-                                            dense
-                                            v-model="config.value"
-                                            :options="[{ label: config.label, value: true }, { label: $t('no'), value: false }]"
-                                            :label="config.label"
-                                            :readonly="isSettingsReadonly"
-                                            :disable="isSettingsReadonly"
-                                            spread
-                                            color="secondary"
-                                            toggle-color="primary"
-                                            toggle-text-color="dark"
-                                            class="full-height"
-                                        ></q-btn-toggle>
+                                        >
+                                            <template v-slot:label>
+                                                <span>{{ config.label }}</span>
+                                                <HyperparamHelp :policy-type="policyForm.type" :param-key="key" />
+                                            </template>
+                                        </q-input>
+                                        <div v-else-if="config.type === 'boolean'" class="row items-center no-wrap">
+                                            <q-btn-toggle
+                                                dense
+                                                v-model="config.value"
+                                                :options="[{ label: config.label, value: true }, { label: $t('no'), value: false }]"
+                                                :readonly="isSettingsReadonly"
+                                                :disable="isSettingsReadonly"
+                                                spread
+                                                color="secondary"
+                                                toggle-color="primary"
+                                                toggle-text-color="dark"
+                                                class="col full-height"
+                                            />
+                                            <HyperparamHelp :policy-type="policyForm.type" :param-key="key" class="q-ml-xs" />
+                                        </div>
                                         <q-input
                                             v-else-if="config.type === 'password'"
                                             dense
@@ -265,6 +291,10 @@
                                             dark
                                             autocomplete="off"
                                         >
+                                            <template v-slot:label>
+                                                <span>{{ config.label }}</span>
+                                                <HyperparamHelp :policy-type="policyForm.type" :param-key="key" />
+                                            </template>
                                             <template v-slot:append>
                                                 <q-icon
                                                     :name="passwordVisibility[key] ? 'visibility' : 'visibility_off'"
@@ -292,7 +322,12 @@
                                                     return isNaN(n) ? s.trim() : n
                                                 }).filter(x => x !== '')
                                             }"
-                                        />
+                                        >
+                                            <template v-slot:label>
+                                                <span>{{ config.label }} (comma-separated)</span>
+                                                <HyperparamHelp :policy-type="policyForm.type" :param-key="key" />
+                                            </template>
+                                        </q-input>
                                         <q-input
                                             dense
                                             outlined
@@ -304,7 +339,12 @@
                                             type="text"
                                             class="full-height bg-secondary"
                                             dark
-                                        />
+                                        >
+                                            <template v-slot:label>
+                                                <span>{{ config.label }}</span>
+                                                <HyperparamHelp :policy-type="policyForm.type" :param-key="key" />
+                                            </template>
+                                        </q-input>
                                     </div>
                                 </q-form>
                             </q-card-section>
@@ -376,7 +416,12 @@
                                     map-options
                                     class="full-height bg-dark"
                                     dark
-                                />
+                                >
+                                    <template v-slot:label>
+                                        <span>{{ config.label }}</span>
+                                        <HyperparamHelp :policy-type="policyForm.type" :param-key="key" />
+                                    </template>
+                                </q-select>
                                 <q-input
                                     dense
                                     outlined
@@ -387,17 +432,23 @@
                                     class="full-height bg-dark"
                                     step="any"
                                     dark
-                                />
-                                <q-btn-toggle
-                                    v-else-if="config.type === 'boolean'"
-                                    dense
-                                    outlined
-                                    v-model="config.value"
-                                    :options="[{ label: config.label, value: true }, { label: $t('no'), value: false }]"
-                                    :label="config.label"
-                                    spread
-                                    class="full-height bg-dark"
-                                ></q-btn-toggle>
+                                >
+                                    <template v-slot:label>
+                                        <span>{{ config.label }}</span>
+                                        <HyperparamHelp :policy-type="policyForm.type" :param-key="key" />
+                                    </template>
+                                </q-input>
+                                <div v-else-if="config.type === 'boolean'" class="row items-center no-wrap">
+                                    <q-btn-toggle
+                                        dense
+                                        outlined
+                                        v-model="config.value"
+                                        :options="[{ label: config.label, value: true }, { label: $t('no'), value: false }]"
+                                        spread
+                                        class="col full-height bg-dark"
+                                    />
+                                    <HyperparamHelp :policy-type="policyForm.type" :param-key="key" class="q-ml-xs" />
+                                </div>
                                 <q-select
                                     v-else-if="config.type === 'wrist_sensor_select'"
                                     dense
@@ -411,7 +462,12 @@
                                     use-chips
                                     class="full-height bg-dark"
                                     dark
-                                />
+                                >
+                                    <template v-slot:label>
+                                        <span>{{ config.label }}</span>
+                                        <HyperparamHelp :policy-type="policyForm.type" :param-key="key" />
+                                    </template>
+                                </q-select>
                                 <q-input
                                     dense
                                     outlined
@@ -421,14 +477,26 @@
                                     type="text"
                                     dark
                                     class="full-height bg-dark"
-                                />
+                                >
+                                    <template v-slot:label>
+                                        <span>{{ config.label }}</span>
+                                        <HyperparamHelp :policy-type="policyForm.type" :param-key="key" />
+                                    </template>
+                                </q-input>
                             </div>
                         </q-form>
                     </div>
                 </q-scroll-area>
                 <q-stepper-navigation align="right" class="q-mt-md q-gutter-x-md">
                     <q-btn @click="step = 2" color="grey" outline :label="$t('back')"/>
-                    <q-btn @click="createCheckpoint" color="primary" outline :label="$t('trainStartTraining')"/>
+                    <q-btn
+                        @click="createCheckpoint"
+                        color="primary"
+                        outline
+                        :label="$t('trainStartTraining')"
+                        :loading="startingTraining"
+                        :disable="startingTraining"
+                    />
                 </q-stepper-navigation>
             </q-step>
         </q-stepper>
@@ -462,6 +530,7 @@ import { POLICY_CONFIGS, TRAIN_CONFIGS } from 'src/configs/modelConfigs';
 import TrainingDialog from 'src/components/v2/TrainingDialog.vue';
 import TrainingQueuePanel from 'src/components/v2/TrainingQueuePanel.vue';
 import TutorialHint from 'src/components/v2/TutorialHint.vue';
+import HyperparamHelp from 'src/components/v2/HyperparamHelp.vue';
 import { useSocket } from 'src/composables/useSocket';
 import { useI18n } from 'vue-i18n';
 
@@ -542,6 +611,7 @@ const { socket } = useSocket();
 
 const selectedWorkspaceId = ref(null);
 const pageLoading = ref(true);
+const startingTraining = ref(false);
 const workspaces = ref([]);
 watch(selectedWorkspaceId, (newVal) => {
     if (newVal) {
@@ -948,11 +1018,13 @@ const watchingCheckpoint = ref(null);
 const queuePanel = ref(null);
 
 function createCheckpoint() {
+    if (startingTraining.value) return;
     if (serverStatus.value !== 'connected') {
         Notify.create({ color: 'negative', message: t('trainConnectToServerFirst') });
         return;
     }
 
+    startingTraining.value = true;
     const trainingPayload = getTrainingPayload();
     let createdCheckpointId = null;
     api.post('/checkpoint', {
@@ -982,6 +1054,7 @@ function createCheckpoint() {
         Notify.create({ color: 'negative', message: t('trainStartFailed', { error }) });
     }).finally(() => {
         listCheckpoints();
+        startingTraining.value = false;
     });
 }
 

@@ -1,11 +1,12 @@
 import json
 
-from flask import Blueprint, request, current_app
+from flask import Blueprint, request, current_app, send_file
 
 from ...database.models.planner_model import Planner as PlannerModel
 from ...database.models.task_model import Task as TaskModel
 from ...database.models.checkpoint_model import Checkpoint as CheckpointModel
 from ..process.planner_run import planner_run
+from ..process.export_planner import bundle_planner_zip
 
 
 planner_bp = Blueprint('planner_bp', __name__)
@@ -39,6 +40,12 @@ BLOCK_CONFIGS = {
         'color': 'teal',
         'keys': ['sync_id', 'name'],
     },
+    'query_pose': {
+        'label': 'Query Pose',
+        'icon': 'travel_explore',
+        'color': 'indigo',
+        'keys': ['workspace_id', 'service_name', 'pose_type', 'duration', 'name'],
+    },
 }
 
 
@@ -47,6 +54,68 @@ def get_block_configs():
     return {
         'status': 'success',
         'block_configs': BLOCK_CONFIGS,
+    }, 200
+
+
+@planner_bp.route('/planner/:test_query_pose', methods=['POST'])
+def test_query_pose():
+    """Run a single Query Pose block end-to-end from the block edit form: call
+    the ROS service, then actually drive the workspace's robots to the returned
+    pose. Returns the pose so the user can see what came back."""
+    body = request.json or {}
+    service_name = (body.get('service_name') or '').strip()
+    pose_type = body.get('pose_type')
+    workspace_id = body.get('workspace_id')
+    if not service_name:
+        return {'status': 'error', 'message': 'service_name is required'}, 400
+    if pose_type not in ('joint_position', 'end_effector_position'):
+        return {'status': 'error', 'message': "pose_type must be 'joint_position' or 'end_effector_position'"}, 400
+    if workspace_id is None:
+        return {'status': 'error', 'message': 'workspace_id is required'}, 400
+
+    if PLANNER_RUN_PROCESS_NAME in current_app.pm.processes:
+        return {'status': 'error', 'message': 'A planner run is in progress — stop it before testing'}, 409
+
+    ws = TaskModel.find(workspace_id)
+    if ws is None:
+        return {'status': 'error', 'message': 'workspace not found'}, 404
+    ws_dict = ws.to_dict()
+
+    agents = getattr(current_app, 'agents', {}) or {}
+    for robot in (ws_dict.get('assembly') or {}).get('robots') or []:
+        if int(robot['id']) not in agents:
+            return {'status': 'error',
+                    'message': f"robot '{robot.get('name')}' is not running — turn it on first"}, 409
+
+    try:
+        duration = float(body.get('duration') or 5.0)
+    except (TypeError, ValueError):
+        duration = 5.0
+
+    block = {
+        'type': 'query_pose',
+        'name': 'test',
+        'workspace_id': workspace_id,
+        'service_name': service_name,
+        'pose_type': pose_type,
+        'duration': duration,
+    }
+    ctx = {'workspaces_by_id': {workspace_id: ws_dict}, 'agents': agents}
+    task_control = {'stop': False}
+
+    from ..process.planner_run import _run_query_pose
+
+    try:
+        pose = _run_query_pose(block, ctx, task_control)
+    except RuntimeError as e:
+        return {'status': 'error', 'message': str(e)}, 502
+    except Exception as e:
+        return {'status': 'error', 'message': f'query_pose test failed: {e}'}, 500
+
+    return {
+        'status': 'success',
+        'message': 'Robot moved to the pose returned by the service',
+        'pose': pose,
     }, 200
 
 
@@ -334,6 +403,26 @@ def _validate_plan_blocks(blocks, workspaces_by_id, agents, prefix_offset=0):
             if not sync_id:
                 errors.append(f"{prefix}: sync_id is required")
 
+        elif btype == 'query_pose':
+            ws = workspaces_by_id.get(block.get('workspace_id'))
+            if ws is None:
+                errors.append(f"{prefix}: workspace not found")
+                continue
+            service_name = (block.get('service_name') or '').strip()
+            if not service_name:
+                errors.append(f"{prefix}: service_name is required")
+            pose_type = block.get('pose_type')
+            if pose_type not in ('joint_position', 'end_effector_position'):
+                errors.append(f"{prefix}: pose_type must be 'joint_position' or 'end_effector_position'")
+            for robot in (ws.get('assembly') or {}).get('robots') or []:
+                if int(robot['id']) not in agents:
+                    errors.append(f"{prefix}: robot '{robot.get('name')}' is not running")
+            try:
+                if float(block.get('duration') or 0) <= 0:
+                    errors.append(f"{prefix}: duration must be > 0")
+            except (TypeError, ValueError):
+                errors.append(f"{prefix}: duration is invalid")
+
         else:
             errors.append(f"{prefix}: unknown block type '{btype}'")
 
@@ -436,3 +525,33 @@ def planner_run_status(id):
         'status': 'success',
         'is_running': is_running,
     }, 200
+
+
+@planner_bp.route('/planner/<id>/:export', methods=['POST', 'GET'])
+def export_planner(id):
+    """Bundle the planner + every checkpoint it references + standalone
+    execution code (run_planner.py / ros_planner_service.py) into a zip
+    download that runs outside the EasyTrainer container."""
+    planner = PlannerModel.find(id)
+    if not planner:
+        return {'status': 'error', 'message': 'Planner not found'}, 404
+
+    plans = _ensure_plans_loaded(planner)
+    if not plans:
+        return {'status': 'error', 'message': 'Planner has no groups to export'}, 400
+
+    try:
+        buf, filename = bundle_planner_zip(planner=planner.to_dict(), groups=plans)
+    except (ValueError, FileNotFoundError) as e:
+        return {'status': 'error', 'message': str(e)}, 400
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {'status': 'error', 'message': f'Export failed: {e}'}, 500
+
+    return send_file(
+        buf,
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name=filename,
+    )

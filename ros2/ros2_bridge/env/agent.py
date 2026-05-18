@@ -279,14 +279,15 @@ class Agent:
             return
         target_js = [curr + delta for curr, delta in zip(current_js, delta_action)]
         self.move_joint_step(target_js)
-        
 
-    def move_ee_step(self, target_ee_dict, vel_arg=None):
+    def _solve_ee_to_joints(self, target_ee_dict):
         """
+        target_ee_dict 를 IK 로 풀어서 로봇에 보낼 final_action(조인트 벡터)을 반환한다.
+        풀 수 없으면 None.
         입력 규격: target_ee_dict = {'L_ee': [x, y, z, r, p, y, tool], 'R_ee': [x, y, z, r, p, y, tool]}
         """
         if self.role == 'tool' or self.ik_solver is None:
-            return
+            return None
 
         self.ee_pos_cmd = target_ee_dict
         full_js = self.get_joint_states()
@@ -294,7 +295,7 @@ class Agent:
 
         # 1. IK Solver 입력용 타겟 정제 및 Tool 값 별도 추출
         ik_targets = {}
-        target_tool_values = {} # 추출된 tool 값 저장용
+        target_tool_values = {}  # 추출된 tool 값 저장용
 
         for name in self.ee_names:
             if name in target_ee_dict:
@@ -303,7 +304,7 @@ class Agent:
                 # 주석 규격에 따라 마지막 요소가 tool이라고 가정
                 if len(val_list) >= 7:
                     ik_targets[name] = val_list[:6]      # [x, y, z, r, p, y]
-                    target_tool_values[name] = val_list[6] # tool
+                    target_tool_values[name] = val_list[6]  # tool
                 else:
                     # tool 값이 포함되지 않은 경우 기존 로직 유지
                     ik_targets[name] = val_list
@@ -313,50 +314,64 @@ class Agent:
         # current_lr_arm_motor_q에 현재 조인트 상태를 전달하여 연속성 확보
         with self.ik_lock:
             sol_q, _ = self.ik_solver.solve_ik(ik_targets, current_lr_arm_motor_q=np.array(arm_js))
-            sol_q_fk = self.ik_solver.get_ee_position(sol_q)
 
+        if sol_q is None:
+            return None
 
-        if sol_q is not None:
-            # 3. 조인트 합치기 (IK 결과 + 툴 포즈)
-            final_action = []
-            sol_q_list = sol_q.tolist()
+        # 3. 조인트 합치기 (IK 결과 + 툴 포즈)
+        final_action = []
+        sol_q_list = sol_q.tolist()
 
-            if self.role == 'single_arm':
-                if self.tool_inner:
-                    # 추출한 tool 값이 있으면 쓰고, 없으면 현재 상태(tool_js) 유지
-                    ee_name = self.ee_names[0]
-                    t_val = target_tool_values.get(ee_name)
-                    if t_val is None: t_val = tool_js[0]
+        if self.role == 'single_arm':
+            if self.tool_inner:
+                ee_name = self.ee_names[0]
+                t_val = target_tool_values.get(ee_name)
+                if t_val is None:
+                    t_val = tool_js[0]
+                final_action = sol_q_list + [t_val]
+            else:
+                final_action = sol_q_list
 
-                    final_action = sol_q_list + [t_val]
-                else:
-                    final_action = sol_q_list
+        elif self.role == 'dual_arm':
+            # IK Solver의 sol_q가 [Left_Arm_Joints, Right_Arm_Joints] 순서라고 가정
+            half = len(sol_q_list) // 2
+            left_sol = sol_q_list[:half]
+            right_sol = sol_q_list[half:]
 
-            elif self.role == 'dual_arm':
-                # IK Solver의 sol_q가 [Left_Arm_Joints, Right_Arm_Joints] 순서라고 가정
-                half = len(sol_q_list) // 2
-                left_sol = sol_q_list[:half]
-                right_sol = sol_q_list[half:]
+            if self.tool_inner:
+                l_ee_name = self.ee_names[0]
+                l_tool = target_tool_values.get(l_ee_name)
+                if l_tool is None:
+                    l_tool = tool_js[0]
 
-                if self.tool_inner:
-                    # 왼쪽 툴 처리
-                    l_ee_name = self.ee_names[0]
-                    l_tool = target_tool_values.get(l_ee_name)
-                    if l_tool is None: l_tool = tool_js[0]
+                r_ee_name = self.ee_names[1]
+                r_tool = target_tool_values.get(r_ee_name)
+                if r_tool is None:
+                    r_tool = tool_js[1]
 
-                    # 오른쪽 툴 처리
-                    r_ee_name = self.ee_names[1]
-                    r_tool = target_tool_values.get(r_ee_name)
-                    if r_tool is None: r_tool = tool_js[1]
+                final_action = left_sol + [l_tool] + right_sol + [r_tool]
+            else:
+                final_action = sol_q_list
 
-                    # 최종 배열 조립: [L_arm, L_tool, R_arm, R_tool]
-                    final_action = left_sol + [l_tool] + right_sol + [r_tool]
-                else:
-                    final_action = sol_q_list
+        return final_action or None
 
-            # 4. 로봇에 명령 발행
-            if final_action:
-                self.move_joint_step(final_action, from_ee=True, velocity_arg=vel_arg)
+    def move_ee_step(self, target_ee_dict, vel_arg=None):
+        """
+        입력 규격: target_ee_dict = {'L_ee': [x, y, z, r, p, y, tool], 'R_ee': [x, y, z, r, p, y, tool]}
+        """
+        final_action = self._solve_ee_to_joints(target_ee_dict)
+        if final_action:
+            self.move_joint_step(final_action, from_ee=True, velocity_arg=vel_arg)
+
+    def move_ee_to(self, target_ee_dict, duration=5.0, hz=100):
+        """
+        target_ee_dict 를 IK 로 풀어서, move_to 로 duration 초에 걸쳐 보간 이동한다.
+        move_ee_step 과 달리 단발 명령이 아니라 시간 기반 보간 모션이다.
+        입력 규격: target_ee_dict = {'L_ee': [x, y, z, r, p, y, tool], ...}
+        """
+        final_action = self._solve_ee_to_joints(target_ee_dict)
+        if final_action:
+            self.move_to(final_action, duration=duration, hz=hz)
 
     def compute_fk_delta(self, qaction, qpos):
         """FK(commanded) - FK(actual): 로봇이 이번 스텝에서 이동해야 할 EE 변위."""
