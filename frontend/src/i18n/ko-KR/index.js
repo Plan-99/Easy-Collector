@@ -48,6 +48,8 @@ export default {
   customSensorResolutionWidth: '해상도(가로)',
   customSensorResolutionHeight: '해상도(세로)',
   errorTurnOffSensorFirst: '먼저 센서를 끄세요.',
+  errorStartSensorFailed: '센서 "{name}" 시작에 실패했습니다: {error}',
+  errorStartSensorTimeout: '센서 "{name}" 가 응답하지 않습니다. 연결과 설정을 확인하세요.',
 
   // ───── Robot page ─────
   robotIntroTitle: '로봇아, 너의 몸을 다스리자',
@@ -62,6 +64,8 @@ export default {
   robotContextEdit: '로봇 편집',
   robotContextHide: '로봇 숨기기',
   errorTurnOffRobotFirst: '먼저 로봇을 끄세요.',
+  errorStartRobotFailed: '로봇 "{name}" 시작에 실패했습니다: {error}',
+  errorStartRobotTimeout: '로봇 "{name}" 가 응답하지 않습니다. 연결과 설정을 확인하세요.',
   robotFieldCanPort: 'CAN 포트',
   robotFieldPort: '포트',
   robotFieldChangerAddress: '체인저 주소',

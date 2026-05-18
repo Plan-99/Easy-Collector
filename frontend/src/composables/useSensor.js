@@ -1,5 +1,7 @@
 import { watch } from 'vue';
 import { api } from 'boot/axios';
+import { Notify } from 'quasar';
+import { t } from 'boot/i18n';
 import { useTopicStore } from 'src/stores/topicStore';
 
 /**
@@ -13,13 +15,36 @@ import { useTopicStore } from 'src/stores/topicStore';
 export function useSensor(sensor, sensorOnCallback = () => {}) {
   const topicStore = useTopicStore();
 
+  const formatError = (error) => {
+    if (error?.response?.data?.message) return error.response.data.message;
+    if (error?.message) return error.message;
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return String(error);
+    }
+  };
+
   sensor.status = sensor.status || 'off';
+  if (!sensor.lastError) sensor.lastError = null;
+
+  let startWatchdog = null;
+  const START_TIMEOUT_MS = 20000;
+
+  function clearStartWatchdog() {
+    if (startWatchdog) {
+      clearTimeout(startWatchdog);
+      startWatchdog = null;
+    }
+  }
 
   watch(
     () => topicStore.isPublished(sensor.read_topic),
     (isPublished, wasPublished) => {
       if (isPublished && !wasPublished) {
+        clearStartWatchdog();
         sensor.status = 'on';
+        sensor.lastError = null;
         try {
           sensorOnCallback();
         } catch (e) {
@@ -37,21 +62,44 @@ export function useSensor(sensor, sensorOnCallback = () => {}) {
   }
 
   function startSensor() {
+    clearStartWatchdog();
     sensor.status = 'loading';
+    sensor.lastError = null;
+    startWatchdog = setTimeout(() => {
+      if (sensor.status === 'loading') {
+        const msg = t('errorStartSensorTimeout', { name: sensor.name });
+        sensor.lastError = msg;
+        sensor.status = 'error';
+        Notify.create({ color: 'negative', message: msg });
+      }
+      startWatchdog = null;
+    }, START_TIMEOUT_MS);
     return api.post('/sensor:start', sensor).catch((error) => {
-      console.error('Error starting sensor:', error);
-      sensor.status = 'off';
+      clearStartWatchdog();
+      const msg = formatError(error);
+      console.error('Error starting sensor:', msg);
+      sensor.lastError = msg;
+      sensor.status = 'error';
+      Notify.create({
+        color: 'negative',
+        message: t('errorStartSensorFailed', { name: sensor.name, error: msg }),
+      });
     });
   }
 
   function stopSensor() {
+    clearStartWatchdog();
     sensor.status = 'loading';
-    return api.post('/sensor:stop', sensor).then(() => {
-      sensor.status = 'off';
-    }).catch((error) => {
-      console.error('Error stopping sensor:', error);
-      sensor.status = 'on';
-    });
+    return api
+      .post('/sensor:stop', sensor)
+      .then(() => {
+        sensor.status = 'off';
+        sensor.lastError = null;
+      })
+      .catch((error) => {
+        console.error('Error stopping sensor:', error);
+        sensor.status = 'on';
+      });
   }
 
   function checkSensorTopic() {

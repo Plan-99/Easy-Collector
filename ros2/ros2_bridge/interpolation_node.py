@@ -48,6 +48,7 @@ class JointInterpolationNode(Node):
         self.declare_parameter('sdk_can_port', 'can0')       # SDK CAN 포트 (Piper)
         self.declare_parameter('sdk_has_gripper', True)      # SDK 그리퍼 유무 (Piper)
         self.declare_parameter('sdk_ip_address', '')         # SDK IP (Fairino 등 ethernet 로봇)
+        self.declare_parameter('sdk_serial_port', '')        # SDK serial 포트 (Robotiq 등 USB/RS485)
         self.declare_parameter('read_topic', 'interpolated_joint_cmd')  # SDK 모드: 상태 퍼블리시 토픽
 
         self.publish_rate = self.get_parameter('publish_rate').value
@@ -122,6 +123,7 @@ class JointInterpolationNode(Node):
             'can_port': self.get_parameter('sdk_can_port').value,
             'has_gripper': self.get_parameter('sdk_has_gripper').value,
             'ip_address': self.get_parameter('sdk_ip_address').value,
+            'serial_port': self.get_parameter('sdk_serial_port').value,
         }
         read_topic = self.get_parameter('read_topic').value
 
