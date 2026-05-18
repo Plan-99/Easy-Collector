@@ -1013,7 +1013,7 @@ def relative_trajectory_to_delta(waypoints: np.ndarray) -> np.ndarray:
 
 
 class EpisodicDataset(torch.utils.data.Dataset):
-    def __init__(self, episode_ids, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone='resnet18', n_obs_steps=1, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None):
+    def __init__(self, episode_ids, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone='resnet18', n_obs_steps=1, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None, augment=False, wrist_sensor_ids=None):
         super(EpisodicDataset).__init__()
         self.episode_ids = episode_ids
         self.dataset_dir = dataset_dir
@@ -1026,6 +1026,26 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self.action_key = action_key
         self.use_relative_trajectory = use_relative_trajectory
         self.obs_state_keys = obs_state_keys if obs_state_keys is not None else ['qpos']
+        # Image augmentation: PI0.5 paper Appendix E recipe (RandomResizedCrop 95%
+        # + Rotate ±5° + ColorJitter). Applied on PIL images before process_image.
+        # Train-only; val/eval datasets pass augment=False.
+        # Wrist cameras: openpi skips spatial transforms because crop/rotate breaks
+        # the gripper↔observation geometric coupling (audit-doc bug #31). User
+        # configures wrist_sensor_ids to opt into ColorJitter-only path.
+        self.augment = augment
+        self.wrist_sensor_ids = set(int(x) for x in (wrist_sensor_ids or []))
+        if augment:
+            self._image_augment_full = transforms.Compose([
+                transforms.RandomResizedCrop(size=(224, 224), scale=(0.9025, 1.0), ratio=(0.95, 1.05)),
+                transforms.RandomRotation(degrees=5),
+                transforms.ColorJitter(brightness=0.3, contrast=0.4, saturation=0.5),
+            ])
+            self._image_augment_color_only = transforms.ColorJitter(
+                brightness=0.3, contrast=0.4, saturation=0.5
+            )
+        else:
+            self._image_augment_full = None
+            self._image_augment_color_only = None
         self.info = None
 
         # Pre-load episode metadata (lengths) for efficient sampling
@@ -1209,8 +1229,16 @@ class EpisodicDataset(torch.utils.data.Dataset):
         _pixel_range = '-11' if self.policy_type == 'PI05' else '01'
         for sensor_id in self.sensor_ids:
             processed_images = []
+            # Wrist cams: ColorJitter only (preserve spatial geometry).
+            # Other cams: full aug (RandomResizedCrop + RandomRotation + ColorJitter).
+            if int(sensor_id) in getattr(self, 'wrist_sensor_ids', set()):
+                aug = getattr(self, '_image_augment_color_only', None)
+            else:
+                aug = getattr(self, '_image_augment_full', None)
             for image in image_dict[f"sensor_{sensor_id}"]:
                 image = Image.fromarray(np.array(image))
+                if aug is not None:
+                    image = aug(image)
                 image = process_image(image, self.vision_backbone, pixel_range=_pixel_range)
                 processed_images.append(image)
 
@@ -1276,8 +1304,18 @@ def process_image(image, vision_backbone='resnet18', to_cuda=False, pixel_range=
     return image.cuda() if to_cuda else image
 
 
-def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None):
-    """Compute normalization stats from LeRobot dataset parquet files."""
+def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None, use_relative_actions=False, relative_joints_dim=None, relative_action_mask=None, absolute_action_dims=None, chunk_size=50):
+    """Compute normalization stats from LeRobot dataset parquet files.
+
+    When ``use_relative_actions=True`` the pipeline transforms action to
+    (action - state) for dimensions shared with state BEFORE normalization. Stats
+    must therefore be computed on those delta values, not raw absolute targets —
+    otherwise the normalizer divides tiny deltas by absolute-scale q99/q01 and the
+    training signal collapses (every normalized target ends up near a constant).
+
+    Audit doc bug #11: this was the "loss won't go down with delta mode" root
+    cause; the chunk-wise delta math below mirrors backend/policies/utils.py.
+    """
     if obs_state_keys is None:
         obs_state_keys = ['qpos']
 
@@ -1348,6 +1386,49 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
 
         if action_key == 'relative_ee_pos' or (use_relative_trajectory and action_key == 'ee_delta_action'):
             action = delta_to_relative_trajectory(action)
+            # relative_ee_pos는 PI05+use_relative_actions와 결합 안 함.
+            use_relative_actions = False
+
+        # use_relative_actions: stats MUST match what RelativeActionsProcessorStep
+        # actually produces during training/inference, not naive per-timestep deltas.
+        # The pipeline does:
+        #     delta[t in chunk] = action[t] - state[chunk_start]   (single state, all T)
+        # NOT:
+        #     delta[t] = action[t] - state[t]                      (per-step, tiny)
+        # Per-step deltas underestimate q99-q01 → normalizer explodes targets to
+        # [-99, 99] → gradients break → loss never decreases. (audit-doc bug #11)
+        if use_relative_actions:
+            episode_len = action.shape[0]
+            state_dim = qpos.shape[1]
+            action_dim = action.shape[1]
+
+            if relative_action_mask:
+                m = list(relative_action_mask)
+                m = m + [False] * (action_dim - len(m)) if len(m) < action_dim else m[:action_dim]
+                effective_mask = [bool(x) for x in m]
+            elif absolute_action_dims:
+                effective_mask = [True] * action_dim
+                for idx in absolute_action_dims:
+                    if 0 <= int(idx) < action_dim:
+                        effective_mask[int(idx)] = False
+            elif relative_joints_dim and relative_joints_dim > 0:
+                n = min(relative_joints_dim, action_dim)
+                effective_mask = [True] * n + [False] * (action_dim - n)
+            else:
+                shared = min(state_dim, action_dim)
+                effective_mask = [True] * shared + [False] * (action_dim - shared)
+
+            delta_chunks = []
+            cs = max(1, int(chunk_size))
+            for start in range(episode_len):
+                end = min(start + cs, episode_len)
+                _chunk = action[start:end].copy()
+                state_at_start = qpos[start]
+                for i, is_delta in enumerate(effective_mask):
+                    if is_delta and i < state_dim:
+                        _chunk[:, i] = _chunk[:, i] - state_at_start[i]
+                delta_chunks.append(_chunk)
+            action = np.concatenate(delta_chunks, axis=0) if delta_chunks else action
 
         # Collect image keys from parquet columns
         for col in df.columns:
@@ -1379,12 +1460,25 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
     action_mean = all_action_data.mean(dim=0)
     action_std = all_action_data.std(dim=0)
     action_std = torch.clip(action_std, 1e-2, np.inf)
+    # q01/q99 (1st & 99th percentiles) — required by PI05 QUANTILES normalization.
+    # Computed unconditionally so the same stats dict can drive any policy type.
+    action_q01 = torch.quantile(all_action_data.float(), 0.01, dim=0)
+    action_q99 = torch.quantile(all_action_data.float(), 0.99, dim=0)
+    # Guard against near-constant columns (e.g. done flag with q01==q99==0).
+    # Without this the normalizer falls back to eps=1e-8 denominator and the
+    # single non-zero value becomes ~1e8 in normalized space (audit-doc bug #13).
+    _arange = action_q99 - action_q01
+    action_q99 = action_q01 + torch.clamp(_arange, min=1e-2)
 
     qpos_min = all_qpos_data.min(dim=0)[0]
     qpos_max = all_qpos_data.max(dim=0)[0]
     qpos_mean = all_qpos_data.mean(dim=0)
     qpos_std = all_qpos_data.std(dim=0)
     qpos_std = torch.clip(qpos_std, 1e-2, np.inf)
+    qpos_q01 = torch.quantile(all_qpos_data.float(), 0.01, dim=0)
+    qpos_q99 = torch.quantile(all_qpos_data.float(), 0.99, dim=0)
+    _qrange = qpos_q99 - qpos_q01
+    qpos_q99 = qpos_q01 + torch.clamp(_qrange, min=1e-2)
 
     stats = {
         "action": {
@@ -1392,6 +1486,8 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
             "max": action_max.numpy(),
             "mean": action_mean.numpy().squeeze(),
             "std": action_std.numpy().squeeze(),
+            "q01": action_q01.numpy().squeeze(),
+            "q99": action_q99.numpy().squeeze(),
             "count": np.array([cnt]),
         },
         "observation.state": {
@@ -1399,6 +1495,8 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
             "max": qpos_max.numpy(),
             "mean": qpos_mean.numpy().squeeze(),
             "std": qpos_std.numpy().squeeze(),
+            "q01": qpos_q01.numpy().squeeze(),
+            "q99": qpos_q99.numpy().squeeze(),
             "count": np.array([cnt]),
         },
     }
@@ -1511,8 +1609,16 @@ class FullScanDataset(EpisodicDataset):
         _pixel_range = '-11' if self.policy_type == 'PI05' else '01'
         for sensor_id in self.sensor_ids:
             processed_images = []
+            # Wrist cams: ColorJitter only (preserve spatial geometry).
+            # Other cams: full aug (RandomResizedCrop + RandomRotation + ColorJitter).
+            if int(sensor_id) in getattr(self, 'wrist_sensor_ids', set()):
+                aug = getattr(self, '_image_augment_color_only', None)
+            else:
+                aug = getattr(self, '_image_augment_full', None)
             for image in image_dict[f"sensor_{sensor_id}"]:
                 image = Image.fromarray(np.array(image))
+                if aug is not None:
+                    image = aug(image)
                 image = process_image(image, self.vision_backbone, pixel_range=_pixel_range)
                 processed_images.append(image)
 
@@ -1549,10 +1655,19 @@ class FullScanDataset(EpisodicDataset):
         return item
 
 
-def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_train, batch_size_val, chunk_size, vision_backbone='resnet18', num_workers=1, n_obs_steps=1, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None):
+def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_train, batch_size_val, chunk_size, vision_backbone='resnet18', num_workers=1, n_obs_steps=1, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None, use_relative_actions=False, relative_joints_dim=None, relative_action_mask=None, absolute_action_dims=None, wrist_sensor_ids=None):
     if obs_state_keys is None:
         obs_state_keys = ['qpos']
     print(f'\nData from: {dataset_dir}\n')
+
+    # Surface wrist_sensor_ids decision early so users can verify wire-through
+    # (audit-doc §7 checklist #1). Empty set = all cams get full spatial aug.
+    _wrist_set = set(int(x) for x in (wrist_sensor_ids or []))
+    if _wrist_set:
+        print(f'[CONFIG] wrist_sensor_ids: {sorted(_wrist_set)} (skip spatial aug)', flush=True)
+    else:
+        print('[CONFIG] wrist_sensor_ids: [] (all cams get full crop+rotate aug)', flush=True)
+
     # obtain train test split
     train_ratio = 0.8
     shuffled_indices = np.random.permutation(num_episodes)
@@ -1561,8 +1676,21 @@ def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_tra
     # 에피소드가 적으면 train 데이터를 val에도 재사용
     val_indices = shuffled_indices[split:] if split < num_episodes else shuffled_indices
 
-    # obtain normalization stats for qpos and action
-    norm_stats, skipped_episodes = get_norm_stats(dataset_dir, num_episodes, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys)
+    # obtain normalization stats for qpos and action.
+    # use_relative_actions / relative_*  / absolute_action_dims는 PI05 delta 모드에서
+    # raw action 대신 chunk-wise delta 분포로 q01/q99/mean/std를 잡기 위해 필수
+    # (audit-doc bug #11).
+    norm_stats, skipped_episodes = get_norm_stats(
+        dataset_dir, num_episodes,
+        action_key=action_key,
+        use_relative_trajectory=use_relative_trajectory,
+        obs_state_keys=obs_state_keys,
+        use_relative_actions=use_relative_actions,
+        relative_joints_dim=relative_joints_dim,
+        relative_action_mask=relative_action_mask,
+        absolute_action_dims=absolute_action_dims,
+        chunk_size=chunk_size,
+    )
 
     # 호환 불가능한 에피소드 제외
     if skipped_episodes:
@@ -1572,9 +1700,11 @@ def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_tra
         train_indices = valid_indices[:split]
         val_indices = valid_indices[split:] if split < len(valid_indices) else valid_indices
 
-    # construct dataset and dataloader
-    train_dataset = EpisodicDataset(train_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys)
-    val_dataset = EpisodicDataset(val_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys)
+    # construct dataset and dataloader.
+    # train: augment=True (RandomResizedCrop+Rotate+ColorJitter), wrist cams get
+    # ColorJitter-only (audit-doc bug #31). val/eval: augment=False.
+    train_dataset = EpisodicDataset(train_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys, augment=True, wrist_sensor_ids=_wrist_set)
+    val_dataset = EpisodicDataset(val_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys, augment=False, wrist_sensor_ids=_wrist_set)
     # Keep workers alive across epochs so EpisodicDataset._ep_cache (and OS page
     # cache backing the mmap'd frame .npy files) survives between epochs.
     loader_kwargs = dict(
