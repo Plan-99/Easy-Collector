@@ -210,6 +210,22 @@
                                             class="full-height bg-secondary"
                                             dark
                                         />
+                                        <q-select
+                                            v-else-if="config.type === 'wrist_sensor_select'"
+                                            dense
+                                            outlined
+                                            v-model="config.value"
+                                            :options="wristSensorOptions"
+                                            :label="config.label"
+                                            :readonly="isSettingsReadonly"
+                                            :disable="isSettingsReadonly"
+                                            emit-value
+                                            map-options
+                                            multiple
+                                            use-chips
+                                            class="full-height bg-secondary"
+                                            dark
+                                        />
                                         <q-input
                                             dense
                                             outlined
@@ -382,6 +398,20 @@
                                     spread
                                     class="full-height bg-dark"
                                 ></q-btn-toggle>
+                                <q-select
+                                    v-else-if="config.type === 'wrist_sensor_select'"
+                                    dense
+                                    outlined
+                                    v-model="config.value"
+                                    :options="wristSensorOptions"
+                                    :label="config.label"
+                                    emit-value
+                                    map-options
+                                    multiple
+                                    use-chips
+                                    class="full-height bg-dark"
+                                    dark
+                                />
                                 <q-input
                                     dense
                                     outlined
@@ -528,9 +558,12 @@ function listWorkspaces() {
     });
 }
 
-// const selectedWorkpace = computed(() => {
-//     return workspaces.value.find(w => w.id === selectedWorkspaceId.value);
-// });
+// wrist_sensor_select 필드용 옵션. 현재 선택된 workspace의 sensors 목록.
+const wristSensorOptions = computed(() => {
+    const w = workspaces.value.find(w => w.id === selectedWorkspaceId.value);
+    return (w?.sensors || []).map(s => ({ label: `${s.name} (id=${s.id})`, value: s.id }));
+});
+
 // --- Computed Properties for Step 2 ---
 const checkpointOptions = computed(() => {
     return [
@@ -596,7 +629,13 @@ watch(selectedCheckpoint, (newVal) => {
                 for (const key in config) {
                     newSettings[key] = { ...config[key] }; // Copy complete config
                     if (policy.settings[key] !== undefined) {
-                        newSettings[key].value = policy.settings[key]; // Override value
+                        let _val = policy.settings[key];
+                        // legacy coercion: wrist_sensor_ids는 옛 schema에서 "2,3" 문자열
+                        // 이었음. 새 multiselect는 [int, int] 배열을 기대.
+                        if (key === 'wrist_sensor_ids' && typeof _val === 'string') {
+                            _val = _val.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n))
+                        }
+                        newSettings[key].value = _val; // Override value
                     }
                 }
             }
@@ -652,7 +691,13 @@ watch(selectedPolicy, (newVal) => {
                 for (const key in config) {
                     newSettings[key] = { ...config[key] }; // Copy complete config
                     if (policy.settings[key] !== undefined) {
-                        newSettings[key].value = policy.settings[key]; // Override value
+                        let _val = policy.settings[key];
+                        // legacy coercion: wrist_sensor_ids는 옛 schema에서 "2,3" 문자열
+                        // 이었음. 새 multiselect는 [int, int] 배열을 기대.
+                        if (key === 'wrist_sensor_ids' && typeof _val === 'string') {
+                            _val = _val.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n))
+                        }
+                        newSettings[key].value = _val; // Override value
                     }
                 }
             }

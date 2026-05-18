@@ -97,24 +97,15 @@ export const POLICY_CONFIGS = {
         'freeze_vision_encoder': { 'label': 'Freeze Vision Encoder', 'value': true, 'type': 'boolean' },
         'train_expert_only': { 'label': 'Train Expert Only', 'value': true, 'type': 'boolean' },
         'gradient_checkpointing': { 'label': 'Gradient Checkpointing', 'value': true, 'type': 'boolean' },
-        // Relative actions: paper uses absolute target poses (large-scale training handles
-        // the broad distribution). For small-dataset fine-tune, delta actions concentrate
-        // around zero → easier to learn. Flip off if your dataset action field is already
-        // pre-computed deltas.
-        'use_relative_actions': { 'label': 'Use Relative Actions', 'value': true, 'type': 'boolean' },
-        // Action dim indices that should stay ABSOLUTE (gripper, done flag, etc.)
-        // when use_relative_actions=true. All other dims become delta automatically.
-        // Default [6, 7] = single 6-DOF arm + gripper(6) + done(7). For dual-arm
-        // (2×6 joints + 2 grippers + done), use [6, 13, 14].
-        // Empty list ([]) = all dims delta. nullable so user can leave it.
-        'absolute_action_dims': {
-            'label': 'Absolute Action Dims (gripper / done indices)',
-            'value': [6, 7],
-            'type': 'array',
-            'nullable': true,
-            'showIf': 'use_relative_actions',
-        },
-        'action_type': { 'label': 'Action Type', 'value': 'joint', 'type': 'select', 'options': ['joint', 'ee_delta', 'relative_ee_pos'] },
+        // Action target encoding.
+        //   - 'joint'             : 절대 joint target (raw)
+        //   - 'relative_joint_pos': chunk-anchored joint delta. anchor = observation.qpos
+        //                           컬럼에서 직접 (obs_state_keys와 독립). PI0.5 권장.
+        //   - 'ee_delta'          : EE world-frame per-step delta
+        //   - 'relative_ee_pos'   : EE local-frame chunk trajectory (SE(3) transform)
+        'action_type': { 'label': 'Action Type', 'value': 'relative_joint_pos', 'type': 'select', 'options': ['joint', 'relative_joint_pos', 'ee_delta', 'relative_ee_pos'] },
+        // gripper / tool / done dim은 backend가 dataset features (action.joint names +
+        // has_succeed) 에서 자동 식별해서 absolute로 유지. user 설정 불필요.
         'obs_state_keys': { 'label': 'Observation State Keys', 'value': ['qpos'], 'type': 'multiselect', 'options': ['qpos', 'qvel', 'qeffort', 'eepos'] },
     }
     // 'VLAsEn': {
@@ -210,10 +201,10 @@ export const TRAIN_CONFIGS = {
         'ema_decay': { 'label': 'EMA Decay (0=off, 0.99 for full-FT only)', 'value': 0, 'type': 'number' },
         'val_smooth_window': { 'label': 'Val Smooth Window (epochs, 1=raw)', 'value': 1, 'type': 'number' },
         'val_n_passes': { 'label': 'Val Passes per Epoch (1=fast)', 'value': 1, 'type': 'number' },
-        // Wrist-mounted camera sensor IDs (comma-separated, e.g. "1" or "2,3").
-        // openpi skips spatial aug (crop+rotate) on these — they encode end-effector
-        // geometry and random crop destroys the gripper↔scene invariance critical
-        // for fine cube approach. Empty = no wrist sensors (all get full aug).
-        'wrist_sensor_ids': { 'label': 'Wrist Sensor IDs (comma-sep)', 'value': '', 'type': 'text' },
+        // Wrist-mounted camera sensors. Options는 TrainPage가 현재 workspace의
+        // sensors 목록으로 runtime injection. openpi skips spatial aug (crop+rotate)
+        // on these — wrist cam은 end-effector geometry를 인코딩해서 random crop이
+        // gripper↔scene invariance를 파괴.
+        'wrist_sensor_ids': { 'label': 'Wrist Sensors', 'value': [], 'type': 'wrist_sensor_select' },
     }
 };

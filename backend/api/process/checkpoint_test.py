@@ -8,7 +8,7 @@ from einops import rearrange
 from lerobot.configs.types import PolicyFeature, FeatureType
 from ...utils.image_parser import fetch_image_with_config
 
-from ...policies.utils import VISION_BACKBONE_MAP, process_image, relative_trajectory_to_delta, make_easytrainer_processors
+from ...policies.utils import VISION_BACKBONE_MAP, process_image, relative_trajectory_to_delta, make_easytrainer_processors, _absolute_action_dims_from_features
 from ...configs.global_configs import resolve_checkpoint_dir
 from collections import deque
 from ...bridge.remote_env import RemoteEnv
@@ -125,20 +125,14 @@ def checkpoint_test(
         # 아래에서 분기 비교할 때 양쪽 모두 인식되도록 normalize.
         _ACTION_KEY_ALIAS = {'qaction': 'joint', 'joint': 'joint',
                               'ee_delta_action': 'ee_delta', 'ee_delta': 'ee_delta',
-                              'relative_ee_pos': 'relative_ee_pos'}
+                              'relative_ee_pos': 'relative_ee_pos',
+                              'relative_joint_pos': 'relative_joint_pos'}
         action_key_norm = _ACTION_KEY_ALIAS.get(action_key, action_key)
         _obs_keys = policy_obj.get('settings', {}).get('obs_state_keys')
         if _obs_keys is None:
             _obs_keys = checkpoint.get('train_settings', {}).get('obs_state_keys')
         obs_state_keys = _obs_keys if _obs_keys is not None else ['qpos']
         use_relative_trajectory = checkpoint.get('train_settings', {}).get('use_relative_trajectory', False)
-        # PI05's use_relative_actions affects how the action chunk relates to state.
-        # When True, the model predicts deltas anchored to the state at chunk-inference
-        # time. The postprocessor's AbsoluteActionsProcessorStep adds state back. If we
-        # postprocess per single action while preprocessor caches a NEW state every step,
-        # the wrong (current-step) state is added → cumulative drift across the chunk.
-        # We need to drain the whole chunk and postprocess once with the inference-time state.
-        use_relative_actions = policy_obj.get('settings', {}).get('use_relative_actions', False)
         has_succeed = checkpoint.get('train_settings', {}).get('has_succeed', False)
 
         # Either reuse a CPU-resident model from the planner prefetch cache, or
@@ -213,7 +207,8 @@ def checkpoint_test(
             print(f'[INFER][WARN] No processor pipeline found at {ckpt_dir}. '
                   f'Falling back to raw model I/O — retrain to enable normalization.')
         else:
-            print(f'[INFER] Loaded preprocessor/postprocessor from {ckpt_dir}')
+            print(f'[INFER] Loaded preprocessor/postprocessor from {ckpt_dir} '
+                  f'(action_key_norm={action_key_norm})')
 
         # OOD reference tensors — keep originals on CPU (so the cache survives),
         # ship a CUDA copy into the loop. The CUDA copies are freed in finally.
@@ -359,9 +354,9 @@ def checkpoint_test(
             if agent.role != 'tool' and agent.ik_solver is not None:
                 prev_qpos_dict[agent.id] = ts.observation['robot_states'][agent.id]['qpos']
         rel_action_queue = deque()  # relative_ee_pos용 delta action queue
-        # PI05+use_relative_actions: whole-chunk absolute actions cached after one
-        # inference. Subsequent loop iterations pop from here without re-inferring or
-        # re-postprocessing, so the state-add-back stays anchored to chunk-inference time.
+        # PI05 + relative_joint_pos: whole-chunk absolute joint targets cached after one
+        # inference (delta + current qpos). Subsequent loop iterations pop from here
+        # without re-inferring.
         pi05_chunk_queue = deque()
         # Soft start: 첫 추론 cycle 의 cmd 는 정책의 raw 첫 chunk[0] 이라 학습 home
         # 을 가리킬 수 있고, 추론 cadence(100ms) 안에서 큰 delta 가 되어 ServoJ
@@ -414,10 +409,9 @@ def checkpoint_test(
             # relative_ee_pos: queue에 남은 delta가 있으면 추론 없이 꺼내 씀
             if action_key_norm == 'relative_ee_pos' and len(rel_action_queue) > 0:
                 state_t = rel_action_queue.popleft()
-            # PI05+use_relative_actions: 같은 chunk의 나머지 absolute action 사용
-            # (chunk-inference 시점의 state로 이미 더해진 상태). 재추론/재postprocess
-            # 없이 pop만 하면 state drift 없음.
-            elif policy_obj['type'] == 'PI05' and use_relative_actions and len(pi05_chunk_queue) > 0:
+            # PI05 + relative_joint_pos: 같은 chunk의 나머지 absolute joint targets
+            # 사용 (chunk-inference 시점의 qpos로 이미 더해진 상태). 재추론 없이 pop.
+            elif policy_obj['type'] == 'PI05' and action_key_norm == 'relative_joint_pos' and len(pi05_chunk_queue) > 0:
                 state_t = pi05_chunk_queue.popleft()
             else:
                 with torch.no_grad():
@@ -570,11 +564,12 @@ def checkpoint_test(
                         state_t = deltas[0]
                         for i in range(1, len(deltas)):
                             rel_action_queue.append(deltas[i])
-                    elif policy_obj['type'] == 'PI05' and use_relative_actions:
-                        # Drain whole action chunk and postprocess it once with the
-                        # state cached during preprocessor (= state at chunk inference
-                        # time). Per-step postprocess would add stale state and accumulate
-                        # drift since model output deltas are anchored to chunk start.
+                    elif policy_obj['type'] == 'PI05' and action_key_norm == 'relative_joint_pos':
+                        # 데이터가 chunk-anchored delta로 학습됐고, runtime processor는
+                        # raw → normalize → model → unnormalize 만 함. 모델 출력 =
+                        # real-unit delta. robot의 current qpos를 직접 가져와서 delta에
+                        # 더해서 absolute joint target 복원 (relative_ee_pos가 current_eepos를
+                        # forward kinematics로 가져오는 패턴과 대칭).
                         policy.reset()
                         first = policy.select_action(policy_input_t).squeeze(0)
                         chunk_list = [first]
@@ -584,11 +579,35 @@ def checkpoint_test(
                         raw_actions = torch.stack(chunk_list)
                         if postprocessor is not None:
                             raw_actions = postprocessor(raw_actions)
-                        # Use first action immediately; queue the rest for subsequent
-                        # iterations (popped at the top of the loop without re-postprocessing).
-                        state_t = raw_actions[0].cpu().numpy()
-                        for i in range(1, len(raw_actions)):
-                            pi05_chunk_queue.append(raw_actions[i].cpu().numpy())
+                        raw_np = raw_actions.cpu().numpy()  # (chunk_size, action_dim) — delta
+                        # Robot의 current qpos를 anchor로. obs_state_keys와 무관하게
+                        # robot_states에서 직접 읽어옴.
+                        anchor_qpos = np.concatenate([
+                            item['qpos'] for item in obs_t['robot_states'].values()
+                        ])
+                        # absolute dims (gripper/tool/done)는 학습 시점 dataset features
+                        # 에서 자동 식별. agent.joint_names + has_succeed로 안전하게 재구성.
+                        action_dim = raw_np.shape[1]
+                        anchor_dim = anchor_qpos.shape[0]
+                        _action_names = []
+                        for _ag in sorted(agents, key=lambda a: a.id):
+                            for _jn in (getattr(_ag, 'joint_names', None) or []):
+                                _action_names.append(f"robot_{_ag.id}_{_jn}")
+                        _abs_dims = _absolute_action_dims_from_features(_action_names, has_succeed)
+                        if _abs_dims:
+                            effective_mask = [True] * action_dim
+                            for idx in _abs_dims:
+                                if 0 <= int(idx) < action_dim:
+                                    effective_mask[int(idx)] = False
+                        else:
+                            shared = min(anchor_dim, action_dim)
+                            effective_mask = [True] * shared + [False] * (action_dim - shared)
+                        for i, is_delta in enumerate(effective_mask):
+                            if is_delta and i < anchor_dim:
+                                raw_np[:, i] = raw_np[:, i] + anchor_qpos[i]
+                        state_t = raw_np[0]
+                        for i in range(1, len(raw_np)):
+                            pi05_chunk_queue.append(raw_np[i])
                     else:
                         # relative trajectory 모드: select_action이 반환하는 값은 chunk[0] = T_now→1 = 즉각 delta
                         raw_action = policy.select_action(policy_input_t)

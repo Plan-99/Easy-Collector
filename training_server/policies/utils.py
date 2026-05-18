@@ -1216,6 +1216,38 @@ class EpisodicDataset(torch.utils.data.Dataset):
         padded_action = np.zeros(original_action_shape, dtype=np.float32)
         if self.action_key == 'relative_ee_pos' or (self.use_relative_trajectory and self.action_key == 'ee_delta_action'):
             padded_action[:action_len] = delta_to_relative_trajectory(action[:action_len])
+        elif self.action_key == 'relative_joint_pos':
+            # chunk-anchored joint delta: action[t in chunk] - qpos[chunk_start].
+            # anchor를 ep["state_data"]에서 직접 읽음 (training_server에서 state_data
+            # 가 곧 qpos이므로 anchor source로 직접 사용). obs_state_keys와 별개 채널.
+            # absolute dims (gripper/tool/done)는 dataset features에서 자동 추출.
+            qpos_anchor_data = ep.get("state_data")
+            chunk_slice = action[:action_len]
+            if qpos_anchor_data is not None and len(qpos_anchor_data) > start_ts:
+                if qpos_anchor_data.ndim == 1:
+                    qpos_anchor_data = qpos_anchor_data.reshape(-1, 1)
+                action_dim = chunk_slice.shape[1]
+                anchor_dim = qpos_anchor_data.shape[1]
+                _features = (self._dataset_info or {}).get('features', {})
+                _action_names = _features.get('action.joint', {}).get('names', [])
+                _has_succeed = action_dim > len(_action_names) and len(_action_names) > 0
+                _abs_dims = _absolute_action_dims_from_features(_action_names, _has_succeed)
+                if _abs_dims:
+                    effective_mask = [True] * action_dim
+                    for idx in _abs_dims:
+                        if 0 <= int(idx) < action_dim:
+                            effective_mask[int(idx)] = False
+                else:
+                    shared = min(anchor_dim, action_dim)
+                    effective_mask = [True] * shared + [False] * (action_dim - shared)
+                anchor_at_start = qpos_anchor_data[start_ts]
+                delta_chunk = chunk_slice.copy()
+                for i, is_delta in enumerate(effective_mask):
+                    if is_delta and i < anchor_dim:
+                        delta_chunk[:, i] = delta_chunk[:, i] - anchor_at_start[i]
+                padded_action[:action_len] = delta_chunk
+            else:
+                padded_action[:action_len] = chunk_slice
         else:
             padded_action[:action_len] = action
         is_pad = np.zeros(self.chunk_size)
@@ -1275,6 +1307,24 @@ class EpisodicDataset(torch.utils.data.Dataset):
         return item
 
 
+def _absolute_action_dims_from_features(action_names, has_succeed: bool):
+    """action.joint feature names + has_succeed 로부터 absolute dim 인덱스 자동 추출.
+
+    relative_joint_pos 모드에서 어떤 dim이 delta로 변환돼선 안 되는지 결정.
+    - 이름에 'gripper' 또는 'tool' 포함 → absolute
+    - has_succeed=True → action 마지막 dim이 succeed bit → absolute
+    """
+    if not action_names:
+        return []
+    abs_dims = []
+    for i, name in enumerate(action_names):
+        nl = (name or '').lower()
+        if 'gripper' in nl or 'tool' in nl:
+            abs_dims.append(i)
+    if has_succeed:
+        abs_dims.append(len(action_names))
+    return abs_dims
+
 
 def process_image(image, vision_backbone='resnet18', to_cuda=False, pixel_range='01'):
     """Preprocess an image into a model-ready tensor.
@@ -1304,17 +1354,13 @@ def process_image(image, vision_backbone='resnet18', to_cuda=False, pixel_range=
     return image.cuda() if to_cuda else image
 
 
-def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None, use_relative_actions=False, relative_joints_dim=None, relative_action_mask=None, absolute_action_dims=None, chunk_size=50):
+def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None, chunk_size=50):
     """Compute normalization stats from LeRobot dataset parquet files.
 
-    When ``use_relative_actions=True`` the pipeline transforms action to
-    (action - state) for dimensions shared with state BEFORE normalization. Stats
-    must therefore be computed on those delta values, not raw absolute targets —
-    otherwise the normalizer divides tiny deltas by absolute-scale q99/q01 and the
-    training signal collapses (every normalized target ends up near a constant).
-
-    Audit doc bug #11: this was the "loss won't go down with delta mode" root
-    cause; the chunk-wise delta math below mirrors backend/policies/utils.py.
+    For ``action_key='relative_joint_pos'`` the action is overwritten with the
+    chunk-anchored delta from observation.qpos before stats are accumulated.
+    Absolute dims (gripper / tool / done) are auto-detected from action feature
+    names + has_succeed via ``_absolute_action_dims_from_features``.
     """
     if obs_state_keys is None:
         obs_state_keys = ['qpos']
@@ -1386,49 +1432,43 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
 
         if action_key == 'relative_ee_pos' or (use_relative_trajectory and action_key == 'ee_delta_action'):
             action = delta_to_relative_trajectory(action)
-            # relative_ee_pos는 PI05+use_relative_actions와 결합 안 함.
-            use_relative_actions = False
 
-        # use_relative_actions: stats MUST match what RelativeActionsProcessorStep
-        # actually produces during training/inference, not naive per-timestep deltas.
-        # The pipeline does:
-        #     delta[t in chunk] = action[t] - state[chunk_start]   (single state, all T)
-        # NOT:
-        #     delta[t] = action[t] - state[t]                      (per-step, tiny)
-        # Per-step deltas underestimate q99-q01 → normalizer explodes targets to
-        # [-99, 99] → gradients break → loss never decreases. (audit-doc bug #11)
-        if use_relative_actions:
-            episode_len = action.shape[0]
-            state_dim = qpos.shape[1]
-            action_dim = action.shape[1]
+        # relative_joint_pos: obs_state_keys와 독립. observation.qpos 컬럼을 직접
+        # anchor로 사용. relative_ee_pos가 observation.eepos를 anchor로 쓰는 패턴
+        # 과 대칭. action target = chunk-anchored delta from qpos[chunk_start].
+        if action_key == 'relative_joint_pos':
+            _qpos_col = 'observation.qpos' if 'observation.qpos' in df.columns else 'observation.state'
+            if _qpos_col in df.columns:
+                anchor_arr = np.array(df[_qpos_col].tolist(), dtype=np.float32)
+                if anchor_arr.ndim == 1:
+                    anchor_arr = anchor_arr.reshape(-1, 1)
+                T_total = action.shape[0]
+                action_dim = action.shape[1]
+                anchor_dim = anchor_arr.shape[1]
+                # absolute_action_dims는 features의 action.joint names + has_succeed
+                # 로부터 자동 계산. gripper/tool/done은 절대 유지.
+                _action_names = (dataset_info or {}).get('features', {}).get('action.joint', {}).get('names', [])
+                _abs_dims = _absolute_action_dims_from_features(_action_names, any_has_succeed)
+                if _abs_dims:
+                    effective_mask = [True] * action_dim
+                    for idx in _abs_dims:
+                        if 0 <= int(idx) < action_dim:
+                            effective_mask[int(idx)] = False
+                else:
+                    shared = min(anchor_dim, action_dim)
+                    effective_mask = [True] * shared + [False] * (action_dim - shared)
 
-            if relative_action_mask:
-                m = list(relative_action_mask)
-                m = m + [False] * (action_dim - len(m)) if len(m) < action_dim else m[:action_dim]
-                effective_mask = [bool(x) for x in m]
-            elif absolute_action_dims:
-                effective_mask = [True] * action_dim
-                for idx in absolute_action_dims:
-                    if 0 <= int(idx) < action_dim:
-                        effective_mask[int(idx)] = False
-            elif relative_joints_dim and relative_joints_dim > 0:
-                n = min(relative_joints_dim, action_dim)
-                effective_mask = [True] * n + [False] * (action_dim - n)
-            else:
-                shared = min(state_dim, action_dim)
-                effective_mask = [True] * shared + [False] * (action_dim - shared)
-
-            delta_chunks = []
-            cs = max(1, int(chunk_size))
-            for start in range(episode_len):
-                end = min(start + cs, episode_len)
-                _chunk = action[start:end].copy()
-                state_at_start = qpos[start]
-                for i, is_delta in enumerate(effective_mask):
-                    if is_delta and i < state_dim:
-                        _chunk[:, i] = _chunk[:, i] - state_at_start[i]
-                delta_chunks.append(_chunk)
-            action = np.concatenate(delta_chunks, axis=0) if delta_chunks else action
+                rel_chunks = []
+                cs = max(1, int(chunk_size))
+                for start in range(T_total):
+                    end = min(start + cs, T_total)
+                    _chunk = action[start:end].copy()
+                    anchor_at_start = anchor_arr[start]
+                    for i, is_delta in enumerate(effective_mask):
+                        if is_delta and i < anchor_dim:
+                            _chunk[:, i] = _chunk[:, i] - anchor_at_start[i]
+                    rel_chunks.append(_chunk)
+                action = np.concatenate(rel_chunks, axis=0) if rel_chunks else action
 
         # Collect image keys from parquet columns
         for col in df.columns:
@@ -1596,6 +1636,38 @@ class FullScanDataset(EpisodicDataset):
         padded_action = np.zeros(original_action_shape, dtype=np.float32)
         if self.action_key == 'relative_ee_pos' or (self.use_relative_trajectory and self.action_key == 'ee_delta_action'):
             padded_action[:action_len] = delta_to_relative_trajectory(action[:action_len])
+        elif self.action_key == 'relative_joint_pos':
+            # chunk-anchored joint delta: action[t in chunk] - qpos[chunk_start].
+            # anchor를 ep["state_data"]에서 직접 읽음 (training_server에서 state_data
+            # 가 곧 qpos이므로 anchor source로 직접 사용). obs_state_keys와 별개 채널.
+            # absolute dims (gripper/tool/done)는 dataset features에서 자동 추출.
+            qpos_anchor_data = ep.get("state_data")
+            chunk_slice = action[:action_len]
+            if qpos_anchor_data is not None and len(qpos_anchor_data) > start_ts:
+                if qpos_anchor_data.ndim == 1:
+                    qpos_anchor_data = qpos_anchor_data.reshape(-1, 1)
+                action_dim = chunk_slice.shape[1]
+                anchor_dim = qpos_anchor_data.shape[1]
+                _features = (self._dataset_info or {}).get('features', {})
+                _action_names = _features.get('action.joint', {}).get('names', [])
+                _has_succeed = action_dim > len(_action_names) and len(_action_names) > 0
+                _abs_dims = _absolute_action_dims_from_features(_action_names, _has_succeed)
+                if _abs_dims:
+                    effective_mask = [True] * action_dim
+                    for idx in _abs_dims:
+                        if 0 <= int(idx) < action_dim:
+                            effective_mask[int(idx)] = False
+                else:
+                    shared = min(anchor_dim, action_dim)
+                    effective_mask = [True] * shared + [False] * (action_dim - shared)
+                anchor_at_start = qpos_anchor_data[start_ts]
+                delta_chunk = chunk_slice.copy()
+                for i, is_delta in enumerate(effective_mask):
+                    if is_delta and i < anchor_dim:
+                        delta_chunk[:, i] = delta_chunk[:, i] - anchor_at_start[i]
+                padded_action[:action_len] = delta_chunk
+            else:
+                padded_action[:action_len] = chunk_slice
         else:
             padded_action[:action_len] = action
         is_pad = np.zeros(self.chunk_size)
@@ -1655,7 +1727,7 @@ class FullScanDataset(EpisodicDataset):
         return item
 
 
-def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_train, batch_size_val, chunk_size, vision_backbone='resnet18', num_workers=1, n_obs_steps=1, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None, use_relative_actions=False, relative_joints_dim=None, relative_action_mask=None, absolute_action_dims=None, wrist_sensor_ids=None):
+def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_train, batch_size_val, chunk_size, vision_backbone='resnet18', num_workers=1, n_obs_steps=1, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None, wrist_sensor_ids=None):
     if obs_state_keys is None:
         obs_state_keys = ['qpos']
     print(f'\nData from: {dataset_dir}\n')
@@ -1677,18 +1749,13 @@ def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_tra
     val_indices = shuffled_indices[split:] if split < num_episodes else shuffled_indices
 
     # obtain normalization stats for qpos and action.
-    # use_relative_actions / relative_*  / absolute_action_dims는 PI05 delta 모드에서
-    # raw action 대신 chunk-wise delta 분포로 q01/q99/mean/std를 잡기 위해 필수
-    # (audit-doc bug #11).
+    # action_key='relative_joint_pos'면 raw action이 아니라 chunk-anchored delta
+    # 분포로 q01/q99/mean/std를 잡음. absolute dims는 features에서 자동 검출.
     norm_stats, skipped_episodes = get_norm_stats(
         dataset_dir, num_episodes,
         action_key=action_key,
         use_relative_trajectory=use_relative_trajectory,
         obs_state_keys=obs_state_keys,
-        use_relative_actions=use_relative_actions,
-        relative_joints_dim=relative_joints_dim,
-        relative_action_mask=relative_action_mask,
-        absolute_action_dims=absolute_action_dims,
         chunk_size=chunk_size,
     )
 

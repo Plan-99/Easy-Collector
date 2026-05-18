@@ -184,7 +184,7 @@ def main():
     pre, post = make_easytrainer_processors(
         policy_type="PI05", cfg=policy.config, pretrained_path=str(ckpt_dir)
     )
-    print(f"    chunk_size={policy.config.chunk_size}  use_relative_actions={getattr(policy.config, 'use_relative_actions', '?')}")
+    print(f"    chunk_size={policy.config.chunk_size}")
     if pre is None:
         print("    [WARN] preprocessor=None — falling back to raw I/O (suspicious!)")
 

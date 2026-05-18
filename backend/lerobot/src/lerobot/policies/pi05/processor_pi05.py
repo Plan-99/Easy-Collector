@@ -24,7 +24,6 @@ import torch
 from lerobot.configs.types import PipelineFeatureType, PolicyFeature
 from lerobot.policies.pi05.configuration_pi05 import PI05Config
 from lerobot.processor import (
-    AbsoluteActionsProcessorStep,
     AddBatchDimensionProcessorStep,
     DeviceProcessorStep,
     NormalizerProcessorStep,
@@ -32,7 +31,6 @@ from lerobot.processor import (
     PolicyProcessorPipeline,
     ProcessorStep,
     ProcessorStepRegistry,
-    RelativeActionsProcessorStep,
     RenameObservationsProcessorStep,
     TokenizerProcessorStep,
     UnnormalizerProcessorStep,
@@ -145,24 +143,13 @@ def make_pi05_pre_post_processors(
         A tuple containing the configured pre-processor and post-processor pipelines.
     """
 
-    relative_step = RelativeActionsProcessorStep(
-        enabled=config.use_relative_actions,
-        exclude_joints=getattr(config, "relative_exclude_joints", []),
-        action_names=getattr(config, "action_feature_names", None),
-        # Three ways to specify which dims are delta vs absolute (priority order):
-        #   1. relative_action_mask: explicit per-dim list (full control)
-        #   2. absolute_action_dims: list of indices to keep ABSOLUTE (user-friendly)
-        #   3. relative_joints_dim: int N → first N delta, rest absolute (single-arm)
-        relative_joints_dim=getattr(config, "relative_joints_dim", None),
-        relative_action_mask=getattr(config, "relative_action_mask", None),
-        absolute_action_dims=getattr(config, "absolute_action_dims", None),
-    )
-
-    # OpenPI order: raw → relative → normalize → model → unnormalize → absolute
+    # EasyTrainer: relative action 변환은 데이터 로더에서 직접 처리 (action_type=
+    # 'relative_joint_pos'면 chunk-anchored delta로 미리 인코딩). 따라서 런타임
+    # processor에 RelativeActionsProcessorStep / AbsoluteActionsProcessorStep
+    # 단계를 두지 않음. raw → normalize → model → unnormalize 순.
     input_steps: list[ProcessorStep] = [
         RenameObservationsProcessorStep(rename_map={}),  # To mimic the same processor as pretrained one
         AddBatchDimensionProcessorStep(),
-        relative_step,
         # NOTE: NormalizerProcessorStep MUST come before Pi05PrepareStateTokenizerProcessorStep
         # because the tokenizer step expects normalized state in [-1, 1] range for discretization
         NormalizerProcessorStep(
@@ -193,7 +180,6 @@ def make_pi05_pre_post_processors(
         UnnormalizerProcessorStep(
             features=config.output_features, norm_map=config.normalization_mapping, stats=dataset_stats
         ),
-        AbsoluteActionsProcessorStep(enabled=config.use_relative_actions, relative_step=relative_step),
         DeviceProcessorStep(device="cpu"),
     ]
 

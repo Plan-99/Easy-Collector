@@ -208,7 +208,41 @@ _ACTION_KEY_ALIASES = {
     'ee_delta_action': 'ee_delta',
     'ee_delta': 'ee_delta',
     'relative_ee_pos': 'relative_ee_pos',
+    # relative_joint_pos: action target = chunk-anchored delta from observation.qpos.
+    # Anchor 출처는 obs_state_keys와 독립적인 별도 채널 (parquet의 observation.qpos
+    # 컬럼). relative_ee_pos가 observation.eepos를 anchor로 쓰는 것과 대칭.
+    'relative_joint_pos': 'relative_joint_pos',
 }
+
+
+def _absolute_action_dims_from_features(action_names, has_succeed: bool):
+    """action.joint feature names + has_succeed 로부터 absolute dim 인덱스 자동 추출.
+
+    relative_joint_pos 모드에서 어떤 dim이 delta로 변환돼선 안 되는지 결정.
+    - 이름에 'gripper' 또는 'tool' 포함 → absolute (개폐 명령 / 도구 joint)
+    - has_succeed=True → action의 마지막 dim이 succeed/done flag → absolute
+
+    relative_ee_pos가 EE pose의 처음 6 dim을 transform하고 나머지(tool)는 그대로
+    두는 패턴과 같은 논리. user가 따로 설정할 필요 없음.
+
+    Args:
+        action_names: dataset features['action.joint']['names'] (list of str).
+                       Empty/None이면 빈 list 반환 (호출자가 fallback).
+        has_succeed: True면 action 마지막 dim이 succeed bit로 append됨.
+
+    Returns:
+        list of int — absolute로 유지할 action dim 인덱스.
+    """
+    if not action_names:
+        return []
+    abs_dims = []
+    for i, name in enumerate(action_names):
+        nl = (name or '').lower()
+        if 'gripper' in nl or 'tool' in nl:
+            abs_dims.append(i)
+    if has_succeed:
+        abs_dims.append(len(action_names))
+    return abs_dims
 
 
 def _normalize_action_key(action_key):
@@ -251,7 +285,10 @@ def _get_action_data(df, action_key):
     """
     norm = _normalize_action_key(action_key)
 
-    if norm == 'joint':
+    if norm in ('joint', 'relative_joint_pos'):
+        # relative_joint_pos: raw joint absolute을 그대로 반환. 호출자(get_norm_stats /
+        # EpisodicDataset)가 observation.qpos를 anchor로 받아 chunk-anchored delta로
+        # 후처리. relative_ee_pos 패턴과 대칭.
         col = 'action.joint' if 'action.joint' in df.columns else 'action'
         return np.array(df[col].tolist(), dtype=np.float32)
 
@@ -394,6 +431,18 @@ class EpisodicDataset(torch.utils.data.Dataset):
             np.array(df['observation.eepos'].tolist(), dtype=np.float32)
             if 'observation.eepos' in df.columns else None
         )
+        # qpos sequence — relative_joint_pos 학습에서 __getitem__ 이 chunk-anchored
+        # delta 계산에 직접 사용. obs_state_keys와 독립적인 별도 채널이라
+        # state_data와 별개로 보관. 옛 dataset 호환을 위해 observation.state도 fallback.
+        _qpos_col = 'observation.qpos' if 'observation.qpos' in df.columns else (
+            'observation.state' if 'observation.state' in df.columns else None
+        )
+        qpos_anchor_data = (
+            np.array(df[_qpos_col].tolist(), dtype=np.float32)
+            if _qpos_col else None
+        )
+        if qpos_anchor_data is not None and qpos_anchor_data.ndim == 1:
+            qpos_anchor_data = qpos_anchor_data.reshape(-1, 1)
 
         # Language instruction from episodes.jsonl (per-episode `tasks` list).
         # Use the first entry; most datasets have a single task per episode.
@@ -461,6 +510,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
             "state_data": state_data,
             "action_data": action_data,
             "eepos_data": eepos_data,
+            "qpos_anchor_data": qpos_anchor_data,
             "language_instruction": language_instruction,
             "image_data": image_data,
             "succeed": succeed,
@@ -543,6 +593,35 @@ class EpisodicDataset(torch.utils.data.Dataset):
                 padded_action[:action_len, :rel_traj.shape[1]] = rel_traj[:action_len]
             else:
                 padded_action[:action_len] = delta_to_relative_trajectory(action[:action_len])
+        elif _normalize_action_key(self.action_key) == 'relative_joint_pos':
+            # chunk-anchored joint delta: action[t in chunk] - qpos[chunk_start].
+            # anchor를 observation.qpos에서 직접 읽음 (obs_state_keys와 독립).
+            # absolute dims (gripper/tool/done)는 dataset features에서 자동 추출.
+            qpos_anchor_data = ep.get("qpos_anchor_data")
+            chunk_slice = action[:action_len]
+            if qpos_anchor_data is not None and len(qpos_anchor_data) > start_ts:
+                action_dim = chunk_slice.shape[1]
+                anchor_dim = qpos_anchor_data.shape[1]
+                _features = (self._dataset_info or {}).get('features', {})
+                _action_names = _features.get('action.joint', {}).get('names', [])
+                _has_succeed = action_dim > len(_action_names) and len(_action_names) > 0
+                _abs_dims = _absolute_action_dims_from_features(_action_names, _has_succeed)
+                if _abs_dims:
+                    effective_mask = [True] * action_dim
+                    for idx in _abs_dims:
+                        if 0 <= int(idx) < action_dim:
+                            effective_mask[int(idx)] = False
+                else:
+                    shared = min(anchor_dim, action_dim)
+                    effective_mask = [True] * shared + [False] * (action_dim - shared)
+                anchor_at_start = qpos_anchor_data[start_ts]
+                delta_chunk = chunk_slice.copy()
+                for i, is_delta in enumerate(effective_mask):
+                    if is_delta and i < anchor_dim:
+                        delta_chunk[:, i] = delta_chunk[:, i] - anchor_at_start[i]
+                padded_action[:action_len] = delta_chunk
+            else:
+                padded_action[:action_len] = chunk_slice
         else:
             padded_action[:action_len] = action
         is_pad = np.zeros(self.chunk_size)
@@ -631,18 +710,14 @@ def process_image(image, vision_backbone='resnet18', to_cuda=False, pixel_range=
     return image.cuda() if to_cuda else image
 
 
-def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None, use_relative_actions=False, relative_joints_dim=None, relative_action_mask=None, absolute_action_dims=None, chunk_size=50):
+def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None, chunk_size=50):
     """Compute normalization stats from LeRobot dataset parquet files.
 
-    When ``use_relative_actions=True`` the pipeline transforms action to
-    (action - state) for dimensions shared with state BEFORE normalization. Stats
-    must therefore be computed on those delta values, not raw absolute targets —
-    otherwise the normalizer divides tiny deltas by absolute-scale q99/q01 and the
-    training signal collapses (every normalized target ends up near a constant).
-
-    ``relative_joints_dim`` mirrors openpi's ``make_bool_mask(N, -1)`` — when set,
-    only the first N dims are converted to delta. For a 6-DOF arm + gripper + done
-    token, use relative_joints_dim=6 (gripper and done stay absolute).
+    For ``action_key='relative_joint_pos'`` the action is overwritten with the
+    chunk-anchored delta from observation.qpos before stats are accumulated —
+    same idea as relative_ee_pos but in joint space. Absolute dims (gripper /
+    tool / done) are auto-detected from action feature names + has_succeed via
+    ``_absolute_action_dims_from_features``.
     """
     if obs_state_keys is None:
         obs_state_keys = ['qpos']
@@ -712,8 +787,6 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
         if _normalize_action_key(action_key) == 'relative_ee_pos' or (use_relative_trajectory and _normalize_action_key(action_key) == 'ee_delta'):
             # eepos 있으면 DexUMI 스타일 — 매 frame 을 chunk 시작점으로 보고 그
             # 시점부터 chunk_size step 의 trajectory in local frame 으로 stats 누적.
-            # action 변수를 chunk-flattened 로 갈아끼우면 뒤의 use_relative_actions
-            # 분기가 깨지므로, stats 계산 전용 별도 변수로 처리.
             if 'observation.eepos' in df.columns:
                 eepos_arr = np.array(df['observation.eepos'].tolist(), dtype=np.float32)
                 T_total = len(eepos_arr)
@@ -727,63 +800,47 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
                             eepos_arr[future_idx], eepos_arr[start]
                         ))
                     action = np.concatenate(rel_chunks, axis=0)
-                    # relative_ee_pos 는 PI05+use_relative_actions 와 결합 안 함
-                    # (PI05 의 joint-relative 모드는 qaction 기반). use_relative_actions
-                    # 분기를 건너뛰도록 강제로 False 설정.
-                    use_relative_actions = False
                 else:
                     action = delta_to_relative_trajectory(action)
             else:
                 action = delta_to_relative_trajectory(action)
 
-        # use_relative_actions: stats MUST match what RelativeActionsProcessorStep
-        # actually produces during training/inference, not naive per-timestep deltas.
-        # The pipeline does:
-        #     delta[t in chunk] = action[t] - state[chunk_start]   (single state, all T)
-        # NOT:
-        #     delta[t] = action[t] - state[t]                      (per-step, tiny)
-        # The chunk-wise delta accumulates over the chunk → magnitudes 10-50× larger
-        # than per-step deltas. Computing stats with per-step deltas underestimates
-        # q99-q01, normalization explodes target values to [-99, 99], gradients break,
-        # loss never decreases. THIS WAS THE "loss won't go down with delta mode" bug.
-        if use_relative_actions:
-            episode_len = action.shape[0]
-            state_dim = qpos.shape[1]
-            action_dim = action.shape[1]
+        # relative_joint_pos: obs_state_keys와 독립. observation.qpos 컬럼을 직접
+        # anchor로 사용. relative_ee_pos가 observation.eepos를 직접 anchor로 쓰는
+        # 패턴과 대칭. action target = chunk-anchored delta from qpos[chunk_start].
+        if _normalize_action_key(action_key) == 'relative_joint_pos':
+            _qpos_col = 'observation.qpos' if 'observation.qpos' in df.columns else 'observation.state'
+            if _qpos_col in df.columns:
+                anchor_arr = np.array(df[_qpos_col].tolist(), dtype=np.float32)
+                if anchor_arr.ndim == 1:
+                    anchor_arr = anchor_arr.reshape(-1, 1)
+                T_total = action.shape[0]
+                action_dim = action.shape[1]
+                anchor_dim = anchor_arr.shape[1]
+                # absolute_action_dims는 dataset features의 action.joint names + has_succeed
+                # 로부터 자동 계산. gripper / tool / done dim은 절대 유지.
+                _action_names = (dataset_info or {}).get('features', {}).get('action.joint', {}).get('names', [])
+                _abs_dims = _absolute_action_dims_from_features(_action_names, any_has_succeed)
+                if _abs_dims:
+                    effective_mask = [True] * action_dim
+                    for idx in _abs_dims:
+                        if 0 <= int(idx) < action_dim:
+                            effective_mask[int(idx)] = False
+                else:
+                    shared = min(anchor_dim, action_dim)
+                    effective_mask = [True] * shared + [False] * (action_dim - shared)
 
-            # Build effective mask once. Truthy checks so default empty list / 0 falls through.
-            if relative_action_mask:
-                m = list(relative_action_mask)
-                m = m + [False] * (action_dim - len(m)) if len(m) < action_dim else m[:action_dim]
-                effective_mask = [bool(x) for x in m]
-            elif absolute_action_dims:
-                effective_mask = [True] * action_dim
-                for idx in absolute_action_dims:
-                    if 0 <= int(idx) < action_dim:
-                        effective_mask[int(idx)] = False
-            elif relative_joints_dim and relative_joints_dim > 0:
-                n = min(relative_joints_dim, action_dim)
-                effective_mask = [True] * n + [False] * (action_dim - n)
-            else:
-                shared = min(state_dim, action_dim)
-                effective_mask = [True] * shared + [False] * (action_dim - shared)
-
-            # Sample chunk-wise deltas: for every valid chunk start in the episode,
-            # compute (action[start:start+chunk_size] - state[start]) for delta dims.
-            # Concatenate all such chunks → matches the distribution the pipeline produces.
-            delta_chunks = []
-            cs = max(1, int(chunk_size))
-            for start in range(episode_len):
-                end = min(start + cs, episode_len)
-                chunk = action[start:end].copy()  # (T, action_dim)
-                state_at_start = qpos[start]      # (state_dim,)
-                for i, is_delta in enumerate(effective_mask):
-                    if is_delta and i < state_dim:
-                        chunk[:, i] = chunk[:, i] - state_at_start[i]
-                delta_chunks.append(chunk)
-            # Replace `action` with concatenated chunk-deltas so downstream stats
-            # (min/max/mean/std/q01/q99) are computed on the right distribution.
-            action = np.concatenate(delta_chunks, axis=0) if delta_chunks else action
+                rel_chunks = []
+                cs = max(1, int(chunk_size))
+                for start in range(T_total):
+                    end = min(start + cs, T_total)
+                    _chunk = action[start:end].copy()
+                    anchor_at_start = anchor_arr[start]
+                    for i, is_delta in enumerate(effective_mask):
+                        if is_delta and i < anchor_dim:
+                            _chunk[:, i] = _chunk[:, i] - anchor_at_start[i]
+                    rel_chunks.append(_chunk)
+                action = np.concatenate(rel_chunks, axis=0) if rel_chunks else action
 
         # Collect image keys from parquet columns
         for col in df.columns:
@@ -963,6 +1020,35 @@ class FullScanDataset(EpisodicDataset):
                 padded_action[:action_len, :rel_traj.shape[1]] = rel_traj[:action_len]
             else:
                 padded_action[:action_len] = delta_to_relative_trajectory(action[:action_len])
+        elif _normalize_action_key(self.action_key) == 'relative_joint_pos':
+            # chunk-anchored joint delta: action[t in chunk] - qpos[chunk_start].
+            # anchor를 observation.qpos에서 직접 읽음 (obs_state_keys와 독립).
+            # absolute dims (gripper/tool/done)는 dataset features에서 자동 추출.
+            qpos_anchor_data = ep.get("qpos_anchor_data")
+            chunk_slice = action[:action_len]
+            if qpos_anchor_data is not None and len(qpos_anchor_data) > start_ts:
+                action_dim = chunk_slice.shape[1]
+                anchor_dim = qpos_anchor_data.shape[1]
+                _features = (self._dataset_info or {}).get('features', {})
+                _action_names = _features.get('action.joint', {}).get('names', [])
+                _has_succeed = action_dim > len(_action_names) and len(_action_names) > 0
+                _abs_dims = _absolute_action_dims_from_features(_action_names, _has_succeed)
+                if _abs_dims:
+                    effective_mask = [True] * action_dim
+                    for idx in _abs_dims:
+                        if 0 <= int(idx) < action_dim:
+                            effective_mask[int(idx)] = False
+                else:
+                    shared = min(anchor_dim, action_dim)
+                    effective_mask = [True] * shared + [False] * (action_dim - shared)
+                anchor_at_start = qpos_anchor_data[start_ts]
+                delta_chunk = chunk_slice.copy()
+                for i, is_delta in enumerate(effective_mask):
+                    if is_delta and i < anchor_dim:
+                        delta_chunk[:, i] = delta_chunk[:, i] - anchor_at_start[i]
+                padded_action[:action_len] = delta_chunk
+            else:
+                padded_action[:action_len] = chunk_slice
         else:
             padded_action[:action_len] = action
         is_pad = np.zeros(self.chunk_size)
@@ -1022,7 +1108,7 @@ class FullScanDataset(EpisodicDataset):
         return item
 
 
-def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_train, batch_size_val, chunk_size, vision_backbone='resnet18', num_workers=1, n_obs_steps=1, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None, use_relative_actions=False, relative_joints_dim=None, relative_action_mask=None, absolute_action_dims=None, wrist_sensor_ids=None):
+def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_train, batch_size_val, chunk_size, vision_backbone='resnet18', num_workers=1, n_obs_steps=1, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None, wrist_sensor_ids=None):
     if obs_state_keys is None:
         obs_state_keys = ['qpos']
     print(f'\nData from: {dataset_dir}\n')
@@ -1035,7 +1121,7 @@ def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_tra
     val_indices = shuffled_indices[split:] if split < num_episodes else shuffled_indices
 
     # obtain normalization stats for qpos and action
-    norm_stats, skipped_episodes = get_norm_stats(dataset_dir, num_episodes, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys, use_relative_actions=use_relative_actions, relative_joints_dim=relative_joints_dim, relative_action_mask=relative_action_mask, absolute_action_dims=absolute_action_dims, chunk_size=chunk_size)
+    norm_stats, skipped_episodes = get_norm_stats(dataset_dir, num_episodes, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys, chunk_size=chunk_size)
 
     # 호환 불가능한 에피소드 제외
     if skipped_episodes:
@@ -1340,27 +1426,6 @@ def make_easytrainer_processors(policy_type, cfg, dataset_stats=None, pretrained
                 to_transition=policy_action_to_transition,
                 to_output=transition_to_policy_action,
             )
-            # Re-wire the relative↔absolute pair after deserialization. AbsoluteActionsProcessorStep's
-            # get_config only persists `enabled` (not relative_step, which is a live cross-pipeline
-            # reference), so a freshly loaded postprocessor has relative_step=None and would either
-            # crash (use_relative_actions=True) or silently skip delta→absolute conversion.
-            # Find the RelativeActionsProcessorStep inside the preprocessor and rebind it.
-            try:
-                from lerobot.processor.relative_action_processor import (
-                    RelativeActionsProcessorStep,
-                    AbsoluteActionsProcessorStep,
-                )
-                _rel_step = None
-                for s in getattr(preprocessor, 'steps', []):
-                    if isinstance(s, RelativeActionsProcessorStep):
-                        _rel_step = s
-                        break
-                if _rel_step is not None:
-                    for s in getattr(postprocessor, 'steps', []):
-                        if isinstance(s, AbsoluteActionsProcessorStep):
-                            s.relative_step = _rel_step
-            except Exception as _wire_err:
-                print(f'[WARN] Could not rewire AbsoluteActionsProcessorStep.relative_step: {_wire_err}')
             return preprocessor, postprocessor
         except Exception as e:
             print(f'[WARN] make_easytrainer_processors: failed to load processors from '
