@@ -125,16 +125,18 @@ class JointValues(_message.Message):
     def __init__(self, values: _Optional[_Iterable[float]] = ...) -> None: ...
 
 class MoveJointRequest(_message.Message):
-    __slots__ = ("agent_id", "action", "from_ee", "velocity_arg")
+    __slots__ = ("agent_id", "action", "from_ee", "velocity_arg", "t_absolute")
     AGENT_ID_FIELD_NUMBER: _ClassVar[int]
     ACTION_FIELD_NUMBER: _ClassVar[int]
     FROM_EE_FIELD_NUMBER: _ClassVar[int]
     VELOCITY_ARG_FIELD_NUMBER: _ClassVar[int]
+    T_ABSOLUTE_FIELD_NUMBER: _ClassVar[int]
     agent_id: int
     action: _containers.RepeatedScalarFieldContainer[float]
     from_ee: bool
     velocity_arg: float
-    def __init__(self, agent_id: _Optional[int] = ..., action: _Optional[_Iterable[float]] = ..., from_ee: bool = ..., velocity_arg: _Optional[float] = ...) -> None: ...
+    t_absolute: float
+    def __init__(self, agent_id: _Optional[int] = ..., action: _Optional[_Iterable[float]] = ..., from_ee: bool = ..., velocity_arg: _Optional[float] = ..., t_absolute: _Optional[float] = ...) -> None: ...
 
 class MoveEERequest(_message.Message):
     __slots__ = ("agent_id", "target_ee_json", "velocity_arg")
@@ -147,16 +149,18 @@ class MoveEERequest(_message.Message):
     def __init__(self, agent_id: _Optional[int] = ..., target_ee_json: _Optional[str] = ..., velocity_arg: _Optional[float] = ...) -> None: ...
 
 class MoveEEDeltaRequest(_message.Message):
-    __slots__ = ("agent_id", "delta_ee_json", "velocity_arg", "tool_positions_json")
+    __slots__ = ("agent_id", "delta_ee_json", "velocity_arg", "tool_positions_json", "t_absolute")
     AGENT_ID_FIELD_NUMBER: _ClassVar[int]
     DELTA_EE_JSON_FIELD_NUMBER: _ClassVar[int]
     VELOCITY_ARG_FIELD_NUMBER: _ClassVar[int]
     TOOL_POSITIONS_JSON_FIELD_NUMBER: _ClassVar[int]
+    T_ABSOLUTE_FIELD_NUMBER: _ClassVar[int]
     agent_id: int
     delta_ee_json: str
     velocity_arg: float
     tool_positions_json: str
-    def __init__(self, agent_id: _Optional[int] = ..., delta_ee_json: _Optional[str] = ..., velocity_arg: _Optional[float] = ..., tool_positions_json: _Optional[str] = ...) -> None: ...
+    t_absolute: float
+    def __init__(self, agent_id: _Optional[int] = ..., delta_ee_json: _Optional[str] = ..., velocity_arg: _Optional[float] = ..., tool_positions_json: _Optional[str] = ..., t_absolute: _Optional[float] = ...) -> None: ...
 
 class MoveToRequest(_message.Message):
     __slots__ = ("agent_id", "target_pos", "step_size", "duration", "hz")

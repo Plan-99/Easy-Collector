@@ -57,7 +57,12 @@ class AgentServiceServicer(pb_grpc.AgentServiceServicer):
         if agent is None:
             return pb.StatusResponse(success=False, message='Agent not found')
         vel = request.velocity_arg if request.HasField('velocity_arg') else None
-        agent.move_joint_step(list(request.action), from_ee=request.from_ee, velocity_arg=vel)
+        # t_absolute > 0 → scheduled waypoint, 0/unset → immediate.
+        t_abs = request.t_absolute if request.HasField('t_absolute') else 0.0
+        if t_abs > 0:
+            agent.move_to_joints_at(list(request.action), t_abs, velocity_arg=vel)
+        else:
+            agent.move_joint_step(list(request.action), from_ee=request.from_ee, velocity_arg=vel)
         return pb.StatusResponse(success=True, message='OK')
 
     def MoveJointDeltaStep(self, request, context):
@@ -83,7 +88,13 @@ class AgentServiceServicer(pb_grpc.AgentServiceServicer):
         delta_ee = json.loads(request.delta_ee_json)
         vel = request.velocity_arg if request.HasField('velocity_arg') else None
         tool_positions = json.loads(request.tool_positions_json) if request.tool_positions_json else None
-        agent.move_ee_delta_step(delta_ee, vel_arg=vel, tool_positions=tool_positions)
+        # t_absolute > 0 면 DexUMI-style scheduled waypoint (큐에 push). 0/unset 이면
+        # legacy 즉시 명령 (move_ee_delta_step).
+        t_abs = request.t_absolute if request.HasField('t_absolute') else 0.0
+        if t_abs > 0:
+            agent.move_ee_delta_step_at(delta_ee, t_abs, tool_positions=tool_positions)
+        else:
+            agent.move_ee_delta_step(delta_ee, vel_arg=vel, tool_positions=tool_positions)
         return pb.StatusResponse(success=True, message='OK')
 
     def MoveTo(self, request, context):

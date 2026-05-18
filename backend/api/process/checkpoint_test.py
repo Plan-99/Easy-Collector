@@ -103,11 +103,38 @@ def checkpoint_test(
     inference_episode_len=None,  # planner feature: inference 시 별도 episode_len 지정
     preloaded=None,
     go_home_first=True,
+    action_hz=None,       # 로봇 명령 송신 rate. 미지정 시 hz 와 동일 (back-compat).
+    inference_hz=None,    # 모델 inference 호출 rate. 미지정 시 action_hz / re_inference_steps.
     ):
 
     agents = sorted(agents, key=lambda a: a.id)
     oti_rl = False
     move_reward = 1.0
+
+    # action_hz / inference_hz 정규화.
+    # - hz (legacy) 는 두 값의 fallback. 명시 안 한 경우 모두 동일하게 설정 → 기존 동작.
+    # - inference_hz 미지정 + re_inference_steps>1 이면 action_hz / re_inference_steps
+    #   (예: action_hz=10, re_inference_steps=8 → inference_hz≈1.25 = 한 chunk 다 쓰고 재추론).
+    # 분리값을 지정하면 action thread 는 매 1/action_hz 마다 한 step 진행, inference
+    # 는 1/inference_hz 마다만 호출됨 (느린 모델 latency 흡수).
+    if action_hz is None:
+        action_hz = float(hz)
+    else:
+        action_hz = float(action_hz)
+    if inference_hz is None:
+        # back-compat: re_inference_steps 가 inference 간격을 step 단위로 표현.
+        _ris = max(1, int(re_inference_steps))
+        inference_hz = action_hz / _ris
+    else:
+        inference_hz = float(inference_hz)
+    action_dt = 1.0 / action_hz
+    inference_dt = 1.0 / inference_hz
+    print(
+        f'[INFER] action_hz={action_hz:.2f} (dt={action_dt*1000:.0f}ms), '
+        f'inference_hz={inference_hz:.2f} (dt={inference_dt*1000:.0f}ms), '
+        f're_inference_steps={re_inference_steps}',
+        flush=True,
+    )
 
     # --- 1. 초기 설정 ---
     try:
@@ -137,6 +164,23 @@ def checkpoint_test(
         # 에서 state 가 빈 텐서로 들어가 normalize 에서 dim mismatch.)
         obs_state_keys = _obs_keys if _obs_keys else ['qpos']
         use_relative_trajectory = checkpoint.get('train_settings', {}).get('use_relative_trajectory', False)
+
+        # Scheduled-waypoint 모드: DexUMI 스타일 absolute-time waypoint scheduling.
+        # 모든 action_key 에 대해 기본 활성화 — 매 명령을 (target, t_start + dt) 로
+        # ec_joint_waypoint 큐에 push, interpolation_node 가 200Hz 로 보간해 출력.
+        # frame dt 와 추론 hz 가 어긋나도 robot 이 학습 분포를 그대로 traverse,
+        # inference jitter 에 강함. 비상시 OFF: 환경변수 EC_SCHEDULED_WAYPOINTS=0
+        import os as _os
+        use_scheduled_waypoints = (
+            _os.environ.get('EC_SCHEDULED_WAYPOINTS', '').lower() not in ('0', 'false', 'no')
+        )
+        if use_scheduled_waypoints:
+            print(f'[INFER] Scheduled-waypoint mode (action_key={action_key_norm}, target = t_start + {action_dt:.3f}s)', flush=True)
+        else:
+            print('[INFER] Scheduled-waypoint mode DISABLED via EC_SCHEDULED_WAYPOINTS=0', flush=True)
+        # NOTE: use_relative_actions 플래그는 upstream 에서 action_key_norm ==
+        # 'relative_joint_pos' 로 대체됨 (commit 2881984). 아래 PI05 chunk-state
+        # 매핑 분기도 그 기준으로 통일.
         has_succeed = checkpoint.get('train_settings', {}).get('has_succeed', False)
 
         # Either reuse a CPU-resident model from the planner prefetch cache, or
@@ -400,6 +444,128 @@ def checkpoint_test(
         # 해당 — ee_delta/relative_ee_pos 는 본질적으로 delta 라 첫 cmd 가 작음.
         first_step = True
         first_step_duration = 0.3
+        # 시간 기반 inference cadence: 마지막 inference 시각 추적. 두 큐(rel_action_queue,
+        # pi05_chunk_queue) path 모두 (1) 큐가 비었거나 (2) inference_dt 가 지났으면
+        # 재추론. 후자가 발동되면 queue 의 잔여 chunk 는 폐기되고 새 chunk 로 교체.
+        last_inference_time = 0.0
+
+        # Background inference (relative_ee_pos 전용): 모델 forward 가 action loop 를
+        # block 하지 않도록 별도 thread 에서 실행. 결과는 매 iter 시작에 polling 으로
+        # 수거해 rel_action_queue 를 갱신. 큐가 비어 있고 inference 도 아직 안 끝났으면
+        # 그 iter 는 action skip (cold start / inference 늦을 때만 발생).
+        # PI05 use_relative_actions 및 일반 ACT online 경로는 기존대로 synchronous 유지
+        # (변경 폭 최소화).
+        inference_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='infer')
+        _inference_future = None
+
+        # 아래 nested function 은 closure 로 env, policy, preprocessor, postprocessor,
+        # agents, sensors, task, policy_obj, language_instruction, obs_state_keys,
+        # vision_backbone, action_key_norm, use_relative_trajectory 를 캡쳐. 호출 시
+        # obs_snap (ts.observation 스냅샷) 만 인자로 전달.
+        def _do_rel_ee_inference(obs_snap):
+            """relative_ee_pos chunk 한 번 추론 — worker thread 에서 실행.
+
+            obs_snap: dict-like observation snapshot (immutable read).
+                      agent.get_joint_vel/effort/get_ee_position/get_joint_states 는
+                      gRPC 호출이라 thread 에서 안전 (호출 시점의 fresh 값 가져옴).
+            Returns: deltas np.ndarray (chunk_size, action_dim).
+            """
+            with torch.no_grad():
+                if use_relative_trajectory and action_key_norm == 'ee_delta':
+                    policy.reset()
+                # obs_state_keys 순서대로 state vector 조립 (학습 _build_obs_state 와 동일).
+                _parts = []
+                for _key in obs_state_keys:
+                    if _key == 'qpos':
+                        _parts.append(np.concatenate(
+                            [np.array(item['qpos'], dtype=np.float32)
+                             for item in obs_snap['robot_states'].values()]
+                        ))
+                    elif _key == 'qvel':
+                        _parts.append(np.concatenate(
+                            [np.array(_a.get_joint_vel(), dtype=np.float32)
+                             for _a in env.agents]
+                        ))
+                    elif _key == 'qeffort':
+                        _parts.append(np.concatenate(
+                            [np.array(_a.get_joint_effort(), dtype=np.float32)
+                             for _a in env.agents]
+                        ))
+                    elif _key == 'eepos':
+                        _ee_parts = []
+                        for _a in env.agents:
+                            if _a.role == 'tool' or _a.ik_solver is None:
+                                continue
+                            _ee_dict = _a.get_ee_position() or {}
+                            for _ee_name in sorted(_a.ee_names or []):
+                                _vals = _ee_dict.get(_ee_name)
+                                if _vals:
+                                    _ee_parts.append(np.array(_vals, dtype=np.float32))
+                        for _a in env.agents:
+                            if _a.role == 'tool' and _a.ik_solver is None:
+                                _ee_parts.append(np.array(_a.get_joint_states() or [], dtype=np.float32))
+                        if _ee_parts:
+                            _parts.append(np.concatenate(_ee_parts))
+                _qpos_np = np.concatenate(_parts) if _parts else np.zeros(0, dtype=np.float32)
+                _qpos_t = torch.from_numpy(_qpos_np).float().cuda().unsqueeze(0)
+                _policy_input = {'observation.state': _qpos_t}
+                if policy_obj['type'] == 'PI05':
+                    _lang = language_instruction if (language_instruction and str(language_instruction).strip()) else task.get('name', '')
+                    _policy_input['language_instruction'] = _lang
+                for _sensor in sensors:
+                    _img = obs_snap['images'][f'sensor_{_sensor["id"]}']
+                    _sid = str(_sensor['id'])
+                    _img = fetch_image_with_config(_img, {
+                        'sensor_id': _sid,
+                        'sam3': (task.get('sensor_sam3') or {}).get(_sid),
+                        'resize': task['sensor_img_size'][_sid],
+                        'cropped_area': task['sensor_cropped_area'][_sid],
+                        'rotate': task['sensor_rotate'][_sid],
+                    })
+                    if hasattr(_img, 'ndim') and _img.ndim == 3 and _img.shape[2] == 3:
+                        _img = _img[:, :, ::-1]
+                        _img = np.ascontiguousarray(_img)
+                    _pixel_range = '-11' if policy_obj['type'] == 'PI05' else '01'
+                    _img = process_image(_img, vision_backbone, to_cuda=True, pixel_range=_pixel_range)
+                    _policy_input[f'observation.images.sensor_{_sensor["id"]}'] = _img.unsqueeze(0)
+
+                if preprocessor is not None:
+                    if policy_obj['type'] == 'PI05' and 'task' not in _policy_input:
+                        _lang = _policy_input.get('language_instruction') or task.get('name', '')
+                        if isinstance(_lang, str):
+                            _lang = [_lang]
+                        _policy_input['task'] = _lang
+                    _policy_input = preprocessor(_policy_input)
+
+                policy.reset()
+                if hasattr(policy, 'predict_action_chunk'):
+                    _raw_actions = policy.predict_action_chunk(_policy_input).squeeze(0)
+                else:
+                    _raw_list = []
+                    _first = policy.select_action(_policy_input).squeeze(0)
+                    _raw_list.append(_first)
+                    while len(policy._action_queue if hasattr(policy, '_action_queue') else policy._queues.get('action', [])) > 0:
+                        _q = policy._action_queue if hasattr(policy, '_action_queue') else policy._queues['action']
+                        _raw_list.append(_q.popleft().squeeze(0))
+                    _raw_actions = torch.stack(_raw_list)
+
+                if postprocessor is not None:
+                    _raw_actions = postprocessor(_raw_actions)
+                _raw_np = _raw_actions.cpu().numpy()
+
+                # Current EE pose — inference 시점의 fresh 값 (agents 통해 RPC).
+                _curr_eepos_local = None
+                for _a in env.agents:
+                    if _a.role == 'tool' or _a.ik_solver is None:
+                        continue
+                    _ee_dict = _a.get_ee_position() or {}
+                    _ee_name = _a.ee_names[0] if _a.ee_names else None
+                    if _ee_name and _ee_name in _ee_dict:
+                        _curr_eepos_local = np.array(_ee_dict[_ee_name], dtype=np.float32)
+                        break
+                _deltas_local = relative_trajectory_to_delta(_raw_np, current_eepos=_curr_eepos_local)
+                return _deltas_local
+
         start = time.time()
         while not task_control['stop']:
             if step_num % episode_len == 0 and step_num != 0 and move_homepose:
@@ -440,14 +606,78 @@ def checkpoint_test(
             # === a. 현재 상태(state_t) 계산 ===
             obs_t = ts.observation
 
-            # relative_ee_pos: queue에 남은 delta가 있으면 추론 없이 꺼내 씀
-            if action_key_norm == 'relative_ee_pos' and len(rel_action_queue) > 0:
-                state_t = rel_action_queue.popleft()
+            # Background inference 결과 수거 — non-blocking. 완료된 future 가 있으면
+            # rel_action_queue 를 새 chunk 로 교체.
+            #
+            # Chunk boundary smoothing (option 1: bridge anchor):
+            # 단순 clear+append 하면 robot 이 old chunk 의 다음 waypoint 방향으로
+            # 가속 중인데 target 이 new chunk 의 첫 waypoint 로 점프해서 미세 진동.
+            # → 기존 큐의 첫 점(= 곧 pop 될 다음 waypoint) 을 anchor 로 prepend 해서
+            #   첫 step 은 old motion 자연 연장, 두 번째 step 부터 new chunk 사용.
+            #   velocity 점프 제거, trajectory 만 부드럽게 휨.
+            if _inference_future is not None and _inference_future.done():
+                try:
+                    _new_deltas = _inference_future.result()
+                    _bridge_anchor = None
+                    if len(rel_action_queue) > 0:
+                        _bridge_anchor = np.asarray(rel_action_queue[0]).copy()
+                    rel_action_queue.clear()
+                    if _bridge_anchor is not None and len(_new_deltas) > 0:
+                        # 1 step 은 anchor (= old chunk 의 다음 점)
+                        rel_action_queue.append(_bridge_anchor)
+                        # 나머지는 new chunk 의 2번째 이후 (첫 점은 anchor 가 대체)
+                        for _d in _new_deltas[1:]:
+                            rel_action_queue.append(_d)
+                        print(
+                            f'[INFER thread] chunk ready (smoothed), '
+                            f'queue refilled to {len(rel_action_queue)} '
+                            f'(1 anchor + {len(_new_deltas)-1} new)',
+                            flush=True,
+                        )
+                    else:
+                        # 큐가 비어 있던 경우 — anchor 없이 그대로 채움 (cold start)
+                        for _d in _new_deltas:
+                            rel_action_queue.append(_d)
+                        print(
+                            f'[INFER thread] chunk ready (no anchor, cold start), '
+                            f'queue refilled to {len(rel_action_queue)}',
+                            flush=True,
+                        )
+                except Exception as _ex:
+                    print(f'[INFER thread] error: {_ex}', flush=True)
+                _inference_future = None
+
+            # 시간 기반 inference 게이트.
+            _t_now_for_gate = time.time()
+            _inference_due = (_t_now_for_gate - last_inference_time) >= inference_dt
+
+            # relative_ee_pos: 백그라운드 inference 사용. due + idle 면 새 task 제출,
+            # 그 외에는 queue 에서 pop. queue 비고 inference 도 안 끝났으면 action skip.
+            if action_key_norm == 'relative_ee_pos':
+                if _inference_due and _inference_future is None:
+                    last_inference_time = _t_now_for_gate
+                    _inference_future = inference_executor.submit(_do_rel_ee_inference, obs_t)
+                if len(rel_action_queue) > 0:
+                    state_t = rel_action_queue.popleft()
+                else:
+                    # Queue 비어 있음 — cold start 또는 inference 가 inference_dt 안에
+                    # 못 끝난 경우. 짧게 대기 후 다음 iter 에서 다시 체크.
+                    time.sleep(min(action_dt, 0.02))
+                    continue
             # PI05 + relative_joint_pos: 같은 chunk의 나머지 absolute joint targets
             # 사용 (chunk-inference 시점의 qpos로 이미 더해진 상태). 재추론 없이 pop.
-            elif policy_obj['type'] == 'PI05' and action_key_norm == 'relative_joint_pos' and len(pi05_chunk_queue) > 0:
+            # (upstream 의 'relative_joint_pos' action_key 분기 + stashed 의 시간-게이트
+            # 통합 — 둘 조건 모두 만족할 때만 큐 재사용.)
+            elif (policy_obj['type'] == 'PI05'
+                  and action_key_norm == 'relative_joint_pos'
+                  and len(pi05_chunk_queue) > 0
+                  and not _inference_due):
                 state_t = pi05_chunk_queue.popleft()
             else:
+                # 재추론 전에 잔여 큐 폐기 (새 chunk 가 곧 덮어씀).
+                rel_action_queue.clear()
+                pi05_chunk_queue.clear()
+                last_inference_time = _t_now_for_gate
                 with torch.no_grad():
                     # UMI relative trajectory: 매 step마다 현재 EE pose 기준으로 재예측.
                     # temporal ensemble이 다른 기준 frame의 waypoint를 섞지 않도록 policy를 reset.
@@ -770,6 +1000,14 @@ def checkpoint_test(
             else:
                 ordered_agents = list(env.agents)
 
+            # Scheduled-waypoint target time = 이 step 이 도달해야 하는 시각.
+            # 학습 시 frame 간격이 1/hz 라고 보고, 현재 iteration 시작(start) 으로
+            # 부터 1/hz 후 도달이 학습 분포와 정합. inference 가 dt 보다 오래
+            # 걸려도 robot 은 큐의 미래 waypoint 따라 계속 진행.
+            # action_key_norm 이 relative_ee_pos / ee_delta 면 항상 scheduled 사용,
+            # joint 모드는 _t_target_for_step = None 으로 즉시 명령 fallback.
+            _t_target_for_step = start + action_dt if use_scheduled_waypoints else None
+
             for agent in ordered_agents:
                 if action_key_norm in ('ee_delta', 'relative_ee_pos') and agent.role != 'tool' and agent.ik_solver is not None:
                     ee_delta_dim = len(agent.ee_names) * 6
@@ -785,7 +1023,11 @@ def checkpoint_test(
                     }
 
                     tool_positions = agent_action[ee_delta_dim:].tolist() if tool_dim > 0 else None
-                    thread_pool.submit(agent.move_ee_delta_step, ee_delta_dict, None, tool_positions)
+                    # 이 분기는 ee_delta/relative_ee_pos 만 → use_scheduled_waypoints 항상 True.
+                    thread_pool.submit(
+                        agent.move_ee_delta_step_at,
+                        ee_delta_dict, _t_target_for_step, tool_positions,
+                    )
                     start_action_id += total_dim
                 else:
                     target_qpos = final_action[start_action_id : start_action_id + agent.joint_len]
@@ -794,6 +1036,9 @@ def checkpoint_test(
                         # SDK 자체 velocity profile 이라 그대로 step.
                         target_list = target_qpos.tolist() if hasattr(target_qpos, 'tolist') else list(target_qpos)
                         agent.move_to(target_list, duration=first_step_duration)
+                    elif use_scheduled_waypoints:
+                        target_list = target_qpos.tolist() if hasattr(target_qpos, 'tolist') else list(target_qpos)
+                        thread_pool.submit(agent.move_to_joints_at, target_list, _t_target_for_step)
                     else:
                         thread_pool.submit(agent.move_joint_step, target_qpos)
                     start_action_id += agent.joint_len
@@ -874,7 +1119,7 @@ def checkpoint_test(
 
                 episode_reward += reward_t
 
-            time.sleep(max(0, (1.0 / hz) - (time.time() - start)))  # Loop at specified Hz
+            time.sleep(max(0, action_dt - (time.time() - start)))  # Loop at action_hz
             print(f"Time: -------------------{time.time() - start}" )
             start = time.time()
             step_num += 1

@@ -16,12 +16,15 @@ Usage (standalone):
 Usage (as subprocess):
     driver_service.py에서 드라이버와 함께 자동 실행됨.
 """
+import threading
 import time
 import numpy as np
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
+
+from ros2_bridge.joint_trajectory_interpolator import JointTrajectoryInterpolator
 
 
 class JointInterpolationNode(Node):
@@ -50,12 +53,22 @@ class JointInterpolationNode(Node):
         self.declare_parameter('sdk_ip_address', '')         # SDK IP (Fairino 등 ethernet 로봇)
         self.declare_parameter('sdk_serial_port', '')        # SDK serial 포트 (Robotiq 등 USB/RS485)
         self.declare_parameter('read_topic', 'interpolated_joint_cmd')  # SDK 모드: 상태 퍼블리시 토픽
+        # Output LPF (option 3 — chunk boundary 안전망).
+        # 매 publish 직전 1차 IIR low-pass: out = α * target + (1-α) * prev_out.
+        # α=1.0 → 무필터 (기존 동작). α=0.5 → 강한 smoothing.
+        # 200Hz timer 기준 α≈0.6 이면 ~30Hz cutoff. jerk 가 부드러워지지만 tracking
+        # lag 10-15ms 추가. Direct cmd / 신호 정리 시 자동 reset 으로 lag 누적 방지.
+        self.declare_parameter('output_lpf_alpha', 0.5)
 
         self.publish_rate = self.get_parameter('publish_rate').value
         self.output_topic = self.get_parameter('output_topic').value
         self.output_msg_type = self.get_parameter('output_msg_type').value
         self.control_mode = self.get_parameter('control_mode').value
         self._dt = 1.0 / self.publish_rate
+        self._lpf_alpha = float(self.get_parameter('output_lpf_alpha').value)
+        if not (0.0 < self._lpf_alpha <= 1.0):
+            self._lpf_alpha = 1.0  # 안전: 잘못된 값이면 무필터
+        self._lpf_state = None  # filtered position (np.ndarray). None 이면 첫 cmd 로 초기화.
 
         # State
         self._current_pos = None
@@ -73,13 +86,26 @@ class JointInterpolationNode(Node):
         # SDK 컨트롤러
         self._sdk_controller = None
 
-        # ROS2 sub (공통: ec_joint_cmd 수신)
+        # 스케줄 waypoint 큐 (DexUMI 스타일).
+        # ec_joint_waypoint 토픽으로 (target_joints, header.stamp=t_absolute) 수신.
+        # 큐가 비어있지 않으면 timer 가 큐 보간을 우선 사용하고, 비면 legacy linear
+        # interp (ec_joint_cmd 경로) fallback.
+        self._traj_interp = JointTrajectoryInterpolator()
+        self._traj_lock = threading.Lock()
+        # 큐가 마지막으로 비워진 시각. 비어있으면 timer 는 legacy path 사용.
+        self._traj_active = False
+
+        # ROS2 sub (공통: ec_joint_cmd 수신 — legacy 즉시 명령 경로)
         self._sub = self.create_subscription(
             JointState, 'ec_joint_cmd', self._cmd_callback, 10
         )
         # 보간 우회 직접 명령 (move_to 등)
         self._direct_sub = self.create_subscription(
             JointState, 'ec_joint_cmd_direct', self._direct_cmd_callback, 10
+        )
+        # 스케줄 waypoint 수신 (header.stamp = target time in epoch seconds).
+        self._waypoint_sub = self.create_subscription(
+            JointState, 'ec_joint_waypoint', self._waypoint_callback, 20
         )
 
         if self.control_mode == 'sdk':
@@ -154,6 +180,15 @@ class JointInterpolationNode(Node):
         target = np.array(msg.position, dtype=np.float64)
         now = time.monotonic()
 
+        # 스케줄 큐가 활성 상태였다면 — legacy 명령 도착 = 모드 전환 의도.
+        # 큐를 정리하지 않으면 timer 가 path 1 (큐 hold) 에서 RETURN 해버려서
+        # 여기 저장된 _target_pos 가 무시되고, move_to/외부 즉시 명령이 1초간
+        # 먹통 → 그 뒤 점프. 따라서 큐 즉시 reset.
+        if self._traj_active:
+            with self._traj_lock:
+                self._traj_interp.reset()
+                self._traj_active = False
+
         if self._cmd_time is not None:
             interval = now - self._cmd_time
             if interval > 0.001:
@@ -172,15 +207,51 @@ class JointInterpolationNode(Node):
         self._target_vel = list(msg.velocity) if msg.velocity else None
         self._has_target = True
 
+    def _waypoint_callback(self, msg: JointState):
+        """스케줄 waypoint 수신.
+
+        msg.header.stamp 는 목표 도달 절대 시각 (epoch seconds + nanoseconds,
+        Python 의 time.time() 과 동일 기준). msg.position 은 해당 시각의 joint
+        target. names 도 함께 사용 (write_joints 호환).
+
+        큐는 시간순 단조 증가 유지 — 과거 시각은 무시. 큐가 활성화되면 legacy
+        linear interp 분기를 끄고 큐 기반 출력으로 전환.
+        """
+        target = np.array(msg.position, dtype=np.float64)
+        # header.stamp → epoch seconds (float)
+        t_target = float(msg.header.stamp.sec) + float(msg.header.stamp.nanosec) * 1e-9
+        if t_target <= 0:
+            # stamp 미설정 — 현재 시각으로 대체 (= 즉시)
+            t_target = time.time()
+        names = list(msg.name) if msg.name else None
+
+        with self._traj_lock:
+            ok = self._traj_interp.schedule_waypoint(target, t_target, names=names)
+            if ok:
+                self._traj_active = True
+                # legacy interp 상태 정리 — 두 path 동시 사용 금지
+                self._has_target = False
+
     def _direct_cmd_callback(self, msg: JointState):
         """보간 없이 즉시 출력 (move_to 등)."""
         target = np.array(msg.position, dtype=np.float64)
+
+        # 스케줄 큐도 함께 정리 — direct 명령은 "지금 즉시 여기" 의도라 기존
+        # 큐의 미래 waypoint 가 남아 있으면 충돌.
+        if self._traj_active:
+            with self._traj_lock:
+                self._traj_interp.reset()
+                self._traj_active = False
 
         # 보간 상태 초기화 (현재 보간 중이면 중단)
         self._has_target = False
         self._current_pos = target.copy()
         self._target_pos = target.copy()
         self._interp_progress = 1.0
+        # Direct cmd 는 LPF bypass — 즉시 target 으로 점프해야 하는 의도
+        # (move_to 의 첫 cmd, 안전정지 등). 필터 state 를 target 으로 reset 해
+        # 다음 timer cycle 에서 lag 없이 시작.
+        self._lpf_state = target.copy()
 
         names = list(msg.name) if msg.name else None
         vel = list(msg.velocity) if msg.velocity else None
@@ -192,7 +263,48 @@ class JointInterpolationNode(Node):
             self._publish_topic(target.tolist(), names, vel)
 
     def _timer_callback(self):
-        """고주파 타이머: 선형 보간으로 목표 추종."""
+        """고주파 타이머. 우선순위:
+        1) 스케줄 waypoint 큐가 활성: 현재 시각 t_now (epoch) 의 보간값을 출력
+        2) legacy linear interp (ec_joint_cmd path)
+        """
+        # ── Path 1: scheduled waypoint queue ────────────────────────────────
+        if self._traj_active:
+            t_now = time.time()
+            cmd_pose = None
+            cmd_names = None
+            queue_last = None
+            with self._traj_lock:
+                if not self._traj_interp.empty:
+                    cmd_pose = self._traj_interp(t_now)
+                    cmd_names = self._traj_interp.names
+                    queue_last = self._traj_interp.last_time
+                    # 너무 옛날 waypoint 들 trim (간단한 메모리 관리)
+                    self._traj_interp.trim_before(t_now - 0.5)
+                else:
+                    self._traj_active = False
+
+            if cmd_pose is not None:
+                # LPF: chunk boundary anchor 만으로 잡히지 않는 미세 진동 흡수.
+                cmd_pose = self._apply_lpf(cmd_pose)
+                self._current_pos = cmd_pose
+                self._target_names = cmd_names if cmd_names else self._target_names
+                if self.control_mode == 'sdk':
+                    self._output_sdk()
+                else:
+                    self._publish_topic(
+                        cmd_pose.tolist(), self._target_names, None
+                    )
+                # 큐 마지막 waypoint 시각이 지나도록 일정 시간 더 hold 한 뒤 비활성
+                # (마지막 값 유지 → 갑작스런 정지 방지). 1초 이상 새 waypoint 없으면
+                # 큐 자체를 비워서 stale lock 방지.
+                if queue_last is not None and t_now > queue_last + 1.0:
+                    with self._traj_lock:
+                        self._traj_interp.reset()
+                        self._traj_active = False
+                        self.get_logger().info('Waypoint queue idle >1s, cleared')
+            return
+
+        # ── Path 2: legacy linear interp ────────────────────────────────────
         if not self._has_target or self._interp_progress >= 1.0:
             return
 
@@ -207,12 +319,32 @@ class JointInterpolationNode(Node):
         self._interp_progress = min(self._interp_progress, 1.0)
         t = self._interp_progress
 
-        self._current_pos = self._start_pos + t * (self._target_pos - self._start_pos)
+        _raw_pos = self._start_pos + t * (self._target_pos - self._start_pos)
+        # LPF 적용 — legacy interp 도 200Hz publish 시 미세 진동 흡수.
+        self._current_pos = self._apply_lpf(_raw_pos)
 
         if self.control_mode == 'sdk':
             self._output_sdk()
         else:
             self._output_topic()
+
+    def _apply_lpf(self, target_np):
+        """1차 IIR low-pass filter: out = α * target + (1-α) * prev_out.
+
+        α=1.0 이면 무필터 (target 그대로 통과). α<1.0 이면 진동/jerk smoothing.
+        첫 호출 시 prev_out 이 없으면 target 으로 초기화 (lag 0).
+        target_np shape 가 기존 state 와 다르면 (joint 수 변경 등) state 재초기화.
+        """
+        if self._lpf_alpha >= 1.0:
+            return target_np
+        if self._lpf_state is None or self._lpf_state.shape != target_np.shape:
+            self._lpf_state = target_np.copy()
+            return self._lpf_state
+        self._lpf_state = (
+            self._lpf_alpha * target_np
+            + (1.0 - self._lpf_alpha) * self._lpf_state
+        )
+        return self._lpf_state
 
     def _output_topic(self):
         """보간 결과를 ROS2 토픽으로 퍼블리시."""

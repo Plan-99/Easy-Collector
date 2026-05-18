@@ -80,11 +80,15 @@ class ROS2LogStreamer:
             stream_type = match.group(2)
             message = match.group(3)
             # rclpy logger 는 [INFO]/[WARN]/[ERROR] 를 모두 stderr 로 내보내므로
-            # 스트림이 아니라 메시지 prefix 로 분류한다. prefix 가 없을 때만
-            # stderr 를 약한 신호로 사용해 'error' 로 떨군다(트레이스백 등).
-            msg_type = _detect_type(message)
-            if msg_type == 'stdout' and stream_type == 'stderr':
+            # 스트림이 아니라 메시지 prefix 로 분류한다. prefix 가 아예 없는
+            # stderr (Python 트레이스백 등) 만 'error' 로 떨군다.
+            detected = _detect_type(message)
+            if detected is not None:
+                msg_type = detected
+            elif stream_type == 'stderr':
                 msg_type = 'error'
+            else:
+                msg_type = 'stdout'
             self.socketio.emit('task_log', {
                 'id': process_id,
                 'message': message,
@@ -94,11 +98,12 @@ class ROS2LogStreamer:
             self.socketio.emit('task_log', {
                 'id': self.FALLBACK_ID,
                 'message': line,
-                'type': _detect_type(line),
+                'type': _detect_type(line) or 'stdout',
             })
 
 
 def _detect_type(message):
+    """severity prefix 가 감지되면 type 문자열을, 없으면 None 을 반환."""
     m = message.strip()
     if m.startswith('[ERROR]') or m.startswith('[FATAL]') or m.startswith('ERROR'):
         return 'error'
@@ -110,4 +115,4 @@ def _detect_type(message):
         return 'notice'
     if m.startswith('[INFO]') or m.startswith('[DEBUG]'):
         return 'stdout'
-    return 'stdout'
+    return None

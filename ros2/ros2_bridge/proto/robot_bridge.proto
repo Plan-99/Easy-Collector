@@ -113,6 +113,11 @@ message MoveJointRequest {
   repeated double action = 2;
   bool from_ee = 3;
   optional double velocity_arg = 4;
+  // DexUMI-style absolute-time waypoint scheduling. Set > 0 to schedule the
+  // joint target at this absolute wall-clock time (epoch seconds, matches
+  // Python time.time()). Server dispatches to agent.move_to_joints_at instead
+  // of immediate move_joint_step. If 0 or unset, legacy immediate behavior.
+  optional double t_absolute = 5;
 }
 
 message MoveEERequest {
@@ -129,6 +134,9 @@ message MoveEEDeltaRequest {
   optional double velocity_arg = 3;
   // JSON-encoded tool_positions list (optional)
   string tool_positions_json = 4;
+  // DexUMI-style absolute-time scheduling. Set > 0 to dispatch to
+  // agent.move_ee_delta_step_at instead of immediate move_ee_delta_step.
+  optional double t_absolute = 5;
 }
 
 message MoveToRequest {

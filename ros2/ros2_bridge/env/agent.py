@@ -116,6 +116,7 @@ class Agent:
         # 이라 더 이상 agent 가 들고 있지 않는다.
         self._interp_pub = None
         self._direct_pub = None
+        self._waypoint_pub = None
         self._driver = None
         ns = f'/ec_robot_{robot["id"]}'
 
@@ -132,8 +133,12 @@ class Agent:
         if interpolation_on:
             interp_topic = f'{ns}/ec_joint_cmd'
             direct_topic = f'{ns}/ec_joint_cmd_direct'
+            waypoint_topic = f'{ns}/ec_joint_waypoint'
             self._interp_pub = node.create_publisher(JointStateMsg, interp_topic, 10)
             self._direct_pub = node.create_publisher(JointStateMsg, direct_topic, 10)
+            # 스케줄 waypoint publisher (DexUMI 스타일 absolute-time scheduling).
+            # header.stamp 에 목표 도달 시각(epoch seconds) 을 담아 보낸다.
+            self._waypoint_pub = node.create_publisher(JointStateMsg, waypoint_topic, 20)
             self._sdk_write_msg = JointStateMsg()  # move_to direct path 가 재사용
         else:
             # custom robot 의 interp OFF 모드 — module.json 에서 driver entrypoint 를
@@ -280,6 +285,59 @@ class Agent:
         target_js = [curr + delta for curr, delta in zip(current_js, delta_action)]
         self.move_joint_step(target_js)
 
+    def move_to_joints_at(self, action, t_absolute, velocity_arg=None):
+        """스케줄 waypoint 송신 — DexUMI 스타일 absolute-time scheduling.
+
+        ``action`` joint target 을 ``t_absolute`` (epoch seconds, time.time() 기준)
+        시각에 도달하도록 큐에 추가한다. interpolation_node 가 200Hz 로 큐를 보간
+        해 robot 에 출력. 호출 자체는 즉시 반환 (non-blocking).
+
+        chunk inference 결과를 N 개 한 번에 push 해두면, inference 가 100~300ms
+        걸려도 robot 은 큐 안의 미래 waypoint 따라 끊김 없이 진행.
+
+        interpolation ON 일 때만 동작 — 그 외 경로는 move_joint_step 으로 폴백.
+        """
+        if self._waypoint_pub is None:
+            # interp OFF 인 custom robot — scheduled waypoint 미지원, 즉시 명령으로.
+            self.move_joint_step(action, velocity_arg=velocity_arg)
+            return
+
+        try:
+            if action is None:
+                raise ValueError("action is None")
+            action = [0.0 if a is None else float(a) for a in action]
+            if len(action) != self.joint_len:
+                if len(action) < self.joint_len:
+                    action = action + [0.0] * (self.joint_len - len(action))
+                else:
+                    action = action[:self.joint_len]
+        except Exception as exc:
+            print(f"[ERROR] move_to_joints_at invalid action {action}: {exc}")
+            return
+
+        # Joint bound clipping (move_joint_step 과 동일)
+        if self.joint_upper_bounds is not None and self.joint_lower_bounds is not None:
+            action = np.clip(
+                action, self.joint_lower_bounds, self.joint_upper_bounds
+            ).tolist()
+
+        # 마지막 명령 추적 — joint_actions 는 dataset eepos 계산에도 쓰임.
+        self.joint_actions = action
+
+        from sensor_msgs.msg import JointState as JointStateMsg
+        msg = JointStateMsg()
+        # header.stamp = t_absolute (epoch seconds → sec + nanosec)
+        t_sec = int(t_absolute)
+        t_nsec = int((t_absolute - t_sec) * 1e9)
+        msg.header.stamp.sec = t_sec
+        msg.header.stamp.nanosec = max(0, min(t_nsec, 999_999_999))
+        msg.name = self.joint_names
+        msg.position = action
+        msg.velocity = [0.0] * self.joint_len
+        if self.tool_inner:
+            msg.velocity[-1] = 100.0
+        self._waypoint_pub.publish(msg)
+
     def _solve_ee_to_joints(self, target_ee_dict):
         """
         target_ee_dict 를 IK 로 풀어서 로봇에 보낼 final_action(조인트 벡터)을 반환한다.
@@ -425,6 +483,57 @@ class Agent:
         # 계산된 절대 좌표 타겟으로 이동 명령
         print(f"Moving EE with delta step. Target EE dict: {target_ee_dict}")
         self.move_ee_step(target_ee_dict, vel_arg=vel_arg)
+
+    def move_ee_delta_step_at(self, delta_ee_dict, t_absolute, tool_positions=None):
+        """move_ee_delta_step 의 scheduled 버전.
+
+        IK 로 joint target 계산 → move_to_joints_at 으로 큐에 push. inference
+        측에서 chunk 의 각 step waypoint 를 (delta_ee, t_absolute) 로 한 번에
+        예약하는 데 사용.
+
+        Note: 현재 robot state(arm_js) 기준으로 IK 를 풀어 절대 joint target 을
+        만든다. chunk 내 후속 waypoint 들도 같은 호출 시점의 arm_js 기준이라
+        모델이 학습 시 가정한 "현재 state 기준 relative trajectory" 와 부합.
+        """
+        if self.role == 'tool' or self.ik_solver is None:
+            return
+
+        full_js = self.get_joint_states()
+        arm_js, _ = self.get_joint_and_tool_pos(full_js)
+
+        ik_targets = {}
+        with self.ik_lock:
+            for name in self.ee_names:
+                if name not in delta_ee_dict:
+                    continue
+                target_pose = self.ik_solver.compute_delta_target(
+                    name,
+                    np.array(arm_js),
+                    delta_ee_dict[name][:6],
+                    frame='global'
+                )
+                ik_targets[name] = target_pose[:6]  # IK 입력은 xyz+rpy 만
+
+            if not ik_targets:
+                return
+            sol_q, _ = self.ik_solver.solve_ik(
+                ik_targets, current_lr_arm_motor_q=np.array(arm_js)
+            )
+
+        if sol_q is None:
+            print(f"[move_ee_delta_step_at] IK failed (no solution)")
+            return
+        target_joint_list = list(sol_q)
+
+        # tool joint 추가 (tool_inner 면 같은 agent 가 그리퍼 joint 도 들고 있음)
+        if tool_positions is not None:
+            target_joint_list = target_joint_list + list(tool_positions)
+        elif self.tool_inner:
+            _, tool_js = self.get_joint_and_tool_pos(full_js)
+            if tool_js is not None:
+                target_joint_list = target_joint_list + list(tool_js)
+
+        self.move_to_joints_at(target_joint_list, t_absolute)
 
     def move_ee_from_origin(self, origin, offset_ee_dict):
         """

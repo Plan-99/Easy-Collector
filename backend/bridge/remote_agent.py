@@ -159,6 +159,46 @@ class RemoteAgent:
             req.velocity_arg = vel_arg
         client.agent.MoveEEStep(req)
 
+    def move_ee_delta_step_at(self, delta_ee_dict, t_absolute, tool_positions=None):
+        """DexUMI-style scheduled waypoint — t_absolute (epoch seconds) 에 도달.
+
+        ROS2 측 Agent.move_ee_delta_step_at 호출로 dispatch. IK 계산 후
+        interpolation_node 의 waypoint 큐에 push 되어 200Hz 보간으로 robot 출력.
+        """
+        # last_ee_delta 캐싱 (record_episode 호환).
+        try:
+            if isinstance(delta_ee_dict, dict):
+                ee_names = self.ee_names or list(delta_ee_dict.keys())
+                self.last_ee_delta = {
+                    name: list(delta_ee_dict[name][:6])
+                    for name in ee_names
+                    if name in delta_ee_dict
+                }
+        except Exception as e:
+            print(f"[RemoteAgent] last_ee_delta cache failed: {e}")
+
+        client = get_bridge_client()
+        req = pb.MoveEEDeltaRequest(
+            agent_id=self._agent_id,
+            delta_ee_json=json.dumps(delta_ee_dict),
+            tool_positions_json=json.dumps(tool_positions) if tool_positions else '',
+            t_absolute=float(t_absolute),
+        )
+        client.agent.MoveEEDeltaStep(req)
+
+    def move_to_joints_at(self, action, t_absolute, velocity_arg=None):
+        """DexUMI-style scheduled joint waypoint."""
+        client = get_bridge_client()
+        req = pb.MoveJointRequest(
+            agent_id=self._agent_id,
+            action=action,
+            from_ee=False,
+            t_absolute=float(t_absolute),
+        )
+        if velocity_arg is not None:
+            req.velocity_arg = velocity_arg
+        client.agent.MoveJointStep(req)
+
     def move_ee_delta_step(self, delta_ee_dict, vel_arg=None, tool_positions=None):
         # record_episode (keyboard tele) 가 agent.last_ee_delta 를 읽어 ee_delta_action
         # 으로 저장한다. ROS2 측 Agent 는 자기쪽에서 last_ee_delta 를 갱신하지만 backend
