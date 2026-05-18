@@ -398,7 +398,14 @@
                 </q-scroll-area>
                 <q-stepper-navigation align="right" class="q-mt-md q-gutter-x-md">
                     <q-btn @click="step = 2" color="grey" outline :label="$t('back')"/>
-                    <q-btn @click="createCheckpoint" color="primary" outline :label="$t('trainStartTraining')"/>
+                    <q-btn
+                        @click="createCheckpoint"
+                        color="primary"
+                        outline
+                        :label="$t('trainStartTraining')"
+                        :loading="startingTraining"
+                        :disable="startingTraining"
+                    />
                 </q-stepper-navigation>
             </q-step>
         </q-stepper>
@@ -512,6 +519,7 @@ const { socket } = useSocket();
 
 const selectedWorkspaceId = ref(null);
 const pageLoading = ref(true);
+const startingTraining = ref(false);
 const workspaces = ref([]);
 watch(selectedWorkspaceId, (newVal) => {
     if (newVal) {
@@ -903,11 +911,13 @@ const watchingCheckpoint = ref(null);
 const queuePanel = ref(null);
 
 function createCheckpoint() {
+    if (startingTraining.value) return;
     if (serverStatus.value !== 'connected') {
         Notify.create({ color: 'negative', message: t('trainConnectToServerFirst') });
         return;
     }
 
+    startingTraining.value = true;
     const trainingPayload = getTrainingPayload();
     let createdCheckpointId = null;
     api.post('/checkpoint', {
@@ -937,6 +947,7 @@ function createCheckpoint() {
         Notify.create({ color: 'negative', message: t('trainStartFailed', { error }) });
     }).finally(() => {
         listCheckpoints();
+        startingTraining.value = false;
     });
 }
 

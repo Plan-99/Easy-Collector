@@ -122,11 +122,40 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                           f"reset_ik={_t_ik:.0f}ms", flush=True)
 
                 _hp_futures = [thread_pool.submit(_start_homepose, a) for a in agents]
-                for _f in _hp_futures:
-                    try:
-                        _f.result(timeout=10.0)
-                    except Exception as _e:
-                        print(f"[record_episode] homepose start failed: {_e}", flush=True)
+                # Polling으로 future 완료 대기 — `.result(timeout=10)` 동기 호출은 그 안에
+                # stop 신호를 못 받아 progress=0% 상태에서 stop 눌러도 최대 10초 hang.
+                # 폴링하면서 task_control['stop'] 체크 → 즉시 cancel + return.
+                _dispatch_timeout = 10.0
+                _dispatch_t0 = time.monotonic()
+                while True:
+                    if task_control['stop']:
+                        # stop 시점: 아직 dispatch 안 끝났을 수 있으니 background thread도
+                        # 깨끗하게 정리하기 위해 cancel + future 마감 대기 (짧게).
+                        for a in agents:
+                            try:
+                                a.cancel_move_to()
+                            except Exception:
+                                pass
+                        for _f in _hp_futures:
+                            try:
+                                _f.result(timeout=1.0)
+                            except Exception:
+                                pass
+                        socketio_instance.emit('moving_homepose', {'moving': False})
+                        print('[record_episode] stop during homepose dispatch — aborting.', flush=True)
+                        return
+                    if all(_f.done() for _f in _hp_futures):
+                        # 완료된 future의 예외 추출 (로그만)
+                        for _f in _hp_futures:
+                            try:
+                                _f.result(timeout=0.1)
+                            except Exception as _e:
+                                print(f"[record_episode] homepose start failed: {_e}", flush=True)
+                        break
+                    if time.monotonic() - _dispatch_t0 > _dispatch_timeout:
+                        print(f"[record_episode] homepose dispatch timeout — proceeding anyway", flush=True)
+                        break
+                    time.sleep(0.05)
                 print(f"[record_episode] homepose dispatch total: "
                       f"{(time.monotonic()-_ep_t0)*1000:.0f}ms", flush=True)
 

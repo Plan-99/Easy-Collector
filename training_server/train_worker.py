@@ -567,6 +567,28 @@ def main(args):
     use_relative_trajectory = train_settings.get('use_relative_trajectory', False)
     sensor_ids = config.get('sensor_ids', [])
 
+    # PI05 delta-mode 기준 (audit-doc bug #11 fix). stats가 raw action이 아니라
+    # chunk-wise delta 분포로 계산돼야 함. ACT/Diffusion은 use_relative_actions
+    # 미사용이라 무해.
+    use_relative_actions = policy['settings'].get('use_relative_actions', False)
+    absolute_action_dims = policy['settings'].get('absolute_action_dims', None)
+    relative_action_mask = policy['settings'].get('relative_action_mask', None)
+    relative_joints_dim = policy['settings'].get('relative_joints_dim', None)
+
+    # wrist_sensor_ids: 콤마 sep 문자열로 들어옴 ("2,3"). 빈 문자열/None 모두 허용.
+    # 컬러 jitter만 받고 spatial aug는 스킵 (audit-doc bug #31).
+    _wrist_raw = (
+        train_settings.get('wrist_sensor_ids')
+        or policy['settings'].get('wrist_sensor_ids')
+        or ''
+    )
+    if isinstance(_wrist_raw, (list, tuple)):
+        wrist_sensor_ids = [int(x) for x in _wrist_raw if str(x).strip()]
+    elif isinstance(_wrist_raw, str):
+        wrist_sensor_ids = [int(x.strip()) for x in _wrist_raw.split(',') if x.strip()]
+    else:
+        wrist_sensor_ids = []
+
     if policy['type'] in ['ACT']:
         chunk_size = policy['settings']['chunk_size']
         vision_backbone = policy['settings']['vision_backbone']
@@ -613,6 +635,11 @@ def main(args):
         batch_size, batch_size, chunk_size, vision_backbone, num_workers,
         n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory,
         obs_state_keys=obs_state_keys,
+        use_relative_actions=use_relative_actions,
+        relative_joints_dim=relative_joints_dim,
+        relative_action_mask=relative_action_mask,
+        absolute_action_dims=absolute_action_dims,
+        wrist_sensor_ids=wrist_sensor_ids,
     )
 
     best_epoch, min_val_loss = train(

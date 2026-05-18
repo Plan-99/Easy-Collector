@@ -461,9 +461,19 @@ class Leader():
             raise e
         
         finally:
-            # 에러가 나든 정상 종료되든 반드시 실행되는 블록
+            # 에러가 나든 정상 종료되든 반드시 실행되는 블록.
+            # 단, episode 단위로 정상 종료 (episode_stop=True) 된 경우엔 collection
+            # 전체를 멈추면 안 된다 — record_episode 의 outer loop 가 다음 epoch 로
+            # 진행해야 함. task_control['stop']=True 를 무조건 set 하면 다음 outer
+            # iteration 진입 시 break 되어 첫 epoch 후 record 가 끝나버린다.
+            # 예외 발생 또는 외부 stop 신호로 들어온 경우만 stop 을 set한다.
             print("Cleaning up Leader Robot resources...", flush=True)
-            task_control['stop'] = True
+            normal_episode_exit = (
+                task_control.get('episode_stop', False)
+                and not task_control.get('stop', False)
+            )
+            if not normal_episode_exit:
+                task_control['stop'] = True
             try:
                 read_thread.join(timeout=1.0)
                 print("Dxl read thread joined.", flush=True)

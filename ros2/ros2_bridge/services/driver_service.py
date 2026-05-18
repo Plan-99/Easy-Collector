@@ -285,6 +285,7 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
                 can_port = 'can' + can_port[4:]
             has_gripper = rtype not in ('piper_no_gripper',)
             ip_address = settings.get('ip_address', '')
+            serial_port = settings.get('serial_port', '')
             params = {
                 'control_mode': 'sdk',
                 'sdk_type': sdk_type,
@@ -294,6 +295,8 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
                 # interpolation_node 의 _build_interpolation_cmd 가 빈 문자열은
                 # 자동으로 skip 하므로 CAN 전용 로봇(Piper)에서는 no-op.
                 'sdk_ip_address': ip_address,
+                # serial 기반 SDK 로봇(Robotiq 등)용 USB/RS485 포트 경로.
+                'sdk_serial_port': serial_port,
                 'read_topic': 'interpolated_joint_cmd',
             }
         else:

@@ -48,6 +48,8 @@ export default {
   customSensorResolutionWidth: 'Resolution Width',
   customSensorResolutionHeight: 'Resolution Height',
   errorTurnOffSensorFirst: 'Turn off the sensor first.',
+  errorStartSensorFailed: 'Failed to start sensor "{name}": {error}',
+  errorStartSensorTimeout: 'Sensor "{name}" is not responding. Check the connection and settings.',
 
   // ───── Robot page ─────
   robotIntroTitle: 'Robot, Control Your Body',
@@ -62,6 +64,8 @@ export default {
   robotContextEdit: 'Edit Robot',
   robotContextHide: 'Hide Robot',
   errorTurnOffRobotFirst: 'Turn off the robot first.',
+  errorStartRobotFailed: 'Failed to start robot "{name}": {error}',
+  errorStartRobotTimeout: 'Robot "{name}" is not responding. Check the connection and settings.',
   robotFieldCanPort: 'CAN Port',
   robotFieldPort: 'Port',
   robotFieldChangerAddress: 'Changer Address',

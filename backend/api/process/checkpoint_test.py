@@ -128,10 +128,15 @@ def checkpoint_test(
                               'relative_ee_pos': 'relative_ee_pos'}
         action_key_norm = _ACTION_KEY_ALIAS.get(action_key, action_key)
         _obs_keys = policy_obj.get('settings', {}).get('obs_state_keys')
-        if _obs_keys is None:
+        if not _obs_keys:  # None, [], 빈 값 모두 학습 측 _build_obs_state 와 동일하게 처리
             _obs_keys = checkpoint.get('train_settings', {}).get('obs_state_keys')
-        obs_state_keys = _obs_keys if _obs_keys is not None else ['qpos']
+        # 학습 측 _build_obs_state 는 `if not obs_state_keys: obs_state_keys = ['qpos']`
+        # 로 빈 리스트도 ['qpos'] 로 fallback. 추론도 동일해야 norm_stats / model
+        # 입력 차원이 학습 시와 일치. (이 분기 없으면 obs_state_keys=[] 인 policy
+        # 에서 state 가 빈 텐서로 들어가 normalize 에서 dim mismatch.)
+        obs_state_keys = _obs_keys if _obs_keys else ['qpos']
         use_relative_trajectory = checkpoint.get('train_settings', {}).get('use_relative_trajectory', False)
+
         # PI05's use_relative_actions affects how the action chunk relates to state.
         # When True, the model predicts deltas anchored to the state at chunk-inference
         # time. The postprocessor's AbsoluteActionsProcessorStep adds state back. If we
@@ -208,6 +213,36 @@ def checkpoint_test(
         policy.cuda()
         policy.eval()
         print(f'Loaded Policy from {ckpt_dir}, hz: {hz}, re_inference_steps: {re_inference_steps}, action_key: {action_key}')
+
+        # relative_ee_pos / ee_delta 추론은 action 이 EE pose (6 또는 6+tool 차원).
+        # 옛 코드 (DexUMI 도입 전) 로 학습된 checkpoint 의 action 차원은 joint 기준
+        # (7~8) 일 수 있어 새 추론 로직과 맞지 않음 → 명시적 에러로 막는다.
+        if action_key_norm in ('ee_delta', 'relative_ee_pos'):
+            _expected_ee_dim = 0
+            for _a in agents:
+                if _a.role == 'tool' or getattr(_a, 'ik_solver', None) is None:
+                    continue
+                _per_ee = 6 + (1 if getattr(_a, 'tool_inner', False) else 0)
+                _expected_ee_dim += _per_ee * max(1, len(getattr(_a, 'ee_names', []) or []))
+            # 별도 tool agent (그리퍼) joint dim 도 eepos/action 에 포함됨. lerobot_io
+            # 가 ee_names_list 끝에 추가하는 것과 동일.
+            for _a in agents:
+                if _a.role == 'tool' and getattr(_a, 'ik_solver', None) is None:
+                    _expected_ee_dim += getattr(_a, 'joint_len', 0)
+            try:
+                _model_action_dim = policy.config.output_features['action'].shape[0]
+            except Exception:
+                _model_action_dim = None
+            if _model_action_dim is not None and _model_action_dim != _expected_ee_dim:
+                # has_succeed 면 +1 허용.
+                if not (has_succeed and _model_action_dim == _expected_ee_dim + 1):
+                    raise RuntimeError(
+                        f'[INFER] action_key={action_key} (EE 기반) 인데 checkpoint 의 '
+                        f'output action dim = {_model_action_dim} 이고 expected EE dim = '
+                        f'{_expected_ee_dim} (또는 +1 if succeed). 학습 시점에 DexUMI 스타일 '
+                        f'relative trajectory 로직이 없던 옛 코드로 학습됐을 가능성. '
+                        f'최신 코드로 재학습 필요.'
+                    )
 
         if preprocessor is None:
             print(f'[INFER][WARN] No processor pipeline found at {ckpt_dir}. '
@@ -425,54 +460,46 @@ def checkpoint_test(
                     # temporal ensemble이 다른 기준 frame의 waypoint를 섞지 않도록 policy를 reset.
                     if use_relative_trajectory and action_key_norm == 'ee_delta':
                         policy.reset()
-                    if action_key_norm in ('ee_delta', 'relative_ee_pos'):
-                        # single_arm: 실제 EE 포즈 변화량 (closed-loop) + tool qpos, tool-only: 현재 qpos
-                        obs_parts = []
-                        for agent in env.agents:
-                            if agent.role != 'tool' and agent.ik_solver is not None:
-                                current_qpos = obs_t['robot_states'][agent.id]['qpos']
-                                if agent.id in prev_qpos_dict:
-                                    fk_delta = agent.compute_fk_delta(current_qpos, prev_qpos_dict[agent.id])
-                                    if fk_delta is not None:
-                                        ee_obs = np.concatenate([fk_delta[name] for name in agent.ee_names])
-                                    else:
-                                        ee_obs = np.zeros(len(agent.ee_names) * 6)
-                                else:
-                                    ee_obs = np.zeros(len(agent.ee_names) * 6)
-                                # tool_inner: tool joint qpos를 proprioception에 append
-                                if agent.tool_inner:
-                                    _, tool_pos = agent.get_joint_and_tool_pos(current_qpos)
-                                    if tool_pos is not None:
-                                        ee_obs = np.concatenate([ee_obs, np.array(tool_pos)])
-                                obs_parts.append(ee_obs)
-                            else:
-                                obs_parts.append(obs_t['robot_states'][agent.id]['qpos'])
-                        qpos_np = np.concatenate(obs_parts)
-                    else:
-                        qpos_np = np.concatenate([item['qpos'] for item in obs_t['robot_states'].values()])
-                    # qpos가 obs_state_keys에 없으면 0으로 채움
-                    if 'qpos' not in obs_state_keys:
-                        qpos_np = np.zeros_like(qpos_np)
-                    # obs_state_keys 에 따라 qvel, qeffort, eepos append.
-                    # 학습 시 _build_obs_state 와 동일한 순서로 concat 해야 dim 맞음:
-                    # qpos → qvel → qeffort → eepos.
-                    extra_obs = []
-                    if 'qvel' in obs_state_keys:
-                        extra_obs.extend([np.array(agent.get_joint_vel()) for agent in env.agents])
-                    if 'qeffort' in obs_state_keys:
-                        extra_obs.extend([np.array(agent.get_joint_effort()) for agent in env.agents])
-                    if 'eepos' in obs_state_keys:
-                        # EE 절대좌표 (x,y,z,rx,ry,rz). tool_inner면 tool joint 도 append.
-                        for agent in env.agents:
-                            if agent.role == 'tool' or agent.ik_solver is None:
-                                continue
-                            ee_dict = agent.get_ee_position() or {}
-                            for ee_name in (agent.ee_names or []):
-                                vals = ee_dict.get(ee_name)
-                                if vals:
-                                    extra_obs.append(np.array(vals, dtype=np.float32))
-                    if extra_obs:
-                        qpos_np = np.concatenate([qpos_np] + extra_obs)
+                    # 학습 측 _build_obs_state 와 동일하게 obs_state_keys 순서대로
+                    # 각 block 을 concat. 학습 시 column 들 (observation.qpos / qvel /
+                    # qeffort / eepos) 와 동일 형태/순서로 입력 구성 — 그러지 않으면
+                    # state dim 이 안 맞아 normalize 에서 size mismatch 발생.
+                    parts = []
+                    for _key in obs_state_keys:
+                        if _key == 'qpos':
+                            parts.append(np.concatenate(
+                                [np.array(item['qpos'], dtype=np.float32)
+                                 for item in obs_t['robot_states'].values()]
+                            ))
+                        elif _key == 'qvel':
+                            parts.append(np.concatenate(
+                                [np.array(agent.get_joint_vel(), dtype=np.float32)
+                                 for agent in env.agents]
+                            ))
+                        elif _key == 'qeffort':
+                            parts.append(np.concatenate(
+                                [np.array(agent.get_joint_effort(), dtype=np.float32)
+                                 for agent in env.agents]
+                            ))
+                        elif _key == 'eepos':
+                            # 학습 _build_obs_state 가 observation.eepos 컬럼 단일
+                            # block 으로 처리 — agent / ee_name 순서로 concat.
+                            ee_parts = []
+                            for agent in env.agents:
+                                if agent.role == 'tool' or agent.ik_solver is None:
+                                    continue
+                                ee_dict = agent.get_ee_position() or {}
+                                for ee_name in sorted(agent.ee_names or []):
+                                    vals = ee_dict.get(ee_name)
+                                    if vals:
+                                        ee_parts.append(np.array(vals, dtype=np.float32))
+                            # 별도 tool agent joint 도 eepos 컬럼 끝에 (lerobot_io 와 동일).
+                            for agent in env.agents:
+                                if agent.role == 'tool' and agent.ik_solver is None:
+                                    ee_parts.append(np.array(agent.get_joint_states() or [], dtype=np.float32))
+                            if ee_parts:
+                                parts.append(np.concatenate(ee_parts))
+                    qpos_np = np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
                     qpos_t = torch.from_numpy(qpos_np).float().cuda().unsqueeze(0)
                     policy_input_t = {'observation.state': qpos_t}
                     # PI05 needs tokenized language inputs. Prefer user-provided
@@ -567,6 +594,23 @@ def checkpoint_test(
                                 _curr_eepos = np.array(_ee_dict[_ee_name], dtype=np.float32)
                                 break
                         deltas = relative_trajectory_to_delta(raw_np, current_eepos=_curr_eepos)
+                        # DIAG: 모델 출력 (relative trajectory in current EE local frame) 의
+                        # rotation/translation 통계 + 역변환된 world deltas 통계 출력.
+                        # 학습 데이터에 rotation 없는데 추론에서 발생하면 여기서 값이
+                        # 들킴 — 모델이 rotation dim 에 노이즈를 출력하고 있다는 뜻.
+                        _rt = raw_np[:, 3:6] if raw_np.shape[1] >= 6 else None
+                        _dt = deltas[:, 3:6] if deltas.shape[1] >= 6 else None
+                        _tt = raw_np[:, :3]
+                        _ddt = deltas[:, :3]
+                        print(
+                            f'[REL_DIAG] curr_eepos={_curr_eepos.tolist() if _curr_eepos is not None else None}\n'
+                            f'  raw rel_traj translation max_abs={np.abs(_tt).max():.4f} '
+                            f'rotation max_abs={np.abs(_rt).max():.4f}\n'
+                            f'  world deltas    translation max_abs={np.abs(_ddt).max():.4f} '
+                            f'rotation max_abs={np.abs(_dt).max():.4f}\n'
+                            f'  rel_traj[0]={raw_np[0].tolist()} ... [N-1]={raw_np[-1].tolist()}',
+                            flush=True
+                        )
                         state_t = deltas[0]
                         for i in range(1, len(deltas)):
                             rel_action_queue.append(deltas[i])
@@ -693,7 +737,22 @@ def checkpoint_test(
                     prev_qpos_dict[agent.id] = obs_t['robot_states'][agent.id]['qpos']
 
             start_action_id = 0
-            for agent in env.agents:
+            # relative_ee_pos / ee_delta 일 때 action 컬럼 layout 은 lerobot_io 의
+            # eepos 컬럼과 동일: [arms_with_ik 순서대로, separate_tool_agents 순서대로].
+            # agent.id 정렬로 가면 ID 가 작은 tool 이 arm 보다 앞서버려 슬라이싱이 어긋남.
+            # → arm 먼저 처리하고 그 다음 tool 처리하는 두 패스로 분리.
+            arm_then_tool = (
+                action_key_norm in ('ee_delta', 'relative_ee_pos')
+            )
+            if arm_then_tool:
+                ordered_agents = (
+                    [a for a in env.agents if a.role != 'tool' and a.ik_solver is not None]
+                    + [a for a in env.agents if not (a.role != 'tool' and a.ik_solver is not None)]
+                )
+            else:
+                ordered_agents = list(env.agents)
+
+            for agent in ordered_agents:
                 if action_key_norm in ('ee_delta', 'relative_ee_pos') and agent.role != 'tool' and agent.ik_solver is not None:
                     ee_delta_dim = len(agent.ee_names) * 6
                     # tool_inner: ee_delta(6) + tool_abs 차원 추가

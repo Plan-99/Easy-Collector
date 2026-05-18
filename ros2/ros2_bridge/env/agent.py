@@ -279,7 +279,6 @@ class Agent:
             return
         target_js = [curr + delta for curr, delta in zip(current_js, delta_action)]
         self.move_joint_step(target_js)
-        
 
     def _solve_ee_to_joints(self, target_ee_dict):
         """
