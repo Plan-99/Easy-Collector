@@ -21,6 +21,10 @@ export default {
   yes: '예',
   no: '아니오',
   selectWorkspaceFirst: '워크스페이스를 먼저 선택하세요',
+  hyperparamHelpTooltip: '이 항목 설명 보기',
+  hyperparamEasyHeading: '쉬운 설명',
+  hyperparamExpertHeading: '자세한 설명',
+  hyperparamNoteHeading: '주의',
 
   // ───── Sensor page ─────
   sensorIntroTitle: '로봇아, 세상을 처음 만나자',
@@ -331,6 +335,11 @@ export default {
   plannerNameAutoSleep: '{duration}초 대기',
   plannerStartingStatus: '시작 중...',
   plannerStartFailed: '플래너 실행 시작에 실패했습니다.',
+  plannerExport: '내보내기',
+  plannerExportTooltip: '플래너를 독립 실행 코드 zip으로 내보냅니다 (체크포인트 + 실행 코드 포함).',
+  plannerExporting: '플래너 내보내는 중...',
+  plannerExported: '플래너를 내보냈습니다: {filename}',
+  plannerExportFailed: '플래너 내보내기 실패: {error}',
   plannerRunningStatus: '실행 중 ({current}/{total})',
   plannerRunningStatusDetail: '실행 중 ({current}/{total}) — {name}',
   plannerBlockFailed: "블록 '{name}' 실패: {error}",

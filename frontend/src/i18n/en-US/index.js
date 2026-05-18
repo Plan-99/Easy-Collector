@@ -21,6 +21,10 @@ export default {
   yes: 'Yes',
   no: 'No',
   selectWorkspaceFirst: 'Select Workspace First',
+  hyperparamHelpTooltip: 'What does this do?',
+  hyperparamEasyHeading: 'Plain English',
+  hyperparamExpertHeading: 'Technical Details',
+  hyperparamNoteHeading: 'Note',
 
   // ───── Sensor page ─────
   sensorIntroTitle: 'Robot, First Meet the World',
@@ -331,6 +335,11 @@ export default {
   plannerNameAutoSleep: 'Wait {duration}s',
   plannerStartingStatus: 'Starting...',
   plannerStartFailed: 'Failed to start the planner run.',
+  plannerExport: 'Export',
+  plannerExportTooltip: 'Export this planner as a standalone code zip (checkpoints + run code included).',
+  plannerExporting: 'Exporting planner...',
+  plannerExported: 'Planner exported: {filename}',
+  plannerExportFailed: 'Planner export failed: {error}',
   plannerRunningStatus: 'Running ({current}/{total})',
   plannerRunningStatusDetail: 'Running ({current}/{total}) — {name}',
   plannerBlockFailed: "Block '{name}' failed: {error}",
