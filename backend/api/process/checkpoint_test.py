@@ -155,14 +155,16 @@ def checkpoint_test(
                               'relative_ee_pos': 'relative_ee_pos',
                               'relative_joint_pos': 'relative_joint_pos'}
         action_key_norm = _ACTION_KEY_ALIAS.get(action_key, action_key)
-        _obs_keys = policy_obj.get('settings', {}).get('obs_state_keys')
-        if not _obs_keys:  # None, [], 빈 값 모두 학습 측 _build_obs_state 와 동일하게 처리
-            _obs_keys = checkpoint.get('train_settings', {}).get('obs_state_keys')
-        # 학습 측 _build_obs_state 는 `if not obs_state_keys: obs_state_keys = ['qpos']`
-        # 로 빈 리스트도 ['qpos'] 로 fallback. 추론도 동일해야 norm_stats / model
-        # 입력 차원이 학습 시와 일치. (이 분기 없으면 obs_state_keys=[] 인 policy
-        # 에서 state 가 빈 텐서로 들어가 normalize 에서 dim mismatch.)
-        obs_state_keys = _obs_keys if _obs_keys else ['qpos']
+        # 빈 리스트 [] 는 명시적 "no-state" 의도 — 학습 측 _build_obs_state 가
+        # 그대로 빈 state 로 처리하므로 추론도 동일. None 일 때만 ['qpos'] 로 default.
+        _p_keys = policy_obj.get('settings', {}).get('obs_state_keys')
+        _t_keys = checkpoint.get('train_settings', {}).get('obs_state_keys')
+        if _p_keys is not None:
+            obs_state_keys = _p_keys
+        elif _t_keys is not None:
+            obs_state_keys = _t_keys
+        else:
+            obs_state_keys = ['qpos']
         use_relative_trajectory = checkpoint.get('train_settings', {}).get('use_relative_trajectory', False)
 
         # Scheduled-waypoint 모드: DexUMI 스타일 absolute-time waypoint scheduling.
@@ -250,6 +252,20 @@ def checkpoint_test(
         policy.cuda()
         policy.eval()
         print(f'Loaded Policy from {ckpt_dir}, hz: {hz}, re_inference_steps: {re_inference_steps}, action_key: {action_key}')
+        # DIAG: 모델이 observation.state 를 실제로 입력으로 받는지 확인 (ACT 의
+        # robot_state_feature property — input_features 에 observation.state 가
+        # 있으면 truthy).
+        try:
+            _rsf = getattr(policy.config, 'robot_state_feature', None)
+            _inp = dict(getattr(policy.config, 'input_features', {}) or {})
+            _inp_summary = {k: getattr(v, 'shape', None) for k, v in _inp.items()}
+            print(
+                f'[INFER policy] robot_state_feature={_rsf} '
+                f'input_features={_inp_summary}',
+                flush=True,
+            )
+        except Exception as _ex:
+            print(f'[INFER policy] diag failed: {_ex}', flush=True)
 
         # relative_ee_pos / ee_delta 추론은 action 이 EE pose (6 또는 6+tool 차원).
         # 옛 코드 (DexUMI 도입 전) 로 학습된 checkpoint 의 action 차원은 joint 기준
@@ -473,42 +489,61 @@ def checkpoint_test(
             with torch.no_grad():
                 if use_relative_trajectory and action_key_norm == 'ee_delta':
                     policy.reset()
-                # obs_state_keys 순서대로 state vector 조립 (학습 _build_obs_state 와 동일).
+                # 학습 측 _build_obs_state 와 동일 semantic — arm features 만 user-selected,
+                # tool pose 는 obs_state_keys 와 무관하게 마지막에 항상 추가.
+                _arms = [a for a in env.agents if not (a.role == 'tool' and a.ik_solver is None)]
+                _tools = [a for a in env.agents if a.role == 'tool' and a.ik_solver is None]
                 _parts = []
                 for _key in obs_state_keys:
                     if _key == 'qpos':
-                        _parts.append(np.concatenate(
-                            [np.array(item['qpos'], dtype=np.float32)
-                             for item in obs_snap['robot_states'].values()]
-                        ))
+                        _arm_qpos = []
+                        for _a in _arms:
+                            _st = obs_snap['robot_states'].get(_a.id) or obs_snap['robot_states'].get(str(_a.id))
+                            if _st is not None and _st.get('qpos') is not None:
+                                _arm_qpos.append(np.array(_st['qpos'], dtype=np.float32))
+                        if _arm_qpos:
+                            _parts.append(np.concatenate(_arm_qpos))
                     elif _key == 'qvel':
-                        _parts.append(np.concatenate(
-                            [np.array(_a.get_joint_vel(), dtype=np.float32)
-                             for _a in env.agents]
-                        ))
+                        _arm_qvel = [np.array(_a.get_joint_vel() or [], dtype=np.float32) for _a in _arms]
+                        if any(len(x) > 0 for x in _arm_qvel):
+                            _parts.append(np.concatenate(_arm_qvel))
                     elif _key == 'qeffort':
-                        _parts.append(np.concatenate(
-                            [np.array(_a.get_joint_effort(), dtype=np.float32)
-                             for _a in env.agents]
-                        ))
+                        _arm_eff = [np.array(_a.get_joint_effort() or [], dtype=np.float32) for _a in _arms]
+                        if any(len(x) > 0 for x in _arm_eff):
+                            _parts.append(np.concatenate(_arm_eff))
                     elif _key == 'eepos':
                         _ee_parts = []
-                        for _a in env.agents:
-                            if _a.role == 'tool' or _a.ik_solver is None:
+                        for _a in _arms:
+                            if _a.ik_solver is None:
                                 continue
                             _ee_dict = _a.get_ee_position() or {}
                             for _ee_name in sorted(_a.ee_names or []):
                                 _vals = _ee_dict.get(_ee_name)
                                 if _vals:
                                     _ee_parts.append(np.array(_vals, dtype=np.float32))
-                        for _a in env.agents:
-                            if _a.role == 'tool' and _a.ik_solver is None:
-                                _ee_parts.append(np.array(_a.get_joint_states() or [], dtype=np.float32))
                         if _ee_parts:
                             _parts.append(np.concatenate(_ee_parts))
+                # 항상 마지막에 tool_pose append — 분리형 tool agent 의 qpos.
+                for _a in _tools:
+                    _t_qpos = _a.get_joint_states()
+                    if _t_qpos:
+                        _parts.append(np.array(_t_qpos, dtype=np.float32))
                 _qpos_np = np.concatenate(_parts) if _parts else np.zeros(0, dtype=np.float32)
                 _qpos_t = torch.from_numpy(_qpos_np).float().cuda().unsqueeze(0)
                 _policy_input = {'observation.state': _qpos_t}
+                # DIAG: 매번 찍으면 로그 폭주 — 처음 한 번만, 그 이후엔 1000번에 한 번.
+                if not hasattr(_do_rel_ee_inference, '_state_log_count'):
+                    _do_rel_ee_inference._state_log_count = 0
+                _do_rel_ee_inference._state_log_count += 1
+                if _do_rel_ee_inference._state_log_count == 1 or \
+                   _do_rel_ee_inference._state_log_count % 1000 == 0:
+                    _state_vals = _qpos_t[0].cpu().numpy()
+                    print(
+                        f"[INPUT bg-infer #{_do_rel_ee_inference._state_log_count}] "
+                        f"obs_state_keys={obs_state_keys} state.shape={_qpos_t.shape} "
+                        f"values={_state_vals.tolist()}",
+                        flush=True,
+                    )
                 if policy_obj['type'] == 'PI05':
                     _lang = language_instruction if (language_instruction and str(language_instruction).strip()) else task.get('name', '')
                     _policy_input['language_instruction'] = _lang
@@ -638,11 +673,28 @@ def checkpoint_test(
                         # 큐가 비어 있던 경우 — anchor 없이 그대로 채움 (cold start)
                         for _d in _new_deltas:
                             rel_action_queue.append(_d)
+                        _t_chunk_ready = time.time()
+                        try:
+                            _first_delta_preview = (
+                                np.asarray(_new_deltas[0]).flatten()[:6].tolist()
+                                if len(_new_deltas) > 0 else None
+                            )
+                        except Exception:
+                            _first_delta_preview = None
                         print(
                             f'[INFER thread] chunk ready (no anchor, cold start), '
-                            f'queue refilled to {len(rel_action_queue)}',
+                            f'queue refilled to {len(rel_action_queue)} '
+                            f'at t={_t_chunk_ready:.3f} (start={start:.3f}, '
+                            f'elapsed_since_start={_t_chunk_ready - start:.3f}s) '
+                            f'first_delta[:6]={_first_delta_preview}',
                             flush=True,
                         )
+                        # Cold start: 첫 chunk inference 가 warmup 등으로 수 초 걸리는
+                        # 경우, 기존 ``start`` 는 while 진입 시각이라 이미 과거.
+                        # 이대로 두면 _t_target_for_step = start + action_dt 가 과거가
+                        # 되어 interpolator 가 첫 waypoint 로 점프 → homepose 직후 덜컹.
+                        # → chunk 도착 시각을 새 cadence 기준으로 리셋.
+                        start = _t_chunk_ready
                 except Exception as _ex:
                     print(f'[INFER thread] error: {_ex}', flush=True)
                 _inference_future = None
@@ -683,45 +735,45 @@ def checkpoint_test(
                     # temporal ensemble이 다른 기준 frame의 waypoint를 섞지 않도록 policy를 reset.
                     if use_relative_trajectory and action_key_norm == 'ee_delta':
                         policy.reset()
-                    # 학습 측 _build_obs_state 와 동일하게 obs_state_keys 순서대로
-                    # 각 block 을 concat. 학습 시 column 들 (observation.qpos / qvel /
-                    # qeffort / eepos) 와 동일 형태/순서로 입력 구성 — 그러지 않으면
-                    # state dim 이 안 맞아 normalize 에서 size mismatch 발생.
+                    # 학습 측 _build_obs_state 와 동일 — arm features 만 user-selected,
+                    # tool pose 는 obs_state_keys 와 무관하게 마지막에 항상 추가.
+                    _arms_sync = [a for a in env.agents if not (a.role == 'tool' and a.ik_solver is None)]
+                    _tools_sync = [a for a in env.agents if a.role == 'tool' and a.ik_solver is None]
                     parts = []
                     for _key in obs_state_keys:
                         if _key == 'qpos':
-                            parts.append(np.concatenate(
-                                [np.array(item['qpos'], dtype=np.float32)
-                                 for item in obs_t['robot_states'].values()]
-                            ))
+                            _aq = []
+                            for _a in _arms_sync:
+                                _st = obs_t['robot_states'].get(_a.id) or obs_t['robot_states'].get(str(_a.id))
+                                if _st is not None and _st.get('qpos') is not None:
+                                    _aq.append(np.array(_st['qpos'], dtype=np.float32))
+                            if _aq:
+                                parts.append(np.concatenate(_aq))
                         elif _key == 'qvel':
-                            parts.append(np.concatenate(
-                                [np.array(agent.get_joint_vel(), dtype=np.float32)
-                                 for agent in env.agents]
-                            ))
+                            _vs = [np.array(_a.get_joint_vel() or [], dtype=np.float32) for _a in _arms_sync]
+                            if any(len(x) > 0 for x in _vs):
+                                parts.append(np.concatenate(_vs))
                         elif _key == 'qeffort':
-                            parts.append(np.concatenate(
-                                [np.array(agent.get_joint_effort(), dtype=np.float32)
-                                 for agent in env.agents]
-                            ))
+                            _es = [np.array(_a.get_joint_effort() or [], dtype=np.float32) for _a in _arms_sync]
+                            if any(len(x) > 0 for x in _es):
+                                parts.append(np.concatenate(_es))
                         elif _key == 'eepos':
-                            # 학습 _build_obs_state 가 observation.eepos 컬럼 단일
-                            # block 으로 처리 — agent / ee_name 순서로 concat.
                             ee_parts = []
-                            for agent in env.agents:
-                                if agent.role == 'tool' or agent.ik_solver is None:
+                            for _a in _arms_sync:
+                                if _a.ik_solver is None:
                                     continue
-                                ee_dict = agent.get_ee_position() or {}
-                                for ee_name in sorted(agent.ee_names or []):
+                                ee_dict = _a.get_ee_position() or {}
+                                for ee_name in sorted(_a.ee_names or []):
                                     vals = ee_dict.get(ee_name)
                                     if vals:
                                         ee_parts.append(np.array(vals, dtype=np.float32))
-                            # 별도 tool agent joint 도 eepos 컬럼 끝에 (lerobot_io 와 동일).
-                            for agent in env.agents:
-                                if agent.role == 'tool' and agent.ik_solver is None:
-                                    ee_parts.append(np.array(agent.get_joint_states() or [], dtype=np.float32))
                             if ee_parts:
                                 parts.append(np.concatenate(ee_parts))
+                    # 항상 tool pose append
+                    for _a in _tools_sync:
+                        _t_qpos = _a.get_joint_states()
+                        if _t_qpos:
+                            parts.append(np.array(_t_qpos, dtype=np.float32))
                     qpos_np = np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
                     qpos_t = torch.from_numpy(qpos_np).float().cuda().unsqueeze(0)
                     policy_input_t = {'observation.state': qpos_t}
@@ -1006,7 +1058,35 @@ def checkpoint_test(
             # 걸려도 robot 은 큐의 미래 waypoint 따라 계속 진행.
             # action_key_norm 이 relative_ee_pos / ee_delta 면 항상 scheduled 사용,
             # joint 모드는 _t_target_for_step = None 으로 즉시 명령 fallback.
-            _t_target_for_step = start + action_dt if use_scheduled_waypoints else None
+            # Scheduled-waypoint target time.
+            # 일반 케이스: start + action_dt (학습 분포와 정합).
+            # 일반 보호: time.time() + action_dt (start 가 stale 한 경우 — 예: 큰
+            # GC pause, 일시적 stall — 에 대비. t_target 이 과거가 되어 interpolator
+            # 가 점프하는 것을 막음). cold start fix 와 별도로 안전망 역할.
+            if use_scheduled_waypoints:
+                _t_target_for_step = max(start + action_dt, time.time() + action_dt)
+            else:
+                _t_target_for_step = None
+
+            # === FIRST-STEP DIAG === scheduled-waypoint 의 첫 publish 시
+            # t_target 이 과거에 잡히는지 확인. diff < 0 이면 보간기가 점프.
+            if first_step and use_scheduled_waypoints and _t_target_for_step is not None:
+                _now_dbg = time.time()
+                _diff_dbg = _t_target_for_step - _now_dbg
+                try:
+                    _action_preview = (
+                        final_action[:6].tolist()
+                        if hasattr(final_action, 'tolist') else list(final_action[:6])
+                    )
+                except Exception:
+                    _action_preview = None
+                print(
+                    f'[FIRST CHUNK DIAG] start={start:.3f} now={_now_dbg:.3f} '
+                    f'action_dt={action_dt:.3f} t_target={_t_target_for_step:.3f} '
+                    f'diff(t_target-now)={_diff_dbg:.3f}s '
+                    f'action[:6]={_action_preview}',
+                    flush=True,
+                )
 
             for agent in ordered_agents:
                 if action_key_norm in ('ee_delta', 'relative_ee_pos') and agent.role != 'tool' and agent.ik_solver is not None:
@@ -1132,6 +1212,13 @@ def checkpoint_test(
 
     finally:
         thread_pool.shutdown(wait=False)
+        # Background inference executor 도 함께 정리 — 미정리 시 호출 반복마다
+        # thread leak + 미완료 future 의 GPU 텐서가 GC 안 됨.
+        try:
+            if 'inference_executor' in locals() and inference_executor is not None:
+                inference_executor.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
         # --- 4. 종료 처리 ---
         if oti_rl and 'bridge_client' in locals():
             try:

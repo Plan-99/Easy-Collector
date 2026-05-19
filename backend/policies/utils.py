@@ -321,19 +321,25 @@ def _get_action_data(df, action_key, eepos_tool_qpos_indices=None):
 
 
 def _compute_eepos_tool_augment_indices(dataset_info):
-    """옛 dataset 호환: observation.eepos 에 별도 tool agent (그리퍼) joint 가 빠진
-    경우, qpos 의 어느 인덱스를 끝에 append 해야 하는지 계산.
+    """qpos 의 어느 인덱스가 tool joint 인지 계산.
 
-    판별 로직: features 의 column names 파싱.
-      - eepos.names 의 'robot_<id>_...' prefix 들 → eepos 에 이미 표현된 robot id 집합
-        (arm EE 또는 'tool_' 표기 포함)
-      - qpos.names 중 그 집합에 없는 robot id 는 'separate tool agent' (그리퍼 등)
-      - 해당 robot id 의 qpos 인덱스가 augment 대상
+    우선순위:
+      1. info.json 의 ``tool_qpos_indices`` 필드 (lerobot_io 가 dataset 생성 시
+         robot DB role/tool_inner/tool_index 기반으로 정확히 계산해 저장) — 신규.
+      2. fallback 휴리스틱: features 의 column name 파싱
+         (eepos 에 안 나오는 robot id 의 qpos 인덱스 = 분리형 tool agent)
 
     Returns:
-        list[int] — qpos 의 추가 인덱스. 비어 있으면 augment 불필요
-        (eepos 가 이미 tool 포함하거나, tool agent 가 없는 경우).
+        list[int] — qpos 의 tool joint 인덱스. 비어 있으면 tool 없음.
     """
+    if dataset_info and isinstance(dataset_info, dict):
+        explicit = dataset_info.get('tool_qpos_indices')
+        if isinstance(explicit, list):
+            try:
+                return [int(x) for x in explicit]
+            except Exception:
+                pass
+
     features = dataset_info.get("features", {}) if dataset_info else {}
     qpos_names = features.get("observation.qpos", {}).get("names") or []
     eepos_names = features.get("observation.eepos", {}).get("names") or []
@@ -362,35 +368,74 @@ def _compute_eepos_tool_augment_indices(dataset_info):
     return tool_indices
 
 
-def _build_obs_state(df, obs_state_keys):
+def _build_obs_state(df, obs_state_keys, tool_qpos_indices=None):
     """obs_state_keys 순서대로 컬럼을 concat 해 (T, total_dim) state 행렬 반환.
 
-    누락된 컬럼 (예: 옛 dataset 에 observation.qpos 가 없으면 observation.state 사용)
-    은 가능한 한 fallback 으로 메우고, 정말 없으면 skip.
+    Semantic (NEW):
+      - 사용자 선택 obs_state_keys 는 **arm 부분만** 추출 (qpos/qvel/qeffort 에서
+        tool joint 인덱스 제외). eepos 는 기존 구조 유지.
+      - 마지막에 **항상 tool_pose 추가** — qpos 의 tool joint 인덱스 dim.
+      - obs_state_keys == [] → state = [tool_pose] 만.
+
+    tool_qpos_indices: qpos 컬럼 안에서 별도 tool agent (그리퍼 등) joint 의 인덱스.
+                        None 이면 분리할 게 없다고 보고 옛 동작 (전체 features 그대로).
+
+    누락된 컬럼은 가능한 한 fallback (옛 dataset 호환).
     """
-    if not obs_state_keys:
+    if obs_state_keys is None:
         obs_state_keys = ['qpos']
+
+    # tool 인덱스 분리. 분리형 tool agent 가 없으면 (tool_inner 또는 tool 없음) 빈 list.
+    tool_idx = list(tool_qpos_indices) if tool_qpos_indices else []
+    has_tool = len(tool_idx) > 0
+
+    # qpos column 결정 (qpos 가 없는 옛 dataset 은 state fallback)
+    qpos_col = 'observation.qpos' if 'observation.qpos' in df.columns \
+        else ('observation.state' if 'observation.state' in df.columns else None)
+    qpos_arr = None
+    if qpos_col is not None:
+        qpos_arr = np.array(df[qpos_col].tolist(), dtype=np.float32)
+        if qpos_arr.ndim == 1:
+            qpos_arr = qpos_arr.reshape(-1, 1)
+
+    # 전체 joint 인덱스에서 tool 을 뺀 arm 인덱스
+    arm_idx = None
+    if qpos_arr is not None and has_tool:
+        n_joints = qpos_arr.shape[1]
+        arm_idx = [i for i in range(n_joints) if i not in tool_idx]
 
     parts = []
     for key in obs_state_keys:
-        # qpos: 신규 컬럼 observation.qpos 우선, 옛 dataset 은 observation.state 사용.
         if key == 'qpos':
-            col = 'observation.qpos' if 'observation.qpos' in df.columns else 'observation.state'
-        else:
-            col = f'observation.{key}'
-        if col in df.columns:
-            arr = np.array(df[col].tolist(), dtype=np.float32)
-            if arr.ndim == 1:
-                arr = arr.reshape(-1, 1)
-            parts.append(arr)
+            if qpos_arr is None:
+                continue
+            parts.append(qpos_arr[:, arm_idx] if (arm_idx is not None) else qpos_arr)
+            continue
+        col = f'observation.{key}'
+        if col not in df.columns:
+            continue
+        arr = np.array(df[col].tolist(), dtype=np.float32)
+        if arr.ndim == 1:
+            arr = arr.reshape(-1, 1)
+        # qvel / qeffort 도 joint-aligned 라 arm 만 추출. eepos 는 이미 [arm_EE,
+        # tool_augment] 구조라 그대로 두고, 마지막 tool dim 만 제거.
+        if key in ('qvel', 'qeffort') and arm_idx is not None and arr.shape[1] >= len(arm_idx) + len(tool_idx):
+            arr = arr[:, arm_idx]
+        elif key == 'eepos' and has_tool:
+            # eepos column 끝에 tool_pose 가 augmented 되어 있음 (lerobot_io 의
+            # _compute_eepos_tool_augment_indices 동작). 마지막 len(tool_idx) dim 제거.
+            if arr.shape[1] > len(tool_idx):
+                arr = arr[:, :-len(tool_idx)]
+        parts.append(arr)
+
+    # tool pose 항상 마지막에 append (분리형 tool agent 인 경우만)
+    if has_tool and qpos_arr is not None:
+        parts.append(qpos_arr[:, tool_idx])
+
     if not parts:
-        # 최후의 fallback — observation.state 가 있으면 그것만.
-        if 'observation.state' in df.columns:
-            arr = np.array(df['observation.state'].tolist(), dtype=np.float32)
-            if arr.ndim == 1:
-                arr = arr.reshape(-1, 1)
-            return arr
-        raise ValueError("No observation column found in dataset")
+        # obs_state_keys=[] + tool 없는 경우 — 빈 state 반환
+        return np.zeros((len(df), 0), dtype=np.float32)
+
     return np.concatenate(parts, axis=1)
 
 
@@ -482,7 +527,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
         # obs_state_keys 와 action_key 에 따라 state/action 구성. action_key 가
         # ee_delta/relative_ee_pos 면 _get_action_data 가 observation.eepos 시간
         # 차분으로 derive — action.ee_delta 컬럼 저장 안 함.
-        state_data = _build_obs_state(df, self.obs_state_keys)
+        state_data = _build_obs_state(df, self.obs_state_keys, self._eepos_tool_qpos_indices)
         action_data = _get_action_data(df, self.action_key, self._eepos_tool_qpos_indices)
         # eepos sequence — relative_ee_pos 학습에서 __getitem__ 이 chunk 별
         # current EE local frame trajectory 를 계산하는 데 사용. 없으면 None.
@@ -820,7 +865,7 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
 
         # obs_state_keys / action_key 에 따라 state/action 구성. ee_delta 등은
         # observation.eepos 차분으로 derive.
-        state_data = _build_obs_state(df, obs_state_keys)
+        state_data = _build_obs_state(df, obs_state_keys, eepos_tool_qpos_indices)
         action_data = _get_action_data(df, action_key, eepos_tool_qpos_indices)
 
         # Check succeed
@@ -836,7 +881,7 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
         table = pq.read_table(parquet_path)
         df = table.to_pandas()
 
-        qpos = _build_obs_state(df, obs_state_keys)
+        qpos = _build_obs_state(df, obs_state_keys, eepos_tool_qpos_indices)
         action = _get_action_data(df, action_key, eepos_tool_qpos_indices)
 
         if qpos.ndim == 1:

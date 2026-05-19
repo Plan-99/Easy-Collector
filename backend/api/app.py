@@ -245,7 +245,13 @@ def handle_connect():
 # 'disconnect' 이벤트: 클라이언트 연결이 끊어졌을 때
 @socketio.on('disconnect')
 def handle_disconnect():
-    print('Client disconnected')
+    # 핸들러 자체에서 예외가 새어나가면 flask-socketio 가 websocket cleanup
+    # 도중 native (engineio C / gevent) 레이어로 던져 faulthandler 가 그
+    # context 에서 죽는 케이스 관찰됨. 항상 안전하게 swallow.
+    try:
+        print('Client disconnected')
+    except Exception:
+        pass
 
 
 @socketio.on('offer')

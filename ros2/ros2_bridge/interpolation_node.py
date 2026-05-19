@@ -226,6 +226,18 @@ class JointInterpolationNode(Node):
         names = list(msg.name) if msg.name else None
 
         with self._traj_lock:
+            # Cold start anchor: 큐가 비어 있고 (cold start 또는 idle 후 새 chunk
+            # 도착) 현재 pose 가 있으면, t=now 에 현재 pose 를 anchor 로 넣은 뒤
+            # target 을 schedule. 이게 없으면 interpolator 가 큐에 점이 1 개라
+            # t_now < t_target 이어도 즉시 target 을 반환 (joint_trajectory_interpolator
+            # __call__ 의 ``len==1`` 분기). 결과: homepose 직후 첫 publish 에서
+            # robot 이 target 으로 점프하면서 덜컹.
+            if self._traj_interp.empty and self._current_pos is not None:
+                t_anchor = time.time()
+                if t_anchor < t_target:
+                    self._traj_interp.schedule_waypoint(
+                        self._current_pos.copy(), t_anchor, names=names
+                    )
             ok = self._traj_interp.schedule_waypoint(target, t_target, names=names)
             if ok:
                 self._traj_active = True

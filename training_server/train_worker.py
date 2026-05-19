@@ -571,7 +571,16 @@ def main(args):
     # Extract settings
     batch_size = train_settings.get('batch_size', 32)
     action_key = policy['settings'].get('action_type') or train_settings.get('action_type', 'qaction')
-    obs_state_keys = policy['settings'].get('obs_state_keys') or train_settings.get('obs_state_keys', ['qpos'])
+    # NOTE: `or` 로 fallback 하면 빈 리스트 ([]) 가 falsy 라 ['qpos'] 로 덮여
+    # 사용자의 "no-state" 의도가 무효화됨. 명시적 None 체크로 빈 리스트도 그대로 전달.
+    _p_keys = policy['settings'].get('obs_state_keys')
+    _t_keys = train_settings.get('obs_state_keys')
+    if _p_keys is not None:
+        obs_state_keys = _p_keys
+    elif _t_keys is not None:
+        obs_state_keys = _t_keys
+    else:
+        obs_state_keys = ['qpos']
     use_relative_trajectory = train_settings.get('use_relative_trajectory', False)
     sensor_ids = config.get('sensor_ids', [])
 
@@ -639,6 +648,26 @@ def main(args):
         n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory,
         obs_state_keys=obs_state_keys,
         wrist_sensor_ids=wrist_sensor_ids,
+    )
+
+    # ── 학습 직전 state 구성 검증 (사용자가 의도한 obs_state_keys 가 실제 모델에
+    # 어떻게 반영됐는지 한 줄로 확인 가능). 두 정보가 일치해야 함:
+    #   1) obs_state_keys (전달된 키)
+    #   2) stats['observation.state'].mean.shape (실제 학습되는 state 차원)
+    try:
+        _ss = stats.get('observation.state', {}).get('mean')
+        _shape = tuple(getattr(_ss, 'shape', ())) if _ss is not None else None
+    except Exception:
+        _shape = None
+    try:
+        _input_state = input_features.get('observation.state')
+        _input_shape = getattr(_input_state, 'shape', None)
+    except Exception:
+        _input_shape = None
+    print(
+        f"[VERIFY] obs_state_keys={obs_state_keys}  "
+        f"stats.state.shape={_shape}  model.input.state.shape={_input_shape}",
+        flush=True,
     )
 
     best_epoch, min_val_loss = train(

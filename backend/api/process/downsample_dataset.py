@@ -22,13 +22,44 @@ from lerobot.datasets.video_utils import encode_video_frames
 from ...configs.global_configs import DATASET_DIR
 
 
+def _detect_tool_transition_frames(qpos_arr, tool_qpos_indices,
+                                    rel_threshold=0.1, abs_threshold=1e-3):
+    """그리퍼(tool) dim 값이 크게 바뀌는 프레임 index 반환.
+
+    qpos_arr: (T, dim) numpy array.
+    tool_qpos_indices: tool dim indices (list of int).
+    rel_threshold: 에피소드 내 tool dim range 의 몇 % 변화부터 transition 으로
+        볼지 (per-dim, episode-adaptive).
+    abs_threshold: range 가 0 (정적 dim) 일 때를 위한 절대값 floor.
+
+    Returns: numpy array of frame indices i where qpos[i] 가 qpos[i-1] 대비
+    유의미하게 변한 시점. 0번 프레임은 제외 (diff 없음).
+    """
+    if not tool_qpos_indices or qpos_arr.shape[0] < 2:
+        return np.array([], dtype=np.int64)
+    tool_vals = qpos_arr[:, tool_qpos_indices]
+    ranges = tool_vals.max(axis=0) - tool_vals.min(axis=0)
+    threshold = np.maximum(ranges * rel_threshold, abs_threshold)
+    diffs = np.abs(np.diff(tool_vals, axis=0))  # (T-1, n_tool)
+    transition_mask = (diffs > threshold).any(axis=1)
+    return np.where(transition_mask)[0] + 1  # +1: diff[i] 는 frame i+1 변화
+
+
 def downsample_dataset(dataset_id, new_dataset_id, keep, every,
-                       socketio_instance, task_control):
+                       socketio_instance, task_control,
+                       preserve_tool_transitions=True, tool_pad=1):
     """Downsample dataset by keeping `keep` frames out of every `every` frames.
 
     For each episode, frames are grouped into blocks of `every` frames,
     and only the first `keep` frames of each block are retained.
     The result is written into new_dataset_id as a new dataset.
+
+    If `preserve_tool_transitions=True` and info.json contains
+    `tool_qpos_indices`, frames near a gripper state change are also kept
+    (with `tool_pad` frames of padding on each side). 이렇게 하지 않으면 짧은
+    그리퍼 transition (2~3 frame) 이 다운샘플링 phase 에 따라 sampling 되거나
+    빠져서, 학습 시 같은 입력에 open/close 라벨이 섞이고 추론 시 그리퍼가
+    진동함.
     """
     dataset_path = os.path.join(DATASET_DIR, str(dataset_id))
     new_dataset_path = os.path.join(DATASET_DIR, str(new_dataset_id))
@@ -91,6 +122,41 @@ def downsample_dataset(dataset_id, new_dataset_id, keep, every,
 
             # Build keep indices: for every block of `every` frames, keep first `keep`
             keep_indices = [idx for idx in range(num_frames) if (idx % every) < keep]
+
+            # Tool transition preservation — qpos 의 tool dim 변화가 큰 프레임
+            # 주변을 강제 keep. info.json 의 tool_qpos_indices 와 parquet 의
+            # observation.qpos 가 둘 다 있을 때만 동작.
+            if preserve_tool_transitions:
+                tool_idx = src_info.get("tool_qpos_indices") or []
+                qpos_col = None
+                for _c in ("observation.qpos", "observation.state"):
+                    if _c in table.column_names:
+                        qpos_col = _c
+                        break
+                if tool_idx and qpos_col is not None:
+                    try:
+                        qpos_arr = np.array(
+                            table.column(qpos_col).to_pylist(), dtype=np.float32
+                        )
+                        trans = _detect_tool_transition_frames(qpos_arr, tool_idx)
+                        if trans.size > 0:
+                            must_keep = set()
+                            for tf in trans:
+                                lo = max(0, int(tf) - tool_pad)
+                                hi = min(num_frames, int(tf) + tool_pad + 1)
+                                must_keep.update(range(lo, hi))
+                            added = sorted(must_keep - set(keep_indices))
+                            if added:
+                                keep_indices = sorted(set(keep_indices) | must_keep)
+                                print(
+                                    f"[INFO] ep {ep_idx}: preserved {len(added)} "
+                                    f"extra frames around {len(trans)} tool "
+                                    f"transitions (tool_idx={tool_idx}, "
+                                    f"pad={tool_pad})"
+                                )
+                    except Exception as _ex:
+                        print(f"[WARN] tool transition detection failed ep {ep_idx}: {_ex}")
+
             new_num_frames = len(keep_indices)
             if new_num_frames == 0:
                 print(f"[WARN] Episode {ep_idx} has 0 frames after downsample, skipping")

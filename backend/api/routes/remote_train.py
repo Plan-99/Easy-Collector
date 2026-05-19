@@ -278,6 +278,39 @@ def _build_train_config(checkpoint):
     dataset_info_parsed = _parse_json_field(checkpoint.dataset_info)
     dataset_info = dataset_info_parsed if isinstance(dataset_info_parsed, dict) else {}
 
+    # Auto-detect has_succeed from the first dataset's first parquet — UI 가
+    # 학습 시 이 플래그를 보내주지 않으므로 backend 에서 dataset 을 직접 보고
+    # 결정한다. 결정된 값은 checkpoint.train_settings 에도 persist 시켜서 추후
+    # 추론 (checkpoint_test) 에서 has_succeed 분기가 정상 동작하도록.
+    #
+    # NOTE: 이 함수는 학습 시작 직전에 호출되므로 dataset 의 'succeed' 컬럼 존재
+    # = 새 모델이 succeed dim 으로 학습될 것 (training_server 가 같은 방식으로
+    # 자동 감지). 옛 checkpoint (이미 학습 완료된 것) 는 disk 에 있는 model 의
+    # action shape 로만 신뢰성 있게 판단 가능 — 이건 별도 백필 스크립트가 처리.
+    if 'has_succeed' not in train_settings and isinstance(dataset_info, dict):
+        try:
+            import pyarrow.parquet as pq
+            _first_ds_id = next(iter(dataset_info.keys()), None)
+            if _first_ds_id is not None:
+                _parquet_path = os.path.join(
+                    DATASET_DIR, str(_first_ds_id),
+                    'data', 'chunk-000', 'episode_000000.parquet',
+                )
+                if os.path.exists(_parquet_path):
+                    _cols = pq.read_table(_parquet_path).column_names
+                    if 'succeed' in _cols:
+                        train_settings['has_succeed'] = True
+                        # DB 에도 즉시 반영 (set & save)
+                        checkpoint.train_settings = json.dumps(train_settings)
+                        checkpoint.save()
+                        print(
+                            f'[checkpoint {checkpoint.id}] auto-detected '
+                            f'has_succeed=True from dataset {_first_ds_id}',
+                            flush=True,
+                        )
+        except Exception as _ex:
+            print(f'[checkpoint {checkpoint.id}] has_succeed auto-detect failed: {_ex}', flush=True)
+
     sensor_ids = []
     if task:
         parsed = _parse_json_field(task.sensor_ids)

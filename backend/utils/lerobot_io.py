@@ -130,6 +130,10 @@ def create_dataset(dataset_dir, agents, sensors, task, fps=20, action_key="joint
     )
     # Add custom field
     info["action_key"] = action_key
+    # Agent metadata — observation.qpos 의 global 인덱스 중 tool joint 위치.
+    # 학습/추론 측이 arm/tool 분리에 직접 사용. 기존 휴리스틱 (eepos.names 파싱) 보다
+    # 정확 — tool_inner 케이스 (그리퍼 joint 가 arm URDF 안) 도 정확히 잡힘.
+    info["tool_qpos_indices"] = _compute_tool_qpos_indices(agents)
 
     os.makedirs(dataset_dir, exist_ok=True)
     _write_json(info, os.path.join(dataset_dir, INFO_PATH))
@@ -142,6 +146,37 @@ def create_dataset(dataset_dir, agents, sensors, task, fps=20, action_key="joint
             open(fpath, "w").close()
 
     return features
+
+
+def _compute_tool_qpos_indices(agents):
+    """Robot DB 의 role / tool_inner / tool_index 정보로 global qpos 의 tool joint
+    인덱스 계산. observation.qpos 컬럼은 agents_sorted (id 순) 의 joint_names 를
+    순서대로 concat 한 것이므로, 같은 순회로 누적 offset 계산.
+
+    판별 규칙 (agent 별로 어느 joint 가 tool 인지):
+      - role == 'tool':                전체 joint 가 tool (그리퍼 같은 분리형 agent)
+      - tool_inner=True + tool_index:  arm 안의 tool_index 만 tool (URDF 임베디드)
+      - 외:                            tool joint 없음 (순수 arm)
+    """
+    agents_sorted = sorted(agents, key=lambda a: a['id'] if isinstance(a, dict) else a.id)
+    tool_indices = []
+    offset = 0
+    for agent in agents_sorted:
+        a = agent if isinstance(agent, dict) else agent.__dict__
+        joint_names = a.get('joint_names', []) or []
+        role = a.get('role') if isinstance(agent, dict) else getattr(agent, 'role', None)
+        tool_inner = a.get('tool_inner', False) if isinstance(agent, dict) else getattr(agent, 'tool_inner', False)
+        tool_index_local = a.get('tool_index') or [] if isinstance(agent, dict) else (getattr(agent, 'tool_index', None) or [])
+        n = len(joint_names)
+        if role == 'tool':
+            # 전체 joint 가 tool
+            tool_indices.extend(range(offset, offset + n))
+        elif tool_inner and tool_index_local:
+            for ti in tool_index_local:
+                if 0 <= int(ti) < n:
+                    tool_indices.append(offset + int(ti))
+        offset += n
+    return tool_indices
 
 
 def build_features(agents, sensors, task, action_key="joint"):
