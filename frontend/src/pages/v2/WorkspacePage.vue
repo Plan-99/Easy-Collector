@@ -423,15 +423,26 @@
                     style="height: 90%"
                 >
                     <TutorialHint class="q-mb-sm" :text="$t('tutorialWorkspaceData')" />
-                    <q-btn
-                        outline
-                        class="full-width q-mb-sm"
-                        rounded
-                        color="primary bg-dark"
-                        icon="add"
-                        :label="$t('workspaceAddDatasetFolder')"
-                        @click="openAddDatasetForm"
-                    ></q-btn>
+                    <div class="row q-mb-sm no-wrap" style="gap: 8px;">
+                        <q-btn
+                            outline
+                            class="col"
+                            rounded
+                            color="primary bg-dark"
+                            icon="add"
+                            :label="$t('workspaceAddDatasetFolder')"
+                            @click="openAddDatasetForm"
+                        ></q-btn>
+                        <q-btn
+                            outline
+                            class="col"
+                            rounded
+                            color="primary bg-dark"
+                            icon="file_upload"
+                            :label="$t('workspaceImportDataset')"
+                            @click="openImportDatasetDialog"
+                        ></q-btn>
+                    </div>
                     <q-scroll-area class="full-height">
                         <q-list bordered separator class="border-rounded bg-dark" dark>
                             <q-expansion-item
@@ -470,6 +481,12 @@
                                                     <q-item-section>{{ $t('workspaceDatasetMerge') }}</q-item-section>
                                                     <q-item-section side>
                                                         <q-icon name="merge_type" size="xs" />
+                                                    </q-item-section>
+                                                </q-item>
+                                                <q-item clickable v-ripple v-close-popup @click="openExportDatasetDialog(dataset)">
+                                                    <q-item-section>{{ $t('workspaceExportDataset') }}</q-item-section>
+                                                    <q-item-section side>
+                                                        <q-icon name="file_download" size="xs" />
                                                     </q-item-section>
                                                 </q-item>
                                                 <q-item clickable v-ripple class="text-negative" @click="deleteDataset(dataset)">
@@ -679,6 +696,14 @@
                 v-if="selectedWorkspaceId"
             />
         </q-dialog>
+
+        <input
+            ref="importInputEl"
+            type="file"
+            accept=".tar.gz,.tgz,.tar,.zip,application/gzip,application/x-tar,application/zip"
+            style="display: none"
+            @change="onImportFolderSelected"
+        />
 
         <q-dialog v-model="showCheckpointInfo" full-width>
             <q-card class="bg-secondary border-rounded border-white" dark>
@@ -1139,6 +1164,105 @@ function openAugmentationForm(dataset) {
     }
     augmentingDataset.value = dataset;
     showAugmentationForm.value = true;
+}
+
+// ── Dataset import / export ────────────────────────────────────────────────
+// Import accepts a single tar.gz/zip archive via the OS-native file picker.
+// Export triggers a tar.gz download so the browser's native save dialog handles it.
+const importInputEl = ref(null);
+
+function openImportDatasetDialog() {
+    if (!selectedWorkspaceId.value) {
+        Notify.create({ color: 'negative', message: t('selectWorkspaceFirst') });
+        return;
+    }
+    if (importInputEl.value) {
+        importInputEl.value.value = '';
+        importInputEl.value.click();
+    }
+}
+
+async function onImportFolderSelected(event) {
+    const file = (event.target.files || [])[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file, file.name);
+    formData.append('task_id', String(selectedWorkspaceId.value));
+
+    Loading.show();
+    try {
+        const res = await api.post('/dataset/:import_upload', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        if (res.data?.status === 'success') {
+            Notify.create({ color: 'positive', message: t('datasetImportSuccess') });
+            await listDatasets();
+        } else {
+            Notify.create({ color: 'negative', message: res.data?.message || t('datasetImportFailed') });
+        }
+    } catch (e) {
+        Notify.create({
+            color: 'negative',
+            message: e?.response?.data?.message || e.message || t('datasetImportFailed'),
+        });
+    } finally {
+        Loading.hide();
+        event.target.value = '';
+    }
+}
+
+async function openExportDatasetDialog(dataset) {
+    // Prefer the native OS save-as dialog (File System Access API) so the user
+    // can pick where to drop the archive. Falls back to the standard browser
+    // download flow when the API is unavailable (e.g. Firefox / Safari).
+    const filename = `${dataset.name || 'dataset'}_${dataset.id}.tar.gz`;
+
+    let writableHandle = null;
+    if (typeof window.showSaveFilePicker === 'function') {
+        try {
+            writableHandle = await window.showSaveFilePicker({
+                suggestedName: filename,
+                types: [{
+                    description: 'Gzipped tar archive',
+                    accept: { 'application/gzip': ['.tar.gz', '.tgz'] },
+                }],
+            });
+        } catch (e) {
+            if (e?.name === 'AbortError') return; // user cancelled
+        }
+    }
+
+    Loading.show();
+    try {
+        const res = await api.get(`/dataset/${dataset.id}/:download`, {
+            responseType: 'blob',
+        });
+        const blob = new Blob([res.data], { type: 'application/gzip' });
+
+        if (writableHandle) {
+            const writable = await writableHandle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+        } else {
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.URL.revokeObjectURL(url);
+        }
+        Notify.create({ color: 'positive', message: t('datasetExportSuccess') });
+    } catch (e) {
+        Notify.create({
+            color: 'negative',
+            message: e?.response?.data?.message || e.message || t('datasetExportFailed'),
+        });
+    } finally {
+        Loading.hide();
+    }
 }
 
 function deleteWorkspace(workspace) {

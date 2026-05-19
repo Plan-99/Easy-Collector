@@ -761,3 +761,163 @@ def downsample_dataset_route(id):
     )
 
     return {'status': 'success', 'message': 'Dataset downsample started'}, 200
+
+
+# ── Dataset import / export ─────────────────────────────────────────────────
+# Symmetric round-trip via the web UI: Export streams a tar.gz of
+# DATASET_DIR/<id>/ as an attachment; Import accepts the same archive shape
+# (tar.gz / tgz / tar / zip) and unpacks it into DATASET_DIR/<new_id>/. Lets
+# users move datasets between machines without dropping into the launcher.
+
+def _extract_archive_to(archive_path: str, dest: str, archive_name: str):
+    """Extract a tar.gz/tgz/tar/zip into ``dest``. If the archive has exactly
+    one top-level entry that is a directory (the typical layout produced by our
+    Export endpoint), its contents are unpacked directly into ``dest`` so the
+    LeRobot layout (``meta/``, ``data/``, ``videos/``) lands at the dataset
+    root. Rejects entries with absolute or parent-traversal paths.
+    """
+    import tarfile
+    import zipfile
+    import tempfile
+
+    lower = (archive_name or '').lower()
+    staging = tempfile.mkdtemp(prefix='dataset_import_', dir=os.path.dirname(dest) or None)
+
+    try:
+        if lower.endswith(('.tar.gz', '.tgz', '.tar')):
+            mode = 'r:gz' if lower.endswith(('.tar.gz', '.tgz')) else 'r:'
+            with tarfile.open(archive_path, mode) as tar:
+                for member in tar.getmembers():
+                    # Reject path traversal / absolute paths.
+                    name = member.name.replace('\\', '/')
+                    if name.startswith('/') or '..' in name.split('/'):
+                        continue
+                    tar.extract(member, staging)
+        elif lower.endswith('.zip'):
+            with zipfile.ZipFile(archive_path) as zf:
+                for info in zf.infolist():
+                    name = info.filename.replace('\\', '/')
+                    if name.startswith('/') or '..' in name.split('/'):
+                        continue
+                    zf.extract(info, staging)
+        else:
+            raise ValueError(f'Unsupported archive type: {archive_name}')
+
+        # If the archive has a single top-level directory, unwrap it.
+        entries = [e for e in os.listdir(staging) if not e.startswith('.')]
+        if len(entries) == 1 and os.path.isdir(os.path.join(staging, entries[0])):
+            src_root = os.path.join(staging, entries[0])
+        else:
+            src_root = staging
+
+        for name in os.listdir(src_root):
+            shutil.move(os.path.join(src_root, name), os.path.join(dest, name))
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
+@dataset_bp.route('/dataset/:import_upload', methods=['POST'])
+def import_dataset_upload():
+    """Import a dataset from an uploaded archive (``.tar.gz`` / ``.tgz`` /
+    ``.tar`` / ``.zip``). Used by the web UI's native file picker — mirrors the
+    Export endpoint's output format for a symmetric round-trip.
+
+    Form fields:
+        ``task_id``: workspace/task id (required).
+        ``name`` (optional): dataset name; defaults to the archive's stem
+            (with the ``.tar.gz``/``.zip`` extension stripped).
+        ``file``: the archive.
+    """
+    import tempfile
+
+    task_id = request.form.get('task_id')
+    if not task_id:
+        return {'status': 'error', 'message': 'task_id is required'}, 400
+
+    archive = request.files.get('file')
+    if archive is None:
+        return {'status': 'error', 'message': 'no archive uploaded'}, 400
+
+    filename = archive.filename or 'dataset.tar.gz'
+    lower = filename.lower()
+    if not lower.endswith(('.tar.gz', '.tgz', '.tar', '.zip')):
+        return {
+            'status': 'error',
+            'message': 'Unsupported archive — use .tar.gz, .tgz, .tar, or .zip',
+        }, 400
+
+    # Default name: strip the archive suffix. Order matters — '.tar.gz' first.
+    name = request.form.get('name')
+    if not name:
+        for ext in ('.tar.gz', '.tgz', '.tar', '.zip'):
+            if lower.endswith(ext):
+                name = filename[: -len(ext)]
+                break
+        name = name or filename
+
+    new_dataset = DatasetModel.create(name=name, task_id=task_id)
+    dest = os.path.join(DATASET_DIR, str(new_dataset.id))
+    os.makedirs(dest, exist_ok=True)
+
+    # Save the upload to a temp file, then extract — tarfile/zipfile both want
+    # a seekable file rather than a stream.
+    tmp = tempfile.NamedTemporaryFile(prefix='dataset_upload_', suffix=lower, delete=False)
+    try:
+        archive.save(tmp.name)
+        tmp.close()
+        _extract_archive_to(tmp.name, dest, filename)
+    except Exception as e:
+        shutil.rmtree(dest, ignore_errors=True)
+        new_dataset.delete_instance()
+        return {'status': 'error', 'message': f'Import failed: {e}'}, 500
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+
+    return {
+        'status': 'success',
+        'message': 'Dataset imported',
+        'dataset_id': new_dataset.id,
+    }, 200
+
+
+@dataset_bp.route('/dataset/<id>/:download', methods=['GET'])
+def download_dataset(id):
+    """Stream a dataset as a tar.gz attachment so the browser shows its native
+    save-as dialog. Used by the web UI's Export Dataset menu."""
+    import tempfile
+    import tarfile
+
+    dataset = DatasetModel.find(id)
+    if not dataset:
+        return {'status': 'error', 'message': 'Dataset not found'}, 404
+
+    src = os.path.join(DATASET_DIR, str(dataset.id))
+    if not os.path.isdir(src):
+        return {'status': 'error', 'message': 'Dataset folder not found'}, 404
+
+    safe_name = re.sub(r'[^A-Za-z0-9._-]+', '_', dataset.name or f'dataset_{dataset.id}')
+    arcname = f'{safe_name}_{dataset.id}'
+
+    tmp = tempfile.NamedTemporaryFile(prefix='dataset_export_', suffix='.tar.gz', delete=False)
+    tmp.close()
+    try:
+        with tarfile.open(tmp.name, 'w:gz') as tar:
+            tar.add(src, arcname=arcname)
+    except Exception as e:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+        return {'status': 'error', 'message': f'Archive failed: {e}'}, 500
+
+    return send_file(
+        tmp.name,
+        as_attachment=True,
+        download_name=f'{arcname}.tar.gz',
+        mimetype='application/gzip',
+    )
+
+

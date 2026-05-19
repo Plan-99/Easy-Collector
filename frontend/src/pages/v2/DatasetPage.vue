@@ -31,6 +31,8 @@
             </div>
         </div>
 
+        <TutorialHint class="q-mb-md" :text="$t('tutorialDatasetIntro')" />
+
         <div
             class="col q-mb-md border-rounded border-grey flex-center flex column"
             v-if="pageLoading"
@@ -48,15 +50,28 @@
         <div class="col row q-mb-md items-stretch" style="min-height: 0;" v-else>
             <!-- LEFT: dataset list with episodes -->
             <div class="col-4 bg-secondary q-mr-md border-rounded q-pa-sm column" style="min-height: 0;">
-                <q-btn
-                    outline
-                    rounded
-                    color="primary"
-                    icon="add"
-                    class="full-width q-mb-sm bg-dark"
-                    :label="$t('workspaceAddDatasetFolder')"
-                    @click="openAddDatasetForm"
-                />
+                <TutorialHint step="1" class="q-mb-sm" :text="$t('tutorialDatasetList')" />
+                <TutorialHint class="q-mb-sm" :text="$t('tutorialDatasetAugment')" />
+                <div class="row q-mb-sm no-wrap" style="gap: 8px;">
+                    <q-btn
+                        outline
+                        rounded
+                        color="primary"
+                        icon="add"
+                        class="col bg-dark"
+                        :label="$t('workspaceAddDatasetFolder')"
+                        @click="openAddDatasetForm"
+                    />
+                    <q-btn
+                        outline
+                        rounded
+                        color="primary"
+                        icon="file_upload"
+                        class="col bg-dark"
+                        :label="$t('workspaceImportDataset')"
+                        @click="openImportDatasetDialog"
+                    />
+                </div>
 
                 <!-- Selection action bar -->
                 <div
@@ -143,6 +158,10 @@
                                         <q-item clickable v-ripple v-close-popup @click="openMergeDatasetForm(dataset)">
                                             <q-item-section>{{ $t('workspaceDatasetMerge') }}</q-item-section>
                                             <q-item-section side><q-icon name="merge_type" size="xs" color="grey-5" /></q-item-section>
+                                        </q-item>
+                                        <q-item clickable v-ripple v-close-popup @click="openExportDatasetDialog(dataset)">
+                                            <q-item-section>{{ $t('workspaceExportDataset') }}</q-item-section>
+                                            <q-item-section side><q-icon name="file_download" size="xs" color="grey-5" /></q-item-section>
                                         </q-item>
                                         <q-separator dark />
                                         <q-item clickable v-ripple class="text-negative" v-close-popup @click="deleteDataset(dataset)">
@@ -249,6 +268,7 @@
 
             <!-- RIGHT: Episode viewer -->
             <div class="col bg-secondary border-rounded q-pa-md column" style="min-width: 0; min-height: 0; overflow: auto;">
+                <TutorialHint step="2" class="q-mb-sm" :text="$t('tutorialDatasetViewer')" />
                 <div
                     v-if="!currentEpisode"
                     class="flex flex-center text-grey-5 text-h6"
@@ -301,6 +321,14 @@
             />
         </q-dialog>
 
+        <input
+            ref="importInputEl"
+            type="file"
+            accept=".tar.gz,.tgz,.tar,.zip,application/gzip,application/x-tar,application/zip"
+            style="display: none"
+            @change="onImportFolderSelected"
+        />
+
         <!-- Move/copy target picker -->
         <q-dialog v-model="showMoveCopyDialog">
             <q-card class="bg-dark text-white" style="min-width: 380px;">
@@ -351,6 +379,7 @@ import { useSocket } from 'src/composables/useSocket';
 import FormDialog from 'src/components/v2/FormDialog.vue';
 import DataAugmentationDialog from 'src/components/v2/DataAugmentationDialog.vue';
 import EpisodePanel from 'src/components/v2/EpisodePanel.vue';
+import TutorialHint from 'src/components/v2/TutorialHint.vue';
 
 const { t } = useI18n();
 const { socket } = useSocket();
@@ -757,6 +786,104 @@ function openAugmentationForm(dataset) {
     }
     augmentingDataset.value = dataset;
     showAugmentationForm.value = true;
+}
+
+// ─── Import / Export ──────────────────────────────────────────────────────
+// Import accepts a single tar.gz/zip archive via the OS-native file picker.
+// Export triggers a tar.gz download so the browser's native save dialog runs.
+const importInputEl = ref(null);
+
+function openImportDatasetDialog() {
+    if (!selectedWorkspaceId.value) {
+        Notify.create({ color: 'negative', message: t('selectWorkspaceFirst') });
+        return;
+    }
+    if (importInputEl.value) {
+        importInputEl.value.value = '';
+        importInputEl.value.click();
+    }
+}
+
+async function onImportFolderSelected(event) {
+    const file = (event.target.files || [])[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file, file.name);
+    formData.append('task_id', String(selectedWorkspaceId.value));
+
+    Loading.show();
+    try {
+        const res = await api.post('/dataset/:import_upload', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        if (res.data?.status === 'success') {
+            Notify.create({ color: 'positive', message: t('datasetImportSuccess') });
+            await listDatasets();
+        } else {
+            Notify.create({ color: 'negative', message: res.data?.message || t('datasetImportFailed') });
+        }
+    } catch (e) {
+        Notify.create({
+            color: 'negative',
+            message: e?.response?.data?.message || e.message || t('datasetImportFailed'),
+        });
+    } finally {
+        Loading.hide();
+        event.target.value = '';
+    }
+}
+
+async function openExportDatasetDialog(dataset) {
+    // Prefer the native OS save-as dialog; fall back to the standard browser
+    // download trigger when the File System Access API isn't available.
+    const filename = `${dataset.name || 'dataset'}_${dataset.id}.tar.gz`;
+
+    let writableHandle = null;
+    if (typeof window.showSaveFilePicker === 'function') {
+        try {
+            writableHandle = await window.showSaveFilePicker({
+                suggestedName: filename,
+                types: [{
+                    description: 'Gzipped tar archive',
+                    accept: { 'application/gzip': ['.tar.gz', '.tgz'] },
+                }],
+            });
+        } catch (e) {
+            if (e?.name === 'AbortError') return;
+        }
+    }
+
+    Loading.show();
+    try {
+        const res = await api.get(`/dataset/${dataset.id}/:download`, {
+            responseType: 'blob',
+        });
+        const blob = new Blob([res.data], { type: 'application/gzip' });
+
+        if (writableHandle) {
+            const writable = await writableHandle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+        } else {
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.URL.revokeObjectURL(url);
+        }
+        Notify.create({ color: 'positive', message: t('datasetExportSuccess') });
+    } catch (e) {
+        Notify.create({
+            color: 'negative',
+            message: e?.response?.data?.message || e.message || t('datasetExportFailed'),
+        });
+    } finally {
+        Loading.hide();
+    }
 }
 
 // ─── Merge ─────────────────────────────────────────────────────────────────
