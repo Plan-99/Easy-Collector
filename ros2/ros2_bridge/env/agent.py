@@ -230,6 +230,14 @@ class Agent:
         if not from_ee:
             self.ee_pos_cmd = None
 
+        # role=tool (그리퍼) 은 항상 direct 경로. 하드웨어가 자체 velocity profile
+        # 을 가지므로 소프트웨어 linear interp 를 거치면 Modbus write 지연으로
+        # 200Hz 보간 타이머가 늘어져 interp 가 0.3s stale timeout 에 걸려 target
+        # 직전에서 끊긴다. _direct_pub 이 없으면 (interp OFF) 아래 일반 경로로.
+        if self.role == 'tool' and self._direct_pub is not None:
+            self.move_joint_direct(action, velocity_arg=velocity_arg)
+            return
+
         try:
             if action is None:
                 raise ValueError("action is None")
@@ -285,6 +293,49 @@ class Agent:
         target_js = [curr + delta for curr, delta in zip(current_js, delta_action)]
         self.move_joint_step(target_js)
 
+    def move_joint_direct(self, action, velocity_arg=None):
+        """보간/큐 우회 — target 을 interpolation_node 의 direct 경로로 즉시 송신.
+
+        role=tool (그리퍼) 처럼 하드웨어가 자체 velocity profile 을 갖는 경우
+        소프트웨어 linear interp 는 (a) Modbus 트래픽만 낭비하고, (b) SDK write
+        지연으로 200Hz 보간 타이머가 늘어져 interp 가 0.3s stale timeout 에
+        걸려 target 직전에서 끊긴다. direct 경로는 _direct_cmd_callback 이 받아
+        SDK 로 target 을 한 번에 write — interp/LPF/timeout 모두 우회.
+
+        _direct_pub 이 없으면 (custom robot interp OFF) move_joint_step 폴백.
+        """
+        if self._direct_pub is None:
+            self.move_joint_step(action, velocity_arg=velocity_arg)
+            return
+        try:
+            if action is None:
+                raise ValueError("action is None")
+            action = [0.0 if a is None else float(a) for a in action]
+            if len(action) != self.joint_len:
+                if len(action) < self.joint_len:
+                    action = action + [0.0] * (self.joint_len - len(action))
+                else:
+                    action = action[:self.joint_len]
+        except Exception as exc:
+            print(f"[ERROR] move_joint_direct invalid action {action}: {exc}")
+            return
+
+        if self.joint_upper_bounds is not None and self.joint_lower_bounds is not None:
+            action = np.clip(
+                action, self.joint_lower_bounds, self.joint_upper_bounds
+            ).tolist()
+
+        self.joint_actions = action
+
+        from sensor_msgs.msg import JointState as JointStateMsg
+        msg = JointStateMsg()
+        msg.name = self.joint_names
+        msg.position = action
+        msg.velocity = [0.0] * self.joint_len
+        if self.tool_inner:
+            msg.velocity[-1] = 100.0
+        self._direct_pub.publish(msg)
+
     def move_to_joints_at(self, action, t_absolute, velocity_arg=None):
         """스케줄 waypoint 송신 — DexUMI 스타일 absolute-time scheduling.
 
@@ -297,6 +348,12 @@ class Agent:
 
         interpolation ON 일 때만 동작 — 그 외 경로는 move_joint_step 으로 폴백.
         """
+        # role=tool (그리퍼) 은 scheduled waypoint 도 쓰지 않고 항상 direct —
+        # 하드웨어 자체 velocity profile. interp/큐/timeout 전부 우회.
+        if self.role == 'tool':
+            self.move_joint_direct(action, velocity_arg=velocity_arg)
+            return
+
         if self._waypoint_pub is None:
             # interp OFF 인 custom robot — scheduled waypoint 미지원, 즉시 명령으로.
             self.move_joint_step(action, velocity_arg=velocity_arg)
@@ -836,10 +893,11 @@ class Agent:
                 self._move_to_thread.join(timeout=0.5)
 
         # role=tool (그리퍼 등) 은 SDK/하드웨어가 자체 velocity profile 로 동작 →
-        # 소프트웨어 보간이 오히려 Modbus 트래픽만 낭비한다. target 을 한 번에 송신.
+        # 소프트웨어 보간이 오히려 Modbus 트래픽만 낭비한다. direct 경로로 target
+        # 을 한 번에 송신 — interp/LPF/0.3s stale timeout 모두 우회.
         if self.role == 'tool':
             self._move_target = list(target_pos)
-            self.move_joint_step(target_pos)
+            self.move_joint_direct(target_pos)
             return
 
         self._move_target = list(target_pos)

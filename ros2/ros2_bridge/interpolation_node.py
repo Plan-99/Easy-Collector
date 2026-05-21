@@ -26,6 +26,10 @@ from sensor_msgs.msg import JointState
 
 from ros2_bridge.joint_trajectory_interpolator import JointTrajectoryInterpolator
 
+# legacy interp 완료 후 LPF 가 target 에 이만큼 가까워지면 정착으로 보고
+# publish 중단. rad / m 단위 — 충분히 작아 그리퍼/관절 모두 무해.
+_LPF_SETTLE_EPS = 1e-4
+
 
 class JointInterpolationNode(Node):
     """
@@ -317,7 +321,7 @@ class JointInterpolationNode(Node):
             return
 
         # ── Path 2: legacy linear interp ────────────────────────────────────
-        if not self._has_target or self._interp_progress >= 1.0:
+        if not self._has_target:
             return
 
         # 0.3초 이상 명령이 없으면 이전 상태 폐기 (텔레옵 중지 시 잔여 동작 방지)
@@ -327,8 +331,9 @@ class JointInterpolationNode(Node):
             self.get_logger().info('Stale command discarded (>0.3s idle)')
             return
 
-        self._interp_progress += self._dt / self._cmd_interval
-        self._interp_progress = min(self._interp_progress, 1.0)
+        if self._interp_progress < 1.0:
+            self._interp_progress += self._dt / self._cmd_interval
+            self._interp_progress = min(self._interp_progress, 1.0)
         t = self._interp_progress
 
         _raw_pos = self._start_pos + t * (self._target_pos - self._start_pos)
@@ -339,6 +344,18 @@ class JointInterpolationNode(Node):
             self._output_sdk()
         else:
             self._output_topic()
+
+        # interp 완료(progress>=1.0) 후에도 LPF lag 때문에 마지막 publish 값이
+        # target 보다 ~1 step 짧다. 여기서 바로 publish 를 멈추면 (구버전 동작)
+        # robot/gripper 가 목표 pose 직전에서 영구히 멈춤. → progress 1.0 도달
+        # 후에도 _raw_pos(=target) 를 LPF 에 계속 통과시켜 완전히 수렴할 때까지
+        # publish 를 이어간다. _lpf_state 가 None 이면 (α>=1.0 무필터) lag 자체가
+        # 없으므로 즉시 종료.
+        if self._interp_progress >= 1.0:
+            if (self._lpf_state is None
+                    or np.max(np.abs(self._lpf_state - self._target_pos))
+                    < _LPF_SETTLE_EPS):
+                self._has_target = False
 
     def _apply_lpf(self, target_np):
         """1차 IIR low-pass filter: out = α * target + (1-α) * prev_out.
