@@ -179,7 +179,11 @@ export const TRAIN_CONFIGS = {
         'scheduler_decay_lr': { 'label': 'Scheduler Decay LR', 'value': 2.5e-6, 'type': 'number' },
     },
     'Common': {
-        'num_epochs': { 'label': 'Number of Epochs', 'value': 1000, 'type': 'number' },
+        // num_steps: 총 gradient(optimizer) update 수. 학습은 step 기반 —
+        // frame-indexed dataset 을 cycle() 로 무한 순회하며 num_steps 만큼 돈다.
+        'num_steps': { 'label': 'Number of Steps', 'value': 20000, 'type': 'number' },
+        // val_freq: 몇 step마다 validation 할지. 매 step validation 은 낭비.
+        'val_freq': { 'label': 'Validation Frequency (steps)', 'value': 200, 'type': 'number' },
         'batch_size': { 'label': 'Batch Size', 'value': 32, 'type': 'number' },
         'num_workers': { 'label': 'Number of Workers', 'value': 4, 'type': 'number' },
         'use_peft': { 'label': 'Use LoRA (PEFT)', 'value': false, 'type': 'boolean' },

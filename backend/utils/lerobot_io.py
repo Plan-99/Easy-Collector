@@ -207,34 +207,18 @@ def build_features(agents, sensors, task, action_key="joint"):
         state_dim += len(joint_names)
         action_dim += len(joint_names)
 
-        # EE features: only if agent has ik_solver
+        # EE features: only if agent has ik_solver.
+        # observation.eepos 는 **순수 EE pose (x,y,z,rx,ry,rz) 6 dim** 만 담는다.
+        # tool 은 tool_inner 든 separate tool agent 든 전부 qpos 에 있으며,
+        # 학습/추론 시 tool_qpos_indices 로 붙인다 — eepos 규격을 6×ee 로 통일
+        # (옛 tool_inner +1 / separate tool tail-append 분기를 모두 제거).
         has_ik = a.get('ik_solver') is not None if isinstance(agent, dict) else getattr(agent, 'ik_solver', None) is not None
         if has_ik:
             agent_ee_names = a.get('ee_names', []) if isinstance(agent, dict) else getattr(agent, 'ee_names', [])
-            tool_inner = a.get('tool_inner', False) if isinstance(agent, dict) else getattr(agent, 'tool_inner', False)
-            per_ee_dim = 6 + (1 if tool_inner else 0)
             for ee_name in sorted(agent_ee_names):
                 components = ["x", "y", "z", "rx", "ry", "rz"]
-                if tool_inner:
-                    components.append("tool")
                 ee_names_list.extend([f"robot_{a_id}_{ee_name}_{c}" for c in components])
-                ee_dim += per_ee_dim
-
-    # 별도 tool agent (role='tool', ik_solver 없음 — 예: Robotiq 그리퍼) 의 joint
-    # position 을 eepos 컬럼 끝에 absolute pass-through 로 추가. 이렇게 해야
-    # relative_ee_pos 학습/추론에서 그리퍼 dim 이 action 에 포함되어 정책이 그리퍼를
-    # 제어할 수 있다. compute_relative_trajectory_in_local_frame 은 이미 dim 6 이후를
-    # absolute 로 통과시키므로 별도 변환 코드는 필요 없음.
-    if ee_dim > 0:
-        for agent in agents_sorted:
-            a = agent if isinstance(agent, dict) else agent.__dict__
-            role = a.get('role') if isinstance(agent, dict) else getattr(agent, 'role', None)
-            has_ik = a.get('ik_solver') is not None if isinstance(agent, dict) else getattr(agent, 'ik_solver', None) is not None
-            if role == 'tool' and not has_ik:
-                a_id = a.get('id', a.get('agent_id'))
-                tool_joint_names = a.get('joint_names', [])
-                ee_names_list.extend([f"robot_{a_id}_tool_{jn}" for jn in tool_joint_names])
-                ee_dim += len(tool_joint_names)
+                ee_dim += 6
 
     features = {
         # observation.qpos: 절대 joint position. 학습/추론 모두 _build_obs_state 헬퍼가
@@ -397,24 +381,16 @@ def append_episode(dataset_dir, timesteps, agents, sensors, task,
             elif qpos is not None:
                 qeffort_parts.append(np.zeros(len(qpos), dtype=np.float32))
 
-            # observation.eepos — flatten dict {ee_name: [6+tool]}
+            # observation.eepos — flatten dict {ee_name: [x,y,z,rx,ry,rz(,tool)]}.
+            # 순수 EE pose 6 dim 만 저장 — agent 가 tool_inner tool 을 7번째로
+            # 넣어줘도 [:6] 으로 잘라낸다. tool 은 qpos 에만 존재.
             eepos = robot_state.get('eepos')
             if eepos is not None and isinstance(eepos, dict):
                 for ee_name in sorted(eepos.keys()):
-                    eepos_parts.append(np.array(eepos[ee_name], dtype=np.float32))
+                    eepos_parts.append(np.array(eepos[ee_name][:6], dtype=np.float32))
 
             # action.ee_delta 는 더 이상 robot_state['ee_delta_action'] 을 직접 쓰지 않고,
             # 루프 끝난 뒤 eepos 시간 차분으로 derive (모든 tele-type 통일).
-
-        # 별도 tool agent (그리퍼 등) joint position 을 eepos 끝에 추가.
-        # build_features 의 ee_names_list 와 동일한 순서 (agents_sorted 내 tool agent).
-        for agent in agents_sorted:
-            if getattr(agent, 'role', None) != 'tool' or getattr(agent, 'ik_solver', None) is not None:
-                continue
-            tool_state = ts.observation['robot_states'][agent.id]
-            tool_qpos = tool_state.get('qpos')
-            if tool_qpos is not None:
-                eepos_parts.append(np.array(tool_qpos, dtype=np.float32))
 
         # action.joint: 절대 joint position target (qaction). 항상 모든 agent
         # 에 대해 채움. action_key 와 무관.

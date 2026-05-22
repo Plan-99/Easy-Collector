@@ -317,6 +317,33 @@ def stop_training(job_id):
     return jsonify({'status': 'success', 'message': 'Training stopped'}), 200
 
 
+@app.route('/api/train/save/<job_id>', methods=['POST'])
+def save_training(job_id):
+    """Save 버튼(조기 종료) — worker 에 SIGUSR1 송신. worker 는 현재까지의 best
+    checkpoint 를 저장하고 정상 종료(exit 0)한다. stop 과 달리 프로세스를 죽이지
+    않으므로 학습 결과가 보존되고, 이후 status=finished → 다운로드 파이프라인이
+    그대로 동작한다. SIGUSR1 은 worker 메인 프로세스에만 보낸다 (DataLoader
+    worker 들은 process group 이지만 특정 pid 송신이라 영향 없음)."""
+    with jobs_lock:
+        job = jobs.get(job_id)
+    if not job:
+        return jsonify({'status': 'error', 'message': 'Job not found'}), 404
+
+    process = job.get('process')
+    if not (process and process.poll() is None):
+        return jsonify({'status': 'error', 'message': 'No active training process'}), 410
+
+    try:
+        os.kill(process.pid, signal.SIGUSR1)
+    except ProcessLookupError:
+        return jsonify({'status': 'error', 'message': 'Process not running'}), 410
+
+    return jsonify({
+        'status': 'success',
+        'message': 'Save (early-finish) signal sent — worker will save best and finish',
+    }), 200
+
+
 @app.route('/api/train/logs/<job_id>', methods=['GET'])
 def get_logs(job_id):
     """Return new log lines with index >= since."""

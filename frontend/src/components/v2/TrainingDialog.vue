@@ -11,7 +11,8 @@
         <checkpoint-info :checkpoint="props.checkpoint" />
       </q-card-section>
       <q-card-section>
-        <div class="text-center">
+        <div class="text-center q-gutter-x-sm">
+            <q-btn color="positive" :label="$t('trainSaveBtn')" @click="saveTraining" :loading="saving" v-if="isTraining" />
             <q-btn color="negative" :label="$t('trainStopBtn')" @click="stopTraining" v-if="isTraining" />
             <q-btn :color="terminalColor" :label="terminalLabel" @click="$emit('update:modelValue', false)" v-else-if="isTerminal" />
             <q-btn color="primary" :label="$t('trainCancelBtn')" @click="cancelTraing" v-else />
@@ -134,9 +135,12 @@ const options = {
   maintainAspectRatio: false
 };
 
+const saving = ref(false);
+
 watch(() => props.isTraining, (newVal) => {
     if (!newVal) {
         trainingProgress.value = 0;
+        saving.value = false;
         data.value.labels = [];
         data.value.datasets[0].data = [];
         data.value.datasets[1].data = [];
@@ -199,6 +203,25 @@ async function stopTraining() {
         emit('cpRemoved', props.checkpoint.id);
     } catch (error) {
         Notify.create({ color: 'negative', message: t('trainStopFailed', { error }) });
+    }
+}
+
+async function saveTraining() {
+    // Save = '조기 종료 + best 저장'. worker 가 SIGUSR1 을 받아 final validation
+    // 후 best checkpoint 를 저장하고 정상 종료 → 기존 완료 파이프라인이 다운로드.
+    // Stop 과 달리 학습 결과가 보존된다. (Stop 과 동일하게 확인 없이 즉시 동작.)
+    if (!props.isTraining || saving.value) return;
+    saving.value = true;
+    const serverUrl = localStorage.getItem('remoteTrainingServerUrl') || '';
+    try {
+        await api.post('/train/save', {
+            server_url: serverUrl,
+            checkpoint_id: props.checkpoint.id,
+        });
+        Notify.create({ color: 'positive', message: t('trainSaveRequested') });
+    } catch (error) {
+        saving.value = false;
+        Notify.create({ color: 'negative', message: t('trainSaveFailed', { error }) });
     }
 }
 

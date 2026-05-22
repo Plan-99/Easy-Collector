@@ -145,6 +145,37 @@ def train_queue_list():
     return {'status': 'success', **scheduler.snapshot()}, 200
 
 
+@remote_train_bp.route('/train/save', methods=['POST'])
+def train_save():
+    """학습 중인 체크포인트를 '조기 종료 + best 저장'. training server 의
+    /api/train/save/<job_id> 로 프록시 — worker 가 SIGUSR1 을 받아 final
+    validation 후 best checkpoint 를 저장하고 정상 종료(exit 0)한다.
+
+    Stop 과 달리 프로세스를 죽이지 않으므로 결과가 보존되고, 이후 worker 가
+    exit 0 으로 끝나면 기존 완료 파이프라인(status=finished → 다운로드 → DB
+    등록)이 그대로 동작한다 — scheduler/runner 변경 불필요."""
+    data = request.json or {}
+    server_url = _normalize_url(data.get('server_url', ''))
+    checkpoint_id = data.get('checkpoint_id')
+    if not server_url or checkpoint_id is None:
+        return {'status': 'error', 'message': 'server_url and checkpoint_id required'}, 400
+
+    # job_id 는 runner 가 만드는 규칙과 동일해야 한다 (run_training_job 참조).
+    from ...utils.machine_id import machine_id as _machine_id_fn
+    job_id = f'{_machine_id_fn()[:8]}_ckpt_{int(checkpoint_id)}'
+
+    try:
+        resp = requests.post(f'{server_url}/api/train/save/{job_id}', timeout=10)
+    except requests.exceptions.RequestException as e:
+        return {'status': 'error', 'message': f'training server unreachable: {e}'}, 502
+    if resp.status_code != 200:
+        return {'status': 'error', 'message': f'HTTP {resp.status_code}: {resp.text}'}, 502
+    return {
+        'status': 'success',
+        'message': 'Save requested — training will finish and save the best checkpoint',
+    }, 200
+
+
 # ---------------------------------------------------------------------------
 # Legacy aliases — 기존 프론트엔드 호출처 호환용. 새 큐 라우트로 라우팅.
 # (당분간 유지, 다음 단계에 프론트엔드에서 직접 큐 라우트로 이전.)
@@ -517,10 +548,19 @@ def _apply_result_json(checkpoint, ckpt_dir):
         data = json.load(f)
     loss = data.get('loss')
     best_epoch = data.get('best_epoch')
+    steps_run = data.get('steps_run')
     if loss is not None:
         checkpoint.loss = float(loss)
     if best_epoch is not None:
         checkpoint.best_epoch = int(best_epoch)
+    # steps_run = 실제로 완주한 step 수. 조기 종료(Save & Finish) 시 설정한
+    # num_steps 보다 작다 → train_settings.num_steps 를 실제값으로 갱신해서
+    # 체크포인트가 실제 학습량을 정직하게 반영하도록 한다.
+    if steps_run is not None:
+        ts = _parse_json_field(checkpoint.train_settings)
+        if isinstance(ts, dict):
+            ts['num_steps'] = int(steps_run)
+            checkpoint.train_settings = json.dumps(ts)
     return True
 
 

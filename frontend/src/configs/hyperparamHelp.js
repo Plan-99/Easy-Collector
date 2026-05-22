@@ -1032,16 +1032,29 @@ export const HYPERPARAM_HELP = {
   // ============================================================
   // Common training config — shared across policies
   // ============================================================
-  'Common.num_epochs': {
+  'Common.num_steps': {
     ko: {
-      title: '에폭 수 (num_epochs)',
-      easy: '전체 데이터를 몇 번 반복해서 학습할지. 작은 데이터셋이면 많이(500~1500), 큰 데이터셋이면 적게(200 이하) 돌리는 게 보통이에요.',
-      expert: '전체 데이터셋 반복 횟수. 작은 데이터셋이면 500~1500, 큰 데이터셋이면 200 이하부터 시작.\n\nValidation loss가 plateau면 일찍 중단해도 됩니다.',
+      title: '스텝 수 (num_steps)',
+      easy: '학습을 몇 번의 gradient 업데이트(step)로 돌릴지. 한 step = 배치 하나로 모델을 한 번 갱신. 작은 데이터셋이면 10000~30000 정도면 충분해요.',
+      expert: '총 optimizer update 수. 학습은 step 기반 — frame 단위 데이터셋을 무한 순회하며 num_steps 만큼 돕니다.\n\n총 처리 샘플 ≈ num_steps × batch_size. Validation loss가 plateau면 그 step 수로 줄이세요.',
     },
     en: {
-      title: 'Number of Epochs',
-      easy: 'How many times to loop over the dataset. Small dataset → many epochs (500-1500); large dataset → fewer (≤ 200).',
-      expert: 'Number of passes over the full dataset. 500-1500 for small datasets; start at ≤ 200 for large ones.\n\nStopping early once validation plateaus is fine.',
+      title: 'Number of Steps',
+      easy: 'How many gradient updates (steps) to train for. One step = one batch update. 10000-30000 is usually enough for small datasets.',
+      expert: 'Total optimizer updates. Training is step-based — the frame-indexed dataset is cycled indefinitely for num_steps updates.\n\nTotal samples seen ≈ num_steps × batch_size. If validation loss plateaus, cut num_steps to that point.',
+    },
+  },
+
+  'Common.val_freq': {
+    ko: {
+      title: 'Validation 주기 (val_freq)',
+      easy: '몇 step마다 validation 을 돌릴지. 너무 자주 하면 학습이 느려져요. 200 정도가 적당합니다.',
+      expert: 'Validation + best checkpoint 갱신 주기 (step 단위). 매 step validation 은 큰 낭비라 주기적으로만 수행.\n\n작으면 best 탐지가 촘촘하지만 느려지고, 크면 빠르지만 best 를 놓칠 수 있음. 100~500 권장.',
+    },
+    en: {
+      title: 'Validation Frequency',
+      easy: 'How often (in steps) to run validation. Too frequent slows training down. ~200 is a good default.',
+      expert: 'How often (in steps) to run validation + best-checkpoint detection. Validating every step is very wasteful.\n\nSmaller = finer best detection but slower; larger = faster but may miss the best. 100-500 recommended.',
     },
   },
 

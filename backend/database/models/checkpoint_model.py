@@ -91,6 +91,16 @@ class Checkpoint(SoftDeleteModel):
 
         return val
 
+    def _to_dict_shallow(self):
+        """관계(task/policy/load_model)를 재귀 확장하지 않고 자기 컬럼만 반환.
+
+        load_model(부모 체크포인트) 임베드 전용. fine-tune 계보가 깊으면
+        to_dict() 가 load_model.to_dict() 로 계보 전체를 재귀 확장하고, 매
+        단계마다 task.to_dict() 의 N+1 쿼리가 다시 터져 응답이 수십 초~분
+        단위로 늘어진다. 부모는 name/id 등 컬럼 값만 있으면 충분(프론트는
+        load_model.name 만 사용)하므로 shallow 로 끊는다."""
+        return super().to_dict()
+
     def to_dict(self):
         data = super().to_dict()
         # Enrich dataset_info
@@ -101,5 +111,6 @@ class Checkpoint(SoftDeleteModel):
         policy = self.policy
         data['policy'] = policy.to_dict() if policy else None
         load_model = self.load_model
-        data['load_model'] = load_model.to_dict() if load_model else None
+        # load_model 은 shallow — 깊은 계보 재귀 + task N+1 폭발 방지.
+        data['load_model'] = load_model._to_dict_shallow() if load_model else None
         return data

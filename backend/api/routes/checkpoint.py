@@ -57,7 +57,9 @@ def create_checkpoint():
         task_id=data.get('task_id'),
         policy_id=data.get('policy_id'),
         dataset_info=data.get('dataset_info', []),
-        num_epochs=data.get('num_epochs'),
+        # num_epochs DB 컬럼 — step 기반 전환 후엔 num_steps 값을 저장 (컬럼명은
+        # 마이그레이션 회피 위해 유지). 구버전 num_epochs 도 fallback 으로 허용.
+        num_epochs=data.get('num_steps', data.get('num_epochs')),
         batch_size=data.get('batch_size'),
     )
     return {'status': 'success', 'message': 'Checkpoint Created', 'id': new_checkpoint.id}, 200
