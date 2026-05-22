@@ -798,7 +798,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
 
 
-def process_image(image, vision_backbone='resnet18', to_cuda=False, pixel_range='01'):
+def process_image(image, vision_backbone='resnet18', to_cuda=False, pixel_range='01', image_resolution=None):
     """Preprocess an image into a model-ready tensor.
 
     pixel_range: '01' → standard torchvision ToTensor output in [0, 1].
@@ -808,12 +808,27 @@ def process_image(image, vision_backbone='resnet18', to_cuda=False, pixel_range=
                          distribution and wrecks pretrained visual grounding; LoRA
                          can't fully recover it, which matches the "moves but misses"
                          symptom during inference.
+
+    image_resolution: (H, W) target resize used to UNIFY heterogeneous source resolutions.
+                      Defaults to (224, 224) — backwards compatible with the previous
+                      hard-coded resize. At inference time the checkpoint metadata's
+                      ``image_resolution`` (saved at training time) should be passed in
+                      so the runtime preprocessing matches what the model was trained on.
     """
+    if image_resolution is None:
+        image_resolution = (224, 224)
+    if isinstance(image_resolution, int):
+        image_resolution = (image_resolution, image_resolution)
+    elif isinstance(image_resolution, (list, tuple)) and len(image_resolution) == 2:
+        image_resolution = (int(image_resolution[0]), int(image_resolution[1]))
+    else:
+        raise ValueError(f"image_resolution must be int or (H, W); got {image_resolution!r}")
+
     if not isinstance(image, Image.Image):
         image = Image.fromarray(np.array(image))
     if vision_backbone not in VISION_BACKBONE_MAP:
         image_transform = transforms.Compose([
-            transforms.Resize((224, 224)),
+            transforms.Resize(image_resolution),
             transforms.ToTensor(),
         ])
         image = image_transform(image)
@@ -821,7 +836,12 @@ def process_image(image, vision_backbone='resnet18', to_cuda=False, pixel_range=
             image = image * 2.0 - 1.0
     else:
         image_processor = AutoImageProcessor.from_pretrained(VISION_BACKBONE_MAP[vision_backbone])
-        image = image_processor(image)['pixel_values'][0]  # backbone's own normalization
+        h, w = image_resolution
+        image = image_processor(
+            image,
+            do_resize=True, do_center_crop=False,
+            size={"height": h, "width": w},
+        )['pixel_values'][0]  # backbone's own normalization
 
     return image.cuda() if to_cuda else image
 

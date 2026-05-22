@@ -10,19 +10,30 @@ export const POLICY_CONFIGS = {
             'type': 'select', 
             'options': ['resnet18', 'resnet34', 'resnet50', 'dinov2', 'dinov3'] // Assuming DinoV2 is a valid option,
         },
-        'pretrained_backbone_weights': { 
-            'label': 'Pretrained Backbone Weights', 
-            value: 'ResNet18_Weights.IMAGENET1K_V1', 
+        // torchvision `weights=...` enum string used to init the ResNet backbone.
+        // Ignored on DINO backbones (DinoVisionBackbone loads via HF AutoModel),
+        // so the UI hides this field when a dinov* backbone is selected. We mark
+        // it nullable because (a) `weights=None` is a legitimate ResNet choice
+        // (random init) and (b) when the user switches to DINO the watcher resets
+        // the value to null — the validator would otherwise block submit even
+        // though the field is hidden.
+        'pretrained_backbone_weights': {
+            'label': 'Pretrained Backbone Weights',
+            value: 'ResNet18_Weights.IMAGENET1K_V1',
             type: 'select',
+            nullable: true,
+            hideIfBackbone: 'dinov',
             options: {
-                'resnet18': ['ResNet18_Weights.IMAGENET1K_V1'], 
-                'resnet34': ['ResNet34_Weights.IMAGENET1K_V1'], 
-                'resnet50': ['ResNet50_Weights.IMAGENET1K_V1'],
-                'dinov2': ['dinov2_vits14'], // Assuming DinoV2 is a valid option
-                'dinov3': ['facebook/dinov3-vitb16-pretrain-lvd1689m'] // Assuming DinoV3 is a valid option
+                'resnet18': ['ResNet18_Weights.IMAGENET1K_V1', null],
+                'resnet34': ['ResNet34_Weights.IMAGENET1K_V1', null],
+                'resnet50': ['ResNet50_Weights.IMAGENET1K_V1', null],
             }
         },
         'replace_final_stride_with_dilation': { 'label': 'Replace Final Stride', 'value': false, 'type': 'boolean' },
+        // DINO partial unfreeze: 0 = fully frozen, N = unfreeze last N transformer blocks.
+        // Only meaningful when vision_backbone is dinov2/dinov3 (ResNet path ignores it).
+        // UI hides this field unless a DINO backbone is selected.
+        'n_unfrozen_blocks': { 'label': 'DINO Unfrozen Blocks', 'value': 0, 'type': 'number', 'showIfBackbone': 'dinov' },
         'pre_norm': { 'label': 'Pre-Normalization', 'value': false, 'type': 'boolean' },
         'dim_model': { 'label': 'Model Dimension', 'value': 512, 'type': 'number' },
         'n_heads': { 'label': 'Number of Heads', 'value': 8, 'type': 'number' },
@@ -182,6 +193,13 @@ export const TRAIN_CONFIGS = {
         'num_epochs': { 'label': 'Number of Epochs', 'value': 1000, 'type': 'number' },
         'batch_size': { 'label': 'Batch Size', 'value': 32, 'type': 'number' },
         'num_workers': { 'label': 'Number of Workers', 'value': 4, 'type': 'number' },
+        // Unified resize target applied in the preprocessing pipeline so datasets with
+        // different camera resolutions can be mixed in a single training run.
+        // Default (224, 224) matches the previous hard-coded resize used by both
+        // ResNet (Resize+ToTensor) and DINO (HF AutoImageProcessor) paths.
+        // Inference uses the value stored in the checkpoint's train_meta.json
+        // (falls back to (224, 224) when absent).
+        'image_resolution': { 'label': 'Image Resolution (H, W)', 'value': [224, 224], 'type': 'array' },
         'use_peft': { 'label': 'Use LoRA (PEFT)', 'value': false, 'type': 'boolean' },
         // alpha=r (scale=1.0) matches openpi's gemma_2b_lora config (rank=alpha=16).
         // Earlier alpha=128 with r=64 gave scale=2.0 which doubled LoRA delta magnitude

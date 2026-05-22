@@ -82,16 +82,31 @@ export const HYPERPARAM_HELP = {
 
   'ACT.pretrained_backbone_weights': {
     ko: {
-      title: '백본 사전학습 가중치',
-      easy: '비전 신경망에 "이미 학습된 지식"을 미리 넣어둘지 정합니다. 거의 항상 ImageNet/DinoV2 같은 사전학습 가중치를 쓰는 게 좋습니다.',
-      expert: '비전 백본을 어떤 사전학습 weights로 초기화할지 선택합니다. torchvision의 weights= 인자로 전달됩니다.\n\nImageNet 가중치는 거의 모든 일반 물체 인식 작업에 유리하고, DinoV2/V3 변형은 더 풍부한 자기지도학습 표현으로 unseen scene 일반화에 강합니다.',
-      note: 'vision_backbone을 바꾸면 호환되는 옵션이 갱신되지만 값은 자동으로 맞춰주지 않습니다 — 직접 선택해야 합니다.',
+      title: '백본 사전학습 가중치 (ResNet 전용)',
+      easy: 'ResNet 백본을 ImageNet 사전학습 가중치로 시작할지 정합니다. 거의 항상 켜두는 게 좋습니다 (None 으로 두면 random 초기화).',
+      expert: 'torchvision 의 `weights=` 인자로 그대로 전달됩니다. e.g. `ResNet18_Weights.IMAGENET1K_V1` 이면 ImageNet1K 분류로 학습된 conv 가중치를 받아 backbone 을 초기화. `None` 으로 두면 random init.',
+      note: 'DINOv2/v3 백본에서는 무시됩니다 — DinoVisionBackbone 은 HuggingFace AutoModel 로 자체적으로 사전학습 weight 를 받아 옵니다. 그래서 dinov* 선택 시 이 필드는 자동 숨김.',
     },
     en: {
-      title: 'Pretrained Backbone Weights',
-      easy: 'Whether to start the vision network from pretrained knowledge (almost always yes — ImageNet or DinoV2/V3).',
-      expert: 'Which pretrained weights to initialize the vision backbone with. Passed to torchvision via the `weights=` argument.\n\nImageNet weights help on most everyday-object tasks; DinoV2/V3 variants pack stronger self-supervised features that generalize better to unseen scenes.',
-      note: 'Changing vision_backbone filters the compatible options but does not auto-update this field — pick a value manually.',
+      title: 'Pretrained Backbone Weights (ResNet only)',
+      easy: 'Whether to initialize the ResNet backbone from ImageNet weights. Almost always yes — set to `None` only if you specifically want random init.',
+      expert: 'Passed verbatim as torchvision `weights=`. e.g. `ResNet18_Weights.IMAGENET1K_V1` loads ImageNet1K-pretrained conv weights into the backbone. `None` → random init.',
+      note: 'Ignored on DINOv2/v3 backbones — DinoVisionBackbone loads its own pretrained weights via HuggingFace AutoModel, so this field is hidden when a dinov* backbone is selected.',
+    },
+  },
+
+  'ACT.n_unfrozen_blocks': {
+    ko: {
+      title: 'DINO 학습 가능 블록 수 (n_unfrozen_blocks)',
+      easy: 'DINO 비전 백본의 뒤쪽 N개 transformer 블록만 추가로 학습합니다. 0이면 백본을 그대로 두고 사용(빠름·메모리 적음). 케이블 삽입처럼 위치 정밀도가 중요한 작업에서 0으로 성능이 부족하면 2~4부터 조금씩 풀어보세요.',
+      expert: 'DINOv2/v3 trunk의 마지막 N개 transformer 블록과 final LayerNorm만 학습 가능 상태로 전환합니다. 그 외 블록은 frozen + eval()-pinned. 0이면 fully frozen (기본). vision_backbone이 resnet*일 때는 무시됩니다.\n\n전형적인 트레이드오프:\n- 0: representation 완전 보존, 학습 비용 최소. self-sup invariance가 정밀 위치 단서를 깎을 수 있음.\n- 2~4: 마지막 블록만 task 데이터로 미세조정. ResNet 전체 학습보다 훨씬 적은 파라미터로 fine-grained 위치 적응 가능.\n- 12 (전체): 사실상 full fine-tune. 큰 데이터셋(>100 episodes) 권장.\n\n학습 가능한 파라미터는 ACT의 backbone optimizer group(`optimizer_lr_backbone`)으로 자동 흡수됩니다.',
+      note: 'ResNet 백본일 때는 화면에 보이지 않습니다.',
+    },
+    en: {
+      title: 'DINO Unfrozen Blocks (n_unfrozen_blocks)',
+      easy: 'How many transformer blocks at the END of the DINO trunk to fine-tune. 0 keeps the backbone fully frozen (fast, low VRAM). For precision tasks like cable insertion where 0 underperforms, try 2-4 to gently adapt the backbone to your camera view.',
+      expert: 'Unfreezes the last N transformer blocks plus the final LayerNorm of the DINOv2/v3 trunk; everything else stays frozen and eval()-pinned. 0 = fully frozen (default). Ignored when vision_backbone starts with "resnet".\n\nTypical trade-off:\n- 0: representation fully preserved, minimal training cost. Self-supervised invariance may smear fine spatial cues.\n- 2-4: late blocks adapt to task data. Far fewer trainable params than a full ResNet, while regaining fine-grained spatial precision.\n- 12 (all): essentially full fine-tune. Recommended only for large datasets (>100 episodes).\n\nTrainable params are automatically picked up by ACT\'s backbone optimizer group (`optimizer_lr_backbone`).',
+      note: 'Hidden in the UI when a ResNet backbone is selected.',
     },
   },
 
@@ -1055,6 +1070,21 @@ export const HYPERPARAM_HELP = {
       title: 'Batch Size',
       easy: "How many samples the model sees per step. Larger = more stable but uses more GPU memory.",
       expert: 'Samples per forward/backward. Larger = more stable training but more VRAM.\n\nOn a 24GB GPU: 32-64 for ACT/Diffusion, 16-32 for PI0.5 LoRA.\n\nUse grad_accum_steps to simulate a larger batch when VRAM is tight.',
+    },
+  },
+
+  'Common.image_resolution': {
+    ko: {
+      title: '이미지 해상도 (image_resolution)',
+      easy: '학습 전에 모든 카메라 이미지를 이 (높이, 너비)로 맞춰줍니다. 사이즈가 다른 데이터를 함께 학습할 수 있도록 통일해 주는 역할입니다. 잘 모르겠으면 [224, 224] 그대로 두세요.',
+      expert: '전처리 파이프라인의 통일 resize 타겟. 각 frame을 (H, W)로 강제 리사이즈한 뒤 텐서화하기 때문에, 서로 다른 카메라 해상도로 수집된 데이터셋을 한 학습 run에서 자유롭게 혼합할 수 있습니다.\n\n- ResNet: torchvision Resize → ToTensor\n- DINOv2/v3: HF AutoImageProcessor를 do_resize=True + do_center_crop=False + size={H,W}로 override하여 동일 타겟 사용\n- Augment 단계의 RandomResizedCrop도 이 사이즈를 따라감\n\n학습 종료 시 `<checkpoint_dir>/train_meta.json`에 기록되어, 추론 시 동일 사이즈로 재현됩니다. 큰 값(e.g. 448, 448)은 세밀한 위치 정보를 더 보존하지만 token/연산이 그만큼 증가.',
+      note: '학습/추론은 자동으로 같은 값을 사용합니다. checkpoint 단위로 저장되므로 정책마다 다른 사이즈를 쓸 수 있습니다.',
+    },
+    en: {
+      title: 'Image Resolution (image_resolution)',
+      easy: 'Every camera frame is resized to this (Height, Width) before training, so datasets recorded at different resolutions can be mixed in one run. Leave as [224, 224] if unsure.',
+      expert: "Unified resize target for the preprocessing pipeline. Each frame is forced to (H, W) before tensorization, which lets you mix datasets recorded with different camera resolutions in a single training run.\n\n- ResNet: torchvision Resize → ToTensor\n- DINOv2/v3: HF AutoImageProcessor is overridden with do_resize=True + do_center_crop=False + size={H,W}\n- The training-time RandomResizedCrop augmentation follows this size too\n\nThe value is persisted to `<checkpoint_dir>/train_meta.json` and reused at inference for matching preprocessing. Larger values (e.g. 448x448) preserve more fine-grained spatial cues at the cost of compute/tokens.",
+      note: 'Training and inference automatically use the same value via the checkpoint sidecar — different policies can use different sizes.',
     },
   },
 

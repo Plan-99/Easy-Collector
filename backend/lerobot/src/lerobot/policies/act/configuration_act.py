@@ -115,6 +115,15 @@ class ACTConfig(PreTrainedConfig):
     latent_dim: int = 32
     n_vae_encoder_layers: int = 4
 
+    # DINOv2/v3 partial unfreeze.
+    # 0  → trunk fully frozen (default; matches the standard "DINO as feature
+    #      extractor" recipe).
+    # N>0 → unfreeze the last N transformer blocks (plus the final LayerNorm).
+    #      Useful when fine motor tasks need backbone adaptation but you still
+    #      want most of the self-supervised representation preserved.
+    # Ignored when `vision_backbone` starts with "resnet".
+    n_unfrozen_blocks: int = 0
+
     # Inference.
     # Note: the value used in ACT when temporal ensembling is enabled is 0.01.
     temporal_ensemble_coeff: float | None = None
@@ -132,9 +141,11 @@ class ACTConfig(PreTrainedConfig):
         super().__post_init__()
 
         """Input validation (not exhaustive)."""
-        if not self.vision_backbone.startswith("resnet"):
+        _BB_PREFIXES = ("resnet", "dinov2", "dinov3")
+        if not any(self.vision_backbone.startswith(p) for p in _BB_PREFIXES):
             raise ValueError(
-                f"`vision_backbone` must be one of the ResNet variants. Got {self.vision_backbone}."
+                f"`vision_backbone` must start with one of {_BB_PREFIXES}. "
+                f"Got {self.vision_backbone}."
             )
         if self.temporal_ensemble_coeff is not None and self.n_action_steps > 1:
             raise NotImplementedError(

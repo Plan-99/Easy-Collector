@@ -1247,7 +1247,7 @@ def _build_obs_state(df, obs_state_keys, tool_qpos_indices=None):
 
 
 class EpisodicDataset(torch.utils.data.Dataset):
-    def __init__(self, episode_ids, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone='resnet18', n_obs_steps=1, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None, augment=False, wrist_sensor_ids=None):
+    def __init__(self, episode_ids, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone='resnet18', n_obs_steps=1, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None, augment=False, wrist_sensor_ids=None, image_resolution=None):
         super(EpisodicDataset).__init__()
         self.episode_ids = episode_ids
         self.dataset_dir = dataset_dir
@@ -1260,6 +1260,17 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self.action_key = action_key
         self.use_relative_trajectory = use_relative_trajectory
         self.obs_state_keys = obs_state_keys if obs_state_keys is not None else ['qpos']
+        # Unified resize target — lets users mix datasets recorded with different camera
+        # resolutions in a single training run. process_image() resizes every frame to
+        # this size before stacking, so the batch tensor is well-defined regardless of
+        # source dimensions. Default (224, 224) matches the previous hard-coded behavior.
+        if image_resolution is None:
+            image_resolution = (224, 224)
+        if isinstance(image_resolution, int):
+            image_resolution = (image_resolution, image_resolution)
+        else:
+            image_resolution = (int(image_resolution[0]), int(image_resolution[1]))
+        self.image_resolution = image_resolution
         # Image augmentation: PI0.5 paper Appendix E recipe (RandomResizedCrop 95%
         # + Rotate ±5° + ColorJitter). Applied on PIL images before process_image.
         # Train-only; val/eval datasets pass augment=False.
@@ -1270,7 +1281,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self.wrist_sensor_ids = set(int(x) for x in (wrist_sensor_ids or []))
         if augment:
             self._image_augment_full = transforms.Compose([
-                transforms.RandomResizedCrop(size=(224, 224), scale=(0.9025, 1.0), ratio=(0.95, 1.05)),
+                transforms.RandomResizedCrop(size=self.image_resolution, scale=(0.9025, 1.0), ratio=(0.95, 1.05)),
                 transforms.RandomRotation(degrees=5),
                 transforms.ColorJitter(brightness=0.3, contrast=0.4, saturation=0.5),
             ])
@@ -1543,7 +1554,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
                 image = Image.fromarray(np.array(image))
                 if aug is not None:
                     image = aug(image)
-                image = process_image(image, self.vision_backbone, pixel_range=_pixel_range)
+                image = process_image(image, self.vision_backbone, pixel_range=_pixel_range, image_resolution=self.image_resolution)
                 processed_images.append(image)
 
             # New lerobot expects [C, H, W] per sample (collate → [batch, C, H, W])
@@ -1598,7 +1609,7 @@ def _absolute_action_dims_from_features(action_names, has_succeed: bool):
     return abs_dims
 
 
-def process_image(image, vision_backbone='resnet18', to_cuda=False, pixel_range='01'):
+def process_image(image, vision_backbone='resnet18', to_cuda=False, pixel_range='01', image_resolution=None):
     """Preprocess an image into a model-ready tensor.
 
     pixel_range: '01' → standard torchvision ToTensor output in [0, 1].
@@ -1608,12 +1619,29 @@ def process_image(image, vision_backbone='resnet18', to_cuda=False, pixel_range=
                          distribution and wrecks pretrained visual grounding (audit-doc
                          bug #1). NOTE: modeling_pi05._preprocess_images expects [-1,1]
                          and does NOT re-scale (audit-doc bug #28 fix).
+
+    image_resolution: (H, W) target resize used to UNIFY heterogeneous source resolutions
+                      so that datasets recorded with different camera sizes can be mixed
+                      in a single training run. Defaults to (224, 224) — backwards compatible
+                      with the previous hard-coded resize. For DINO backbones, the HF
+                      AutoImageProcessor's internal {height, width} is overridden so the
+                      same target is honored end-to-end.
     """
+    if image_resolution is None:
+        image_resolution = (224, 224)
+    # Normalize tuple/list/int → (H, W) ints.
+    if isinstance(image_resolution, int):
+        image_resolution = (image_resolution, image_resolution)
+    elif isinstance(image_resolution, (list, tuple)) and len(image_resolution) == 2:
+        image_resolution = (int(image_resolution[0]), int(image_resolution[1]))
+    else:
+        raise ValueError(f"image_resolution must be int or (H, W); got {image_resolution!r}")
+
     if not isinstance(image, Image.Image):
         image = Image.fromarray(np.array(image))
     if vision_backbone not in VISION_BACKBONE_MAP:
         image_transform = transforms.Compose([
-            transforms.Resize((224, 224)),
+            transforms.Resize(image_resolution),
             transforms.ToTensor(),
         ])
         image = image_transform(image)
@@ -1621,7 +1649,13 @@ def process_image(image, vision_backbone='resnet18', to_cuda=False, pixel_range=
             image = image * 2.0 - 1.0
     else:
         image_processor = AutoImageProcessor.from_pretrained(VISION_BACKBONE_MAP[vision_backbone])
-        image = image_processor(image)['pixel_values'][0]  # backbone's own normalization
+        # Override DINO's default crop/resize so the requested target is honored.
+        h, w = image_resolution
+        image = image_processor(
+            image,
+            do_resize=True, do_center_crop=False,
+            size={"height": h, "width": w},
+        )['pixel_values'][0]  # backbone's own normalization
 
     return image.cuda() if to_cuda else image
 
@@ -2018,7 +2052,7 @@ class FullScanDataset(EpisodicDataset):
                 image = Image.fromarray(np.array(image))
                 if aug is not None:
                     image = aug(image)
-                image = process_image(image, self.vision_backbone, pixel_range=_pixel_range)
+                image = process_image(image, self.vision_backbone, pixel_range=_pixel_range, image_resolution=self.image_resolution)
                 processed_images.append(image)
 
             # New lerobot expects [C, H, W] per sample (collate → [batch, C, H, W])
@@ -2054,7 +2088,7 @@ class FullScanDataset(EpisodicDataset):
         return item
 
 
-def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_train, batch_size_val, chunk_size, vision_backbone='resnet18', num_workers=1, n_obs_steps=1, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None, wrist_sensor_ids=None):
+def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_train, batch_size_val, chunk_size, vision_backbone='resnet18', num_workers=1, n_obs_steps=1, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None, wrist_sensor_ids=None, image_resolution=None):
     if obs_state_keys is None:
         obs_state_keys = ['qpos']
     print(f'\nData from: {dataset_dir}\n')
@@ -2097,8 +2131,8 @@ def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_tra
     # construct dataset and dataloader.
     # train: augment=True (RandomResizedCrop+Rotate+ColorJitter), wrist cams get
     # ColorJitter-only (audit-doc bug #31). val/eval: augment=False.
-    train_dataset = EpisodicDataset(train_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys, augment=True, wrist_sensor_ids=_wrist_set)
-    val_dataset = EpisodicDataset(val_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys, augment=False, wrist_sensor_ids=_wrist_set)
+    train_dataset = EpisodicDataset(train_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys, augment=True, wrist_sensor_ids=_wrist_set, image_resolution=image_resolution)
+    val_dataset = EpisodicDataset(val_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys, augment=False, wrist_sensor_ids=_wrist_set, image_resolution=image_resolution)
     # Keep workers alive across epochs so EpisodicDataset._ep_cache (and OS page
     # cache backing the mmap'd frame .npy files) survives between epochs.
     loader_kwargs = dict(

@@ -168,7 +168,7 @@
                                         v-for="(config, key) in policyForm.settings"
                                         :key="key"
                                         class="col-4"
-                                        v-show="!config.showIf || (policyForm.settings[config.showIf] && policyForm.settings[config.showIf].value)"
+                                        v-show="(!config.showIf || (policyForm.settings[config.showIf] && policyForm.settings[config.showIf].value)) && (!config.showIfBackbone || (policyForm.settings.vision_backbone && policyForm.settings.vision_backbone.value && String(policyForm.settings.vision_backbone.value).startsWith(config.showIfBackbone))) && (!config.hideIfBackbone || !(policyForm.settings.vision_backbone && policyForm.settings.vision_backbone.value && String(policyForm.settings.vision_backbone.value).startsWith(config.hideIfBackbone)))"
                                     >
                                         <q-select
                                             v-if="key === 'pretrained_backbone_weights'"
@@ -726,14 +726,14 @@ watch(selectedCheckpoint, (newVal) => {
 });
 
 const pretrained_backbone_weight_options = computed(() => {
-    if (!policyForm.value.type || !POLICY_CONFIGS[policyForm.value.type]['pretrained_backbone_weight']) return [];
+    if (!policyForm.value.type || !POLICY_CONFIGS[policyForm.value.type]['pretrained_backbone_weights']) return [];
     if (!policyForm.value.settings || !policyForm.value.settings.vision_backbone) return [];
     const backbone = policyForm.value.settings.vision_backbone.value;
     return POLICY_CONFIGS[policyForm.value.type].pretrained_backbone_weights.options[backbone] || [];
 });
 
 watch(() => policyForm.value.settings?.vision_backbone?.value, (newVal) => {
-    if (!policyForm.value.type || !POLICY_CONFIGS[policyForm.value.type]['pretrained_backbone_weight']) return;
+    if (!policyForm.value.type || !POLICY_CONFIGS[policyForm.value.type]['pretrained_backbone_weights']) return;
     if (newVal && policyForm.value.type) {
         policyForm.value.settings.pretrained_backbone_weights.options = pretrained_backbone_weight_options.value;
         if (!policyForm.value.settings.pretrained_backbone_weights.value) {

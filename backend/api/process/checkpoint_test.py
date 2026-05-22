@@ -1,4 +1,5 @@
 import os
+import json
 import torch
 import pickle
 import numpy as np
@@ -146,6 +147,20 @@ def checkpoint_test(
         executor = None
         
         ckpt_dir = resolve_checkpoint_dir(checkpoint['id'])
+
+        # Read training-time preprocessing metadata (image_resolution) so the
+        # inference resize matches what the model was trained on. Falls back to
+        # (224, 224) when the sidecar is absent (older checkpoints).
+        image_resolution = (224, 224)
+        _meta_path = os.path.join(ckpt_dir, 'train_meta.json')
+        if os.path.exists(_meta_path):
+            try:
+                with open(_meta_path, 'r') as _f:
+                    _ir = (json.load(_f) or {}).get('image_resolution')
+                if isinstance(_ir, (list, tuple)) and len(_ir) == 2:
+                    image_resolution = (int(_ir[0]), int(_ir[1]))
+            except Exception as _e:
+                print(f'[INFER][WARN] failed to read train_meta.json: {_e}; falling back to (224, 224)')
 
         action_key = action_type or policy_obj.get('settings', {}).get('action_type') or checkpoint.get('train_settings', {}).get('action_type', 'qaction')
         # 신/구 action_key 별칭 통일: 'qaction'→'joint', 'ee_delta_action'→'ee_delta'.
@@ -561,7 +576,7 @@ def checkpoint_test(
                         _img = _img[:, :, ::-1]
                         _img = np.ascontiguousarray(_img)
                     _pixel_range = '-11' if policy_obj['type'] == 'PI05' else '01'
-                    _img = process_image(_img, vision_backbone, to_cuda=True, pixel_range=_pixel_range)
+                    _img = process_image(_img, vision_backbone, to_cuda=True, pixel_range=_pixel_range, image_resolution=image_resolution)
                     _policy_input[f'observation.images.sensor_{_sensor["id"]}'] = _img.unsqueeze(0)
 
                 if preprocessor is not None:
@@ -816,7 +831,7 @@ def checkpoint_test(
                             image = _np.ascontiguousarray(image)
                         # PI05/PaliGemma pretrained weights expect [-1, 1]-ranged pixels.
                         _pixel_range = '-11' if policy_obj['type'] == 'PI05' else '01'
-                        image = process_image(image, vision_backbone, to_cuda=True, pixel_range=_pixel_range)
+                        image = process_image(image, vision_backbone, to_cuda=True, pixel_range=_pixel_range, image_resolution=image_resolution)
                         policy_input_t[f'observation.images.sensor_{sensor["id"]}'] = image.unsqueeze(0)
 
                     # Normalize observation inputs (state, images) using train-time stats.
@@ -1174,7 +1189,7 @@ def checkpoint_test(
                             image = np.ascontiguousarray(image)
                         # PI05/PaliGemma pretrained weights expect [-1, 1]-ranged pixels.
                         _pixel_range = '-11' if policy_obj['type'] == 'PI05' else '01'
-                        image = process_image(image, vision_backbone, to_cuda=True, pixel_range=_pixel_range)
+                        image = process_image(image, vision_backbone, to_cuda=True, pixel_range=_pixel_range, image_resolution=image_resolution)
                         policy_input_t1[f'observation.images.sensor_{sensor_id}'] = image.unsqueeze(0)
                     state_t1 = policy.select_action(policy_input_t1).squeeze(0).cpu().numpy()
                 

@@ -32,6 +32,8 @@ Usage:
 """
 import argparse
 import json
+import os
+import subprocess
 import sys
 import threading
 import time
@@ -444,19 +446,111 @@ def record_episodes(api: Backend, backend_url, workspace, dataset_id,
 
 
 # ---------------------------------------------------------------------------
+# Vary-resolution helper — 의도적으로 데이터셋 간 카메라 해상도를 다르게 만든다.
+# ---------------------------------------------------------------------------
+
+_VARY_PY_SNIPPET = r"""
+import cv2, os, sys, json
+spec = json.loads(sys.argv[1])
+h, w = int(spec['h']), int(spec['w'])
+modified = []
+for src in spec['files']:
+    if not os.path.exists(src):
+        print(f'[WARN] missing mp4: {src}', flush=True)
+        continue
+    cap = cv2.VideoCapture(src)
+    if not cap.isOpened():
+        raise RuntimeError(f'failed to open {src}')
+    fps = cap.get(cv2.CAP_PROP_FPS) or 20.0
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    tmp = src + '.tmp.mp4'
+    writer = cv2.VideoWriter(tmp, fourcc, fps, (w, h))
+    if not writer.isOpened():
+        cap.release()
+        raise RuntimeError(f'failed to open writer for {tmp}')
+    n = 0
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        resized = cv2.resize(frame, (w, h), interpolation=cv2.INTER_AREA)
+        writer.write(resized)
+        n += 1
+    cap.release()
+    writer.release()
+    os.replace(tmp, src)
+    modified.append((src, n))
+    print(f'  re-encoded {src} ({n} frames -> {h}x{w})', flush=True)
+print(json.dumps({'count': len(modified)}))
+"""
+
+
+def vary_dataset_resolution(dataset_id, target_resolution=(96, 128),
+                             episode_indices=(0,), data_dir='/opt/easytrainer/datasets',
+                             container='easytrainer_backend'):
+    """주어진 데이터셋의 ``episode_indices`` mp4 파일을 ``target_resolution`` 으로
+    리인코딩한다. 같은 데이터셋 내에서도 에피소드별로 해상도가 달라지게 만들어,
+    학습 전처리 리사이즈 로직(image_resolution)이 진짜로 동작하는지 검증한다.
+
+    /opt/easytrainer/datasets 는 컨테이너(root) 가 쓰는 경로라 호스트 user 권한으로
+    파일을 덮어쓸 수 없다 → 컨테이너 안에서 cv2 로 재인코딩한다 (backend 컨테이너에
+    cv2 4.x 는 항상 있고 ffmpeg 바이너리는 없을 수 있음).
+
+    target_resolution: (H, W) 튜플
+    episode_indices : 리사이즈할 에피소드 인덱스 시퀀스
+    """
+    h, w = int(target_resolution[0]), int(target_resolution[1])
+    base = os.path.join(data_dir, str(dataset_id), 'videos', 'chunk-000')
+    if not os.path.isdir(base):
+        raise StageError(f'video chunk dir not found: {base}')
+
+    cam_dirs = sorted(name for name in os.listdir(base)
+                      if name.startswith('observation.images.'))
+    if not cam_dirs:
+        raise StageError(f'no camera mp4 dirs under {base}')
+
+    files = []
+    for cam in cam_dirs:
+        for ep_idx in episode_indices:
+            src = os.path.join(base, cam, f'episode_{ep_idx:06d}.mp4')
+            files.append(src)
+
+    spec = json.dumps({'h': h, 'w': w, 'files': files})
+    cmd = ['docker', 'exec', container, 'python3', '-c', _VARY_PY_SNIPPET, spec]
+    try:
+        out = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        raise StageError(
+            f'docker exec cv2 re-encode failed: {e.stderr or e.stdout}'
+        ) from e
+    print(out.stdout.rstrip())
+    return files
+
+
+# ---------------------------------------------------------------------------
 # Training flow
 # ---------------------------------------------------------------------------
 
-def create_policy(api: Backend, name='tutorial_act_policy'):
-    """ACT 정책 — TrainPage 가 기본으로 만드는 형태와 동일한 settings."""
+def create_policy(api: Backend, name='tutorial_act_policy', vision_backbone='resnet18',
+                  n_unfrozen_blocks=0):
+    """ACT 정책 — TrainPage 가 기본으로 만드는 형태와 동일한 settings.
+
+    ``vision_backbone`` 으로 'resnet18' (기본) / 'dinov2' / 'dinov3' 선택 가능.
+    DINO 변종은 ``pretrained_backbone_weights`` 가 무의미하므로 None 으로 보낸다.
+
+    ``n_unfrozen_blocks`` (DINO 한정) — 마지막 N 개 transformer block + final
+    LayerNorm 의 gradient 를 켠다. 0 이면 trunk 전부 frozen.
+    """
+    is_dino = vision_backbone.startswith('dinov')
     settings = {
         'n_obs_steps': 1,
         'chunk_size': 15,
         'n_action_steps': 1,
         'temporal_ensemble_coeff': 0.01,
-        'vision_backbone': 'resnet18',
-        'pretrained_backbone_weights': 'ResNet18_Weights.IMAGENET1K_V1',
+        'vision_backbone': vision_backbone,
+        'pretrained_backbone_weights': None if is_dino else 'ResNet18_Weights.IMAGENET1K_V1',
         'replace_final_stride_with_dilation': False,
+        'n_unfrozen_blocks': int(n_unfrozen_blocks) if is_dino else 0,
         'pre_norm': False,
         'dim_model': 256,
         'n_heads': 8,
@@ -482,7 +576,8 @@ def create_policy(api: Backend, name='tutorial_act_policy'):
 
 def create_checkpoint_and_train(api: Backend, workspace_id, policy_id,
                                   dataset_id, episodes, training_server_url,
-                                  num_epochs=100, batch_size=4):
+                                  num_epochs=100, batch_size=4,
+                                  image_resolution=None):
     train_settings = {
         'num_epochs': num_epochs,
         'batch_size': batch_size,
@@ -496,6 +591,12 @@ def create_checkpoint_and_train(api: Backend, workspace_id, policy_id,
         'optimizer_weight_decay': 1e-4,
         'optimizer_lr_backbone': 1e-5,
     }
+    if image_resolution is not None:
+        # 학습 전처리 단계에서 모든 카메라 프레임을 이 해상도로 리사이즈.
+        # 데이터셋 간 해상도가 달라도 같은 학습 배치에서 stack 가능해진다.
+        train_settings['image_resolution'] = [
+            int(image_resolution[0]), int(image_resolution[1]),
+        ]
     dataset_info = {
         str(dataset_id): {'episode_num': episodes},
     }
@@ -616,10 +717,18 @@ def run_planner(api: Backend, backend_url, workspace, robot, checkpoint_id,
         ),
     ]
 
+    # Planner 리팩토링(8782c215) 이후 create route 는 grouped ``plans`` 만 받는다 —
+    # legacy ``plan`` (flat list)은 무시된다. 단일 워크스페이스라 그룹 하나에 모든
+    # 블록을 담아서 보낸다. rebalance가 task_ids 기준으로 group_id 를 재발급한다.
+    plans = [{
+        'id': f'group_{workspace["id"]}',
+        'workspace_ids': [workspace['id']],
+        'blocks': plan,
+    }]
     create_res = api.post('/planner', json={
         'name': f'tutorial_e2e_planner_{int(time.time())}',
         'task_ids': [workspace['id']],
-        'plan': plan,
+        'plans': plans,
     })
     if create_res.get('status') != 'success':
         raise StageError(f'create planner failed: {create_res}')
@@ -827,22 +936,39 @@ def _run_pipeline(api: Backend, args):
         record_episodes(api, args.backend, workspace, dataset_id, robot,
                          args.episodes, args.hz, args.episode_seconds)
 
+    if args.vary_resolution:
+        with stage(f'vary episode resolutions (re-encode ep0 mp4 to '
+                   f'{args.vary_resolution_target[0]}x{args.vary_resolution_target[1]})'):
+            # 짝수 에피소드만 재인코딩 — 1 개 데이터셋 안에서 해상도가 섞이는 상황을
+            # 만든다. 인덱스 범위는 args.episodes 안쪽.
+            ep_to_vary = [i for i in range(args.episodes) if i % 2 == 0]
+            vary_dataset_resolution(
+                dataset_id,
+                target_resolution=tuple(args.vary_resolution_target),
+                episode_indices=ep_to_vary,
+            )
+
     if args.skip_train:
         print('\n[OK] data collection succeeded; --skip-train 이므로 종료')
         return
 
     policy = None
-    with stage('create ACT policy'):
-        policy = create_policy(api)
+    with stage(f'create ACT policy (vision_backbone={args.vision_backbone}, '
+               f'n_unfrozen_blocks={args.n_unfrozen_blocks})'):
+        policy = create_policy(api, vision_backbone=args.vision_backbone,
+                               n_unfrozen_blocks=args.n_unfrozen_blocks)
         print(f'  policy_id={policy["id"]}')
 
     checkpoint_id = None
+    img_res_desc = (f'{args.image_resolution[0]}x{args.image_resolution[1]}'
+                    if args.image_resolution else 'default(224x224)')
     with stage(f'create checkpoint + enqueue training '
-               f'(epochs={args.train_epochs})'):
+               f'(epochs={args.train_epochs}, image_resolution={img_res_desc})'):
         checkpoint_id = create_checkpoint_and_train(
             api, workspace_id, policy['id'], dataset_id, args.episodes,
             args.training_server, num_epochs=args.train_epochs,
             batch_size=args.batch_size,
+            image_resolution=args.image_resolution,
         )
 
     with stage(f'wait for training to finish (checkpoint={checkpoint_id})'):
@@ -899,6 +1025,25 @@ def main():
     parser.add_argument('--skip-inference', action='store_true')
     parser.add_argument('--skip-planner', action='store_true',
                         help='planner 단계를 건너뛴다')
+    parser.add_argument('--vision-backbone', default='resnet18',
+                        choices=['resnet18', 'resnet34', 'resnet50', 'dinov2', 'dinov3'],
+                        help='ACT 비전 백본 선택 (기본 resnet18). dinov2/dinov3 는 frozen ViT.')
+    parser.add_argument('--n-unfrozen-blocks', type=int, default=0,
+                        help='DINO partial unfreeze — 마지막 N 개 transformer block 의 '
+                             'gradient 를 켠다. 0 이면 trunk 전부 frozen (기본). '
+                             'resnet 백본에서는 무시.')
+    parser.add_argument('--image-resolution', type=int, nargs=2, default=None,
+                        metavar=('H', 'W'),
+                        help='학습 전처리 리사이즈 해상도 (H W). 지정하면 모든 카메라 '
+                             '프레임을 이 크기로 통일해 학습한다. 미지정이면 백엔드 기본값 '
+                             '(224, 224) 사용.')
+    parser.add_argument('--vary-resolution', action='store_true',
+                        help='데이터 수집 후 ffmpeg 로 일부 에피소드 mp4 의 해상도를 '
+                             '다르게 재인코딩 — 한 데이터셋 안에 해상도가 섞인 상태에서도 '
+                             'image_resolution 리사이즈가 학습을 정상화하는지 검증.')
+    parser.add_argument('--vary-resolution-target', type=int, nargs=2, default=[96, 128],
+                        metavar=('H', 'W'),
+                        help='--vary-resolution 사용 시 재인코딩 타겟 해상도 (기본 96 128).')
     parser.add_argument('--headless-sim', action='store_true',
                         help='mujoco viewer 창 없이 sim 기동 (headless). 종료 시 sim도 stop.')
     parser.add_argument('--keep-sim', action='store_true',

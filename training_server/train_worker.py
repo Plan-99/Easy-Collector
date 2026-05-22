@@ -109,6 +109,12 @@ def train(
     peft_alpha = train_settings.pop('peft_alpha', None)
     use_amp = train_settings.pop('use_amp', False)
     grad_accum_steps = train_settings.pop('grad_accum_steps', 1)
+    # Unified resize target for the preprocessing pipeline (Common train setting,
+    # not a policy config field) — lets users mix datasets with different camera
+    # resolutions in one run. None → preprocessing falls back to (224, 224).
+    # Pop here so it never reaches ACTConfig/DiffusionConfig/PI05Config (would be
+    # rejected as an unknown kwarg).
+    image_resolution = train_settings.pop('image_resolution', None)
     # EMA + smoothed validation defaults are SAFE-OFF (preserve prior ACT/Diffusion
     # behavior). PI05 LoRA users opt in via UI: ema_decay=0 (LoRA), 0.99 (full-FT only),
     # val_smooth_window=5 + val_n_passes=3 (small-dataset noise reduction).
@@ -517,6 +523,19 @@ def train(
     with open(stats_path, 'wb') as f:
         pickle.dump(stats, f)
 
+    # Persist preprocessing metadata so inference can reproduce the exact resize
+    # used during training. Kept in a sidecar file (not config.json) so the
+    # vendored LeRobot dataclass loaders don't reject it as an unknown kwarg.
+    if image_resolution is not None:
+        try:
+            _ir = (int(image_resolution[0]), int(image_resolution[1]))
+        except Exception:
+            _ir = (224, 224)
+    else:
+        _ir = (224, 224)
+    with open(os.path.join(ckpt_dir, 'train_meta.json'), 'w') as f:
+        json.dump({'image_resolution': list(_ir)}, f, indent=2)
+
     preprocessor.save_pretrained(ckpt_dir, config_filename=f"{POLICY_PREPROCESSOR_DEFAULT_NAME}.json")
     postprocessor.save_pretrained(ckpt_dir, config_filename=f"{POLICY_POSTPROCESSOR_DEFAULT_NAME}.json")
 
@@ -613,6 +632,10 @@ def main(args):
 
     num_workers = train_settings.get('num_workers', 4)
     n_obs_steps = policy['settings'].get('n_obs_steps', 1)
+    # Resize target for the preprocessing pipeline. main() reads via .get() so it
+    # stays in train_settings; train() pops from its own copy later (and that copy
+    # is what writes train_meta.json).
+    image_resolution = train_settings.get('image_resolution', None)
 
     # Detect succeed flag.
     # NOTE: LeRobot v2 layout 은 `data/chunk-XXX/...` (옛 v1 은 `parquet/chunk-XXX/...`).
@@ -648,6 +671,7 @@ def main(args):
         n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory,
         obs_state_keys=obs_state_keys,
         wrist_sensor_ids=wrist_sensor_ids,
+        image_resolution=image_resolution,
     )
 
     # ── 학습 직전 state 구성 검증 (사용자가 의도한 obs_state_keys 가 실제 모델에

@@ -38,6 +38,142 @@ from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.utils.constants import ACTION, OBS_ENV_STATE, OBS_IMAGES, OBS_STATE
 
 
+# --- DINOv2/v3 backbone support (frozen ViT, drop-in replacement for the
+# torchvision ResNet branch). Lives outside ACTPolicy so the existing ResNet
+# code path is untouched — the branch is selected in ACT.__init__ below.
+_DINO_HF_MODELS = {
+    "dinov2": "facebook/dinov2-base",
+    "dinov3": "facebook/dinov3-vitb16-pretrain-lvd1689m",
+}
+
+
+class _DinoFCStub(nn.Module):
+    """Mimics torchvision ResNet's `.fc.in_features` so ACT can read the
+    backbone output channel count uniformly across resnet/dino branches.
+    """
+
+    def __init__(self, in_features: int):
+        super().__init__()
+        self.in_features = int(in_features)
+
+
+class DinoVisionBackbone(nn.Module):
+    """DINOv2/v3 ViT wrapped to mimic ``torchvision.IntermediateLayerGetter``'s
+    dict output (``{"feature_map": (B, C, H, W)}``) used by ACT.
+
+    The trunk is frozen by default — standard practice when using DINO as a
+    feature extractor for downstream policy learning. Patch tokens are
+    reshaped from the (B, 1+R+N, D) sequence back to a 2D feature map so the
+    rest of ACT (conv1x1 projection, 2D positional embedding) works unchanged.
+    """
+
+    def __init__(self, name: str, freeze: bool = True, n_unfrozen_blocks: int = 0):
+        super().__init__()
+        if name not in _DINO_HF_MODELS:
+            raise ValueError(
+                f"Unsupported DINO variant '{name}'. Choices: {list(_DINO_HF_MODELS)}"
+            )
+        try:
+            from transformers import AutoModel
+        except ImportError as e:  # pragma: no cover
+            raise ImportError(
+                "DINO vision_backbone requires the `transformers` package."
+            ) from e
+
+        self.model = AutoModel.from_pretrained(_DINO_HF_MODELS[name])
+        self.hidden_size = int(self.model.config.hidden_size)
+        self.patch_size = int(self.model.config.patch_size)
+        self.num_register_tokens = int(
+            getattr(self.model.config, "num_register_tokens", 0) or 0
+        )
+
+        # Resolve freeze / partial-unfreeze policy.
+        # `_fully_frozen` controls eval()-mode pinning and the torch.no_grad() forward
+        # short-circuit. Any unfrozen blocks ⇒ trunk must run with autograd enabled and
+        # follow the surrounding train/eval flag.
+        n_unfrozen_blocks = max(0, int(n_unfrozen_blocks))
+        self._fully_frozen = bool(freeze) and n_unfrozen_blocks == 0
+
+        if freeze:
+            for p in self.model.parameters():
+                p.requires_grad = False
+            if n_unfrozen_blocks > 0:
+                blocks = self._get_transformer_blocks()
+                k = min(n_unfrozen_blocks, len(blocks))
+                for blk in blocks[-k:]:
+                    for p in blk.parameters():
+                        p.requires_grad = True
+                # Final LayerNorm sits after the transformer stack — unfreezing the
+                # last blocks without it pins their outputs through frozen-stat norm,
+                # which negates much of the adaptation. Keep it learnable too.
+                final_ln = getattr(self.model, "layernorm", None) or getattr(
+                    self.model, "norm", None
+                )
+                if final_ln is not None:
+                    for p in final_ln.parameters():
+                        p.requires_grad = True
+        if self._fully_frozen:
+            self.model.eval()
+        # ResNet-API compat for `backbone_model.fc.in_features` reads in ACT.__init__.
+        self.fc = _DinoFCStub(self.hidden_size)
+
+    def _get_transformer_blocks(self) -> list:
+        """Return the transformer block list across HuggingFace ViT layouts.
+
+        DINOv2 uses ``model.encoder.layer`` (list of Dinov2Layer). DINOv3 / other
+        ViTs may expose ``encoder.layers`` or ``blocks`` — handle both.
+        """
+        enc = getattr(self.model, "encoder", None)
+        if enc is not None:
+            for attr in ("layer", "layers"):
+                blks = getattr(enc, attr, None)
+                if blks is not None:
+                    return list(blks)
+        blks = getattr(self.model, "blocks", None)
+        if blks is not None:
+            return list(blks)
+        return []
+
+    def train(self, mode: bool = True):
+        super().train(mode)
+        if self._fully_frozen:
+            # Keep DINO in eval mode regardless of the surrounding policy's train flag.
+            self.model.eval()
+        return self
+
+    def forward(self, pixel_values: Tensor) -> dict:
+        # pixel_values: (B, 3, H, W). Caller is responsible for DINO-style
+        # normalization (handled in our pipeline by process_image() using
+        # transformers' AutoImageProcessor).
+        B, _, H, W = pixel_values.shape
+        Hf, Wf = H // self.patch_size, W // self.patch_size
+        if Hf * self.patch_size != H or Wf * self.patch_size != W:
+            # Resize to the nearest valid patch grid (DINO requires H/W divisible by patch_size).
+            new_h = max(self.patch_size, Hf * self.patch_size)
+            new_w = max(self.patch_size, Wf * self.patch_size)
+            pixel_values = F.interpolate(
+                pixel_values, size=(new_h, new_w), mode="bilinear", align_corners=False
+            )
+            Hf, Wf = new_h // self.patch_size, new_w // self.patch_size
+
+        if self._fully_frozen:
+            with torch.no_grad():
+                out = self.model(pixel_values=pixel_values)
+        else:
+            out = self.model(pixel_values=pixel_values)
+
+        tokens = out.last_hidden_state  # (B, 1 + R + Hf*Wf, D)
+        n_skip = 1 + self.num_register_tokens
+        patch_tokens = tokens[:, n_skip:, :]  # (B, Hf*Wf, D)
+        if patch_tokens.shape[1] != Hf * Wf:
+            raise RuntimeError(
+                f"DINO patch grid mismatch: expected {Hf * Wf} patch tokens "
+                f"(after skipping {n_skip} CLS/register), got {patch_tokens.shape[1]}"
+            )
+        feat = patch_tokens.transpose(1, 2).reshape(B, self.hidden_size, Hf, Wf)
+        return {"feature_map": feat}
+
+
 class ACTPolicy(PreTrainedPolicy):
     """
     Action Chunking Transformer Policy as per Learning Fine-Grained Bimanual Manipulation with Low-Cost
@@ -321,15 +457,27 @@ class ACT(nn.Module):
 
         # Backbone for image feature extraction.
         if self.config.image_features:
-            backbone_model = getattr(torchvision.models, config.vision_backbone)(
-                replace_stride_with_dilation=[False, False, config.replace_final_stride_with_dilation],
-                weights=config.pretrained_backbone_weights,
-                norm_layer=FrozenBatchNorm2d,
-            )
-            # Note: The assumption here is that we are using a ResNet model (and hence layer4 is the final
-            # feature map).
-            # Note: The forward method of this returns a dict: {"feature_map": output}.
-            self.backbone = IntermediateLayerGetter(backbone_model, return_layers={"layer4": "feature_map"})
+            if config.vision_backbone.startswith("dinov"):
+                # DINOv2/v3 branch — frozen ViT producing the same
+                # ``{"feature_map": (B, C, H, W)}`` dict that ACT consumes.
+                self.backbone = DinoVisionBackbone(
+                    name=config.vision_backbone,
+                    freeze=True,
+                    n_unfrozen_blocks=getattr(config, "n_unfrozen_blocks", 0),
+                )
+                # ResNet-API compat alias so the conv1x1 projection below can
+                # read ``backbone_model.fc.in_features`` uniformly.
+                backbone_model = self.backbone
+            else:
+                backbone_model = getattr(torchvision.models, config.vision_backbone)(
+                    replace_stride_with_dilation=[False, False, config.replace_final_stride_with_dilation],
+                    weights=config.pretrained_backbone_weights,
+                    norm_layer=FrozenBatchNorm2d,
+                )
+                # Note: The assumption here is that we are using a ResNet model (and hence layer4 is the final
+                # feature map).
+                # Note: The forward method of this returns a dict: {"feature_map": output}.
+                self.backbone = IntermediateLayerGetter(backbone_model, return_layers={"layer4": "feature_map"})
 
         # Transformer (acts as VAE decoder when training with the variational objective).
         self.encoder = ACTEncoder(config)
