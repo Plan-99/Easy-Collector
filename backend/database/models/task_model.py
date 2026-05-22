@@ -69,35 +69,49 @@ class Task(SoftDeleteModel):
 
     @property
     def assembly(self):
-        from .assembly_model import Assembly
-        return Assembly.find(self.assembly_id) if self.assembly_id else None
+        # 메모이즈 — to_dict() 한 번에 assembly 가 여러 번 (home_pose_computed,
+        # joint_dim, 직접) 접근되는데 매번 Assembly.find() 쿼리가 나가던 것을 1회로.
+        # 모델 인스턴스는 요청마다 새로 생성되므로 캐시는 요청 범위로 안전.
+        if not hasattr(self, '_assembly_cache'):
+            from .assembly_model import Assembly
+            self._assembly_cache = (
+                Assembly.find(self.assembly_id) if self.assembly_id else None
+            )
+        return self._assembly_cache
+
+    @property
+    def _resolved_robots(self):
+        """assembly.robots 의 robot dict 들을 Robot 객체로 1회만 resolve (메모이즈).
+        home_pose_computed 와 joint_dim 이 각각 Robot.find() 루프를 따로 돌며 같은
+        robot 을 중복 쿼리하던 것을 통합한다."""
+        if not hasattr(self, '_resolved_robots_cache'):
+            from .robot_model import Robot
+            robots = []
+            assembly = self.assembly
+            if assembly:
+                for robot_dict in assembly.robots:
+                    r = Robot.find(robot_dict['id'])
+                    if r is not None:
+                        robots.append(r)
+            self._resolved_robots_cache = robots
+        return self._resolved_robots_cache
 
     @property
     def home_pose_computed(self):
-        from .robot_model import Robot
         home_pose = {}
-        assembly = self.assembly
-        if not assembly:
-            return home_pose
-        for robot_dict in assembly.robots:
-            robot = Robot.find(robot_dict['id'])
-            if str(robot.id) not in self._settings.get('robots', {}):
-                home_pose[str(robot.id)] = [0.0] * len(robot.joint_names)
-            else:
-                home_pose[str(robot.id)] = self._settings['robots'][str(robot.id)].get('home_pose', [0.0] * len(robot.joint_names))
+        settings_robots = self._settings.get('robots', {})
+        for robot in self._resolved_robots:
+            rid = str(robot.id)
+            default = [0.0] * len(robot.joint_names)
+            home_pose[rid] = (
+                settings_robots[rid].get('home_pose', default)
+                if rid in settings_robots else default
+            )
         return home_pose
 
     @property
     def joint_dim(self):
-        from .robot_model import Robot
-        joint_dim = 0
-        assembly = self.assembly
-        if not assembly:
-            return joint_dim
-        for robot_dict in assembly.robots:
-            robot = Robot.find(robot_dict['id'])
-            joint_dim += robot.joint_dim
-        return joint_dim
+        return sum(robot.joint_dim for robot in self._resolved_robots)
 
     @property
     def sensors(self):

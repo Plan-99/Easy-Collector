@@ -1,6 +1,19 @@
 <template>
     <q-page-sticky position="bottom-right" :offset="[18, 18]">
         <div class="column items-end q-gutter-y-sm">
+            <!-- 수동 새로고침 — 폴링(10초)/socketio 이벤트를 기다리지 않고
+                 사용자가 즉시 큐 상태를 다시 가져온다. -->
+            <q-btn
+                round
+                size="md"
+                color="blue-grey-7"
+                icon="refresh"
+                :loading="refreshing"
+                @click="manualRefresh"
+            >
+                <q-tooltip>Refresh queue</q-tooltip>
+            </q-btn>
+
             <!-- Queued (FIFO order, oldest first) -->
             <q-btn
                 v-for="(cp, idx) in queue.queued"
@@ -44,7 +57,7 @@ defineEmits(['watch']);
 // floating 버튼은 active(queued/running)만 보여주지만, recent도 함께 보관해서
 // TrainingDialog가 종료 상태(finished/failed)로 자연스럽게 전환될 수 있도록 한다.
 const queue = ref({ running: null, queued: [], recent: [] });
-let pollTimer = null;
+const refreshing = ref(false);
 
 async function refresh() {
     try {
@@ -59,18 +72,29 @@ async function refresh() {
     }
 }
 
+// 사용자가 직접 누르는 새로고침. refresh() 는 socketio 이벤트와 공유하므로
+// loading 스피너는 manual 전용 래퍼에서만 띄운다.
+async function manualRefresh() {
+    if (refreshing.value) return;
+    refreshing.value = true;
+    try {
+        await refresh();
+    } finally {
+        refreshing.value = false;
+    }
+}
+
 const onQueueChanged = () => refresh();
 
 onMounted(() => {
+    // 마운트 시 1회 fetch. 이후 갱신은 socketio 'train_queue_changed' 이벤트와
+    // 수동 새로고침 버튼으로만 — 주기 폴링 제거.
     refresh();
     socket.on('train_queue_changed', onQueueChanged);
-    // 백엔드 단절 / 이벤트 누락 대비 안전망 폴링 (10초).
-    pollTimer = setInterval(refresh, 10000);
 });
 
 onUnmounted(() => {
     socket.off('train_queue_changed', onQueueChanged);
-    if (pollTimer) clearInterval(pollTimer);
 });
 
 defineExpose({ refresh, queue });
