@@ -8,7 +8,7 @@ export const POLICY_CONFIGS = {
             'label': 'Vision Backbone', 
             'value': 'resnet18', 
             'type': 'select', 
-            'options': ['resnet18', 'resnet34', 'resnet50', 'dinov2', 'dinov3'] // Assuming DinoV2 is a valid option,
+            'options': ['resnet18', 'resnet34', 'resnet50', 'dinov2-small', 'dinov2', 'dinov3'] // Assuming DinoV2 is a valid option,
         },
         // torchvision `weights=...` enum string used to init the ResNet backbone.
         // Ignored on DINO backbones (DinoVisionBackbone loads via HF AutoModel),

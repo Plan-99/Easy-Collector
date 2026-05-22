@@ -535,7 +535,7 @@ def create_policy(api: Backend, name='tutorial_act_policy', vision_backbone='res
                   n_unfrozen_blocks=0):
     """ACT 정책 — TrainPage 가 기본으로 만드는 형태와 동일한 settings.
 
-    ``vision_backbone`` 으로 'resnet18' (기본) / 'dinov2' / 'dinov3' 선택 가능.
+    ``vision_backbone`` 으로 'resnet18' (기본) / 'dinov2-small' / 'dinov2' / 'dinov3' 선택 가능.
     DINO 변종은 ``pretrained_backbone_weights`` 가 무의미하므로 None 으로 보낸다.
 
     ``n_unfrozen_blocks`` (DINO 한정) — 마지막 N 개 transformer block + final
@@ -1026,8 +1026,9 @@ def main():
     parser.add_argument('--skip-planner', action='store_true',
                         help='planner 단계를 건너뛴다')
     parser.add_argument('--vision-backbone', default='resnet18',
-                        choices=['resnet18', 'resnet34', 'resnet50', 'dinov2', 'dinov3'],
-                        help='ACT 비전 백본 선택 (기본 resnet18). dinov2/dinov3 는 frozen ViT.')
+                        choices=['resnet18', 'resnet34', 'resnet50',
+                                 'dinov2-small', 'dinov2', 'dinov3'],
+                        help='ACT 비전 백본 선택 (기본 resnet18). dinov2-small/dinov2/dinov3 는 frozen ViT.')
     parser.add_argument('--n-unfrozen-blocks', type=int, default=0,
                         help='DINO partial unfreeze — 마지막 N 개 transformer block 의 '
                              'gradient 를 켠다. 0 이면 trunk 전부 frozen (기본). '

@@ -42,6 +42,7 @@ from lerobot.utils.constants import ACTION, OBS_ENV_STATE, OBS_IMAGES, OBS_STATE
 # torchvision ResNet branch). Lives outside ACTPolicy so the existing ResNet
 # code path is untouched — the branch is selected in ACT.__init__ below.
 _DINO_HF_MODELS = {
+    "dinov2-small": "facebook/dinov2-small",
     "dinov2": "facebook/dinov2-base",
     "dinov3": "facebook/dinov3-vitb16-pretrain-lvd1689m",
 }

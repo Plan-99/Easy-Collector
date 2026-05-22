@@ -70,13 +70,13 @@ export const HYPERPARAM_HELP = {
   'ACT.vision_backbone': {
     ko: {
       title: '비전 백본 (vision_backbone)',
-      easy: '카메라 영상을 "이해해서 숫자로 바꿔주는" 신경망입니다. 작은 데이터셋이면 resnet18(가벼움)이 안전하고, 데이터가 많고 일반화가 중요하면 dinov2/v3를 시도해볼 수 있어요.',
-      expert: '이미지를 임베딩 벡터로 변환하는 CNN/ViT. 코드에서는 `getattr(torchvision.models, backbone_name)`으로 동적으로 로드합니다.\n\n- resnet18/34/50: torchvision 표준 CNN\n- dinov2/dinov3: 자기지도학습 ViT, 일반화에 강하지만 학습이 느리고 VRAM이 큼\n\n변경하면 pretrained_backbone_weights 옵션이 자동 필터링되지만, 값 자체는 사용자가 직접 골라줘야 합니다.',
+      easy: '카메라 영상을 "이해해서 숫자로 바꿔주는" 신경망입니다. 작은 데이터셋이면 resnet18(가벼움)이 안전하고, 데이터가 많고 일반화가 중요하면 DINO 계열을 시도해볼 수 있어요. DINO 중에서는 dinov2-small(작고 빠름)이 일반적인 기본 추천 — dinov2(base) 대비 3~4배 빠른데 정확도 차이는 미미합니다.',
+      expert: '이미지를 임베딩 벡터로 변환하는 CNN/ViT.\n\n- resnet18/34/50: torchvision 표준 CNN (`getattr(torchvision.models, backbone_name)`)\n- dinov2-small: 자기지도 ViT, hidden_size=384, ~22M params. DINO 중 가장 가벼움, 학습 속도/정확도 균형이 좋아 DINO 기본 추천.\n- dinov2: hidden_size=768, ~86M params. dinov2-small 보다 표현력은 강하지만 학습이 3~4배 느리고 VRAM 큼.\n- dinov3: HF gated repo (token 필요), 현재 실험적.\n\nDINO 계열은 HuggingFace `AutoModel` 로 직접 로드하며 `pretrained_backbone_weights` 는 무시됩니다 (UI 자동 숨김). 대신 `n_unfrozen_blocks` 로 partial unfreeze 가능.',
     },
     en: {
       title: 'Vision Backbone',
-      easy: 'The neural network that turns camera frames into numbers the policy can understand. Use resnet18 for small datasets; try dinov2/v3 when generalization matters.',
-      expert: 'CNN/ViT that produces image embeddings. Loaded dynamically via `getattr(torchvision.models, backbone_name)`.\n\n- resnet18/34/50: standard torchvision CNN\n- dinov2/dinov3: self-supervised ViT — better generalization but slower training and heavier VRAM\n\nChanging this auto-filters the pretrained_backbone_weights options, but you still need to pick a compatible value.',
+      easy: 'The neural network that turns camera frames into numbers the policy can understand. Use resnet18 for small datasets; try a DINO backbone when generalization matters. Within DINO, dinov2-small is the recommended default — 3-4x faster than dinov2(base) with negligible accuracy loss on most tasks.',
+      expert: 'CNN/ViT that produces image embeddings.\n\n- resnet18/34/50: standard torchvision CNN (`getattr(torchvision.models, backbone_name)`)\n- dinov2-small: self-supervised ViT, hidden_size=384, ~22M params. Lightest DINO variant, best speed/accuracy trade-off, recommended default for DINO.\n- dinov2: hidden_size=768, ~86M params. Stronger features but ~3-4x slower forward/backward and higher VRAM.\n- dinov3: gated HF repo (token required), experimental.\n\nDINO variants load via HuggingFace `AutoModel` and ignore `pretrained_backbone_weights` (auto-hidden in UI). Use `n_unfrozen_blocks` for partial unfreeze instead.',
     },
   },
 
