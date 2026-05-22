@@ -1125,9 +1125,17 @@ const isPolicyFormChanged = computed(() => {
     if (originalPolicy.type !== policyForm.value.type) return true;
 
     for (const key in policyForm.value.settings) {
-        if (originalPolicy.settings[key] !== policyForm.value.settings[key].value) {
-            return true;
-        }
+        const saved = originalPolicy.settings[key];
+        // 저장된 policy 가 이 키를 안 가짐 = policy 저장 후 추가된 config 필드.
+        // 사용자가 바꾼 게 아니라 schema 확장이므로 "변경"으로 치지 않는다
+        // (안 그러면 기존 policy 가 전부 Save As 로 떠 Continue 가 안 보임).
+        if (saved === undefined) continue;
+        const current = policyForm.value.settings[key].value;
+        // 배열/객체 값(obs_state_keys 등)은 참조 비교(!==)가 항상 true 라 JSON 비교.
+        const changed = (typeof saved === 'object' || typeof current === 'object')
+            ? JSON.stringify(saved) !== JSON.stringify(current)
+            : saved !== current;
+        if (changed) return true;
     }
     return false;
 });
