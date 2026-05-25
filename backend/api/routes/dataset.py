@@ -479,18 +479,32 @@ def get_episode_data(id, episode_ref):
     }
 
     # Numeric channels — frontend graphs build datasets from these.
+    # succeed: lerobot_io.py 가 shape=(1,), names=None 으로 저장 → 1-D arr 로
+    # 읽힌다. 아래에서 (N,1) 로 reshape + 기본 이름 부여하면 UI 가 일반 채널처럼
+    # 그래프에 표시 가능.
     numeric_keys = [
         'observation.qpos', 'observation.state',  # 새/옛 schema
         'action', 'action.joint',
         'observation.qvel', 'observation.qeffort',
         'observation.eepos', 'observation.ee_delta', 'action.ee_delta',
+        'succeed',
     ]
     channels = {}
     for key in numeric_keys:
         if key not in features or key not in df.columns:
             continue
         arr = np.array(df[key].tolist(), dtype=np.float32)
-        names = features[key].get('names') or [f'{key}_{i}' for i in range(arr.shape[1])]
+        if arr.ndim == 1:
+            # scalar-per-row column (e.g. succeed) — make it (N, 1) so frontend's
+            # row[idx] indexing path works uniformly.
+            arr = arr.reshape(-1, 1)
+        names = features[key].get('names')
+        if not names:
+            names = (
+                [key.split('.')[-1]]
+                if arr.shape[1] == 1
+                else [f'{key}_{i}' for i in range(arr.shape[1])]
+            )
         channels[key] = {
             'data': arr.tolist(),
             'names': list(names),

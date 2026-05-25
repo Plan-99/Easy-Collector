@@ -603,15 +603,23 @@ def checkpoint_test(
                     _raw_actions = postprocessor(_raw_actions)
                 _raw_np = _raw_actions.cpu().numpy()
 
-                # Current EE pose — inference 시점의 fresh 값 (agents 통해 RPC).
+                # Current EE pose — image/state 가 캡처된 T1 시점의 eepos (obs_snap).
+                # 학습은 (image_t, eepos_t) 가 같은 frame t 에서 페어링되어 모델 출력의
+                # local-frame trajectory anchor 가 image 시점과 일치한다고 가정한다.
+                # 여기서 fresh RPC (get_ee_position) 로 다시 읽으면 추론 소요시간 만큼
+                # 로봇이 더 이동한 T2 의 eepos 가 잡혀 anchor 가 T1→T2 로 shift,
+                # 결과적으로 chunk 전체가 그 변위만큼 밀려 "데이터 3 step → 추론 4 step"
+                # 같은 off-by-Δt drift 가 생긴다. obs_snap['robot_states'][..]['eepos']
+                # 는 record_step 이 image 와 한 RPC 로 묶어준 같은 T1 값.
                 _curr_eepos_local = None
                 for _a in env.agents:
                     if _a.role == 'tool' or _a.ik_solver is None:
                         continue
-                    _ee_dict = _a.get_ee_position() or {}
+                    _st = obs_snap['robot_states'].get(_a.id) or obs_snap['robot_states'].get(str(_a.id))
+                    _ee_dict = (_st or {}).get('eepos') or {}
                     _ee_name = _a.ee_names[0] if _a.ee_names else None
                     if _ee_name and _ee_name in _ee_dict:
-                        _curr_eepos_local = np.array(_ee_dict[_ee_name], dtype=np.float32)
+                        _curr_eepos_local = np.array(_ee_dict[_ee_name][:6], dtype=np.float32)
                         break
                 _deltas_local = relative_trajectory_to_delta(_raw_np, current_eepos=_curr_eepos_local)
                 return _deltas_local
@@ -874,14 +882,21 @@ def checkpoint_test(
                         # DexUMI 학습 — relative trajectory 는 current EE local frame
                         # 이라 world frame 으로 풀려면 현재 EE pose 가 필요. 단일 arm 가정
                         # (multi-EE 는 추후). tool_inner 면 tool joint 차원도 append.
+                        #
+                        # NOTE: image/state 가 캡처된 같은 snapshot (obs_t) 의 eepos 를
+                        # anchor 로 사용 — 학습이 (image_t, eepos_t) 페어로 라벨을 만들기
+                        # 때문에 fresh RPC 대신 obs_t['robot_states'] 의 eepos 를 읽어야
+                        # 추론 소요시간(T2-T1) 만큼의 drift 가 사라진다. (background path
+                        # 의 _do_rel_ee_inference 와 동일한 보정.)
                         _curr_eepos = None
                         for _agent in env.agents:
                             if _agent.role == 'tool' or _agent.ik_solver is None:
                                 continue
-                            _ee_dict = _agent.get_ee_position() or {}
+                            _st = obs_t['robot_states'].get(_agent.id) or obs_t['robot_states'].get(str(_agent.id))
+                            _ee_dict = (_st or {}).get('eepos') or {}
                             _ee_name = _agent.ee_names[0] if _agent.ee_names else None
                             if _ee_name and _ee_name in _ee_dict:
-                                _curr_eepos = np.array(_ee_dict[_ee_name], dtype=np.float32)
+                                _curr_eepos = np.array(_ee_dict[_ee_name][:6], dtype=np.float32)
                                 break
                         deltas = relative_trajectory_to_delta(raw_np, current_eepos=_curr_eepos)
                         # DIAG: 모델 출력 (relative trajectory in current EE local frame) 의
