@@ -3,14 +3,34 @@
         <div v-if="languageInstruction" class="text-white text-caption q-pb-sm">
             {{ $t('hdf5LanguagePrefix', { value: languageInstruction }) }}
         </div>
-        <div class="q-py-sm" :style="imagesGridStyle">
-            <div
-                v-for="(image, name) in images"
-                :key="name"
-                :style="cellStyle"
-                :class="imageClass"
-            >
-                <img :src="image" alt="" :style="imageStyle">
+        <div style="position: relative;">
+            <div class="q-py-sm" :style="imagesGridStyle">
+                <div
+                    v-for="(image, name) in images"
+                    :key="name"
+                    :style="cellStyle"
+                    :class="imageClass"
+                >
+                    <img :src="image" alt="" :style="imageStyle">
+                    <!-- Vision map heatmap overlay. Positioned absolutely on top of
+                         the camera image, sized to match. pointer-events:none so
+                         slider/play controls still work. -->
+                    <img
+                        v-if="visionMapOn && currentHeatmaps[name]"
+                        :src="currentHeatmaps[name]"
+                        alt=""
+                        :style="overlayImageStyle"
+                    />
+                </div>
+            </div>
+            <div v-if="vmLoading" :style="vmLoadingOverlayStyle">
+                <q-spinner color="primary" size="44px" />
+                <div class="text-white q-mt-sm text-caption">
+                    {{ $t('visionMapPreparing') || '비전 맵 준비 중...' }}
+                </div>
+                <div v-if="vmProgressTotal > 0" class="text-grey-4 q-mt-xs" style="font-size: 11px;">
+                    {{ vmProgressDone }} / {{ vmProgressTotal }}
+                </div>
             </div>
         </div>
 
@@ -45,6 +65,81 @@
                 {{ sliderFrame }} / {{ sliderMax }}
             </div>
         </div>
+
+        <!-- Vision map row -->
+        <div class="q-pt-xs items-center" style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <q-checkbox
+                v-model="visionMapOn"
+                :label="$t('visionMap') || 'Vision Map'"
+                dark
+                size="sm"
+                color="primary"
+                class="text-white"
+                :disable="!vmCheckpointId"
+            />
+            <q-btn
+                flat
+                dense
+                round
+                size="sm"
+                icon="settings"
+                color="grey-5"
+                @click="openVisionMapSettings"
+            >
+                <q-tooltip>{{ $t('visionMapSettings') || 'Vision Map Settings' }}</q-tooltip>
+            </q-btn>
+            <span v-if="visionMapStatus" class="text-caption" :class="visionMapStatusClass">
+                {{ visionMapStatus }}
+            </span>
+        </div>
+
+        <!-- Vision map settings dialog -->
+        <q-dialog v-model="showVMSettings">
+            <q-card class="bg-secondary text-white" style="min-width: 380px;">
+                <q-card-section class="row items-center">
+                    <q-icon name="visibility" size="22px" color="primary" class="q-mr-sm" />
+                    <div class="text-h6">{{ $t('visionMapSettings') || 'Vision Map Settings' }}</div>
+                </q-card-section>
+                <q-card-section class="q-pt-none">
+                    <q-select
+                        v-model="vmCheckpointId"
+                        :options="checkpointOptions"
+                        :label="$t('checkpoint') || 'Checkpoint'"
+                        emit-value
+                        map-options
+                        dark
+                        outlined
+                        dense
+                        bg-color="dark"
+                        :no-options-label="$t('visionMapNoCheckpoints') || 'No finished ACT checkpoints'"
+                    >
+                        <template v-slot:no-option>
+                            <q-item><q-item-section class="text-grey-5">
+                                {{ $t('visionMapNoCheckpoints') || 'No finished ACT checkpoints for this workspace' }}
+                            </q-item-section></q-item>
+                        </template>
+                    </q-select>
+                    <q-select
+                        v-model="vmMethod"
+                        :options="methodOptions"
+                        :label="$t('visionMapMethod') || 'Method'"
+                        emit-value
+                        map-options
+                        dark
+                        outlined
+                        dense
+                        bg-color="dark"
+                        class="q-mt-md"
+                    />
+                    <div class="text-caption text-grey-5 q-mt-sm">
+                        {{ vmMethodHelp }}
+                    </div>
+                </q-card-section>
+                <q-card-actions align="right">
+                    <q-btn flat :label="$t('close') || 'Close'" color="grey" v-close-popup />
+                </q-card-actions>
+            </q-card>
+        </q-dialog>
     </div>
 </template>
 
@@ -83,6 +178,12 @@ const props = defineProps({
     },
     previewFrame: {
         type: Number,
+        default: null,
+    },
+    // Workspace/task id — used to filter Vision Map checkpoint candidates to
+    // the current task. Null/undefined ⇒ vision map UI shows "no checkpoints".
+    taskId: {
+        type: [Number, String],
         default: null,
     },
 });
@@ -125,6 +226,32 @@ const imageStyle = computed(() => ({
     height: '100%',
     objectFit: 'contain',
     display: 'block',
+}));
+
+const overlayImageStyle = computed(() => ({
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+    objectFit: 'contain',
+    pointerEvents: 'none',
+}));
+
+const vmLoadingOverlayStyle = computed(() => ({
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'rgba(0, 0, 0, 0.55)',
+    borderRadius: '4px',
+    zIndex: 10,
+    pointerEvents: 'none',
 }));
 
 const imagesGridStyle = computed(() => ({
@@ -246,6 +373,260 @@ watch(() => props.previewFrame, (newVal) => {
     fetchFrame(props.path, newVal);
 });
 
+// =========================================================================
+// Vision Map — per-frame ACT saliency overlay (episode precompute).
+//
+// On toggle ON (or checkpoint/method change) we ask the backend to compute
+// heatmaps for every frame of the current episode and stream them back over
+// Socket.IO:
+//   POST /checkpoint/<id>/:vision_map_episode_start
+//     body: { dataset_id, episode_idx, method, session_id }
+//   ← vision_map_episode_start { session_id, total_frames }
+//   ← vision_map_episode_frame { session_id, frame_idx, heatmaps }  × N
+//   ← vision_map_episode_done  { session_id, computed, total }
+//
+// Playback is paused with a loading overlay until the *whole* episode is
+// computed; then it auto-resumes and the overlay swaps in the matching
+// per-frame heatmap from heatmapCache. Single backend slot — starting a new
+// precompute cancels any prior one.
+// =========================================================================
+const visionMapOn = ref(false);
+const showVMSettings = ref(false);
+const vmCheckpointId = ref(LocalStorage.getItem('vmCheckpointId') || null);
+const vmMethod = ref(LocalStorage.getItem('vmMethod') || 'attention');
+const heatmapCache = ref({});        // { [frame_idx]: { sensor_name: data-url } }
+const visionMapStatus = ref('');
+const visionMapStatusClass = ref('text-grey-5');
+const taskCheckpoints = ref([]);
+// Loading overlay state — true while the episode is being precomputed.
+// Playback is paused for the duration and auto-resumes on completion.
+const vmLoading = ref(false);
+const vmProgressDone = ref(0);
+const vmProgressTotal = ref(0);
+let vmShouldResumePlayback = false;
+// Active session id — only socket events with this id update state. Mutated
+// (not reffed) because we don't need reactivity on it.
+let vmSessionId = null;
+
+// Heatmaps overlaid on the current frame. Empty until the matching frame_idx
+// has been computed.
+const currentHeatmaps = computed(() => {
+    if (!visionMapOn.value) return {};
+    return heatmapCache.value[sliderFrame.value] || {};
+});
+
+const methodOptions = [
+    { label: 'Attention (decoder cross-attention)', value: 'attention' },
+    { label: 'Grad-CAM (backbone saliency)', value: 'gradcam' },
+];
+
+const vmMethodHelp = computed(() => {
+    if (vmMethod.value === 'gradcam') {
+        return '액션 노름에 대한 backbone feature 의 Grad-CAM. 액션을 만드는 데 영향을 주는 픽셀 위치를 보여줍니다. (느림 — backward pass 필요)';
+    }
+    return '디코더 cross-attention 의 평균 — action query 가 visual token 의 어디를 보는지. (빠름)';
+});
+
+// Only ACT-based checkpoints support the vision_map endpoint — the dropdown
+// hides every other policy type so the user can't pick something unsupported.
+const actCheckpoints = computed(() =>
+    taskCheckpoints.value.filter((c) => String(c?.policy?.type || '').toLowerCase() === 'act'),
+);
+
+const checkpointOptions = computed(() =>
+    actCheckpoints.value.map((c) => ({
+        label: `#${c.id} · ${c.name || `(unnamed)`}`,
+        value: c.id,
+    })),
+);
+
+function loadCheckpointsForTask() {
+    if (!props.taskId) {
+        taskCheckpoints.value = [];
+        return;
+    }
+    api.get('/checkpoints', { params: { where: `task_id,=,${props.taskId}|status,=,finished` } })
+        .then((res) => {
+            taskCheckpoints.value = res.data?.checkpoints || [];
+            // Validate persisted ID against ACT-only options. If invalid or
+            // missing, fall back to the most recent ACT checkpoint so the
+            // checkbox is usable out of the box.
+            const acts = actCheckpoints.value;
+            const persistedValid = vmCheckpointId.value &&
+                acts.some((c) => String(c.id) === String(vmCheckpointId.value));
+            if (!persistedValid) {
+                if (acts.length > 0) {
+                    const sorted = [...acts].sort((a, b) => {
+                        if (a.created_at && b.created_at) {
+                            return new Date(b.created_at) - new Date(a.created_at);
+                        }
+                        return (b.id || 0) - (a.id || 0);
+                    });
+                    vmCheckpointId.value = sorted[0].id;
+                } else {
+                    vmCheckpointId.value = null;
+                }
+            }
+        })
+        .catch((err) => {
+            console.error('[VisionMap] failed to load checkpoints:', err);
+            taskCheckpoints.value = [];
+        });
+}
+
+function openVisionMapSettings() {
+    loadCheckpointsForTask();
+    showVMSettings.value = true;
+}
+
+function parsePath(path) {
+    // path = `${dataset_id}/${episode_name}` e.g. "abc123/episode_3"
+    if (!path) return null;
+    const parts = String(path).split('/');
+    if (parts.length < 2) return null;
+    const dataset_id = parts[0];
+    const epName = parts[1];
+    const m = String(epName).replace('.hdf5', '').match(/(\d+)/);
+    if (!m) return null;
+    return { dataset_id, episode_idx: parseInt(m[1], 10) };
+}
+
+function newSessionId() {
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function startEpisodePrecompute() {
+    if (!visionMapOn.value || !vmCheckpointId.value) return;
+    const parsed = parsePath(props.path);
+    if (!parsed) return;
+
+    // Pause playback for the duration of the precompute; remember whether
+    // we were playing so we can auto-resume on completion.
+    const wasPlaying = !paused.value && !finished.value;
+    if (wasPlaying) {
+        stopReading(props.path);
+        paused.value = true;
+    }
+    vmShouldResumePlayback = wasPlaying;
+
+    // Reset state, generate a fresh session id so straggler events from a
+    // prior request are ignored.
+    heatmapCache.value = {};
+    vmProgressDone.value = 0;
+    vmProgressTotal.value = 0;
+    vmLoading.value = true;
+    visionMapStatus.value = '비전 맵 준비 중...';
+    visionMapStatusClass.value = 'text-grey-5';
+    vmSessionId = newSessionId();
+
+    api.post(`/checkpoint/${vmCheckpointId.value}/:vision_map_episode_start`, {
+        dataset_id: parsed.dataset_id,
+        episode_idx: parsed.episode_idx,
+        method: vmMethod.value,
+        session_id: vmSessionId,
+    }).catch((err) => {
+        const msg = err?.response?.data?.message || err?.message || 'failed';
+        visionMapStatus.value = `오류: ${msg}`;
+        visionMapStatusClass.value = 'text-red-4';
+        vmLoading.value = false;
+        vmShouldResumePlayback = false;
+        vmSessionId = null;
+        console.error('[VisionMap] start failed:', err);
+    });
+}
+
+function stopEpisodePrecompute() {
+    // Best-effort cancel — backend ignores if nothing is running.
+    if (!vmCheckpointId.value) return;
+    api.post(`/checkpoint/${vmCheckpointId.value}/:vision_map_episode_stop`)
+        .catch((err) => console.warn('[VisionMap] stop failed:', err));
+}
+
+// Socket handlers — only mutate state for the current session.
+function onVMEpisodeStart(payload) {
+    if (!payload || payload.session_id !== vmSessionId) return;
+    vmProgressTotal.value = payload.total_frames || 0;
+    vmProgressDone.value = 0;
+    visionMapStatus.value = `0 / ${vmProgressTotal.value} 프레임`;
+}
+
+function onVMEpisodeFrame(payload) {
+    if (!payload || payload.session_id !== vmSessionId) return;
+    if (typeof payload.frame_idx !== 'number') return;
+    // Mutate then reassign so the computed dependency triggers without
+    // making a deep copy of every frame's PNGs.
+    heatmapCache.value[payload.frame_idx] = payload.heatmaps || {};
+    heatmapCache.value = { ...heatmapCache.value };
+    vmProgressDone.value += 1;
+    if (vmProgressTotal.value > 0) {
+        visionMapStatus.value = `${vmProgressDone.value} / ${vmProgressTotal.value} 프레임`;
+    }
+}
+
+function onVMEpisodeDone(payload) {
+    if (!payload || payload.session_id !== vmSessionId) return;
+    vmLoading.value = false;
+    visionMapStatus.value = '';
+    // Auto-resume playback now that every frame has its overlay.
+    if (vmShouldResumePlayback) {
+        vmShouldResumePlayback = false;
+        if (visionMapOn.value && !finished.value && props.path) {
+            startReading(props.path, sliderFrame.value);
+        }
+    }
+}
+
+function onVMEpisodeError(payload) {
+    if (!payload || payload.session_id !== vmSessionId) return;
+    visionMapStatus.value = `오류: ${payload.message || 'failed'}`;
+    visionMapStatusClass.value = 'text-red-4';
+    vmLoading.value = false;
+    vmShouldResumePlayback = false;
+    vmSessionId = null;
+}
+
+// Persist settings + restart precompute when they change while toggle is on.
+watch(vmCheckpointId, (v) => {
+    LocalStorage.set('vmCheckpointId', v);
+    if (visionMapOn.value) startEpisodePrecompute();
+});
+watch(vmMethod, (v) => {
+    LocalStorage.set('vmMethod', v);
+    if (visionMapOn.value) startEpisodePrecompute();
+});
+
+// Toggle on → start precompute. Toggle off → cancel + drop overlays.
+watch(visionMapOn, (on) => {
+    if (on) {
+        if (!vmCheckpointId.value) {
+            openVisionMapSettings();
+            return;
+        }
+        startEpisodePrecompute();
+    } else {
+        stopEpisodePrecompute();
+        heatmapCache.value = {};
+        visionMapStatus.value = '';
+        vmLoading.value = false;
+        vmShouldResumePlayback = false;
+        vmSessionId = null;
+    }
+});
+
+// Episode change → restart precompute for the new episode.
+watch(() => props.path, () => {
+    if (visionMapOn.value && vmCheckpointId.value) {
+        startEpisodePrecompute();
+    } else {
+        heatmapCache.value = {};
+    }
+});
+
+// Pull checkpoints whenever task changes (so the picker is fresh when user
+// opens the settings dialog without an explicit refresh).
+watch(() => props.taskId, () => loadCheckpointsForTask(), { immediate: true });
+// =========================================================================
+
 onMounted(() => {
     if (props.path) startReading(props.path);
 
@@ -266,11 +647,21 @@ onMounted(() => {
             finished.value = true;
         }
     });
+
+    socket.on('vision_map_episode_start', onVMEpisodeStart);
+    socket.on('vision_map_episode_frame', onVMEpisodeFrame);
+    socket.on('vision_map_episode_done', onVMEpisodeDone);
+    socket.on('vision_map_episode_error', onVMEpisodeError);
 });
 
 onUnmounted(() => {
     socket.off('show_episode_step');
     socket.off('replay_progress');
+    socket.off('vision_map_episode_start', onVMEpisodeStart);
+    socket.off('vision_map_episode_frame', onVMEpisodeFrame);
+    socket.off('vision_map_episode_done', onVMEpisodeDone);
+    socket.off('vision_map_episode_error', onVMEpisodeError);
+    if (visionMapOn.value) stopEpisodePrecompute();
     stopReading(props.path);
 });
 </script>

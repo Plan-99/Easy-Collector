@@ -828,6 +828,16 @@ export default {
   datasetCurrentFrame: 'Frame',
   datasetNoVideo: 'No playable video.',
 
+  // ───── Vision Map (EpisodeViewer overlay) ─────
+  visionMap: 'Vision Map',
+  visionMapSettings: 'Vision Map Settings',
+  visionMapMethod: 'Method',
+  visionMapNoCheckpoints: 'No finished ACT checkpoints for this workspace',
+  visionMapPreparing: 'Preparing Vision Map...',
+  visionMapOff: 'Off',
+  visionMapAttention: 'Attention',
+  visionMapGradcam: 'Grad-CAM',
+
   // Trim
   datasetTrimRangeLabel: 'Trim range',
   datasetTrimApply: 'Apply trim',

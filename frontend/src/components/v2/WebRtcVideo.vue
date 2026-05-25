@@ -6,6 +6,11 @@
       :src="gradcamSrc"
       style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0.6; pointer-events: none;"
     />
+    <img
+      v-if="overlaySrc"
+      :src="overlaySrc"
+      style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0.6; pointer-events: none;"
+    />
     <q-btn
       v-if="sensorId"
       round
@@ -55,6 +60,10 @@ const props = defineProps({
   },
   sensorId: {
     type: [String, Number],
+    default: null,
+  },
+  overlaySrc: {
+    type: String,
     default: null,
   },
 });

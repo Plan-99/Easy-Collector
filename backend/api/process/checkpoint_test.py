@@ -335,6 +335,28 @@ def checkpoint_test(
             policy.enable_gradcam(True)
             print('[Grad-CAM] Enabled')
 
+        # Inference-time vision map: register persistent attention hooks once
+        # so each inference forward populates a holder. Frontend toggles the
+        # method via task_control['vision_map_method'] = 'attention'|'gradcam'|None.
+        # Only ACT supports this (others have no comparable cross-attention).
+        _vm_holder = None
+        _vm_ordered_sensors: list = []
+        if policy_obj['type'] == 'ACT':
+            try:
+                from .vision_map import make_attention_holder
+                _vm_holder = make_attention_holder(policy)
+                _vm_ordered_sensors = [
+                    key.replace('observation.images.', '')
+                    for key in policy.config.image_features
+                ]
+                print(f'[InferenceVisionMap] hooks registered (sensors={_vm_ordered_sensors})')
+            except Exception as e:
+                print(f'[InferenceVisionMap] hook registration failed: {e}')
+                _vm_holder = None
+        # Per-sensor (H, W) of the latest raw camera frame — populated each
+        # step. Used to upscale the heatmap PNG to match the live WebRTC feed.
+        _vm_orig_sizes: dict = {}
+
         # 환경 및 RL 에이전트 초기화
         state_dim = sum(agent.joint_len for agent in agents)
         tutorial = any((s.get('settings') or {}).get('is_tutorial') for s in (sensors or []))
@@ -824,6 +846,13 @@ def checkpoint_test(
                             'cropped_area': task['sensor_cropped_area'][str(sensor_id)],
                             'rotate': task['sensor_rotate'][str(sensor_id)]
                         })
+                        # Capture the post-process frame size — this is what the
+                        # WebRTC stream shows in the browser, so the heatmap PNG
+                        # must match this aspect (not the raw camera).
+                        if hasattr(image, 'shape') and len(image.shape) >= 2:
+                            _vm_orig_sizes[f'sensor_{sensor["id"]}'] = (
+                                int(image.shape[0]), int(image.shape[1])
+                            )
                         # BGR → RGB. ros_image_to_numpy() returns BGR (cv2/OpenCV convention),
                         # but training data on disk is saved as RGB (lerobot_io.py applies
                         # cv2.cvtColor(BGR2RGB) before mp4/png write). process_image() then
@@ -1002,6 +1031,36 @@ def checkpoint_test(
                         else:
                             ood_scores['state'] = raw_dist
                     socketio_instance.emit('ood_score', ood_scores)
+
+            # === Inference-time Vision Map (frontend toggle via task_control) ===
+            # Uses the same forward pass for 'attention' (persistent hooks) —
+            # essentially free. 'gradcam' needs a separate backward → expensive.
+            _vm_method = task_control.get('vision_map_method')
+            if _vm_method and _vm_holder is not None and 'policy_input_t' in dir():
+                try:
+                    if _vm_method == 'attention':
+                        from .vision_map import render_attention_heatmaps_from_holder
+                        _vm_heatmaps = render_attention_heatmaps_from_holder(
+                            _vm_holder, policy, _vm_ordered_sensors, _vm_orig_sizes,
+                        )
+                    elif _vm_method == 'gradcam':
+                        from .vision_map import compute_vision_map_from_preprocessed_batch
+                        _vm_heatmaps = compute_vision_map_from_preprocessed_batch(
+                            policy=policy, batch=policy_input_t,
+                            ordered_sensors=_vm_ordered_sensors,
+                            target_hw_per_sensor=_vm_orig_sizes,
+                            method='gradcam',
+                        )
+                    else:
+                        _vm_heatmaps = {}
+                    if _vm_heatmaps:
+                        socketio_instance.emit('inference_vision_map', {
+                            'step': step_num,
+                            'method': _vm_method,
+                            'heatmaps': _vm_heatmaps,
+                        })
+                except Exception as e:
+                    print(f'[InferenceVisionMap] step={step_num} method={_vm_method} error: {e}')
 
             # === Grad-CAM (10스텝마다) ===
             if gradcam_enabled and step_num % 10 == 0 and 'policy_input_t' in dir():

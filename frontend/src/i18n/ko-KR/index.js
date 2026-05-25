@@ -829,6 +829,16 @@ export default {
   datasetCurrentFrame: '현재 프레임',
   datasetNoVideo: '재생 가능한 영상이 없습니다.',
 
+  // ───── Vision Map (EpisodeViewer overlay) ─────
+  visionMap: 'Vision Map',
+  visionMapSettings: 'Vision Map 설정',
+  visionMapMethod: '방식',
+  visionMapNoCheckpoints: '이 워크스페이스에 학습 완료된 ACT 체크포인트가 없습니다',
+  visionMapPreparing: '비전 맵 준비 중...',
+  visionMapOff: '끔',
+  visionMapAttention: 'Attention',
+  visionMapGradcam: 'Grad-CAM',
+
   // Trim
   datasetTrimRangeLabel: '자를 구간',
   datasetTrimApply: 'Trim 적용',

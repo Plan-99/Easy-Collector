@@ -8,6 +8,7 @@ from ..process.checkpoint_test import checkpoint_test
 from ..process.failure_detection import failure_detection
 from ..process.generate_ood_features import generate_ood_features
 from ..process.export_checkpoint import bundle_checkpoint_zip
+from ..process.vision_map import compute_vision_map, compute_vision_map_episode_stream
 from ...configs.global_configs import resolve_checkpoint_dir
 
 
@@ -204,6 +205,122 @@ def generate_ood(id):
         name='generate_ood_features',
     )
     return {'status': 'success', 'message': 'OOD feature generation started'}, 200
+
+
+@checkpoint_bp.route('/checkpoint/<id>/:vision_map', methods=['POST'])
+def vision_map(id):
+    """Compute a per-camera saliency heatmap for a single dataset frame.
+
+    Body: { dataset_id, episode_idx, frame_idx, method ('attention'|'gradcam') }
+    Returns: { heatmaps: { sensor_name: 'data:image/png;base64,...' } }
+
+    Used by the WorkspacePage Vision Map overlay — frontend fetches one heatmap
+    per visible frame (cached on the policy side so the model is loaded once).
+    """
+    checkpoint = CheckpointModel.find(id)
+    if checkpoint is None:
+        return {'status': 'error', 'message': 'Checkpoint not found'}, 404
+    if checkpoint.policy is None:
+        return {'status': 'error', 'message': 'Checkpoint has no associated policy'}, 400
+
+    data = request.json or {}
+    try:
+        dataset_id = str(data['dataset_id'])
+        episode_idx = int(data['episode_idx'])
+        frame_idx = int(data['frame_idx'])
+    except (KeyError, TypeError, ValueError) as e:
+        return {'status': 'error', 'message': f'Invalid request: {e}'}, 400
+    method = data.get('method', 'attention')
+
+    try:
+        heatmaps = compute_vision_map(
+            checkpoint=checkpoint.to_dict(),
+            policy_obj=checkpoint.policy.to_dict(),
+            dataset_id=dataset_id,
+            episode_idx=episode_idx,
+            frame_idx=frame_idx,
+            method=method,
+        )
+    except FileNotFoundError as e:
+        return {'status': 'error', 'message': str(e)}, 404
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return {'status': 'error', 'message': f'Vision map failed: {e}'}, 500
+
+    return {'status': 'success', 'heatmaps': heatmaps}, 200
+
+
+@checkpoint_bp.route('/checkpoint/<id>/:vision_map_episode_start', methods=['POST'])
+def vision_map_episode_start(id):
+    """Kick off precompute of vision-map heatmaps for an entire episode.
+
+    Body: { dataset_id, episode_idx, method, session_id? }
+    Returns: { session_id }
+
+    Frontend listens for vision_map_episode_* socket events and caches the
+    per-frame heatmaps to overlay during playback. A new call cancels any
+    in-flight precompute (single global slot — only one episode at a time).
+    """
+    checkpoint = CheckpointModel.find(id)
+    if checkpoint is None:
+        return {'status': 'error', 'message': 'Checkpoint not found'}, 404
+    if checkpoint.policy is None:
+        return {'status': 'error', 'message': 'Checkpoint has no associated policy'}, 400
+
+    data = request.json or {}
+    try:
+        dataset_id = str(data['dataset_id'])
+        episode_idx = int(data['episode_idx'])
+    except (KeyError, TypeError, ValueError) as e:
+        return {'status': 'error', 'message': f'Invalid request: {e}'}, 400
+    method = data.get('method', 'attention')
+    # Frontend provides a fresh session_id per request so it can ignore
+    # straggler events from a prior request that was cancelled.
+    session_id = str(data.get('session_id') or f'{id}-{dataset_id}-{episode_idx}-{method}')
+
+    # Cancel any prior episode computation before starting a new one. wait so
+    # the prior worker has a chance to release its GPU/policy handles.
+    current_app.pm.stop_function('vision_map_episode', wait_timeout=2.0)
+
+    current_app.pm.start_function(
+        name='vision_map_episode',
+        func=compute_vision_map_episode_stream,
+        checkpoint=checkpoint.to_dict(),
+        policy_obj=checkpoint.policy.to_dict(),
+        dataset_id=dataset_id,
+        episode_idx=episode_idx,
+        method=method,
+        socketio_instance=current_app.pm.socketio,
+        session_id=session_id,
+    )
+    return {'status': 'success', 'session_id': session_id}, 200
+
+
+@checkpoint_bp.route('/checkpoint/<id>/:vision_map_episode_stop', methods=['POST'])
+def vision_map_episode_stop(id):
+    """Cancel in-flight episode precompute. Idempotent."""
+    current_app.pm.stop_function('vision_map_episode')
+    return {'status': 'success'}, 200
+
+
+@checkpoint_bp.route('/checkpoint/<id>/:set_inference_vision_map', methods=['POST'])
+def set_inference_vision_map(id):
+    """Live-toggle the vision-map method on a running inference (checkpoint_test).
+
+    Body: { method: 'attention' | 'gradcam' | null }
+    The inference loop reads ``task_control['vision_map_method']`` each step and
+    emits an ``inference_vision_map`` socket event when the method is set.
+    """
+    task = current_app.pm._get('checkpoint_test')
+    if task is None:
+        return {'status': 'error', 'message': 'No inference running'}, 400
+
+    data = request.json or {}
+    method = data.get('method')
+    if method not in ('attention', 'gradcam', None):
+        return {'status': 'error', 'message': f'Invalid method: {method}'}, 400
+    task.control['vision_map_method'] = method
+    return {'status': 'success', 'method': method}, 200
 
 
 @checkpoint_bp.route('/checkpoint/<id>', methods=['PUT'])

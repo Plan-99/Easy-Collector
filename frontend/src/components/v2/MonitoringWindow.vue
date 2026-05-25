@@ -19,11 +19,12 @@
                     :resize="viewportImgSize(vp.workspace, vp.sensor.id)"
                     :cropped_area="viewportCropArea(vp.workspace, vp.sensor.id)"
                     :rotate="viewportRotate(vp.workspace, vp.sensor.id)"
+                    :overlay-src="status === 'testing' && inferenceVisionMapOn ? inferenceHeatmaps[`sensor_${vp.sensor.id}`] : null"
                 ></web-rtc-video>
                 <div class="full-height border-white bg-dark border-rounded flex flex-center" v-else>
                     <q-btn round flat icon="play_arrow" text-color="white" size="xl" @click="vp.sensor.handler.startSensor(vp.sensor)"></q-btn>
                 </div>
-                <q-chip color="blue-10" text-color="white" class="absolute-top-left" style="top: 20px; left: 15px">
+                <q-chip color="blue-10" text-color="white" class="absolute-top-left" style="top: 20px; left: 15px; z-index: 2">
                     {{ vp.sensor.name }} {{ $t('sensorSuffix') }}<span v-if="vp.workspaceName"> · {{ vp.workspaceName }}</span>
                 </q-chip>
             </div>
@@ -224,6 +225,41 @@
                     >
                         {{ $t('oodLabel') }}: {{ oodScoreDisplay }}
                     </q-badge>
+                    <q-btn-dropdown
+                        v-if="supportsInferenceVisionMap"
+                        :label="$t('visionMap')"
+                        :icon="inferenceVisionMapOn ? 'visibility' : 'visibility_off'"
+                        :color="inferenceVisionMapOn ? 'primary' : 'grey-7'"
+                        text-color="white"
+                        class="q-mr-sm"
+                        dense
+                        no-caps
+                    >
+                        <q-list class="bg-dark text-white" style="min-width: 160px;">
+                            <q-item clickable v-close-popup @click="setInferenceVisionMap(null)">
+                                <q-item-section>
+                                    <q-item-label>{{ $t('visionMapOff') }}</q-item-label>
+                                </q-item-section>
+                                <q-item-section side v-if="!inferenceVisionMapOn">
+                                    <q-icon name="check" color="primary" />
+                                </q-item-section>
+                            </q-item>
+                            <q-item
+                                v-for="opt in inferenceVisionMapMethodOptions"
+                                :key="opt.value"
+                                clickable
+                                v-close-popup
+                                @click="setInferenceVisionMap(opt.value)"
+                            >
+                                <q-item-section>
+                                    <q-item-label>{{ opt.label }}</q-item-label>
+                                </q-item-section>
+                                <q-item-section side v-if="inferenceVisionMapOn && inferenceVisionMapMethod === opt.value">
+                                    <q-icon name="check" color="primary" />
+                                </q-item-section>
+                            </q-item>
+                        </q-list>
+                    </q-btn-dropdown>
                     <q-btn
                         color="white"
                         text-color="red"
@@ -468,6 +504,7 @@
                 :total-frames="selectedEpisodeFrames"
                 :disable-seek="isReplaying"
                 :disable-playback="isReplaying"
+                :task-id="workspace?.id"
             ></episode-viewer>
         </div>
         <!-- Inference Settings Dialog -->
@@ -752,6 +789,63 @@ const oodScoreDisplay = computed(() => {
     const imgStr = typeof img === 'number' ? img.toFixed(2) : '-';
     const stateStr = typeof state === 'number' ? state.toFixed(2) : '-';
     return `${oodTotal.value.toFixed(2)} (${imgStr} + ${stateStr})`;
+});
+
+// =========================================================================
+// Inference-time Vision Map — overlays per-sensor heatmaps on the live
+// WebRTC feed during inference. Backend hooks the running policy's forward
+// pass (attention is essentially free; gradcam adds a backward pass per
+// step). User toggles via checkbox + method select in the status bar.
+// =========================================================================
+const inferenceVisionMapOn = ref(false);
+const inferenceVisionMapMethod = ref('attention');
+const inferenceHeatmaps = ref({}); // { 'sensor_<id>': data-url }
+const inferenceVisionMapMethodOptions = computed(() => [
+    { label: t('visionMapAttention'), value: 'attention' },
+    { label: t('visionMapGradcam'), value: 'gradcam' },
+]);
+// Only ACT supports the inference-time hooks (no equivalent on Diffusion/PI0).
+const supportsInferenceVisionMap = computed(() =>
+    String(checkpoint.value?.policy?.type || '').toUpperCase() === 'ACT',
+);
+
+function applyInferenceVisionMap(method) {
+    if (!selectedCheckpointId.value) return;
+    api.post(`/checkpoint/${selectedCheckpointId.value}/:set_inference_vision_map`, { method })
+        .catch((err) => console.warn('[InferenceVisionMap] set failed:', err));
+}
+
+function setInferenceVisionMap(method) {
+    if (method === null) {
+        inferenceVisionMapOn.value = false;
+    } else {
+        inferenceVisionMapMethod.value = method;
+        inferenceVisionMapOn.value = true;
+    }
+}
+
+watch([inferenceVisionMapOn, inferenceVisionMapMethod], () => {
+    // Only push to backend when inference is actually running — the status
+    // watcher below re-applies on transition into 'testing'.
+    if (props.status !== 'testing') return;
+    if (inferenceVisionMapOn.value) {
+        applyInferenceVisionMap(inferenceVisionMapMethod.value);
+    } else {
+        applyInferenceVisionMap(null);
+        inferenceHeatmaps.value = {};
+    }
+});
+
+watch(() => props.status, (newStatus, oldStatus) => {
+    if (newStatus === 'testing' && oldStatus !== 'testing') {
+        // Inference just started — re-push the current toggle so the backend
+        // emits heatmaps from the very first step.
+        if (inferenceVisionMapOn.value && supportsInferenceVisionMap.value) {
+            applyInferenceVisionMap(inferenceVisionMapMethod.value);
+        }
+    } else if (oldStatus === 'testing' && newStatus !== 'testing') {
+        inferenceHeatmaps.value = {};
+    }
 });
 
 function startDataCollection() {
@@ -1237,6 +1331,7 @@ onMounted(() => {
             succeedScore.value = null;
             oodScore.value = null;
             inferenceProgress.value = { progress: 0, step: 0, episodeLen: 0 };
+            inferenceHeatmaps.value = {};
             Notify.create({
                 color: 'positive',
                 message: t('inferenceStopped')
@@ -1298,6 +1393,17 @@ onMounted(() => {
     socket.on('replay_progress', (data) => {
         replayProgress.value = data.progress;
     });
+
+    socket.on('inference_vision_map', (data) => {
+        // Backend emits {step, method, heatmaps:{sensor_X: data-url}} per step
+        // when task_control['vision_map_method'] is set. Only render if the
+        // user still has the toggle on (avoids stale frame appearing after
+        // toggle-off but before the backend sees the null).
+        if (!inferenceVisionMapOn.value) return;
+        if (data && data.heatmaps) {
+            inferenceHeatmaps.value = data.heatmaps;
+        }
+    });
 });
 
 onUnmounted(() => {
@@ -1309,6 +1415,7 @@ onUnmounted(() => {
     socket.off('episode_saving');
     socket.off('episode_saved');
     socket.off('episode_thrown');
+    socket.off('inference_vision_map');
     removeSucceedKeyListener();
 });
 </script>
