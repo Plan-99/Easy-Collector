@@ -100,6 +100,12 @@ class SimpleAgent:
             ns = f"/ec_robot_{self.id}"
             self._interp_pub = node.create_publisher(_JointStateMsg, f"{ns}/ec_joint_cmd", 10)
             self._direct_pub = node.create_publisher(_JointStateMsg, f"{ns}/ec_joint_cmd_direct", 10)
+            # Scheduled-waypoint publisher (DexUMI-style absolute-time scheduling).
+            # The interpolation node's queue interpolates by time.time(), so a
+            # late inference chunk doesn't pause the robot.
+            self._waypoint_pub = node.create_publisher(
+                _JointStateMsg, f"{ns}/ec_joint_waypoint", 20
+            )
             self._write_pub = None
         else:
             try:
@@ -112,6 +118,7 @@ class SimpleAgent:
                 )
             self._interp_pub = None
             self._direct_pub = None
+            self._waypoint_pub = None
             self._write_pub = node.create_publisher(self._write_cls, self.write_topic, 10)
 
         # ── IK solver (optional) ─────────────────────────────────────────
@@ -256,6 +263,28 @@ class SimpleAgent:
         if msg is None:
             return
         self._write_pub.publish(msg)
+
+    def move_to_joints_at(self, target_qpos, t_absolute: float) -> None:
+        """Schedule a joint waypoint at absolute wall-clock time ``t_absolute``
+        (``time.time()`` epoch seconds).
+
+        The interpolation node maintains a queue and interpolates at 200Hz
+        based on current time — so the robot keeps moving smoothly even if
+        the next inference step lands late. Falls back to ``move_joint_step``
+        when interpolation is off (no node to feed the queue)."""
+        target = list(map(float, list(target_qpos)[: self.joint_len]))
+        if not self.interpolation or self._waypoint_pub is None:
+            self.move_joint_step(target)
+            return
+        msg = _JointStateMsg()
+        t_sec = int(t_absolute)
+        t_nsec = int((t_absolute - t_sec) * 1e9)
+        msg.header.stamp.sec = t_sec
+        msg.header.stamp.nanosec = max(0, min(t_nsec, 999_999_999))
+        if self.joint_names:
+            msg.name = list(self.joint_names)
+        msg.position = target
+        self._waypoint_pub.publish(msg)
 
     # ────────────────────────────────────────────────────────────────────
     # Duration-based interpolated motion (move_to / cancel / is_moving)

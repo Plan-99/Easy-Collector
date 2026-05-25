@@ -1154,6 +1154,104 @@ def trim_episode(dataset_dir, episode_index, start, end):
     _write_json(info, info_path)
 
 
+def downsample_episode_range(dataset_dir, episode_index, start, end, factor):
+    """Downsample frames inside [start, end) by ``factor`` (keep every Nth).
+    Frames outside the range are preserved. Re-encodes parquet + videos and
+    updates per-episode/dataset metadata, mirroring ``trim_episode``.
+
+    factor must be an integer >= 2. start/end are inclusive/exclusive.
+    """
+    factor = int(factor)
+    if factor < 2:
+        raise ValueError(f"factor must be >= 2 (got {factor})")
+
+    info_path = os.path.join(dataset_dir, INFO_PATH)
+    info = _read_json(info_path)
+    chunk = episode_index // info["chunks_size"]
+    parquet_path = _parquet_path(dataset_dir, chunk, episode_index)
+    if not os.path.exists(parquet_path):
+        raise FileNotFoundError(f"Episode parquet not found: {parquet_path}")
+
+    table = pq.read_table(parquet_path)
+    df = table.to_pandas()
+    n = len(df)
+    start = max(0, int(start))
+    end = min(n, int(end))
+    if start >= end:
+        raise ValueError(f"Invalid range: start={start}, end={end}, length={n}")
+
+    # Build keep-list: untouched before/after the range, every Nth inside.
+    keep = list(range(0, start)) + list(range(start, end, factor)) + list(range(end, n))
+    new_n = len(keep)
+    if new_n == n:
+        # factor=1 would no-op; we already rejected that.
+        raise ValueError("Downsample would not change frame count")
+
+    df = df.iloc[keep].reset_index(drop=True)
+    df["frame_index"] = np.arange(new_n, dtype=np.int64)
+    fps = info.get("fps", 20)
+    df["timestamp"] = (np.arange(new_n) / float(fps)).astype(np.float32)
+    pq.write_table(pa.Table.from_pandas(df), parquet_path)
+
+    # Re-encode videos using the same kept frame indices so video stays in sync
+    # with the parquet timeline (will visibly play faster in the speed-up range).
+    features = info.get("features", {})
+    video_keys = [k for k, f in features.items() if f.get("dtype") == "video"]
+    for feature_key in video_keys:
+        video_path = _video_path(dataset_dir, feature_key, chunk, episode_index)
+        if not os.path.exists(video_path):
+            continue
+        frames = _decode_video_frames(video_path)
+        sampled = [frames[i] for i in keep if i < len(frames)]
+        if not sampled:
+            continue
+        tmp_dir = os.path.join(dataset_dir, "_tmp_downsample", feature_key, f"episode_{episode_index:06d}")
+        if os.path.exists(tmp_dir):
+            shutil.rmtree(tmp_dir)
+        os.makedirs(tmp_dir, exist_ok=True)
+        for i, fr in enumerate(sampled):
+            Image.fromarray(fr).save(os.path.join(tmp_dir, f"frame-{i:06d}.png"))
+        from lerobot.datasets.video_utils import encode_video_frames
+        os.remove(video_path)
+        encode_video_frames(
+            imgs_dir=tmp_dir,
+            video_path=video_path,
+            fps=fps,
+            vcodec="h264",
+            pix_fmt="yuv420p",
+            g=2,
+            crf=30,
+            overwrite=True,
+        )
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+    tmp_root = os.path.join(dataset_dir, "_tmp_downsample")
+    if os.path.isdir(tmp_root):
+        shutil.rmtree(tmp_root, ignore_errors=True)
+
+    # Update episodes.jsonl length
+    episodes = _read_jsonl(os.path.join(dataset_dir, EPISODES_PATH))
+    old_length = 0
+    for ep in episodes:
+        if ep.get("episode_index") == episode_index:
+            old_length = ep.get("length", 0)
+            ep["length"] = new_n
+            break
+    _write_jsonl(episodes, os.path.join(dataset_dir, EPISODES_PATH))
+
+    # Recompute episode stats
+    stats_entries = _read_jsonl(os.path.join(dataset_dir, EPISODES_STATS_PATH))
+    new_stats = _compute_episode_stats(df, features, new_n)
+    for entry in stats_entries:
+        if entry.get("episode_index") == episode_index:
+            entry["stats"] = new_stats
+            break
+    _write_jsonl(stats_entries, os.path.join(dataset_dir, EPISODES_STATS_PATH))
+
+    # Update info totals
+    info["total_frames"] = info.get("total_frames", 0) - (old_length - new_n)
+    _write_json(info, info_path)
+
+
 def _compute_episode_stats(df, features, num_frames):
     """Recompute per-episode stats over the parquet df."""
     stats = {}

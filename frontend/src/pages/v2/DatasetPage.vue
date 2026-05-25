@@ -280,9 +280,11 @@
                     v-else
                     :dataset-id="currentDatasetIdForViewer"
                     :episode="currentEpisode"
+                    :task-id="selectedWorkspaceId"
                     :key="`${currentDatasetIdForViewer}_${currentEpisode.name}`"
                     @close="currentEpisode = null"
                     @trim="onTrimEpisode"
+                    @speedup="onSpeedupEpisode"
                     @save-language="onSaveLanguage"
                 />
             </div>
@@ -573,7 +575,7 @@ function confirmBatchDelete() {
     confirmDeleteTargets(selectedTransfers());
 }
 
-// ─── Trim ──────────────────────────────────────────────────────────────────
+// ─── Trim / Speedup ────────────────────────────────────────────────────────
 async function onTrimEpisode({ start, end }) {
     if (!currentEpisode.value || !currentDatasetIdForViewer.value) return;
     Loading.show({ message: t('datasetTrimInProgress') });
@@ -590,6 +592,27 @@ async function onTrimEpisode({ start, end }) {
     } catch (err) {
         console.error(err);
         Notify.create({ color: 'negative', message: t('datasetTrimFailed') });
+    } finally {
+        Loading.hide();
+    }
+}
+
+async function onSpeedupEpisode({ start, end, factor }) {
+    if (!currentEpisode.value || !currentDatasetIdForViewer.value) return;
+    Loading.show({ message: t('datasetSpeedupInProgress') });
+    try {
+        await api.post(
+            `/dataset/${currentDatasetIdForViewer.value}/${currentEpisode.value.name}/:downsample_range`,
+            { start, end, factor },
+        );
+        await listDatasets();
+        const ds = datasets.value.find((d) => d.id === currentDatasetIdForViewer.value);
+        const ep = ds?.episodes.find((e) => e.name === currentEpisode.value.name);
+        currentEpisode.value = ep || null;
+        Notify.create({ color: 'positive', message: t('datasetSpeedupDone') });
+    } catch (err) {
+        console.error(err);
+        Notify.create({ color: 'negative', message: t('datasetSpeedupFailed') });
     } finally {
         Loading.hide();
     }

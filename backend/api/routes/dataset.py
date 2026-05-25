@@ -16,7 +16,7 @@ from ..process.downsample_dataset import downsample_dataset
 from ...utils.lerobot_io import (
     get_episodes_as_file_list, get_dataset_metadata, get_dataset_info,
     delete_episode as lerobot_delete_episode, list_episodes,
-    set_episode_language, trim_episode, copy_episode_to,
+    set_episode_language, trim_episode, downsample_episode_range, copy_episode_to,
     PARQUET_PATH_TEMPLATE, INFO_PATH, TASKS_PATH, EPISODES_PATH,
     _read_json, _read_jsonl,
 )
@@ -653,6 +653,28 @@ def trim_episode_route(id, episode_ref):
     except Exception as e:
         return {'status': 'error', 'message': str(e)}, 500
     return {'status': 'success', 'message': 'Episode trimmed'}, 200
+
+
+@dataset_bp.route('/dataset/<id>/<episode_ref>/:downsample_range', methods=['POST'])
+def downsample_episode_range_route(id, episode_ref):
+    """Downsample frames inside [start, end) by ``factor`` (keep every Nth).
+    Outside the range stays untouched. Used by the dataset page's 배속 button."""
+    folder_path = os.path.join(DATASET_DIR, id)
+    if not os.path.isdir(folder_path):
+        return {'status': 'error', 'message': 'Dataset not found'}, 404
+    try:
+        episode_index = _resolve_episode_index(episode_ref)
+    except Exception:
+        return {'status': 'error', 'message': 'Invalid episode'}, 400
+    data = request.json or {}
+    start = int(data.get('start', 0))
+    end = int(data.get('end', -1))
+    factor = int(data.get('factor', 2))
+    try:
+        downsample_episode_range(folder_path, episode_index, start, end, factor)
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}, 500
+    return {'status': 'success', 'message': 'Range downsampled'}, 200
 
 
 @dataset_bp.route('/dataset/<id>/:batch_delete', methods=['POST'])

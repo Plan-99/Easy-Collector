@@ -148,14 +148,29 @@ export default {
   workspaceAddDatasetFolder: 'Add Dataset Folder',
   workspaceImportDataset: 'Import Dataset',
   workspaceExportDataset: 'Export Dataset',
-  datasetImportSuccess: 'Dataset imported.',
-  datasetImportFailed: 'Failed to import dataset.',
-  datasetExportSuccess: 'Dataset exported.',
-  datasetExportFailed: 'Failed to export dataset.',
   workspaceDatasetEdit: 'Edit Dataset',
   workspaceDatasetAugment: 'Augment Dataset',
   workspaceDatasetMerge: 'Merge Dataset',
   workspaceDatasetDelete: 'Delete Dataset',
+  serverBrowserImportTitle: 'Import Dataset - Pick Folder',
+  serverBrowserExportTitle: 'Export Dataset - Pick Destination',
+  serverBrowserUp: 'Parent folder',
+  serverBrowserRefresh: 'Refresh',
+  serverBrowserGo: 'Go',
+  serverBrowserEmpty: 'Empty',
+  serverBrowserError: 'Could not open folder.',
+  serverBrowserLeRobotHint: 'LeRobot dataset',
+  serverBrowserImportHelp: 'Click once on the dataset folder to select it, then press confirm. Double-click to enter a folder.',
+  serverBrowserExportHelp: 'Navigate to the destination folder, then press confirm.',
+  serverBrowserPickDir: 'Select a dataset folder.',
+  serverBrowserImportSelect: 'Import this folder',
+  serverBrowserExportHere: 'Export here',
+  serverBrowserNewFolder: 'New folder',
+  serverBrowserNewFolderPrompt: 'New folder name',
+  datasetImportSuccess: 'Dataset imported.',
+  datasetImportFailed: 'Failed to import dataset.',
+  datasetExportSuccess: 'Dataset exported to: {path}',
+  datasetExportFailed: 'Failed to export dataset.',
   workspaceCheckpointShow: 'Show Details',
   workspaceCheckpointEdit: 'Edit Checkpoint',
   workspaceCheckpointOod: 'Add OOD Features',
@@ -657,9 +672,9 @@ export default {
   tutorialTrainStep1:
     'Pick which datasets to train on. Multiple datasets can be selected at once.',
   tutorialTrainStep2:
-    'Step to choose the AI type. Create a new policy, or load a previous checkpoint to continue training from there.',
+    'Step to choose the AI type. Create a new policy, or load a previous checkpoint to continue training from there. Click the yellow ? next to any setting for plain-English and technical explanations.',
   tutorialTrainStep3:
-    'Enter the training computer (server) address, verify connection, and start. Once done, use it from the workspace inference tab.',
+    'Enter the training computer (server) address, verify connection, and start. Once done, use it from the workspace inference tab. The yellow ? next to each setting opens its detailed help.',
 
   tutorialPlannerIntro:
     'Build a plan that chains tasks together and runs them in one go. Pick a plan above or create a new one, then stack blocks to automate the flow.',
@@ -668,9 +683,28 @@ export default {
   tutorialPlannerBlocks:
     'Blocks run from top to bottom. Drag to reorder, right-click to edit/duplicate/delete.',
   tutorialPlannerRun:
-    'Press Run All to execute every block in order. Checkpoint blocks are preloaded on start so playback runs without interruption.',
+    'Press Run All to execute every block in order. Checkpoint blocks are preloaded on start so playback runs without interruption. The Export button next to it packs this plan into a standalone zip you can run without EasyTrainer.',
   tutorialPlannerBlockForm:
-    'Three block types are available: joint position (move to a pose), checkpoint (run a trained AI), and time delay.',
+    'Five block types are available: joint position (move to a pose), checkpoint (run a trained AI), time delay, Query Pose (get a target pose from an external node), and Sync (make groups meet at the same point).',
+  tutorialPlannerBlockJointPosition:
+    'Sends the robot to a specific pose. Pick a workspace, then either jog the robot to a pose using the pendant (−/+ buttons) or hit "Apply Current Pose" to capture its current position. Duration (seconds) is how long the move should take.',
+  tutorialPlannerBlockCheckpoint:
+    "Runs a trained AI (checkpoint) on the real robot. Pick a workspace and checkpoint, then set a duration (how long to run) or enable 'until done'. The 'move to home pose' toggle moves to a safe pose before starting.",
+  tutorialPlannerBlockTimesleep:
+    'Pauses for a fixed amount of time without doing anything else. Useful when you need to let the environment settle before the next block.',
+  tutorialPlannerBlockSync:
+    'When multiple groups run in parallel, Sync blocks sharing the same sync ID wait for each other before continuing. Handy when left/right arms move independently but need to meet at the same point before the next move.',
+  tutorialPlannerBlockQueryPose:
+    'Asks an external ROS node (e.g. a vision model) "where should I go next?", then moves the robot to the returned pose. Use this when a pose comes from your own perception/planning code rather than a trained AI. Both joint position and EE position are supported.',
+
+  tutorialDatasetIntro:
+    "Browse and organize the demonstrations (episodes) collected per workspace. Pick a workspace above first. Training quality depends most on the volume and diversity of data here.",
+  tutorialDatasetList:
+    "The left panel is the dataset (folder) list. Use Add to create a folder, and the 3-dot menu on each dataset to edit / augment / downsample / merge / delete. Selecting multiple episodes reveals the bulk move/copy/delete bar at the top.",
+  tutorialDatasetViewer:
+    'The right panel previews the selected episode. Trim a segment in the video timeline and write a natural-language label (e.g. "pick the red cup and move it"). Some policies (Pi0 etc.) use this label as input.',
+  tutorialDatasetAugment:
+    "Augmentation reshapes recorded episodes (color, noise, flip, etc.) to expand training variety, which helps the AI generalize to new environments. Open it from the dataset's 3-dot menu → Augment.",
 
   // ───── Pipeline guide ─────
   pipelineGuideTitle: 'Full Usage Guide',
@@ -707,26 +741,33 @@ export default {
   pipelineStep4Why:
     'Even with the same robot, different tasks need different env settings, data, and trained models. A workspace encapsulates "everything needed for this task." Final training quality hinges most on the volume and variety of demonstrations collected here.',
 
-  pipelineStep5Title: '5. Training',
-  pipelineStep5Where: 'The "Train" tab in the left menu',
+  pipelineStep5Title: '5. Curate / Augment Datasets',
+  pipelineStep5Where: 'The "Datasets" tab in the left menu',
   pipelineStep5What:
-    'After picking a workspace, run three steps — (1) select datasets to train on, (2) pick an AI type (ACT, Diffusion, Pi0, etc.) or continue from an existing checkpoint, (3) enter the training server address, verify connection, and start.',
+    'Browse and clean up the demonstrations recorded in step 4. Create new dataset folders, move/copy/delete/trim episodes, and add natural-language labels. Data Augmentation (color, brightness, noise, flip, etc.), downsample, and merge are all available here.',
   pipelineStep5Why:
-    "The AI watches the demonstrations and learns 'how to act in similar situations.' Training fails when data is sparse or pose/lighting is biased to one side. If results disappoint, return to step 4 to gather more or more diverse data.",
+    "Failed demos or one-sided data prevents the AI from learning evenly. Removing bad episodes, mixing diverse recordings into one folder, or generating variants with augmentation makes training far more stable. This step is optional, but it's the first place to come back to when training results disappoint.",
 
-  pipelineStep6Title: '6. Inference (Real Run)',
-  pipelineStep6Where: '"Workspace" tab → pick workspace → "inference" subtab',
+  pipelineStep6Title: '6. Training',
+  pipelineStep6Where: 'The "Train" tab in the left menu',
   pipelineStep6What:
-    'Pick a finished checkpoint and press Start Inference, and the robot acts autonomously as trained. Adjust details like inference frequency (re-inference steps) and the temporal ensemble coefficient here.',
+    'After picking a workspace, run three steps — (1) select datasets to train on, (2) pick an AI type (ACT, Diffusion, Pi0, etc.) or continue from an existing checkpoint, (3) enter the training server address, verify connection, and start. Every setting has a yellow ? button beside it that opens plain-English and technical explanations.',
   pipelineStep6Why:
-    'The final step verifying training worked on the real robot. If behavior is off, return to step 4 to augment data, or to step 5 to retrain with another policy/checkpoint. Iterating this 4 → 5 → 6 cycle is the core of the EasyTrainer workflow.',
+    "The AI watches the demonstrations and learns 'how to act in similar situations.' Training fails when data is sparse or pose/lighting is biased to one side. If results disappoint, return to step 5 to curate/augment data, or to step 4 to collect more.",
 
-  pipelineStep7Title: '7. Planner (Chained Execution)',
-  pipelineStep7Where: 'The "Planner" tab in the left menu',
+  pipelineStep7Title: '7. Inference (Real Run)',
+  pipelineStep7Where: '"Workspace" tab → pick workspace → "inference" subtab',
   pipelineStep7What:
-    'Stack multiple blocks — joint-position moves, trained checkpoints, time delays, and user-confirmation pauses — into a single plan and run them in order with Run All. Multiple workspaces can be combined inside one plan, and checkpoints are preloaded on start so playback runs without interruption.',
+    'Pick a finished checkpoint and press Start Inference, and the robot acts autonomously as trained. Adjust details like inference frequency (re-inference steps) and the temporal ensemble coefficient here.',
   pipelineStep7Why:
-    'A single trained model rarely covers an end-to-end task on its own. Planner is for orchestrating step 6 outputs into a longer routine — e.g. "go home → run pick checkpoint → wait 1s → run place checkpoint → confirm → go home". This is where individual checkpoints become a real working pipeline.',
+    'The final step verifying training worked on the real robot. If behavior is off, return to step 5 to curate/augment data, or to step 6 to retrain with another policy/checkpoint. Iterating this 4 → 5 → 6 → 7 cycle is the core of the EasyTrainer workflow.',
+
+  pipelineStep8Title: '8. Planner (Chained Execution)',
+  pipelineStep8Where: 'The "Planner" tab in the left menu',
+  pipelineStep8What:
+    'Stack multiple blocks — joint-position moves, trained checkpoints, time delays, Query Pose (get a target from an external node), and Sync (cross-group synchronization) — into a single plan and run them in order with Run All. Multiple workspaces can be combined inside one plan, and checkpoints are preloaded on start so playback runs without interruption. Use the Export button to download the finished plan as a standalone zip (checkpoints + runnable code) that runs without EasyTrainer.',
+  pipelineStep8Why:
+    'A single trained model rarely covers an end-to-end task on its own. Planner is for orchestrating step 7 outputs into a longer routine — e.g. "go home → run pick checkpoint → wait 1s → run place checkpoint → confirm → go home". This is where individual checkpoints become a real working pipeline. With Export, the same plan can be run on machines or robots that do not have EasyTrainer installed.',
 
   pipelinePrev: 'Previous',
   pipelineNext: 'Next',
@@ -838,13 +879,17 @@ export default {
   visionMapAttention: 'Attention',
   visionMapGradcam: 'Grad-CAM',
 
-  // Trim
-  datasetTrimRangeLabel: 'Trim range',
-  datasetTrimApply: 'Apply trim',
+  // Trim / Speedup
+  datasetTrimRangeLabel: 'Range (Trim / Speedup)',
+  datasetTrimApply: 'Trim',
   datasetTrimReset: 'Reset range',
   datasetTrimInProgress: 'Trimming episode…',
   datasetTrimDone: 'Episode trimmed.',
   datasetTrimFailed: 'Trim failed.',
+  datasetSpeedupApply: 'Speedup {factor}x',
+  datasetSpeedupInProgress: 'Speeding up episode…',
+  datasetSpeedupDone: 'Episode sped up.',
+  datasetSpeedupFailed: 'Speedup failed.',
 
   // Language prompt
   datasetLanguagePrompt: 'Language prompt',

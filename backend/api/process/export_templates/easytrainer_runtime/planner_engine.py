@@ -24,6 +24,7 @@ group worker polls it and aborts when set.
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 import traceback
@@ -530,9 +531,23 @@ def _checkpoint_loop(inf, env: SimpleEnv, agents: List[SimpleAgent], sensors: Li
                      until_done: bool, done_threshold: float,
                      sub_control: dict, dry_run: bool):
     """Closed-loop inference — mirrors ros_inference.py's main loop. Runs in a
-    worker thread; the outer handler owns the duration / done bookkeeping."""
+    worker thread; the outer handler owns the duration / done bookkeeping.
+
+    Each predicted action is published as a scheduled waypoint at
+    ``loop_start + 1/hz`` (the time it should be reached). The robot's
+    interpolation node holds the queue and outputs at 200Hz against
+    ``time.time()`` — so inference jitter doesn't show up as a velocity
+    discontinuity at the robot."""
     period = 1.0 / max(hz, 0.1)
     step = 0
+    use_scheduled = os.environ.get("EC_SCHEDULED_WAYPOINTS", "").lower() not in ("0", "false", "no")
+    if use_scheduled:
+        print(f"[planner_engine] checkpoint loop: scheduled-waypoint mode "
+              f"(target = loop_start + {period:.3f}s)")
+    else:
+        print("[planner_engine] checkpoint loop: scheduled-waypoint mode "
+              "DISABLED via EC_SCHEDULED_WAYPOINTS=0 — falling back to "
+              "immediate joint commands")
     while not sub_control.get("stop"):
         loop_start = time.time()
 
@@ -564,6 +579,10 @@ def _checkpoint_loop(inf, env: SimpleEnv, agents: List[SimpleAgent], sensors: Li
                 sub_control["done"] = True
                 break
 
+        # Waypoint target time = the moment this step should be reached on
+        # the robot. Loop_start + period keeps the schedule aligned with the
+        # training-time frame interval.
+        t_target = loop_start + period
         start = 0
         for a in agents:
             target = action[start: start + a.joint_len]
@@ -571,6 +590,8 @@ def _checkpoint_loop(inf, env: SimpleEnv, agents: List[SimpleAgent], sensors: Li
             if dry_run:
                 print(f"[planner_engine][dry-run] step {step} {a.name}: "
                       f"{np.round(target, 4).tolist()}")
+            elif use_scheduled and a.interpolation:
+                a.move_to_joints_at(target, t_target)
             else:
                 a.move_joint_step(target)
 

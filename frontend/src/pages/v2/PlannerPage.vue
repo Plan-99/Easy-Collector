@@ -521,6 +521,7 @@
 
                     <!-- Joint Position Fields -->
                     <template v-if="blockForm.type === 'joint_position'">
+                        <TutorialHint class="q-mb-md" :text="$t('tutorialPlannerBlockJointPosition')" />
                         <q-select
                             v-if="formWorkspaceOptions.length > 1"
                             dense outlined dark bg-color="dark"
@@ -615,6 +616,7 @@
 
                     <!-- Checkpoint Fields -->
                     <template v-if="blockForm.type === 'checkpoint'">
+                        <TutorialHint class="q-mb-md" :text="$t('tutorialPlannerBlockCheckpoint')" />
                         <q-select
                             v-if="formWorkspaceOptions.length > 1"
                             dense outlined dark bg-color="dark"
@@ -726,6 +728,7 @@
 
                     <!-- Timesleep Fields -->
                     <template v-if="blockForm.type === 'timesleep'">
+                        <TutorialHint class="q-mb-md" :text="$t('tutorialPlannerBlockTimesleep')" />
                         <q-input
                             dense outlined dark bg-color="dark"
                             v-model.number="blockForm.duration"
@@ -736,6 +739,7 @@
 
                     <!-- Sync Fields -->
                     <template v-if="blockForm.type === 'sync'">
+                        <TutorialHint class="q-mb-md" :text="$t('tutorialPlannerBlockSync')" />
                         <q-input
                             dense outlined dark bg-color="dark"
                             v-model="blockForm.sync_id"
@@ -747,6 +751,7 @@
 
                     <!-- Query Pose Fields -->
                     <template v-if="blockForm.type === 'query_pose'">
+                        <TutorialHint class="q-mb-md" :text="$t('tutorialPlannerBlockQueryPose')" />
                         <q-select
                             v-if="formWorkspaceOptions.length > 1"
                             dense outlined dark bg-color="dark"

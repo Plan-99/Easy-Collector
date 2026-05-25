@@ -22,10 +22,11 @@
                 :path="hdf5Path"
                 :total-frames="totalFrames"
                 :preview-frame="trimPreviewFrame"
+                :task-id="taskId"
             />
         </section>
 
-        <!-- Trim section -->
+        <!-- Range section (Trim + Speedup share the same slider) -->
         <section class="ep-section q-mb-md">
             <div class="ep-section__title">
                 <q-icon name="content_cut" size="16px" color="amber-5" />
@@ -57,7 +58,7 @@
                     drag-range
                 />
             </div>
-            <div class="row q-gutter-sm q-mt-sm q-px-sm">
+            <div class="row items-center q-gutter-sm q-mt-sm q-px-sm">
                 <q-btn
                     color="primary"
                     :label="$t('datasetTrimApply')"
@@ -68,6 +69,37 @@
                     :disable="!canTrim"
                     @click="$emit('trim', { start: trimStart, end: trimEnd })"
                 />
+                <q-btn
+                    color="amber-8"
+                    text-color="white"
+                    :label="$t('datasetSpeedupApply', { factor: speedFactor })"
+                    icon="fast_forward"
+                    size="sm"
+                    unelevated
+                    no-caps
+                    :disable="!canSpeedup"
+                    @click="$emit('speedup', { start: trimStart, end: trimEnd, factor: speedFactor })"
+                />
+                <q-input
+                    v-model.number="speedFactor"
+                    type="number"
+                    :min="2"
+                    :max="20"
+                    :step="1"
+                    dense
+                    dark
+                    outlined
+                    color="amber"
+                    bg-color="dark"
+                    input-class="text-white text-center"
+                    style="width: 64px;"
+                    hide-bottom-space
+                >
+                    <template v-slot:append>
+                        <span class="text-caption text-grey-5">x</span>
+                    </template>
+                </q-input>
+                <q-space />
                 <q-btn
                     flat
                     color="grey-4"
@@ -246,12 +278,15 @@ ChartJS.register(Title, Tooltip, Legend, PointElement, LineElement, CategoryScal
 const props = defineProps({
     datasetId: { type: [Number, String], default: null },
     episode: { type: Object, default: null },
+    // workspace/task id — forwarded to EpisodeViewer for Vision Map checkpoint filtering.
+    taskId: { type: [Number, String], default: null },
 });
 
-defineEmits(['close', 'trim', 'saveLanguage']);
+defineEmits(['close', 'trim', 'speedup', 'saveLanguage']);
 
 const data = ref(null);
 const trimRange = ref({ min: 0, max: 0 });
+const speedFactor = ref(2);
 const selectedChannelKey = ref('observation.state');
 const visibleSeries = ref([]);
 const languageDraft = ref('');
@@ -281,6 +316,12 @@ const trimEnd = computed(() => trimRange.value.max);
 const canTrim = computed(
     () => totalFrames.value > 0 && (trimStart.value > 0 || trimEnd.value < totalFrames.value - 1),
 );
+// Speedup needs at least `factor` frames in the range to actually drop any —
+// e.g. factor 2 needs >=2 frames, factor 3 needs >=3, etc.
+const canSpeedup = computed(() => {
+    const f = Number(speedFactor.value) || 0;
+    return totalFrames.value > 0 && f >= 2 && trimEnd.value - trimStart.value >= f;
+});
 
 const colorPalette = [
     '#42A5F5', '#EF5350', '#66BB6A', '#FFA726', '#AB47BC',

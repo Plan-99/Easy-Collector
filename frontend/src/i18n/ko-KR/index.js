@@ -148,14 +148,29 @@ export default {
   workspaceAddDatasetFolder: '데이터셋 폴더 추가',
   workspaceImportDataset: '데이터셋 불러오기',
   workspaceExportDataset: '데이터셋 내보내기',
-  datasetImportSuccess: '데이터셋을 가져왔습니다.',
-  datasetImportFailed: '데이터셋 가져오기에 실패했습니다.',
-  datasetExportSuccess: '데이터셋을 내보냈습니다.',
-  datasetExportFailed: '데이터셋 내보내기에 실패했습니다.',
   workspaceDatasetEdit: '데이터셋 편집',
   workspaceDatasetAugment: '데이터셋 증강',
   workspaceDatasetMerge: '데이터셋 병합',
   workspaceDatasetDelete: '데이터셋 삭제',
+  serverBrowserImportTitle: '데이터셋 불러오기 - 폴더 선택',
+  serverBrowserExportTitle: '데이터셋 내보내기 - 저장 위치 선택',
+  serverBrowserUp: '상위 폴더',
+  serverBrowserRefresh: '새로 고침',
+  serverBrowserGo: '이동',
+  serverBrowserEmpty: '비어 있음',
+  serverBrowserError: '폴더를 열 수 없습니다.',
+  serverBrowserLeRobotHint: 'LeRobot 데이터셋',
+  serverBrowserImportHelp: '불러올 데이터셋 폴더를 한 번 클릭해서 선택한 뒤 확인을 누르세요. 폴더는 더블 클릭으로 들어갑니다.',
+  serverBrowserExportHelp: '저장할 폴더로 이동한 뒤 확인을 누르세요.',
+  serverBrowserPickDir: '데이터셋 폴더를 선택하세요.',
+  serverBrowserImportSelect: '이 폴더 가져오기',
+  serverBrowserExportHere: '여기로 내보내기',
+  serverBrowserNewFolder: '새 폴더',
+  serverBrowserNewFolderPrompt: '새 폴더 이름',
+  datasetImportSuccess: '데이터셋을 가져왔습니다.',
+  datasetImportFailed: '데이터셋 가져오기에 실패했습니다.',
+  datasetExportSuccess: '데이터셋을 내보냈습니다: {path}',
+  datasetExportFailed: '데이터셋 내보내기에 실패했습니다.',
   workspaceCheckpointShow: '상세 보기',
   workspaceCheckpointEdit: '체크포인트 편집',
   workspaceCheckpointOod: 'OOD 특성 추가',
@@ -658,9 +673,9 @@ export default {
   tutorialTrainStep1:
     '어떤 데이터로 가르칠지 고르세요. 여러 개를 동시에 고를 수 있어요.',
   tutorialTrainStep2:
-    'AI 종류를 정하는 단계예요. 새로 만들거나, 이전에 학습한 결과를 가져와 이어서 학습할 수도 있어요.',
+    'AI 종류를 정하는 단계예요. 새로 만들거나, 이전에 학습한 결과를 가져와 이어서 학습할 수도 있어요. 각 항목 옆 노란 ? 를 누르면 그 항목이 무엇인지 쉬운 설명과 자세한 설명이 떠요.',
   tutorialTrainStep3:
-    '학습할 컴퓨터(서버) 주소를 넣고 연결을 확인한 뒤 시작하세요. 학습이 끝나면 워크스페이스 inference 탭에서 바로 써볼 수 있어요.',
+    '학습할 컴퓨터(서버) 주소를 넣고 연결을 확인한 뒤 시작하세요. 학습이 끝나면 워크스페이스 inference 탭에서 바로 써볼 수 있어요. 여기 항목들도 옆의 ? 로 자세한 설명을 볼 수 있어요.',
 
   tutorialPlannerIntro:
     '여러 작업을 순서대로 묶어서 한 번에 실행하는 플랜을 만드는 곳이에요. 위에서 플랜을 고르거나 새로 만들고, 블록을 쌓아서 자동으로 돌려보세요.',
@@ -669,9 +684,28 @@ export default {
   tutorialPlannerBlocks:
     '블록을 위에서부터 차례로 실행해요. 드래그로 순서를 바꾸고, 우클릭으로 수정/복사/삭제할 수 있어요.',
   tutorialPlannerRun:
-    'Run All을 누르면 모든 블록이 차례대로 실행돼요. 체크포인트 블록은 시작할 때 미리 로드되어 중간에 끊김 없이 이어집니다.',
+    'Run All을 누르면 모든 블록이 차례대로 실행돼요. 체크포인트 블록은 시작할 때 미리 로드되어 중간에 끊김 없이 이어집니다. 옆에 있는 "내보내기" 버튼은 이 플랜을 EasyTrainer 없이도 돌릴 수 있는 독립 실행 코드 zip으로 만들어줘요.',
   tutorialPlannerBlockForm:
-    '블록은 3가지예요. 관절 위치(원하는 자세로 이동), 체크포인트(학습된 AI 실행), 시간 대기.',
+    '블록은 5가지예요. 관절 위치(원하는 자세로 이동), 체크포인트(학습된 AI 실행), 시간 대기, Query Pose(외부 노드에서 목표 자세를 받아 이동), Sync(여러 그룹이 같은 지점에서 만나도록 대기).',
+  tutorialPlannerBlockJointPosition:
+    '로봇을 특정 자세로 보내는 블록이에요. 워크스페이스를 고른 뒤, 펜던트(−/+ 버튼)로 직접 자세를 만들거나 "현재 위치 적용" 버튼으로 지금 자세를 그대로 저장하세요. duration(초)은 해당 자세까지 이동하는 데 걸리는 시간이에요.',
+  tutorialPlannerBlockCheckpoint:
+    '학습한 AI(체크포인트)를 실제로 돌리는 블록이에요. 워크스페이스 + 체크포인트를 고르고, duration(몇 초 돌릴지) 또는 "성공할 때까지" 옵션을 켜세요. "홈으로 이동" 토글을 켜면 시작 전 안전한 자세로 먼저 이동해요.',
+  tutorialPlannerBlockTimesleep:
+    '아무것도 안 하고 그냥 정해진 시간만큼 멈춰 있는 블록이에요. 다음 블록을 시작하기 전 환경이 안정될 시간이 필요할 때 써요.',
+  tutorialPlannerBlockSync:
+    '여러 그룹이 동시에 돌고 있을 때, 같은 sync ID를 가진 Sync 블록끼리 만나야 다음으로 넘어가게 해줘요. 좌우 팔이 따로 움직이다가 같은 시점에 맞춰 다음 동작을 시작해야 할 때 유용합니다.',
+  tutorialPlannerBlockQueryPose:
+    '외부에서 돌고 있는 ROS 노드(예: 비전 모델)한테 "지금 어디로 가야 해?"라고 물어보고, 받아온 목표 자세까지 이동하는 블록이에요. 학습된 AI가 아니라 직접 만든 인식·계획 코드로 자세를 정하고 싶을 때 써요. joint position 또는 EE position 둘 다 받을 수 있습니다.',
+
+  tutorialDatasetIntro:
+    '워크스페이스에서 모은 시연(에피소드)들을 둘러보고 정리하는 곳이에요. 위에서 워크스페이스를 먼저 고르세요. 학습 품질은 여기에 모인 데이터의 양과 다양성에 가장 크게 좌우됩니다.',
+  tutorialDatasetList:
+    '왼쪽은 데이터셋(폴더) 목록이에요. 추가 버튼으로 폴더를 만들고, 데이터셋 우측 점 3개 메뉴로 편집·증강·다운샘플·병합·삭제할 수 있어요. 에피소드를 여러 개 선택하면 위쪽에 일괄 이동/복사/삭제 바가 나타납니다.',
+  tutorialDatasetViewer:
+    '오른쪽은 선택한 에피소드의 미리보기예요. 영상 타임라인에서 잘라낼 구간을 정하고, 자연어 라벨(예: "빨간 컵을 잡고 옮긴다")을 적어둘 수 있어요. 라벨은 일부 정책(Pi0 등)이 입력으로 사용합니다.',
+  tutorialDatasetAugment:
+    '데이터 증강은 한 번 모은 시연을 색감·노이즈·플립 등으로 변형해서 학습 다양성을 늘려주는 기능이에요. 데이터를 다양화하면 새로운 환경에서도 더 잘 동작합니다. 데이터셋 메뉴의 "증강"으로 열어보세요.',
 
   // ───── Pipeline guide ─────
   pipelineGuideTitle: '전체 사용 가이드',
@@ -708,26 +742,33 @@ export default {
   pipelineStep4Why:
     '같은 로봇이라도 작업이 달라지면 환경 설정·데이터·학습 결과가 모두 분리되어야 해요. 워크스페이스는 "이 작업에 필요한 모든 것"을 한 묶음으로 캡슐화합니다. 최종 학습 품질은 여기서 모은 시연 데이터의 양과 다양성에 가장 크게 좌우돼요.',
 
-  pipelineStep5Title: '5. 학습',
-  pipelineStep5Where: '왼쪽 메뉴의 "Train" 탭',
+  pipelineStep5Title: '5. 데이터셋 정리 / 증강',
+  pipelineStep5Where: '왼쪽 메뉴의 "Datasets" 탭',
   pipelineStep5What:
-    '워크스페이스를 고른 뒤 3단계로 진행됩니다 — (1) 학습에 쓸 데이터셋 선택, (2) AI 종류 선택(ACT, Diffusion, Pi0 등) 또는 기존 체크포인트 이어 학습, (3) 학습 서버 주소를 넣고 연결을 확인한 뒤 시작.',
+    '4번에서 모은 시연들을 둘러보고 다듬는 단계예요. 데이터셋(폴더)을 새로 만들거나, 에피소드를 이동·복사·삭제·자르기로 정리하고, 자연어 라벨을 달 수 있어요. 데이터 증강(밝기·색감·노이즈 등 변형)으로 다양성을 늘리거나, 다운샘플·병합도 여기서 합니다.',
   pipelineStep5Why:
-    '모은 시연을 보고 AI가 "비슷한 상황에서 어떻게 움직여야 하는지"를 배우는 단계예요. 데이터가 너무 적거나 자세/조명이 한쪽으로 쏠리면 학습이 잘 안 됩니다. 결과가 만족스럽지 않으면 4번으로 돌아가 데이터를 더 모으거나 다양화하세요.',
+    '실패한 시연이 섞여 있거나 한쪽 방향만 잔뜩 모인 데이터로는 AI가 골고루 배우지 못해요. 잘못된 에피소드를 빼내고, 다양한 환경의 데이터를 같은 폴더로 묶거나 증강으로 변형을 추가하면 학습이 훨씬 안정적으로 됩니다. 이 단계는 선택이지만, 학습 결과가 만족스럽지 않을 때 가장 먼저 돌아오게 되는 곳이에요.',
 
-  pipelineStep6Title: '6. 추론 (실제 실행)',
-  pipelineStep6Where: '"Workspace" 탭 → 워크스페이스 선택 → "inference" 서브탭',
+  pipelineStep6Title: '6. 학습',
+  pipelineStep6Where: '왼쪽 메뉴의 "Train" 탭',
   pipelineStep6What:
-    '학습이 끝난 체크포인트를 골라 Start Inference를 누르면 로봇이 학습한 대로 자율 동작합니다. 추론 주기(re-inference steps)·temporal ensemble 계수 같은 세부 옵션도 여기서 조정해요.',
+    '워크스페이스를 고른 뒤 3단계로 진행됩니다 — (1) 학습에 쓸 데이터셋 선택, (2) AI 종류 선택(ACT, Diffusion, Pi0 등) 또는 기존 체크포인트 이어 학습, (3) 학습 서버 주소를 넣고 연결을 확인한 뒤 시작. 모든 항목 옆 노란 ? 버튼으로 각 설정의 쉬운 설명과 자세한 설명을 볼 수 있어요.',
   pipelineStep6Why:
-    '학습이 잘 됐는지 실제 로봇으로 검증하는 마지막 단계예요. 의도대로 안 움직이면 4번으로 가서 데이터를 보강하거나, 5번에서 다른 정책/체크포인트로 재학습합니다. 이 4 → 5 → 6 사이클을 반복하면서 성능을 끌어올리는 게 EasyTrainer 워크플로의 핵심이에요.',
+    '모은 시연을 보고 AI가 "비슷한 상황에서 어떻게 움직여야 하는지"를 배우는 단계예요. 데이터가 너무 적거나 자세/조명이 한쪽으로 쏠리면 학습이 잘 안 됩니다. 결과가 만족스럽지 않으면 5번으로 돌아가 데이터를 정리·증강하거나, 4번으로 돌아가 더 모으세요.',
 
-  pipelineStep7Title: '7. Planner (연쇄 실행)',
-  pipelineStep7Where: '왼쪽 메뉴의 "Planner" 탭',
+  pipelineStep7Title: '7. 추론 (실제 실행)',
+  pipelineStep7Where: '"Workspace" 탭 → 워크스페이스 선택 → "inference" 서브탭',
   pipelineStep7What:
-    '여러 블록 — 관절 위치 이동, 학습된 체크포인트, 시간 대기, 사용자 확인 정지 — 을 하나의 플랜으로 쌓아 Run All로 차례대로 실행해요. 한 플랜 안에 여러 워크스페이스를 묶을 수 있고, 체크포인트는 시작 시 미리 로드되어 중간 끊김 없이 이어집니다.',
+    '학습이 끝난 체크포인트를 골라 Start Inference를 누르면 로봇이 학습한 대로 자율 동작합니다. 추론 주기(re-inference steps)·temporal ensemble 계수 같은 세부 옵션도 여기서 조정해요.',
   pipelineStep7Why:
-    '학습된 모델 하나로 전체 작업을 끝까지 수행하기는 어려워요. Planner는 6단계의 결과물(체크포인트)들을 더 긴 루틴으로 엮는 단계입니다 — 예: "홈으로 → pick 체크포인트 실행 → 1초 대기 → place 체크포인트 실행 → 확인 → 홈으로". 개별 체크포인트가 실제로 동작하는 파이프라인이 되는 단계예요.',
+    '학습이 잘 됐는지 실제 로봇으로 검증하는 마지막 단계예요. 의도대로 안 움직이면 5번으로 가서 데이터를 정리·증강하거나, 6번에서 다른 정책/체크포인트로 재학습합니다. 이 4 → 5 → 6 → 7 사이클을 반복하면서 성능을 끌어올리는 게 EasyTrainer 워크플로의 핵심이에요.',
+
+  pipelineStep8Title: '8. Planner (연쇄 실행)',
+  pipelineStep8Where: '왼쪽 메뉴의 "Planner" 탭',
+  pipelineStep8What:
+    '여러 블록 — 관절 위치 이동, 학습된 체크포인트, 시간 대기, Query Pose(외부 노드에서 목표 자세 받기), Sync(그룹 간 동기화) — 을 하나의 플랜으로 쌓아 Run All로 차례대로 실행해요. 한 플랜 안에 여러 워크스페이스를 묶을 수 있고, 체크포인트는 시작 시 미리 로드되어 중간 끊김 없이 이어집니다. 완성한 플랜은 "내보내기" 버튼으로 EasyTrainer 없이도 돌릴 수 있는 독립 실행 zip(체크포인트 + 실행 코드)으로 받을 수 있어요.',
+  pipelineStep8Why:
+    '학습된 모델 하나로 전체 작업을 끝까지 수행하기는 어려워요. Planner는 7단계의 결과물(체크포인트)들을 더 긴 루틴으로 엮는 단계입니다 — 예: "홈으로 → pick 체크포인트 실행 → 1초 대기 → place 체크포인트 실행 → 확인 → 홈으로". 개별 체크포인트가 실제로 동작하는 파이프라인이 되는 단계예요. 내보내기를 활용하면 EasyTrainer가 깔리지 않은 다른 컴퓨터·로봇에서도 같은 플랜을 그대로 돌릴 수 있어요.',
 
   pipelinePrev: '이전',
   pipelineNext: '다음',
@@ -839,13 +880,17 @@ export default {
   visionMapAttention: 'Attention',
   visionMapGradcam: 'Grad-CAM',
 
-  // Trim
-  datasetTrimRangeLabel: '자를 구간',
-  datasetTrimApply: 'Trim 적용',
+  // Trim / Speedup
+  datasetTrimRangeLabel: '구간 선택 (Trim / 배속)',
+  datasetTrimApply: 'Trim',
   datasetTrimReset: '범위 초기화',
   datasetTrimInProgress: '에피소드를 자르는 중입니다…',
   datasetTrimDone: '에피소드를 trim 했습니다.',
   datasetTrimFailed: 'Trim에 실패했습니다.',
+  datasetSpeedupApply: '{factor}배속',
+  datasetSpeedupInProgress: '에피소드를 배속하는 중입니다…',
+  datasetSpeedupDone: '에피소드를 배속했습니다.',
+  datasetSpeedupFailed: '배속에 실패했습니다.',
 
   // Language prompt
   datasetLanguagePrompt: '언어 지시문 (Language prompt)',

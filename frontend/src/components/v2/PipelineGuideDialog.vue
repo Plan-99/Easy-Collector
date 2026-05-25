@@ -90,8 +90,9 @@ const steps = [
     { name: 2, key: 'pipelineStep2', icon: 'precision_manufacturing' },
     { name: 3, key: 'pipelineStep3', icon: 'extension' },
     { name: 4, key: 'pipelineStep4', icon: 'workspaces' },
-    { name: 5, key: 'pipelineStep5', icon: 'school' },
-    { name: 6, key: 'pipelineStep6', icon: 'psychology' },
-    { name: 7, key: 'pipelineStep7', icon: 'account_tree' },
+    { name: 5, key: 'pipelineStep5', icon: 'folder_open' },
+    { name: 6, key: 'pipelineStep6', icon: 'school' },
+    { name: 7, key: 'pipelineStep7', icon: 'psychology' },
+    { name: 8, key: 'pipelineStep8', icon: 'account_tree' },
 ]
 </script>

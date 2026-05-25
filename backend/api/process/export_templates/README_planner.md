@@ -125,6 +125,26 @@ If interpolation is disabled, `SimpleAgent` publishes goals straight to the
 robot's `write_topic` — your robot's driver / controller is then responsible
 for any smoothing.
 
+### Scheduled-waypoint mode (checkpoint blocks)
+
+Inside a `checkpoint` block, each predicted action is published as a
+**scheduled waypoint** (`/ec_robot_<id>/ec_joint_waypoint`) carrying the
+absolute wall-clock time the robot should reach that pose. The interpolation
+node holds the queue and interpolates against `time.time()` at 200Hz — so a
+slow inference step doesn't translate into a velocity discontinuity at the
+robot. A 1st-order IIR low-pass (`α=0.5`) absorbs the residual jerk at chunk
+boundaries.
+
+To disable and fall back to immediate joint commands (legacy `ec_joint_cmd`
+path):
+
+```bash
+EC_SCHEDULED_WAYPOINTS=0 python3 run_planner.py
+```
+
+Scheduled mode only kicks in when a robot has interpolation enabled in
+EasyTrainer; otherwise it falls back to direct commands automatically.
+
 ## Block support
 
 | Block            | Standalone support                                              |

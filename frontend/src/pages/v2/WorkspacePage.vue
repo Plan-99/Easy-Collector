@@ -477,6 +477,12 @@
                                                         <q-icon name="edit" size="xs" />
                                                     </q-item-section>
                                                 </q-item>
+                                                <q-item clickable v-ripple v-close-popup @click="openDownsampleForm(dataset)">
+                                                    <q-item-section>{{ $t('datasetDownsample') }}</q-item-section>
+                                                    <q-item-section side>
+                                                        <q-icon name="compress" size="xs" />
+                                                    </q-item-section>
+                                                </q-item>
                                                 <q-item clickable v-ripple v-close-popup @click="openMergeDatasetForm(dataset)">
                                                     <q-item-section>{{ $t('workspaceDatasetMerge') }}</q-item-section>
                                                     <q-item-section side>
@@ -683,6 +689,14 @@
             :form="mergeDatasetForm"
             @submit="mergeDatasets"
             :ok-button-label="$t('save')"
+        ></form-dialog>
+
+        <form-dialog
+            v-model="showDownsampleForm"
+            :title="$t('datasetDownsampleTitle')"
+            :form="downsampleForm"
+            @submit="downsampleDataset"
+            :ok-button-label="$t('datasetDownsample')"
         ></form-dialog>
 
         <q-dialog
@@ -1577,6 +1591,37 @@ function mergeDatasets(form) {
     }).finally(() => {
         Loading.hide();
     });
+}
+
+// ─── Downsample ────────────────────────────────────────────────────────────
+const showDownsampleForm = ref(false);
+const downsamplingDatasetId = ref(null);
+const downsampleForm = ref([
+    { key: 'name', label: t('datasetName'), type: 'text', value: '', default: '' },
+    { key: 'keep', label: t('datasetDownsampleKeep'), type: 'number', value: 1, default: 1 },
+    { key: 'every', label: t('datasetDownsampleEvery'), type: 'number', value: 2, default: 2 },
+]);
+
+function openDownsampleForm(dataset) {
+    downsamplingDatasetId.value = dataset.id;
+    downsampleForm.value.forEach((f) => (f.value = f.default));
+    downsampleForm.value.find((f) => f.key === 'name').value = `${dataset.name}_downsampled`;
+    showDownsampleForm.value = true;
+}
+
+async function downsampleDataset(form) {
+    if (!downsamplingDatasetId.value) return;
+    try {
+        await api.post(`/dataset/${downsamplingDatasetId.value}/downsample`, {
+            ...form,
+            task_id: selectedWorkspaceId.value,
+        });
+        showDownsampleForm.value = false;
+        Notify.create({ color: 'positive', message: t('datasetDownsampleStarted') });
+    } catch (err) {
+        console.error(err);
+        Notify.create({ color: 'negative', message: t('datasetDownsampleFailed') });
+    }
 }
 
 onUnmounted(() => {
