@@ -101,48 +101,116 @@ def read_dataset(node, episode_path, socketio_instance, sid, task_control, move_
         next_tick = time.time()
         last_tick_time = time.time()
 
+        def _resolve_range_local(value, default=0.0, integer=False):
+            """Per-tick range sampler. Matches transform_dataset._resolve_range
+            so live preview and final transform stay in sync semantically.
+            Accepts scalar or [min, max] — anything else falls back to default.
+            """
+            if value is None:
+                v = default
+            elif isinstance(value, (list, tuple)) and len(value) == 2:
+                lo = float(value[0]); hi = float(value[1])
+                if hi < lo:
+                    lo, hi = hi, lo
+                v = float(np.random.uniform(lo, hi)) if hi > lo else lo
+            elif isinstance(value, (int, float)):
+                v = float(value)
+            else:
+                v = default
+            return int(round(v)) if integer else v
+
+        def _sensor_config(cur_config, cam_name):
+            """Pick per-sensor augmentation. Falls back to a flat global
+            config (legacy live-preview shape) when 'sensors' is absent."""
+            sensors_map = cur_config.get('sensors') if isinstance(cur_config, dict) else None
+            if isinstance(sensors_map, dict):
+                return sensors_map.get(cam_name) or cur_config.get('default') or {}
+            return {k: v for k, v in cur_config.items() if k not in ('sensors', 'default')}
+
         def _encode_and_emit(step_idx, cur_config):
-            """이미지 인코딩 + socketio emit (별도 스레드에서 실행)"""
+            """이미지 인코딩 + socketio emit (별도 스레드에서 실행).
+
+            Per-sensor config + range sampling. Sampling happens every tick so
+            the user immediately sees how a [min, max] range varies.
+            """
             encoded_images = {}
-            local_rect_params = []
 
             for cam_name in sensor_names:
                 img_array = image_data[cam_name][step_idx]
-
                 img = Image.fromarray(img_array)
-                if 'lightness' in cur_config:
-                    img = adjust_lightness(img, cur_config['lightness'])
-                if 'rectangles' in cur_config:
-                    if len(local_rect_params) != cur_config['rectangles'].get('count', 0):
-                        local_rect_params = generate_rect_params(cur_config['rectangles'], img.width, img.height)
-                    img = draw_rectangles(img, local_rect_params)
-                if 'saltAndPepper' in cur_config:
-                    img = add_salt_and_pepper_noise(img, cur_config['saltAndPepper'].get('amount', 0))
-                if 'gaussian' in cur_config:
-                    img = add_gaussian_noise(img, cur_config['gaussian'].get('mean', 0), cur_config['gaussian'].get('sigma', 0))
-                if 'prospective' in cur_config:
-                    transform_matrix = generate_prospective_transform(img.width, img.height,
-                                                                      cur_config['prospective'].get('scale_factor', 0),
-                                                                      cur_config['prospective'].get('degrees', 0),
-                                                                      cur_config['prospective'].get('shear', 0),
-                                                                      cur_config['prospective'].get('perspective', 0))
-                    img = prospective_transform(img, transform_matrix)
+                sensor_cfg = _sensor_config(cur_config, cam_name)
 
-                if 'hsv' in cur_config and cur_config['hsv']:
-                    hsv_config = cur_config['hsv']
-                    if hsv_config.get('random'):
-                        h_gain = 0.5
-                        s_gain = 0.7
-                        v_gain = 0.4
-                        h_adj = (np.random.rand() * 2 - 1) * h_gain * 180
-                        s_adj = (np.random.rand() * 2 - 1) * s_gain + 1
-                        v_adj = (np.random.rand() * 2 - 1) * v_gain + 1
-                    else:
-                        h_adj = hsv_config.get('h', 0) * 180
-                        s_adj = 1 + hsv_config.get('s', 0)
-                        v_adj = 1 + hsv_config.get('v', 0)
+                if not sensor_cfg:
+                    # nothing to apply — encode plain frame
+                    pass
+                else:
+                    if 'lightness' in sensor_cfg:
+                        img = adjust_lightness(img, _resolve_range_local(sensor_cfg.get('lightness'), 0))
+                    rect_cfg = sensor_cfg.get('rectangles')
+                    if rect_cfg:
+                        rect_count = _resolve_range_local(rect_cfg.get('count'), 0, integer=True)
+                        if rect_count > 0:
+                            local_rect_params = generate_rect_params(
+                                {**rect_cfg, 'count': rect_count}, img.width, img.height,
+                            )
+                            img = draw_rectangles(img, local_rect_params)
+                    sap = sensor_cfg.get('saltAndPepper')
+                    if sap:
+                        img = add_salt_and_pepper_noise(img, _resolve_range_local(sap.get('amount'), 0))
+                    g = sensor_cfg.get('gaussian')
+                    if g:
+                        img = add_gaussian_noise(
+                            img,
+                            _resolve_range_local(g.get('mean'), 0),
+                            _resolve_range_local(g.get('sigma'), 0),
+                        )
+                    p = sensor_cfg.get('prospective')
+                    if p:
+                        sf = _resolve_range_local(p.get('scale_factor'), 0)
+                        dg = _resolve_range_local(p.get('degrees'), 0)
+                        sh = _resolve_range_local(p.get('shear'), 0)
+                        pp = _resolve_range_local(p.get('perspective'), 0)
+                        if any((sf, dg, sh, pp)):
+                            tm = generate_prospective_transform(img.width, img.height, sf, dg, sh, pp)
+                            img = prospective_transform(img, tm)
 
-                    img = apply_hsv(img, h_adj, s_adj, v_adj)
+                    hsv_config = sensor_cfg.get('hsv')
+                    if hsv_config:
+                        if hsv_config.get('random'):
+                            h_gain = 0.5
+                            s_gain = 0.7
+                            v_gain = 0.4
+                            h_adj = (np.random.rand() * 2 - 1) * h_gain * 180
+                            s_adj = (np.random.rand() * 2 - 1) * s_gain + 1
+                            v_adj = (np.random.rand() * 2 - 1) * v_gain + 1
+                        else:
+                            h_adj = _resolve_range_local(hsv_config.get('h'), 0) * 180
+                            s_adj = 1 + _resolve_range_local(hsv_config.get('s'), 0)
+                            v_adj = 1 + _resolve_range_local(hsv_config.get('v'), 0)
+                        img = apply_hsv(img, h_adj, s_adj, v_adj)
+
+                # Crop + rotate (applied AFTER augmentation, matching the
+                # transform_dataset pipeline order). cur_config carries
+                # top-level 'crop' and 'rotate' shapes from the BatchEditPanel
+                # live-preview push.
+                crop_cfg = cur_config.get('crop') if isinstance(cur_config, dict) else None
+                if crop_cfg and isinstance(crop_cfg.get('regions'), dict):
+                    box = crop_cfg['regions'].get(cam_name)
+                    if box and len(box) == 4:
+                        x1, y1, x2, y2 = (int(round(v)) for v in box)
+                        w_img, h_img = img.size
+                        x1 = max(0, min(x1, w_img)); x2 = max(0, min(x2, w_img))
+                        y1 = max(0, min(y1, h_img)); y2 = max(0, min(y2, h_img))
+                        if x2 - x1 >= 2 and y2 - y1 >= 2:
+                            img = img.crop((x1, y1, x2, y2))
+                rot_cfg = cur_config.get('rotate') if isinstance(cur_config, dict) else None
+                if rot_cfg and isinstance(rot_cfg.get('angles'), dict):
+                    ang = int(rot_cfg['angles'].get(cam_name, 0) or 0)
+                    _cv2_rot = {90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180,
+                                270: cv2.ROTATE_90_COUNTERCLOCKWISE}
+                    if ang in _cv2_rot:
+                        arr = cv2.rotate(np.array(img), _cv2_rot[ang])
+                        img = Image.fromarray(arr)
 
                 img_array = np.array(img)
                 img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)

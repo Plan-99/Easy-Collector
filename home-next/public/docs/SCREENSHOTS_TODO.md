@@ -2,7 +2,7 @@
 
 `SCREENSHOTS.md`에서 아직 `[ ]` 상태인 슬롯만 추려낸 작업용 체크리스트입니다. 위에서 아래로 진행하면 첫 사용자 동선 그대로 따라가는 순서가 됩니다.
 
-총 **96장 중 54장 완료, 42장 미캡처** (남은 분량 — modules 8, sensors 6, robots 5, teleoperation 6, workspace 1, data-collection 5, datasets 9, training 8, inference 2, planner 4). installation/quickstart는 모두 캡처되어 있고, planner의 checkpoint/run 슬롯은 통합 컷으로 이미 채워져 있습니다.
+총 **111장 중 78장 완료, 33장 미캡처** (남은 분량 — datasets 9, training 8, data-collection 6, robots 4, teleoperation 3, inference 2, workspace 1). installation / quickstart / sensors / modules / planner 섹션은 모두 캡처 완료, planner의 checkpoint/run 슬롯은 통합 컷으로 채워져 있습니다.
 
 캡처할 때마다 해당 줄 앞에 `[x]`로 체크해 주세요. 그 후 `SCREENSHOTS.md` 본 표에도 동일하게 체크하면 됩니다.
 
@@ -100,14 +100,14 @@
 
 런처 floating pill bar에서 모듈 관리 다이얼로그 한 번 열고 시나리오대로 클릭하면서 캡처.
 
-- [ ] `01-launcher-modules-button.png` — 런처 pill bar 🧩 모듈 관리 hover
-- [ ] `02-modules-dialog.png` — 모듈 관리 다이얼로그 — 3 카테고리 (로봇/센서/확장)
-- [ ] `03-module-installing.png` — 설치 진행 중 ⏳
-- [ ] `04-module-installed.png` — 설치 완료 (v버전 + 초록색)
-- [ ] `05-module-paid.png` — 유료 모듈 — "결제" 버튼 + ₩가격
-- [ ] `06-module-checkout.png` — "결제 진행" 다이얼로그 (URL + 복사)
-- [ ] `07-module-after-pay.png` — 결제 완료 후 자동 설치
-- [ ] `08-module-removed.png` — "제거" 클릭 후 미설치 상태
+- [x] `01-launcher-modules-button.png` — 런처 pill bar 🧩 모듈 관리 hover
+- [x] `02-modules-dialog.png` — 모듈 관리 다이얼로그 — 3 카테고리 (로봇/센서/확장)
+- [x] `03-module-installing.png` — 설치 진행 중 ⏳
+- [x] `04-module-installed.png` — 설치 완료 (v버전 + 초록색)
+- [x] `05-module-paid.png` — 유료 모듈 — "결제" 버튼 + ₩가격
+- [x] `06-module-checkout.png` — "결제 진행" 다이얼로그 (URL + 복사)
+- [x] `07-module-after-pay.png` — 결제 완료 후 자동 설치
+- [x] `08-module-removed.png` — "제거" 클릭 후 미설치 상태
 
 ---
 
@@ -117,12 +117,12 @@
 
 타입별 SensorForm 폼 + 등록 직후 ONLINE 카드 한 쌍씩.
 
-- [ ] `realsense-01-form.png` — SensorForm — Type=realsense, Serial Number 입력
-- [ ] `realsense-02-online.png` — Realsense 카드 ONLINE + 라이브 프리뷰
-- [ ] `webcam-01-form.png` — SensorForm — Type=webcam, Device Index
-- [ ] `webcam-02-preview.png` — Webcam 라이브 프리뷰
-- [ ] `custom-01-form.png` — SensorForm — Type=custom, Read Topic, Msg Type, Resolution
-- [ ] `custom-02-topic-on.png` — Custom 센서 TOPIC ON 상태
+- [x] `realsense-01-form.png` — SensorForm — Type=realsense, Serial Number 입력
+- [x] `realsense-02-online.png` — Realsense 카드 ONLINE + 라이브 프리뷰
+- [x] `webcam-01-form.png` — SensorForm — Type=webcam, Device Index
+- [x] `webcam-02-preview.png` — Webcam 라이브 프리뷰
+- [x] `custom-01-form.png` — SensorForm — Type=custom, Read Topic, Msg Type, Resolution
+- [x] `custom-02-topic-on.png` — Custom 센서 TOPIC ON 상태
 
 ---
 
@@ -133,7 +133,7 @@
 - [ ] `piper-01-form.png` — RobotForm — Type=piper, CAN Port=can0
 - [ ] `piper-02-online.png` — Piper 카드 ONLINE
 - [ ] `piper-03-pendant.png` — Piper RobotPendant — Joint + IK
-- [ ] `custom-01-form.png` — RobotForm — Role / Joint Names / Bounds / Read·Write 토픽 / IK Settings JSON 한 화면
+- [x] `custom-01-form.png` — RobotForm — Role / Joint Names / Bounds / Read·Write 토픽 / IK Settings JSON 한 화면
 - [ ] `custom-02-online.png` — Custom 로봇 TOPIC ON 상태
 
 ---
@@ -145,9 +145,9 @@
 - [ ] `assembly-02-role-buttons.png` — single_arm / tool 역할별 Left·Right 슬롯 버튼
 - [ ] `ee-01-general-tab.png` — TeleSettingDialog General 탭
 - [ ] `ee-02-offset-explained.png` — EE offset x/y/z 입력 + 설명 텍스트
-- [ ] `leader-01-tab.png` — Leader Robot 탭 — 좌측 Start Leader Robot 버튼 + 우측 Stepper
-- [ ] `leader-02-origin-mapping.png` — Origin Setting — DXL 카드 드래그 + Set as Gripper 버튼
-- [ ] `testing-01-console.png` — TeleopConsole 초기 상태
+- [x] `leader-01-tab.png` — Leader Robot 탭 — 좌측 Start Leader Robot 버튼 + 우측 Stepper
+- [x] `leader-02-origin-mapping.png` — Origin Setting — DXL 카드 드래그 + Set as Gripper 버튼
+- [x] `testing-01-console.png` — TeleopConsole 초기 상태
 
 ---
 
@@ -169,8 +169,8 @@
 - [ ] `mode-01-select.png` — Teleop Type select 펼침 (keyboard/leader_robot/vive/...)
 - [ ] `mode-02-keyboard.png` — keyboard 모드 — Step Size 입력 추가
 - [ ] `mode-03-leader.png` — leader_robot 모드
-- [ ] `home-01-toggle.png` — home 배지 — 파란색(ON) / 회색(OFF) 두 상태
-- [ ] `btn-01-toolbar.png` — MonitoringWindow 툴바 — SUCCESS / DONE / STOP 3개 버튼
+- [x] `home-01-toggle.png` — home 배지 — 파란색(ON) / 회색(OFF) 두 상태
+- [x] `btn-01-toolbar.png` — MonitoringWindow 툴바 — SUCCESS / DONE / STOP 3개 버튼
 - [ ] `replay-01-select.png` — 워크스페이스 data 탭 — 에피소드 선택
 - [ ] `replay-02-replay-panel.png` — Replay 헤더 — Action Type(qaction/ee_delta_action) + Capture Episode + Target Dataset
 - [ ] `replay-03-progress.png` — Capturing X% progress
@@ -219,16 +219,15 @@
 
 ---
 
-## 12. planner — 플래너 (4장)
+## 12. planner — 플래너 (3장)
 
 폴더: `public/docs/planner/`
 
-- [ ] `create-03-form.png` — 새 플래너 만들기 다이얼로그
-- [ ] `create-04-edit-delete.png` — 플래너 항목 우측 edit/delete 아이콘
-- [ ] `blocks-03-name.png` — 블록 이름 입력 필드
-- [ ] `blocks-04-save.png` — 블록 다이얼로그 저장 버튼
+- [x] `create-04-edit-delete.png` — 플래너 항목 우측 edit/delete 아이콘
+- [x] `blocks-03-name.png` — 블록 이름 입력 필드
+- [x] `blocks-04-save.png` — 블록 다이얼로그 저장 버튼
 
-> `blocks-checkpoint.png`(체크포인트 블록 select+파라미터 통합)와 `run.png`(플랜 실행 통합 컷)는 이미 캡처됨.
+> `create-02-new.png`(영문 다이얼로그)을 Step 2에서 재사용하므로 별도의 `create-03-form.png`은 두지 않음. `blocks-checkpoint.png`(체크포인트 블록 select+파라미터 통합)와 `run.png`(플랜 실행 통합 컷)도 이미 캡처됨.
 
 ---
 

@@ -13,6 +13,7 @@ from ..process.record_episode import record_episode
 from ..process.augment_dataset import augment_dataset
 from ..process.merge_dataset import merge_dataset
 from ..process.downsample_dataset import downsample_dataset
+from ..process.transform_dataset import transform_dataset
 from ...utils.lerobot_io import (
     get_episodes_as_file_list, get_dataset_metadata, get_dataset_info,
     delete_episode as lerobot_delete_episode, list_episodes,
@@ -394,32 +395,66 @@ def throw_episode(id):
     task['obj']['episode_complete'] = True
     return {'status': 'success', 'message': 'Episode throw signal sent'}, 200
 
-@dataset_bp.route('/dataset/<id>/augment', methods=['POST'])
-def augment_dataset_route(id):
-    data = request.json
+@dataset_bp.route('/dataset/<id>/transform', methods=['POST'])
+def transform_dataset_route(id):
+    """Unified transform endpoint — applies augmentation, downsample, crop, and
+    rotate in a single pass. Replaces the older /augment and /downsample
+    endpoints (those are kept as thin wrappers below for backward compat).
+
+    Request body — see backend/api/process/transform_dataset.py docstring.
+    """
+    data = request.json or {}
     name = data.get('name')
     task_id = data.get('task_id')
+    operations = data.get('operations') or {}
 
-    agumented_dataset = DatasetModel.create(
-        name=name,
-        task_id=task_id,
-    )
+    if not name:
+        return {'status': 'error', 'message': 'name is required'}, 400
 
+    new_dataset = DatasetModel.create(name=name, task_id=task_id)
     current_app.pm.start_function(
-        func=augment_dataset,
-        dataset_id = id,
-        aug_dataset_id=agumented_dataset.id,
-        lightness=data.get('lightness'),
-        rectangles=data.get('rectangles'),
-        salt_and_pepper=data.get('saltAndPepper'),
-        gaussian=data.get('gaussian'),
-        prospective=data.get('prospective'),
-        hsv=data.get('hsv'),
+        func=transform_dataset,
+        dataset_id=id,
+        new_dataset_id=new_dataset.id,
+        operations=operations,
         socketio_instance=current_app.pm.socketio,
-        name=f"augment_dataset",
+        name="transform_dataset",
     )
+    return {
+        'status': 'success',
+        'message': 'Dataset transform started',
+        'new_dataset_id': new_dataset.id,
+    }, 200
 
-    return {'status': 'success', 'message': 'Dataset augmentation started'}, 200
+
+@dataset_bp.route('/dataset/<id>/augment', methods=['POST'])
+def augment_dataset_route(id):
+    """Backward-compat wrapper — forwards to /transform with augmentation-only
+    operations. Existing UI clients that haven't migrated still work.
+    """
+    data = request.json or {}
+    operations = {
+        'augmentation': {
+            'lightness': data.get('lightness'),
+            'rectangles': data.get('rectangles'),
+            'saltAndPepper': data.get('saltAndPepper'),
+            'gaussian': data.get('gaussian'),
+            'prospective': data.get('prospective'),
+            'hsv': data.get('hsv'),
+        },
+        'repeat': 1,
+    }
+    new_dataset = DatasetModel.create(name=data.get('name'), task_id=data.get('task_id'))
+    current_app.pm.start_function(
+        func=transform_dataset,
+        dataset_id=id,
+        new_dataset_id=new_dataset.id,
+        operations=operations,
+        socketio_instance=current_app.pm.socketio,
+        name="transform_dataset",
+    )
+    return {'status': 'success', 'message': 'Dataset augmentation started',
+            'new_dataset_id': new_dataset.id}, 200
 
 @dataset_bp.route('/dataset/:merge', methods=['POST'])
 def merge_datasets():
@@ -772,31 +807,27 @@ def batch_move_episodes():
 
 @dataset_bp.route('/dataset/<id>/downsample', methods=['POST'])
 def downsample_dataset_route(id):
-    data = request.json
-    name = data.get('name')
-    task_id = data.get('task_id')
+    """Backward-compat wrapper — forwards to /transform with downsample-only
+    operations. Older UI builds still use this; new UI should call /transform.
+    """
+    data = request.json or {}
     keep = int(data.get('keep', 1))
     every = int(data.get('every', 2))
-
     if keep <= 0 or every <= 0 or keep >= every:
         return {'status': 'error', 'message': 'Invalid downsample ratio: keep must be < every, both > 0'}, 400
 
-    new_dataset = DatasetModel.create(
-        name=name,
-        task_id=task_id,
-    )
-
+    operations = {'downsample': {'keep': keep, 'every': every}, 'repeat': 1}
+    new_dataset = DatasetModel.create(name=data.get('name'), task_id=data.get('task_id'))
     current_app.pm.start_function(
-        func=downsample_dataset,
+        func=transform_dataset,
         dataset_id=id,
         new_dataset_id=new_dataset.id,
-        keep=keep,
-        every=every,
+        operations=operations,
         socketio_instance=current_app.pm.socketio,
-        name="downsample_dataset",
+        name="transform_dataset",
     )
-
-    return {'status': 'success', 'message': 'Dataset downsample started'}, 200
+    return {'status': 'success', 'message': 'Dataset downsample started',
+            'new_dataset_id': new_dataset.id}, 200
 
 
 # ── Dataset import / export ─────────────────────────────────────────────────

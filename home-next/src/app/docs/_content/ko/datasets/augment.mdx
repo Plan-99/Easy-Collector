@@ -1,40 +1,43 @@
 ---
 title: 데이터셋 증강
-description: 색상·크롭·회전 변환으로 한 에피소드에서 여러 학습 샘플 생성.
+description: 색상·노이즈·perspective 변환으로 한 에피소드에서 여러 학습 샘플 생성. 일괄 변경 패널의 한 섹션으로 통합되었습니다.
 section: datasets
-order: 3
+order: 4
 sourceRefs:
-  - frontend/src/components/v2/DataAugmentationDialog.vue
+  - frontend/src/components/v2/BatchEditPanel.vue
   - frontend/src/pages/v2/DatasetPage.vue
-lastVerifiedVersion: 0.0.0
+  - backend/api/process/transform_dataset.py
+related:
+  - /docs/datasets/batch-edit
+lastVerifiedVersion: 5.0.0
 ---
 
-증강은 같은 에피소드를 여러 변형으로 늘려 학습의 일반화 성능을 높이는 기법입니다.
-
-## 어디서 하나
-
-기본 진입점은 좌측 네비의 **데이터셋 탭**이고, 워크스페이스의 **data 탭**에서도 동일하게 가능합니다. 어느 쪽이든 데이터셋을 우클릭하면 메뉴가 나옵니다.
-
-<Steps>
-1. **데이터셋을 우클릭하고 Augment Dataset을 누릅니다.**
-
-   <DocsImage
-     src="/docs/datasets/context-menu.png"
-     alt="데이터셋 우클릭 메뉴 — Edit / Augment / 다운샘플 / Merge / Export / Delete"
-     status="missing"
-   />
-
-2. **Data Augmentation 다이얼로그가 풀스크린으로 열립니다.**
-
-   변환 종류, 강도, 결과 데이터셋 이름 등을 설정합니다.
-
-   <DocsImage
-     src="/docs/datasets/augment-02-dialog.png"
-     alt="DataAugmentationDialog 전체"
-     status="missing"
-   />
-</Steps>
+증강(Augmentation)은 같은 에피소드를 여러 변형으로 늘려 학습의 일반화 성능을 높이는 기법입니다.
 
 <Callout type="info">
-증강은 새로운 에피소드 파일을 생성합니다. 원본은 그대로 유지되니 안심하고 실행하세요.
+**증강은 [일괄 변경 (Batch Edit)](/docs/datasets/batch-edit) 패널의 한 섹션으로 통합되었습니다.** 기존 풀스크린 *Data Augmentation Dialog* 는 제거되었고, 데이터셋 우클릭 메뉴의 *Augmentation* 항목도 **Batch Edit** 항목으로 합쳐졌습니다.
+</Callout>
+
+## 새 위치
+
+좌측 네비의 **데이터셋 탭**에서 다음 중 하나로 BatchEditPanel을 열고 **Augmentation** 섹션을 펼치세요.
+
+- 트리에서 **데이터셋 폴더 라벨**을 클릭
+- 데이터셋 우클릭 → **Batch Edit**
+
+## 무엇이 같고 무엇이 달라졌나
+
+| 항목 | 예전 (Data Augmentation Dialog) | 현재 (BatchEditPanel → Augmentation) |
+|---|---|---|
+| Lightness / HSV / Disturbances / Salt & Pepper / Gaussian / Perspective | ✅ | ✅ (동일) |
+| 반복 횟수 (Repeat) | 다이얼로그 안 입력 | 섹션 상단의 **Repeat** 필드 (1~20) |
+| Crop / Rotate 같이 적용 | ✘ | ✅ (같은 패널의 별도 섹션) |
+| 출력 데이터셋 이름 | 다이얼로그 끝의 입력 | 패널 상단 출력 이름 입력 (기본값 `<원본>_transformed`) |
+| 진행률 이벤트 | `augmentation_progress` | `transform_progress` (구 이벤트도 호환 유지) |
+| 백엔드 엔드포인트 | `POST /dataset/<id>/augment` | `POST /dataset/<id>/transform` (구 엔드포인트는 wrapper로 유지) |
+
+증강 옵션 자체의 의미와 슬라이더 범위는 그대로입니다. 자세한 설명은 [일괄 변경 → Augmentation 섹션](/docs/datasets/batch-edit#augmentation-섹션)을 참고하세요.
+
+<Callout type="tip">
+증강은 새로운 에피소드 파일을 생성합니다. 원본은 그대로 유지되니 안심하고 실행하세요. `repeat=N`이면 원본 1개당 N개의 무작위 변형 에피소드가 만들어집니다.
 </Callout>

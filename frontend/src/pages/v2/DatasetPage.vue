@@ -125,6 +125,7 @@
                             v-for="dataset in datasets"
                             :key="dataset.id"
                             expand-separator
+                            expand-icon-toggle
                             dark
                             header-class="text-white"
                             :model-value="expandedDatasetIds.has(dataset.id)"
@@ -134,9 +135,14 @@
                             @drop="onDropToDataset($event, dataset)"
                         >
                             <template v-slot:header>
-                                <q-icon name="folder" class="q-mr-sm" size="md" color="grey-5" />
-                                <div class="col">
-                                    <div class="text-white">{{ dataset.name }} ({{ dataset.id }})</div>
+                                <!-- Header content click selects the dataset for batch edit;
+                                     only the chevron toggles expansion (expand-icon-toggle). -->
+                                <q-icon name="folder" class="q-mr-sm" size="md" color="grey-5"
+                                    @click="selectDatasetForBatch(dataset)" />
+                                <div class="col cursor-pointer"
+                                    @click="selectDatasetForBatch(dataset)"
+                                    :class="{ 'text-primary': selectedDatasetForBatch && selectedDatasetForBatch.id === dataset.id }">
+                                    <div>{{ dataset.name }} ({{ dataset.id }})</div>
                                     <div class="text-caption text-grey-5">
                                         {{ dataset.episodes.length }} {{ $t('datasetEpisodesSuffix') }}
                                     </div>
@@ -147,13 +153,9 @@
                                             <q-item-section>{{ $t('workspaceDatasetEdit') }}</q-item-section>
                                             <q-item-section side><q-icon name="edit" size="xs" color="grey-5" /></q-item-section>
                                         </q-item>
-                                        <q-item clickable v-ripple v-close-popup @click="openAugmentationForm(dataset)">
-                                            <q-item-section>{{ $t('workspaceDatasetAugment') }}</q-item-section>
+                                        <q-item clickable v-ripple v-close-popup @click="selectDatasetForBatch(dataset)">
+                                            <q-item-section>{{ $t('datasetBatchEdit') || $t('workspaceDatasetAugment') }}</q-item-section>
                                             <q-item-section side><q-icon name="auto_fix_high" size="xs" color="grey-5" /></q-item-section>
-                                        </q-item>
-                                        <q-item clickable v-ripple v-close-popup @click="openDownsampleForm(dataset)">
-                                            <q-item-section>{{ $t('datasetDownsample') }}</q-item-section>
-                                            <q-item-section side><q-icon name="compress" size="xs" color="grey-5" /></q-item-section>
                                         </q-item>
                                         <q-item clickable v-ripple v-close-popup @click="openMergeDatasetForm(dataset)">
                                             <q-item-section>{{ $t('workspaceDatasetMerge') }}</q-item-section>
@@ -266,18 +268,28 @@
                 </q-scroll-area>
             </div>
 
-            <!-- RIGHT: Episode viewer -->
-            <div class="col bg-secondary border-rounded q-pa-md column" style="min-width: 0; min-height: 0; overflow: auto;">
+            <!-- RIGHT: Episode viewer or Batch edit panel
+                 Selection rules (mutually exclusive):
+                   - currentEpisode set → EpisodePanel (per-episode edits)
+                   - selectedDatasetForBatch set → BatchEditPanel (augment / downsample / crop / rotate)
+                   - neither → hint -->
+            <!-- Right pane: a normal block container with overflow:auto. Was
+                 `column` (flex column) earlier, which combined with each
+                 panel's own internal flex layout to fight over heights and
+                 produce double scrollbars + a stray padding strip. As a
+                 plain block, the inner panel takes its intrinsic height and
+                 the wrapper scrolls cleanly when needed. -->
+            <div class="col bg-secondary border-rounded q-pa-md" style="min-width: 0; min-height: 0; overflow: auto;">
                 <TutorialHint step="2" class="q-mb-sm" :text="$t('tutorialDatasetViewer')" />
                 <div
-                    v-if="!currentEpisode"
+                    v-if="!currentEpisode && !selectedDatasetForBatch"
                     class="flex flex-center text-grey-5 text-h6"
                     style="min-height: 400px;"
                 >
                     {{ $t('datasetSelectEpisodeHint') }}
                 </div>
                 <episode-panel
-                    v-else
+                    v-else-if="currentEpisode"
                     :dataset-id="currentDatasetIdForViewer"
                     :episode="currentEpisode"
                     :task-id="selectedWorkspaceId"
@@ -286,6 +298,14 @@
                     @trim="onTrimEpisode"
                     @speedup="onSpeedupEpisode"
                     @save-language="onSaveLanguage"
+                />
+                <batch-edit-panel
+                    v-else
+                    :dataset="selectedDatasetForBatch"
+                    :task-id="selectedWorkspaceId"
+                    :key="`batch_${selectedDatasetForBatch.id}`"
+                    @close="selectedDatasetForBatch = null"
+                    @completed="onBatchTransformCompleted"
                 />
             </div>
         </div>
@@ -307,21 +327,9 @@
             :ok-button-label="$t('save')"
         />
 
-        <form-dialog
-            v-model="showDownsampleForm"
-            :title="$t('datasetDownsampleTitle')"
-            :form="downsampleForm"
-            @submit="downsampleDataset"
-            :ok-button-label="$t('datasetDownsample')"
-        />
-
-        <q-dialog v-model="showAugmentationForm" persistent full-width>
-            <data-augmentation-dialog
-                :dataset="augmentingDataset"
-                :task-id="selectedWorkspaceId"
-                v-if="selectedWorkspaceId"
-            />
-        </q-dialog>
+        <!-- Old augmentation / downsample dialogs were removed in favor of BatchEditPanel.
+             Both transforms are now sections in the right-pane BatchEditPanel when a
+             dataset (folder) is selected, applied together via POST /dataset/<id>/transform. -->
 
         <input
             ref="importInputEl"
@@ -379,8 +387,8 @@ import { useI18n } from 'vue-i18n';
 import { api } from 'src/boot/axios';
 import { useSocket } from 'src/composables/useSocket';
 import FormDialog from 'src/components/v2/FormDialog.vue';
-import DataAugmentationDialog from 'src/components/v2/DataAugmentationDialog.vue';
 import EpisodePanel from 'src/components/v2/EpisodePanel.vue';
+import BatchEditPanel from 'src/components/v2/BatchEditPanel.vue';
 import TutorialHint from 'src/components/v2/TutorialHint.vue';
 
 const { t } = useI18n();
@@ -401,6 +409,7 @@ watch(selectedWorkspaceId, (val) => {
     expandedDatasetIds.value = new Set();
     currentEpisode.value = null;
     currentDatasetIdForViewer.value = null;
+    selectedDatasetForBatch.value = null;
     selectedEpisodeKeys.value = [];
     if (val) listDatasets();
 });
@@ -466,11 +475,28 @@ function selectedTransfers() {
     });
 }
 
-// ─── Episode viewer ────────────────────────────────────────────────────────
+// ─── Episode viewer / Batch edit panel selection ──────────────────────────
+// Right-pane behavior:
+//   - episode clicked  → currentEpisode set, BatchEditPanel hidden
+//   - dataset header clicked (not the chevron) → selectedDatasetForBatch set,
+//     EpisodePanel hidden, BatchEditPanel shown
+// The two states are mutually exclusive — picking one clears the other.
 const currentEpisode = ref(null);
 const currentDatasetIdForViewer = ref(null);
+const selectedDatasetForBatch = ref(null);
+
+function selectDatasetForBatch(dataset) {
+    if (!dataset || !(dataset.episodes || []).length) {
+        Notify.create({ color: 'negative', message: t('workspaceAugmentNeedsEpisodes') });
+        return;
+    }
+    currentEpisode.value = null;
+    currentDatasetIdForViewer.value = null;
+    selectedDatasetForBatch.value = dataset;
+}
 
 function selectEpisode(dataset, episode) {
+    selectedDatasetForBatch.value = null;
     currentDatasetIdForViewer.value = dataset.id;
     currentEpisode.value = episode;
 }
@@ -798,17 +824,14 @@ function deleteDataset(dataset) {
     });
 }
 
-// ─── Augmentation ──────────────────────────────────────────────────────────
-const showAugmentationForm = ref(false);
-const augmentingDataset = ref({});
-
-function openAugmentationForm(dataset) {
-    if (!dataset.episodes.length) {
-        Notify.create({ color: 'negative', message: t('workspaceAugmentNeedsEpisodes') });
-        return;
-    }
-    augmentingDataset.value = dataset;
-    showAugmentationForm.value = true;
+// ─── Batch transform (Augmentation / Downsample / Crop / Rotate) ──────────
+// Replaces the old standalone augment + downsample dialogs. The right-pane
+// BatchEditPanel reads `selectedDatasetForBatch` and posts to /transform once
+// the user picks at least one operation. After completion we refresh the list
+// so the new derived dataset shows up.
+function onBatchTransformCompleted() {
+    Notify.create({ color: 'positive', message: t('datasetTransformComplete') || 'Transform complete.' });
+    listDatasets();
 }
 
 // ─── Import / Export ──────────────────────────────────────────────────────
@@ -946,36 +969,7 @@ async function mergeDatasets(form) {
     }
 }
 
-// ─── Downsample ────────────────────────────────────────────────────────────
-const showDownsampleForm = ref(false);
-const downsamplingDatasetId = ref(null);
-const downsampleForm = ref([
-    { key: 'name', label: t('datasetName'), type: 'text', value: '', default: '' },
-    { key: 'keep', label: t('datasetDownsampleKeep'), type: 'number', value: 1, default: 1 },
-    { key: 'every', label: t('datasetDownsampleEvery'), type: 'number', value: 2, default: 2 },
-]);
-
-function openDownsampleForm(dataset) {
-    downsamplingDatasetId.value = dataset.id;
-    downsampleForm.value.forEach((f) => (f.value = f.default));
-    downsampleForm.value.find((f) => f.key === 'name').value = `${dataset.name}_downsampled`;
-    showDownsampleForm.value = true;
-}
-
-async function downsampleDataset(form) {
-    if (!downsamplingDatasetId.value) return;
-    try {
-        await api.post(`/dataset/${downsamplingDatasetId.value}/downsample`, {
-            ...form,
-            task_id: selectedWorkspaceId.value,
-        });
-        showDownsampleForm.value = false;
-        Notify.create({ color: 'positive', message: t('datasetDownsampleStarted') });
-    } catch (err) {
-        console.error(err);
-        Notify.create({ color: 'negative', message: t('datasetDownsampleFailed') });
-    }
-}
+// (Downsample / Augmentation 전용 dialog 는 제거됨 — BatchEditPanel 로 통합)
 
 // ─── Lifecycle ─────────────────────────────────────────────────────────────
 onMounted(async () => {
@@ -985,8 +979,13 @@ onMounted(async () => {
     } finally {
         pageLoading.value = false;
     }
+    // Refresh dataset list whenever any transform pipeline finishes —
+    // 'augmentation_complete' is kept for backward compat with older
+    // backend builds, 'transform_complete' is the unified event.
+    socket.on('transform_complete', () => {
+        listDatasets();
+    });
     socket.on('augmentation_complete', () => {
-        showAugmentationForm.value = false;
         listDatasets();
     });
     socket.on('episode_added', () => {
@@ -994,9 +993,3 @@ onMounted(async () => {
     });
 });
 </script>
-
-<style scoped>
-.q-expansion-item__container > .q-item:hover {
-    background: rgba(255, 255, 255, 0.05);
-}
-</style>

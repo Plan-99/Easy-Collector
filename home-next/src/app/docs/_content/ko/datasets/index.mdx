@@ -6,7 +6,7 @@ order: 1
 sourceRefs:
   - frontend/src/pages/v2/DatasetPage.vue
   - frontend/src/pages/v2/WorkspacePage.vue
-  - frontend/src/components/v2/DataAugmentationDialog.vue
+  - frontend/src/components/v2/BatchEditPanel.vue
   - frontend/src/components/v2/EpisodePanel.vue
 related:
   - /docs/data-collection
@@ -34,10 +34,14 @@ lastVerifiedVersion: 5.0.0
 ## 가능한 작업
 
 - [데이터셋 편집](/docs/datasets/edit) — 이름 변경, 병합, sensor/robot 매핑 재지정, 삭제 (데이터셋 단위)
-- [데이터셋 증강](/docs/datasets/augment) — 색상·크롭 변형으로 데이터 양 늘리기 (데이터셋 단위)
-- [데이터셋 다운샘플](/docs/datasets/downsample) — 프레임을 솎아 시퀀스 길이/학습 시간 절감, 그리퍼 transition 자동 보존
+- [일괄 변경 (Batch Edit)](/docs/datasets/batch-edit) — 증강·다운샘플·크롭·회전을 한 번에 적용해 새 데이터셋 생성 (데이터셋 단위)
+- [데이터셋 증강](/docs/datasets/augment) · [데이터셋 다운샘플](/docs/datasets/downsample) — 각각 일괄 변경 패널의 한 섹션으로 통합되었습니다. 단독으로 호출하던 풀스크린 다이얼로그·폼은 제거되었습니다.
 - [에피소드 편집](/docs/datasets/episode-edit) — 영상/센서 미리보기, trim, 자연어 지시 수정 (에피소드 단위)
 - [데이터셋 불러오기 / 내보내기](/docs/datasets/import-export) — 아카이브로 백업하거나 다른 머신과 공유
+
+<Callout type="info">
+**우측 패널은 둘 중 하나만 뜹니다.** 좌측 트리에서 **데이터셋 폴더 라벨**을 클릭하면 우측에 [일괄 변경 패널](/docs/datasets/batch-edit)이, **에피소드 행**을 클릭하면 [에피소드 편집 패널](/docs/datasets/episode-edit)이 뜹니다. 폴더의 expand/collapse는 행 우측 chevron 으로만 동작합니다.
+</Callout>
 
 ## 다음 단계
 

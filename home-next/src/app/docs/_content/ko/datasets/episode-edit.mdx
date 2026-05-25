@@ -2,7 +2,7 @@
 title: 에피소드 편집
 description: 데이터셋 탭에서 에피소드를 골라 영상/센서 그래프 확인, trim, 자연어 지시 수정.
 section: datasets
-order: 4
+order: 6
 sourceRefs:
   - frontend/src/pages/v2/DatasetPage.vue
   - frontend/src/components/v2/EpisodePanel.vue
@@ -17,7 +17,11 @@ lastVerifiedVersion: 5.0.0
 
 ## 데이터셋 탭 진입
 
-좌측 네비게이션의 **데이터셋** 탭을 누르면 워크스페이스에 묶인 데이터셋 목록과 에피소드가 보입니다. 에피소드를 클릭하면 우측에 편집 패널이 펼쳐집니다.
+좌측 네비게이션의 **데이터셋** 탭을 누르면 워크스페이스에 묶인 데이터셋 목록과 에피소드가 보입니다. **에피소드 행**을 클릭하면 우측에 EpisodePanel 이 펼쳐집니다.
+
+<Callout type="info">
+**데이터셋 폴더 라벨과는 동작이 다릅니다.** 같은 트리에서 폴더 라벨(아이콘/텍스트)을 클릭하면 [일괄 변경 패널](/docs/datasets/batch-edit)이 대신 뜹니다. 두 패널은 우측 영역에서 상호 배타적입니다. 폴더의 expand/collapse는 행 우측 chevron 으로만 처리됩니다.
+</Callout>
 
 <DocsImage
   src="/docs/datasets/episode-edit-01-panel.png"
