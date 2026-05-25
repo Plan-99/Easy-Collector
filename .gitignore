@@ -28,3 +28,6 @@ ros2/ros2_ws/log/
 node_modules/
 .quasar/
 dist/
+# Auto-generated module manifests staged for Docker build
+ros2/_modules_staging/*.json
+backend/_modules_staging/*.json

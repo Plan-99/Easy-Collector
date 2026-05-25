@@ -1,87 +1,33 @@
-# ROS 2 Humble + IK Solver + gRPC Bridge + WebRTC Streaming
-FROM ros:humble
+# ros2/Dockerfile  ── "modules layer"
+# ------------------------------------------------------------------
+# easytrainer-ros2-base 이미지 위에 설치된 모듈들의 apt/pip deps 를
+# baked 한다. 빌드 컨텍스트의 `ros2/_modules_staging/` 디렉터리에
+# scripts/rebuild_ros2_image.sh 가 manifest 들을 stage 해두면,
+# Docker 의 COPY layer hashing 이 manifest 변경 시 자동으로 캐시
+# 무효화한다. (변경 없으면 layer 캐시 hit → instant rebuild)
+#
+# 모든 apt/pip 다운로드는 BuildKit cache mount 로 영구 캐시되므로
+# 외부 미러(특히 robotpkg) 가 죽어있어도 한 번 받은 패키지는 재사용된다.
+# 빌드 시 반드시 DOCKER_BUILDKIT=1 (또는 buildx) 사용.
+ARG BASE_IMAGE=easytrainer-ros2-base:latest
+FROM ${BASE_IMAGE}
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=Asia/Seoul
-ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
-# Regional mirror
-RUN sed -i 's/archive.ubuntu.com/mirror.kakao.com/g' /etc/apt/sources.list && \
-    sed -i 's/security.ubuntu.com/mirror.kakao.com/g' /etc/apt/sources.list
+# Staged manifests (생성: scripts/rebuild_ros2_image.sh).
+# 디렉터리가 비어있어도 빌드는 통과한다 (no-op layer).
+COPY ros2/_modules_staging/ /tmp/modules_staging/
 
-# ROS 2 packages (realsense는 모듈로 분리됨, 런타임에 설치)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ros-humble-usb-cam \
-    ros-humble-image-transport-plugins \
-    # Robot control
-    ros-humble-ros2-control \
-    ros-humble-ros2-controllers \
-    ros-humble-controller-manager \
-    ros-humble-ruckig \
-    ros-humble-joint-state-publisher \
-    ros-humble-robot-state-publisher \
-    ros-humble-urdf \
-    ros-humble-xacro \
-    # Motion planning
-    ros-humble-moveit \
-    ros-humble-moveit-msgs \
-    ros-humble-moveit-visual-tools \
-    ros-humble-ompl \
-    ros-humble-geometric-shapes \
-    ros-humble-srdfdom \
-    ros-humble-warehouse-ros \
-    ros-humble-eigen-stl-containers \
-    ros-humble-pybind11-vendor \
-    ros-humble-pluginlib \
-    # Communication
-    ros-humble-rosbridge-server \
-    ros-humble-rmw-cyclonedds-cpp \
-    ros-humble-rosidl-generator-dds-idl \
-    # Build tools
-    python3-pip \
-    python3-colcon-common-extensions \
-    python3-pykdl \
-    build-essential cmake \
-    # Device access
-    v4l-utils can-utils iproute2 ethtool \
-    libyaml-cpp-dev \
-    && apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*
+# install_modules.sh: manifest 들을 읽고 deps 를 한 번에 설치
+COPY ros2/install_modules.sh /usr/local/bin/install_modules.sh
+RUN chmod +x /usr/local/bin/install_modules.sh
 
-# Pinocchio + CasADi (IK solver dependencies)
-RUN mkdir -p /etc/apt/keyrings && \
-    curl -sSL http://robotpkg.openrobots.org/packages/debian/robotpkg.asc | tee /etc/apt/keyrings/robotpkg.asc > /dev/null && \
-    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/robotpkg.asc] http://robotpkg.openrobots.org/packages/debian/pub $(lsb_release -cs) robotpkg" | tee /etc/apt/sources.list.d/robotpkg.list && \
-    apt-get update && apt-get install -y --no-install-recommends \
-    robotpkg-simde=0.8.0 \
-    robotpkg-py310-pinocchio \
-    robotpkg-py310-casadi && \
-    rm -rf /var/lib/apt/lists/*
+# BuildKit cache mount 로 apt/pip 다운로드 영구 캐시
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+    /usr/local/bin/install_modules.sh /tmp/modules_staging && \
+    rm -rf /tmp/modules_staging
 
-ENV PATH="/opt/openrobots/bin:${PATH}"
-ENV PYTHONPATH="/opt/openrobots/lib/python3.10/site-packages:${PYTHONPATH}"
-ENV LD_LIBRARY_PATH="/opt/openrobots/lib:${LD_LIBRARY_PATH}"
-
-# Python packages for ROS2 bridge
-COPY ros2/requirements.ros2.txt /tmp/requirements.ros2.txt
-RUN python3 -m pip install --no-cache-dir -r /tmp/requirements.ros2.txt && \
-    python3 -m pip install --no-cache-dir --force-reinstall "setuptools==70.0.0" "packaging>=23.0" && \
-    rm /tmp/requirements.ros2.txt
-
-WORKDIR /root
-
-# Create empty workspace (modules installed at runtime via launcher)
-RUN mkdir -p /root/ros2_ws/src
-
-# Bundle ros2_bridge into image
-COPY ros2/ros2_bridge /root/ros2/ros2_bridge
-
-RUN echo "source /opt/ros/humble/setup.bash" >> /etc/bash.bashrc && \
-    echo '[ -f /root/ros2_ws/install/setup.bash ] && source /root/ros2_ws/install/setup.bash' >> /etc/bash.bashrc
-
-COPY ros2/entrypoint.sh /usr/local/bin/entrypoint.sh
-COPY ros2/start_ros2_services.sh /usr/local/bin/start_ros2_services.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/start_ros2_services.sh
-
-EXPOSE 50051
-
-ENTRYPOINT ["/bin/bash", "/usr/local/bin/start_ros2_services.sh"]
+# 이 marker 가 있으면 start_ros2_services.sh 가 runtime install 을 skip 한다.
+RUN touch /etc/.modules_baked

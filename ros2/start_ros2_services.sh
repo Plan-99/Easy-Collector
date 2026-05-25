@@ -31,9 +31,16 @@ elif [ -d /root/ros2_ws/src ] && [ "$(ls -A /root/ros2_ws/src 2>/dev/null)" ]; t
     [ -f /root/ros2_ws/install/setup.bash ] && source /root/ros2_ws/install/setup.bash
 fi
 
-# --- 모듈 의존성 복구 (project/modules/*.json = single source of truth) ---
+# --- 모듈 의존성 처리 ---
+# 정상 경로: 이미지에 모든 모듈 deps 가 baked 되어 있다 (/etc/.modules_baked).
+#   → 이 블록 전체 skip → startup 5초.
+# Fallback: marker 가 없으면 = 이미지가 구버전이거나 베이크 전. runtime install 로 채워준다.
+#   (호스트에서 `bash scripts/rebuild_images.sh ros2` 후 컨테이너 재시작하면 정상 경로로 복귀)
 MODULES_DIR="/opt/easytrainer/project/modules"
-if [ -d "$MODULES_DIR" ]; then
+if [ -f /etc/.modules_baked ]; then
+    echo "[ROS2 Bridge] Module dependencies baked into image — skipping runtime install."
+elif [ -d "$MODULES_DIR" ]; then
+    echo "[ROS2 Bridge] /etc/.modules_baked not found — falling back to runtime install."
     MISSING_INFO=$(python3 -c "
 import json, subprocess, importlib, glob
 

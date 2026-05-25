@@ -1,0 +1,68 @@
+# Phase 1 hooks for EasyTrainer.
+#
+# Philosophy: catch the failures we keep paying for (missing module.json
+# version bumps, broken JSON, Python syntax errors, trailing whitespace),
+# without making the first commit on a new machine fail catastrophically.
+#
+# Setup (one time per dev machine):
+#   pipx install pre-commit  # or: pip install --user pre-commit
+#   pre-commit install        # writes .git/hooks/pre-commit
+#   pre-commit install --hook-type pre-push
+#
+# Manual run on all files:
+#   pre-commit run --all-files
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^backend/lerobot/|^isaaclab/|\.patch$
+      - id: end-of-file-fixer
+        exclude: ^backend/lerobot/|^isaaclab/|\.patch$
+      - id: check-json
+        exclude: ^backend/lerobot/|^frontend/jsconfig\.json$  # jsconfig has comments
+      - id: check-yaml
+        exclude: ^backend/lerobot/
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=2000"]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.6
+    hooks:
+      - id: ruff
+        # Phase 1: only the truly broken stuff (syntax + undefined names).
+        # Phase 2 will expand the rule set.
+        args: ["--select=E9,F63,F7,F82,F821,F823", "--force-exclude"]
+        files: ^(backend|training_server|scripts)/.*\.py$
+        exclude: ^backend/(lerobot|_modules_staging)/|^backend/lerobot$
+
+  - repo: local
+    hooks:
+      - id: validate-modules
+        name: Validate module.json schema
+        entry: python3 scripts/validate_modules.py
+        language: system
+        files: ^modules/.*/module\.json$
+        pass_filenames: true
+
+      - id: validate-modules-version-bump
+        name: Enforce module.json version bump when siblings change
+        entry: python3 scripts/validate_modules.py --check-version-bump
+        language: system
+        files: ^modules/.*/module\.json$
+        pass_filenames: true
+        # Pre-push so a multi-commit branch can amend mid-flight; first wave
+        # of catch happens before push.
+        stages: [pre-push]
+
+      - id: frontend-eslint
+        name: Frontend ESLint (Quasar/Vue)
+        entry: bash scripts/lint_frontend.sh
+        language: system
+        files: ^frontend/.*\.(js|cjs|mjs|vue)$
+        pass_filenames: true
+        # Pre-push: ESLint needs node_modules; running on every commit hurts
+        # when working offline or without docker up. We still gate the push.
+        stages: [pre-push]

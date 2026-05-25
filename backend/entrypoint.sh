@@ -17,11 +17,15 @@ except Exception as e:
     print(f'[backend][WARN] Migration failed: {e}', file=sys.stderr)
 "
 
-# --- Install module dependencies from manifests (single source of truth) ---
+# --- Install module dependencies from manifests (fallback only) ---
+# 정상 경로: 이미지에 deps 가 baked 됨 (/etc/.modules_baked) → 이 블록 전체 skip.
+# Fallback: marker 가 없거나 컨테이너 재생성 후 처음 켤 때만 manifest 기반 install.
 DATA_DIR="${EASYTRAINER_DATA_DIR:-/opt/easytrainer}"
 MANIFEST_DIR="$DATA_DIR/project/modules"
 DEPS_MARKER="/tmp/.backend_deps_installed"
-if [ ! -f "$DEPS_MARKER" ]; then
+if [ -f /etc/.modules_baked ]; then
+    : # baked into image — nothing to do
+elif [ ! -f "$DEPS_MARKER" ]; then
     if [ -d "$MANIFEST_DIR" ]; then
         # Python3 의 PEP 668 (Debian/Ubuntu 외부 관리 환경) 차단 우회. backend 컨테이너는
         # 격리된 환경이라 시스템 site-packages 에 직접 깔아도 안전.

@@ -232,10 +232,20 @@ copy_file "requirements.txt"
 # modules/ is NOT synced — project/modules/ only holds installed module manifests (*.json)
 # Source module definitions (robots/, sensors/, extensions/) are read-only and mounted separately
 copy_file "backend/entrypoint.sh" 755
+copy_file "backend/Dockerfile"
+copy_file "backend/Dockerfile.base"
+copy_file "backend/install_modules.sh" 755
+copy_file "ros2/Dockerfile"
+copy_file "ros2/Dockerfile.base"
+copy_file "ros2/install_modules.sh" 755
+# build context 의 staging 디렉터리는 빈 상태로라도 반드시 존재해야 함 (COPY 실패 방지)
+mkdir -p "$PROJECT_ROOT/ros2/_modules_staging" "$PROJECT_ROOT/backend/_modules_staging"
+touch "$PROJECT_ROOT/ros2/_modules_staging/.gitkeep" "$PROJECT_ROOT/backend/_modules_staging/.gitkeep"
 copy_file "ros2/start_ros2_services.sh" 755
 copy_file "ros2/entrypoint.sh" 755
 copy_file "scripts/quick_apply.sh" 755
 copy_file "scripts/clean_easytrainer.sh" 755
+copy_file "scripts/rebuild_images.sh" 755
 
 sync_deb_ui
 sync_deb_scripts

@@ -20,10 +20,17 @@ services:
     restart: unless-stopped
 
   # ── Backend: Flask API + PyTorch (GPU) ──
+  # 이미지는 2단계로 빌드됨:
+  #   1) easytrainer-backend-base : backend/Dockerfile.base (시스템/PyTorch)
+  #   2) easytrainer-backend       : backend/Dockerfile     (FROM base + 설치된 모듈 deps)
+  # bootstrap / 모듈 변경 시: `bash scripts/rebuild_images.sh backend`
   backend:
     build:
       context: .
       dockerfile: backend/Dockerfile
+      args:
+        BASE_IMAGE: easytrainer-backend-base:latest
+    image: easytrainer-backend:latest
     container_name: easytrainer_backend
     network_mode: host
     privileged: true
@@ -64,10 +71,17 @@ services:
     restart: unless-stopped
 
   # ── ROS 2: gRPC Bridge + IK Solver + Robot/Sensor drivers ──
+  # 이미지는 2단계로 빌드됨:
+  #   1) easytrainer-ros2-base : ros2/Dockerfile.base (ROS humble + Pinocchio + Bridge)
+  #   2) easytrainer-ros2       : ros2/Dockerfile     (FROM base + 설치된 모듈 deps)
+  # bootstrap / 모듈 변경 시: `bash scripts/rebuild_images.sh ros2`
   ros2:
     build:
       context: .
       dockerfile: ros2/Dockerfile
+      args:
+        BASE_IMAGE: easytrainer-ros2-base:latest
+    image: easytrainer-ros2:latest
     container_name: easytrainer_ros2
     network_mode: host
     privileged: true

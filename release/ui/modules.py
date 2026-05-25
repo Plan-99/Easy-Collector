@@ -459,27 +459,111 @@ def _scan_remote_module_releases() -> dict[str, dict]:
 
 _ROS2_CONTAINER = "easytrainer_ros2"
 _BACKEND_CONTAINER = "easytrainer_backend"
+_CONTAINER_TO_SERVICE = {
+    _ROS2_CONTAINER: "ros2",
+    _BACKEND_CONTAINER: "backend",
+}
 
 
-def _install_deps_in_containers(meta: dict) -> None:
-    """Install module dependencies inside running Docker containers via docker exec.
+def _affected_targets(meta: dict) -> set[str]:
+    """Return {"ros2", "backend"} subset whose images need to be rebuilt for this module.
 
-    스키마:
-      dependencies:
-        apt: [...]            # 기본 컨테이너에 apt-get install
-        pip: [...]            # 기본 컨테이너에 pip install
-        backend_apt: [...]    # 카테고리와 무관하게 backend 컨테이너에 추가 설치
-        backend_pip: [...]    # 카테고리와 무관하게 backend 컨테이너에 추가 설치 (예: realsense
-                              # 의 pyrealsense2 — backend 의 detect 엔드포인트가 사용)
+    Bake rules (mirror of scripts/rebuild_images.sh):
+      - robot/sensor 카테고리에 dependencies.apt|pip 가 있으면 ros2 베이크
+      - extension   카테고리에 dependencies.apt|pip 가 있으면 backend 베이크
+      - 카테고리 무관 dependencies.backend_apt|backend_pip 는 backend 베이크
+    """
+    deps = meta.get("dependencies", {}) or {}
+    category = meta.get("category", "")
+    has_main = bool(deps.get("apt") or deps.get("pip"))
+    has_backend = bool(deps.get("backend_apt") or deps.get("backend_pip"))
+    out: set[str] = set()
+    if has_main:
+        if category in ("robot", "sensor"):
+            out.add("ros2")
+        elif category == "extension":
+            out.add("backend")
+        else:
+            out.update({"ros2", "backend"})
+    if has_backend:
+        out.add("backend")
+    return out
+
+
+def _rebuild_and_restart(targets: set[str]) -> bool:
+    """Rebuild derived image(s) for the given service names then restart them.
+
+    Returns True if rebuild & restart completed successfully for all targets.
+    On failure (e.g. rebuild script missing, build error) returns False — caller
+    may fall back to legacy docker-exec install for "good enough" immediate
+    availability until the next clean rebuild.
     """
     import subprocess as _sp
 
-    deps = meta.get("dependencies", {})
-    install = meta.get("install", {})
+    if not targets:
+        return True
 
-    # 기본 컨테이너 결정 (category 별)
-    containers = []
+    project_root = _get_project_root()
+    rebuild_script = project_root / "scripts" / "rebuild_images.sh"
+    compose_file = None
+    for name in ("docker-compose.yml", "docker-compose.cpu.yml"):
+        cand = project_root / name
+        if cand.is_file():
+            compose_file = cand
+            break
+
+    if not rebuild_script.is_file():
+        print(f"[MODULE] rebuild script missing — skipping image bake: {rebuild_script}")
+        return False
+    if compose_file is None:
+        print(f"[MODULE] docker-compose file not found under {project_root} — skipping restart.")
+        return False
+
+    ok = True
+    for target in sorted(targets):  # deterministic order: backend, ros2
+        print(f"[MODULE] rebuilding image: {target}")
+        try:
+            r = _sp.run(
+                ["bash", str(rebuild_script), target],
+                cwd=str(project_root),
+                timeout=1800,  # 30분 (첫 base 빌드 여유)
+                check=False,
+            )
+            if r.returncode != 0:
+                print(f"[MODULE] rebuild {target} returned {r.returncode}")
+                ok = False
+        except Exception as e:
+            print(f"[MODULE] rebuild {target} failed: {e}")
+            ok = False
+
+    if ok:
+        try:
+            print(f"[MODULE] restarting containers: {sorted(targets)}")
+            _sp.run(
+                ["docker", "compose", "-f", str(compose_file), "up", "-d", "--no-build"] + sorted(targets),
+                cwd=str(project_root),
+                timeout=120, check=False,
+            )
+        except Exception as e:
+            print(f"[MODULE] container restart failed: {e}")
+            ok = False
+    return ok
+
+
+def _legacy_docker_exec_install(meta: dict) -> None:
+    """Fallback: install module deps via docker exec into the running container.
+
+    Used when image rebuild infra is unavailable (older project layout, missing
+    scripts, build failure). Packages installed this way live only in the
+    container's writable layer — they vanish on `docker compose down && up`.
+    The next successful rebuild_and_restart cycle restores persistence.
+    """
+    import subprocess as _sp
+
+    deps = meta.get("dependencies", {}) or {}
     category = meta.get("category", "")
+
+    containers: list[str] = []
     if category in ("robot", "sensor"):
         containers.append(_ROS2_CONTAINER)
     elif category == "extension":
@@ -489,28 +573,21 @@ def _install_deps_in_containers(meta: dict) -> None:
 
     def _is_running(container: str) -> bool:
         try:
-            result = _sp.run(
-                ["docker", "inspect", "-f", "{{.State.Running}}", container],
-                capture_output=True, text=True, timeout=5,
-            )
-            return "true" in result.stdout.lower()
+            r = _sp.run(["docker", "inspect", "-f", "{{.State.Running}}", container],
+                        capture_output=True, text=True, timeout=5)
+            return "true" in r.stdout.lower()
         except Exception:
             return False
 
     def _pip_install(container: str, pkgs: list) -> None:
         if not pkgs:
             return
-        # 먼저 --break-system-packages 로 시도 (Python 3.11+ PEP 668 차단 우회).
-        # 옛 pip (Python 3.10 등) 에서는 unknown option 으로 실패 → 폴백으로 그 옵션
-        # 빼고 재시도. 컨테이너는 격리된 환경이라 system site-packages 에 직접 깔아도
-        # 안전하다 (호스트는 절대 안 됨).
         cmd_base = ["docker", "exec", container, "python3", "-m", "pip", "install", "--quiet"]
         try:
             r = _sp.run(cmd_base + ["--break-system-packages"] + pkgs,
                         capture_output=True, text=True, timeout=120, check=False)
             if r.returncode == 0:
                 return
-            # unknown option 또는 다른 일시 오류 → flag 없이 재시도
             _sp.run(cmd_base + pkgs, timeout=120, check=False)
         except Exception:
             pass
@@ -532,30 +609,50 @@ def _install_deps_in_containers(meta: dict) -> None:
     backend_pip_deps = deps.get("backend_pip", []) or []
     backend_apt_deps = deps.get("backend_apt", []) or []
 
-    for container in containers:
-        if not _is_running(container):
+    for c in containers:
+        if not _is_running(c):
             continue
-        _pip_install(container, pip_deps)
-        _apt_install(container, apt_deps)
+        _pip_install(c, pip_deps)
+        _apt_install(c, apt_deps)
 
-    # backend_* deps 는 카테고리 무관하게 backend 컨테이너에 추가 설치 (중복 OK — pip/apt 모두 idempotent).
     if (backend_pip_deps or backend_apt_deps) and _is_running(_BACKEND_CONTAINER):
         _pip_install(_BACKEND_CONTAINER, backend_pip_deps)
         _apt_install(_BACKEND_CONTAINER, backend_apt_deps)
 
-    # SDK install_cmd (e.g. "pip3 install -e .")
-    sdk_cfg = install.get("sdk", {})
+
+def _install_deps_in_containers(meta: dict) -> None:
+    """Bake module deps into derived images, restart affected containers, then
+    run any SDK install_cmd (bind-mount source, idempotent).
+
+    Replaces the old docker-exec install. New behavior is "persistent by
+    construction" — deps survive `docker compose down && up`. If the rebuild
+    pipeline isn't available (older layout, transient build error) we fall
+    back to docker exec install so the module is still usable until the next
+    successful rebuild.
+    """
+    import subprocess as _sp
+
+    targets = _affected_targets(meta)
+    if targets:
+        rebuilt = _rebuild_and_restart(targets)
+        if not rebuilt:
+            print("[MODULE] image rebuild failed — falling back to docker exec install.")
+            _legacy_docker_exec_install(meta)
+
+    # SDK install_cmd (e.g. "pip3 install -e .") — bind-mount source install,
+    # idempotent. start_ros2_services.sh re-runs an equivalent check on every
+    # boot so this is best-effort (skip on failure).
+    install = meta.get("install", {}) or {}
+    sdk_cfg = install.get("sdk", {}) or {}
     install_cmd = sdk_cfg.get("install_cmd", "")
     if install_cmd and meta.get("id"):
-        # SDK 설치 위치는 항상 module_id 기준 (manifest 의 install.sdk.target 무시).
-        # 컨테이너 안 경로: /root/robot_sdk/<module_id>
         container_sdk_path = f"/root/robot_sdk/{meta['id']}"
         try:
-            result = _sp.run(
+            r = _sp.run(
                 ["docker", "inspect", "-f", "{{.State.Running}}", _ROS2_CONTAINER],
                 capture_output=True, text=True, timeout=5,
             )
-            if "true" in result.stdout.lower():
+            if "true" in r.stdout.lower():
                 _sp.run(
                     ["docker", "exec", "-w", container_sdk_path, _ROS2_CONTAINER,
                      "bash", "-c", install_cmd],
@@ -1402,11 +1499,13 @@ def remove_module(module_id: str) -> bool:
                 except Exception:
                     continue
 
-    # Uninstall pip dependencies if manifest available
+    # 이미지 rebuild 대상은 manifest 가 사라지기 전에 미리 산출.
+    targets_to_rebuild: set[str] = set()
     if manifest:
-        _uninstall_deps(manifest)
+        targets_to_rebuild = _affected_targets(manifest)
 
-    # Remove manifest from project/modules/
+    # Remove manifest from project/modules/ (rebuild_images.sh 가 이 디렉터리를
+    # 읽어 새 이미지를 만들기 때문에 반드시 rebuild 전에 제거)
     _remove_module_manifest(module_id)
 
     # Legacy modules dir
@@ -1415,6 +1514,18 @@ def remove_module(module_id: str) -> bool:
         shutil.rmtree(legacy_dir, ignore_errors=True)
 
     set_module_installed(module_id, False)
+
+    # 이 모듈의 apt/pip deps 가 이미지에 baked 되어 있던 경우 → 새 이미지(=해당
+    # 모듈 deps 제외) 로 리빌드 + 컨테이너 재시작. 실패하면 폴백으로 pip uninstall
+    # 만 수행 (apt 는 다른 모듈이 공유할 수 있어 건드리지 않는 게 기본 정책).
+    if targets_to_rebuild:
+        rebuilt = _rebuild_and_restart(targets_to_rebuild)
+        if not rebuilt and manifest:
+            print("[MODULE] image rebuild failed during uninstall — running legacy pip uninstall as fallback.")
+            _uninstall_deps(manifest)
+    elif manifest:
+        # deps 가 없으면 굳이 rebuild 할 필요 없음. legacy 정리만.
+        _uninstall_deps(manifest)
 
     # Debug log to file
     try:

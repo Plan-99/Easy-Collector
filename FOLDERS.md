@@ -19,6 +19,7 @@
 | 데스크톱 런처, 설치 프로그램(.deb), PyQt UI, 디바이스 인증 화면 | [release/](release/) |
 | ROS 2 노드/서비스, SDK 컨트롤러, IK, 토픽 브릿지 | [ros2/](ros2/) |
 | 원격 학습 서버(별도 Docker, 5100 포트) | [training_server/](training_server/) |
+| **"왜 지금 코드가 이렇게 생겼나"** — 굳어진 설계 결정의 단일 정보원 | [docs/](docs/) |
 
 ---
 

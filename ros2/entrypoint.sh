@@ -5,14 +5,16 @@ source /opt/ros/humble/setup.bash
 
 WS="/root/ros2_ws"
 
-# --- Install module dependencies from manifests (single source of truth) ---
-# project/modules/*.json contains all installed module manifests.
-# On container restart, apt/pip packages are lost — this restores them.
+# --- Install module dependencies from manifests (fallback only) ---
+# 정상 경로: 이미지에 deps 가 baked 됨 (/etc/.modules_baked) → 이 블록 전체 skip.
+# Fallback: marker 가 없거나 컨테이너 재생성 후 처음 켤 때만 manifest 기반 install.
 DEPS_MARKER="/tmp/.ros2_deps_installed"
 DATA_DIR="${EASYTRAINER_DATA_DIR:-/opt/easytrainer}"
 MANIFEST_DIR="$DATA_DIR/project/modules"
 
-if [ ! -f "$DEPS_MARKER" ]; then
+if [ -f /etc/.modules_baked ]; then
+    : # baked into image — nothing to do
+elif [ ! -f "$DEPS_MARKER" ]; then
     # 1) Restore deps from manifest dir (covers ALL modules including apt/pip-only)
     if [ -d "$MANIFEST_DIR" ]; then
         for mj in "$MANIFEST_DIR"/*.json; do

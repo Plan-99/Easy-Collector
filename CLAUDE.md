@@ -6,6 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 작업이 들어오면 **먼저 [FOLDERS.md](FOLDERS.md)를 참고해서 어느 폴더를 건드려야 하는지 결정한다.** 각 폴더(`backend/`, `frontend/`, `home-next/`, `isaaclab/`, `modules/`, `release/`, `ros2/`, `training_server/`)의 역할, 주요 하위 구조, "이런 요청이면 여기를 수정" 예시가 정리되어 있다. 폴더 책임이 바뀌면 FOLDERS.md도 함께 갱신할 것.
 
+## 왜 지금 코드가 이렇게 생겼는지 알아야 하면
+
+[docs/](docs/) — 굳어진 설계 결정이 모두 여기 있다. 특히 [docs/design-docs/](docs/design-docs/)는
+"왜 이런 구조인가"의 단일 정보원이다. 작업이 도메인 결정(모듈 entitlement, 학습 분리, 카메라
+처리 등)에 의존하면 먼저 design-docs를 훑을 것. 새 결정이 굳어지면 `docs/README.md`에 적힌
+규칙대로 새 design-doc을 추가한다.
+
 ## Project Overview
 
 EasyTrainer is a robotics training and data collection platform for robot teleoperation, imitation learning, and policy training. It uses a Python/Flask backend with ROS 2 integration and a Vue 3/Quasar frontend, all running inside Docker containers with NVIDIA GPU support.
@@ -37,6 +44,15 @@ bash scripts/quick_apply.sh ./ /opt/easytrainer/project
 
 ### Release
 Tag with semver (e.g., `git tag 3.2.1`) to trigger GitHub Actions CI/CD which runs PyArmor obfuscation + PyInstaller + DEB packaging.
+
+### Pre-commit (lint gate)
+Catches broken JSON, Python syntax errors, missing module.json fields, and (on pre-push) ESLint + module.json version-bump. One-time setup on each dev machine:
+```bash
+pipx install pre-commit    # or: pip install --user pre-commit
+pre-commit install
+pre-commit install --hook-type pre-push
+```
+Manual sweep across the repo: `pre-commit run --all-files`. Hook definitions live in [.pre-commit-config.yaml](.pre-commit-config.yaml).
 
 ## Architecture
 

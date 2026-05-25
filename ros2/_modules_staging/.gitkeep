@@ -1,0 +1,3 @@
+# 이 디렉터리는 scripts/rebuild_ros2_image.sh 가 build 직전에
+# manifest 들을 stage 하는 임시 영역입니다.
+# 파일들(*.json)은 .gitignore 처리되어 commit 되지 않습니다.
