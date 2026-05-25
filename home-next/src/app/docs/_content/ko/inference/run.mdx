@@ -5,7 +5,8 @@ section: inference
 order: 3
 sourceRefs:
   - frontend/src/components/v2/MonitoringWindow.vue
-lastVerifiedVersion: 0.0.0
+  - ros2/ros2_bridge/interpolation_node.py
+lastVerifiedVersion: 5.0.0
 ---
 
 <Steps>
@@ -29,6 +30,10 @@ lastVerifiedVersion: 0.0.0
 
 설정에 따라 정책이 한 번에 여러 step의 액션을 chunk로 출력합니다 (ACT의 chunk_size 등).
 재추론(reinference) 주기는 정책 학습 시 설정한 chunk_size와 추론 Hz의 관계로 결정됩니다.
+
+<Callout type="info">
+추론 시간이 매 스텝마다 미세하게 달라져도 로봇이 부드럽게 움직이도록, 내부 보간 노드가 각 웨이포인트의 도착 시각을 기준으로 자동 스케줄링하고 출력단에 저역 통과 필터를 적용합니다. 사용자가 별도로 설정할 항목은 없습니다.
+</Callout>
 
 <Callout type="warning">
 Succeed 점수가 낮게 유지되거나 동작이 학습 시연과 동떨어져 보이면 즉시 Stop을 누르고, 데이터를 더 모은 뒤 다시 시도하세요.

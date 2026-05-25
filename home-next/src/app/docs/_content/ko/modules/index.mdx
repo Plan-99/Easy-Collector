@@ -9,7 +9,8 @@ sourceRefs:
   - modules/robots/
   - modules/sensors/
   - modules/extensions/
-lastVerifiedVersion: 0.0.0
+  - modules/extensions/sam3/module.json
+lastVerifiedVersion: 5.0.0
 ---
 
 Easy Trainer의 로봇·센서 드라이버는 **모듈** 단위로 분리되어 있습니다.
@@ -18,8 +19,8 @@ Easy Trainer의 로봇·센서 드라이버는 **모듈** 단위로 분리되어
 모듈은 세 카테고리로 분류됩니다.
 
 - **로봇** — Piper, Dynamixel, Unitree, Jaka, Fairino, RBPodo, Kinova, Techman 등
-- **센서** — Webcam, Intel RealSense 등
-- **확장 기능** — VR Teleop, Test Arm, Isaac Lab Simulation 등
+- **센서** — Webcam (Logitech / APC), Intel RealSense 등
+- **확장 기능** — VR Teleop, Test Arm, Isaac Lab Simulation, SAM 3 Segmentation 등
 
 ## 모듈 설치
 
@@ -57,6 +58,23 @@ Easy Trainer의 로봇·센서 드라이버는 **모듈** 단위로 분리되어
    <DocsImage
      src="/docs/modules/04-module-installed.png"
      alt="설치 완료 — 버전 + 제거 버튼"
+     status="missing"
+   />
+
+5. **모듈이 자격증명을 요구하면 자격증명 입력 다이얼로그가 뜹니다.**
+
+   일부 확장 모듈(예: SAM 3 Segmentation은 HuggingFace 토큰이 필요)은 `module.json`의 `post_install.credentials` 항목에 따라 설치 직후 입력 다이얼로그를 띄웁니다. 다이얼로그에는 다음이 표시됩니다.
+
+   - 토큰을 어디서 발급받는지 안내하는 **버튼식 링크** (예: 라이선스 동의 페이지, 토큰 발급 페이지)
+   - 입력 필드 (비밀 정보면 마스킹 처리)
+   - 형식 검증 (예: `hf_` 로 시작 + 20자 이상)
+   - 모듈이 허용한 경우 **나중에 (모듈 비활성화)** 버튼
+
+   입력값은 사용자 홈의 보호 위치(`$EASYTRAINER_DATA_DIR` 등)에 0600 권한으로 저장되고 다음 설치/재설치 때는 다시 묻지 않습니다. **나중에** 를 누르면 모듈은 설치되지만 자격증명이 필요한 기능은 동작하지 않습니다.
+
+   <DocsImage
+     src="/docs/modules/16-module-credentials.png"
+     alt="모듈 자격증명 입력 다이얼로그 — 안내 링크 + 시크릿 입력"
      status="missing"
    />
 </Steps>

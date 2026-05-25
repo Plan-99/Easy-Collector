@@ -5,8 +5,10 @@ section: training
 order: 5
 sourceRefs:
   - frontend/src/pages/v2/TrainPage.vue
+  - frontend/src/components/v2/HyperparamHelp.vue
+  - frontend/src/configs/hyperparamHelp.js
   - training_server/train_worker.py
-lastVerifiedVersion: 0.0.0
+lastVerifiedVersion: 5.0.0
 ---
 
 Step 3에서는 결과 체크포인트 이름과 학습 하이퍼파라미터를 정합니다.
@@ -25,11 +27,27 @@ Step 3에서는 결과 체크포인트 이름과 학습 하이퍼파라미터를
 
    <DocsImage
      src="/docs/training/params-01-form.png"
-     alt="Step 3 — Checkpoint Name + Learning Rate / Batch Size / Epochs 등 학습 폼"
+     alt="Step 3 파라미터 폼 전체 — Checkpoint Name + Learning Rate / Batch Size / Epochs 등 학습 폼과 하단 Start Training 버튼까지 한 화면에"
+     status="missing"
+   />
+
+2. **각 항목 옆의 ? 버튼을 누르면 하이퍼파라미터 도움말 다이얼로그가 열립니다.**
+
+   파라미터 라벨 우측에 노란 **help_outline** 아이콘이 보입니다. 누르면 해당 정책 타입(ACT / Diffusion / PI0 등)에 맞춰 두 단계로 설명이 나옵니다.
+
+   - **쉬운 설명** — 처음 학습하는 분을 위한 직관적 비유와 권장 시작값
+   - **자세한 설명** — 수렴/일반화에 미치는 영향, 다른 파라미터와의 상호작용 등 전문 해설
+   - 일부 항목은 상단에 **주의** 박스로 "이 값은 함부로 바꾸지 마세요" 같은 경고가 추가로 표시됩니다.
+
+   정책 타입을 바꾸면 같은 키여도 설명이 갱신됩니다. 다이얼로그 우상단의 닫기 버튼 또는 ESC로 닫습니다.
+
+   <DocsImage
+     src="/docs/training/params-02-help-dialog.png"
+     alt="하이퍼파라미터 도움말 다이얼로그 — 쉬운 설명 / 자세한 설명"
      status="missing"
    />
 </Steps>
 
 <Callout type="tip">
-처음에는 기본값을 그대로 두고 학습이 잘 되는지 확인하세요. 결과가 나오면 그때 학습률·에폭을 조정하는 게 시간 효율이 좋습니다.
+처음에는 기본값을 그대로 두고 학습이 잘 되는지 확인하세요. 결과가 나오면 그때 학습률·에폭을 조정하는 게 시간 효율이 좋습니다. 어떤 항목을 바꿔야 할지 모르겠다면 ? 버튼의 도움말부터 확인하는 것을 권장합니다.
 </Callout>

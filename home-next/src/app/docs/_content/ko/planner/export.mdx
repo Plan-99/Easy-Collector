@@ -1,0 +1,170 @@
+---
+title: 플래너 내보내기
+description: 완성된 플래너를 체크포인트 + 런타임 코드가 포함된 독립 실행 zip으로 묶어 EasyTrainer 없이 도커 환경에서 실행합니다.
+section: planner
+order: 4
+sourceRefs:
+  - frontend/src/pages/v2/PlannerPage.vue
+  - backend/api/routes/planner.py
+  - backend/api/process/export_planner.py
+  - backend/api/process/export_templates/README_planner.md
+  - backend/api/process/export_templates/run_planner.py
+  - backend/api/process/export_templates/ros_planner_service.py
+related:
+  - /docs/planner
+  - /docs/planner/blocks-and-run
+  - /docs/inference
+lastVerifiedVersion: 5.0.0
+---
+
+플래너 내보내기는 완성된 플랜과 그 안에서 쓰는 체크포인트, 보간/실행 런타임 코드, 도커 환경 파일을 한 번에 zip으로 묶어 주는 기능입니다. 받은 zip은 EasyTrainer 백엔드 / 컨테이너 / DB / gRPC 브리지 없이도 호스트의 ROS 2 토픽에 직접 명령을 발행해 플래너를 그대로 재생합니다. 양산 라인, 별도 산업용 PC, 데모용 노트북 등 EasyTrainer 전체 스택을 띄우기 어려운 환경에 배포할 때 사용합니다.
+
+## 사전 조건
+
+- 플래너에 [그룹과 블록이 모두 추가](/docs/planner/blocks-and-run)되어 있고 실행 중이 아니어야 합니다 (실행 중에는 **내보내기** 버튼이 비활성화됩니다).
+- 사용된 체크포인트 블록들이 모두 export 가능한 형식이어야 합니다.
+  - `action_key='qaction'` 인 정책
+  - vision backbone이 `resnet18`
+  - 위 조건을 벗어나는 체크포인트가 하나라도 있으면 백엔드가 시작 단계에서 거부하고 알림으로 원인을 표시합니다.
+
+## 내보내기 절차
+
+<Steps>
+1. **플래너를 열고 우측 상단의 내보내기 버튼을 누릅니다.**
+
+   타임라인 헤더의 **전체 실행** 옆에 있는 다운로드 아이콘이 달린 버튼입니다. 블록이 하나도 없거나 그룹이 비어 있을 때, 또는 플래너가 실행 중일 때는 비활성화됩니다.
+
+   <DocsImage
+     src="/docs/planner/export-01-button.png"
+     alt="플래너 헤더 — 내보내기 버튼 위치"
+     status="missing"
+   />
+
+2. **저장 위치 선택 다이얼로그가 뜨면 zip 파일 경로를 지정합니다.**
+
+   파일명은 `planner_<id>_<safe_name>.zip` 형식으로 자동 제안됩니다. 브라우저가 File System Access API를 지원하면(Chrome / Edge 계열) 시스템 저장 다이얼로그가 열리고, 그렇지 않으면 브라우저의 기본 다운로드 폴더로 저장됩니다.
+
+3. **서버가 zip을 생성하는 동안 로딩 표시가 뜹니다.**
+
+   백엔드는 체크포인트 가중치를 export 형식으로 저장하고, IK가 필요한 로봇의 URDF와 메쉬, 런타임 템플릿(`run_planner.py`, `ros_planner_service.py`, `easytrainer_runtime/`), 도커 환경 파일(`Dockerfile`, `docker-compose.yml`, `requirements.txt`), 그리고 플랜 메타데이터(`planner_meta.json`)를 한 폴더로 묶어 zip으로 만듭니다. 체크포인트 크기에 비례하므로 수십 초까지 걸릴 수 있습니다.
+
+4. **내보내기에 성공하면 우하단에 저장된 파일명이 알림으로 표시됩니다.**
+
+   실패하면 알림에 원인이 함께 표시됩니다. 가장 자주 보이는 원인은 export 불가능한 체크포인트가 섞여 있는 경우입니다.
+</Steps>
+
+## zip 안에 무엇이 들어 있나요
+
+```
+planner_<id>_<name>/
+├── run_planner.py            # 단발 / 반복 실행 진입점
+├── ros_planner_service.py    # ROS 서비스 호출로 실행/중지 제어
+├── planner_meta.json         # 그룹·블록·체크포인트·로봇 토픽 메타데이터
+├── requirements.txt          # Python 의존성
+├── Dockerfile                # ROS 2 Humble + 필요한 의존성
+├── docker-compose.yml        # GPU + 호스트 네트워크 설정
+├── easytrainer_runtime/      # SimpleAgent / SimpleEnv / planner_engine / interpolation_node 등
+├── lerobot/                  # 벤더링된 lerobot (별도 pip install 금지)
+└── checkpoints/
+    └── <체크포인트 ID>/
+        ├── config.json, model.safetensors, ...
+        └── export_meta.json
+```
+
+플랜이 쓰는 체크포인트 폴더가 모두 포함되어 있고, IK가 활성화된 로봇이 있으면 그 로봇의 URDF와 메쉬도 `urdfs/<robot_id>/` 아래에 같이 들어갑니다. **다시 export하면 같은 폴더 위에 풀어쓸 수 있어** 한번 빌드한 도커 이미지를 그대로 재사용할 수 있습니다 (`requirements.txt`가 바뀌지 않는 한).
+
+## 받은 zip 실행하기
+
+### 도커로 실행 (권장)
+
+번들된 `Dockerfile`과 `docker-compose.yml`을 그대로 사용하면 호스트 환경을 오염시키지 않고 깨끗하게 돌아갑니다. 호스트에는 Docker, Docker Compose, (GPU 추론을 위해) `nvidia-container-toolkit`이 필요합니다.
+
+```bash
+unzip planner_3_pick_and_place.zip
+cd planner_3_pick_and_place
+
+docker compose build                              # 최초 1회만
+docker compose run --rm test python3 run_planner.py --dry-run   # 안전 사전 검증
+docker compose run --rm test python3 run_planner.py             # 실제 실행
+```
+
+`docker-compose.yml`은 `network_mode: host`로 설정되어 컨테이너가 호스트와 같은 ROS 2 그래프(`ROS_DOMAIN_ID`)를 봅니다. 번들 폴더가 `/workspace`로 마운트되므로, 플래너를 EasyTrainer에서 다시 내보내 같은 폴더에 풀어 두면 다음 `docker compose run`이 곧바로 새 코드를 잡습니다.
+
+### 호스트에서 직접 실행
+
+ROS 2 Humble 이상이 설치/소싱되어 있고 `pip install -r requirements.txt`로 의존성이 들어가 있으면 도커 없이도 됩니다.
+
+```bash
+# 한 번 실행:
+python3 run_planner.py
+
+# 5번 반복:
+python3 run_planner.py --repeat 5
+
+# Ctrl-C까지 무한 반복:
+python3 run_planner.py --repeat 0
+
+# 로봇으로 명령은 보내지 않고 정책 액션 계산만 하기 (안전 점검):
+python3 run_planner.py --dry-run
+
+# CPU 강제 (GPU가 없을 때):
+python3 run_planner.py --device cpu
+```
+
+그룹은 병렬 스레드로, 그룹 안의 블록은 순차로 실행됩니다. Ctrl-C를 누르면 안전하게 중지됩니다.
+
+### ROS 서비스로 트리거하기
+
+산업용 PLC나 다른 노드에서 실행을 트리거하고 싶으면 `ros_planner_service.py`를 띄워 두고 표준 ROS 서비스로 시작/중지할 수 있습니다.
+
+```bash
+# 한 터미널에서 노드 띄우기:
+python3 ros_planner_service.py
+
+# 다른 터미널에서 실행 / 중단:
+ros2 service call /easytrainer_planner_service/start std_srvs/srv/Trigger
+ros2 service call /easytrainer_planner_service/stop  std_srvs/srv/Trigger
+```
+
+노드는 시작할 때 모든 체크포인트를 한 번 메모리에 올려 두므로 `start` 호출 시 곧바로 실행이 시작됩니다.
+
+## 사전 조건 (실행 환경)
+
+- 받은 PC에서 **로봇 드라이버와 카메라 드라이버**가 미리 떠 있어야 합니다. 플랜은 EasyTrainer에서 만들 때 기록된 토픽 이름(`planner_meta.json` 안의 `workspaces.<id>.assembly.robots` / `.sensors`)을 그대로 사용합니다.
+- 로봇의 `write_type`이 `topic`이어야 합니다. 서비스/액션 골 기반 로봇은 시작 단계에서 스킵되고 그 로봇이 필요한 블록은 명확한 오류로 실패합니다.
+- 체크포인트 블록은 GPU에서 도는 것을 강력히 권장합니다. `--device cpu`도 동작하지만 추론이 매우 느려집니다.
+
+## 보간 노드 (joint command smoothing)
+
+체크포인트 추론은 보통 ~10 Hz, 로봇 드라이버는 200 Hz 정도의 매끄러운 명령 스트림을 받아야 떨림 없이 움직입니다. EasyTrainer에서 **interpolation이 켜진 로봇**이 플랜에 있으면 export 시 자동으로 기록되고, 실행 시 각 로봇마다 `JointInterpolationNode`가 함께 떠서 `/ec_robot_<id>/ec_joint_cmd`를 받아 200 Hz로 보간한 뒤 실제 `write_topic`으로 발행합니다.
+
+체크포인트 블록 안에서는 예측된 각 액션이 **스케줄된 웨이포인트**(`/ec_robot_<id>/ec_joint_waypoint`)로 전달되어 추론 한 스텝이 늦어져도 로봇 속도에 끊김이 생기지 않습니다. 이 경로를 끄고 옛 즉시 명령 방식으로 돌아가려면:
+
+```bash
+EC_SCHEDULED_WAYPOINTS=0 python3 run_planner.py
+```
+
+## 블록 지원 범위
+
+| 블록 종류 | 독립 실행 환경에서 지원 여부 |
+|----------|-------------------------------|
+| Joint Position | 지원 — `duration` 동안 보간 이동 |
+| Checkpoint | 지원 — 폐루프 추론, `until_done` / `move_homepose` 모두 반영 |
+| Time Sleep | 지원 |
+| Sync | 지원 — 그룹 간 배리어 |
+| Query Pose (관절 모드) | 지원 |
+| Query Pose (엔드 이펙터 모드) | 지원 — 번들된 Pinocchio + pin-pink IK 사용 |
+
+## EasyTrainer 안에서 실행할 때와의 차이
+
+- **소켓 진행률 브로드캐스트 / OOD 점수 / Grad-CAM / OTI-RL은 빠집니다.** 운영 모니터링 UI가 필요하면 EasyTrainer 안에서 실행하세요.
+- `move_homepose`는 체크포인트 시작 **직전**에 한 번만 홈으로 이동합니다 (in-container의 매 에피소드 재홈 루프와는 다릅니다).
+- 엔드 이펙터 모드 Query Pose는 단일 EE 로봇만 지원합니다.
+
+<Callout type="warning">
+받은 zip은 학습 시 사용된 토픽 이름과 로봇 구성을 그대로 박아 두고 있습니다. 다른 PC에 옮길 때는 그 PC에 같은 토픽 이름으로 같은 로봇/카메라 드라이버가 떠 있어야 정상 동작합니다.
+</Callout>
+
+<Callout type="info">
+zip은 학습 코드 / 데이터셋 / 다른 플래너에 대한 정보 없이 **이 플래너만**을 위한 최소 패키지입니다. 학습이나 추가 시연 수집이 필요해지면 원본 EasyTrainer로 돌아가서 진행하세요.
+</Callout>

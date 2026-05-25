@@ -5,8 +5,9 @@ section: training
 order: 4
 sourceRefs:
   - frontend/src/pages/v2/TrainPage.vue
+  - frontend/src/components/v2/HyperparamHelp.vue
   - backend/policies/
-lastVerifiedVersion: 0.0.0
+lastVerifiedVersion: 5.0.0
 ---
 
 Step 2에서는 어떤 **정책 (policy)**을 학습할지 결정합니다.
@@ -54,6 +55,10 @@ Step 2에서는 어떤 **정책 (policy)**을 학습할지 결정합니다.
      status="missing"
    />
 </Steps>
+
+## 하이퍼파라미터 도움말
+
+정책 폼의 각 하이퍼파라미터(`learning_rate`, `chunk_size`, `lora_rank` 등) 라벨 옆에는 노란 **?** 아이콘이 붙어 있습니다. 누르면 정책 타입에 맞춰 **쉬운 설명 / 자세한 설명**으로 나뉜 도움말 다이얼로그가 뜹니다. 자세한 사용법은 [학습 파라미터](/docs/training/parameters)를 참고하세요.
 
 ## 기존 체크포인트 이어 학습 (Fine-tune)
 

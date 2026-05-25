@@ -1,0 +1,120 @@
+---
+title: 데이터셋 불러오기 / 내보내기
+description: 데이터셋을 아카이브로 내보내거나, 다른 머신에서 만든 아카이브를 현재 워크스페이스로 불러옵니다.
+section: datasets
+order: 4
+sourceRefs:
+  - frontend/src/pages/v2/DatasetPage.vue
+  - frontend/src/pages/v2/WorkspacePage.vue
+  - backend/api/routes/dataset.py
+related:
+  - /docs/datasets
+  - /docs/datasets/edit
+lastVerifiedVersion: 5.0.0
+---
+
+데이터셋을 아카이브 파일로 묶어 다른 머신으로 옮기거나, 받은 아카이브를 다시 풀어 현재 워크스페이스에 새 데이터셋으로 등록합니다. 내보낸 파일을 다른 머신에서 그대로 불러올 수 있는 **라운드트립 호환** 구조입니다.
+
+## 어디서 하나
+
+데이터셋 섹션의 두 페이지에서 동일하게 사용할 수 있습니다.
+
+- **DatasetPage** — 좌측 네비 **데이터셋 탭** 상단의 **데이터셋 불러오기** 버튼, 데이터셋 우클릭 메뉴의 **데이터셋 내보내기** 항목
+- **WorkspacePage** — 워크스페이스의 **data 탭** 상단 버튼과 데이터셋 우클릭 메뉴
+
+<Callout type="info">
+**워크스페이스 선택이 필수입니다.** 새 데이터셋은 현재 선택된 워크스페이스(task)에 귀속되기 때문에, 워크스페이스가 선택되지 않은 상태에서 불러오기 버튼을 누르면 차단되고 "워크스페이스를 먼저 선택하세요" 알림이 표시됩니다.
+</Callout>
+
+## 지원 포맷
+
+| 작업 | 포맷 |
+|---|---|
+| **내보내기** | `.tar.gz` (항상 고정) |
+| **불러오기** | `.tar.gz`, `.tgz`, `.tar`, `.zip` |
+
+내보내기 파일명은 `<dataset_name>_<id>.tar.gz` 형식입니다. 다른 도구로 만든 `.zip`이나 `.tar` 아카이브도 동일한 LeRobot v2.1 레이아웃(`meta/`, `data/`, `videos/`)을 갖추고 있으면 그대로 불러올 수 있습니다. 아카이브가 단일 최상위 디렉터리로 감싸여 있어도 자동으로 풀립니다.
+
+<Callout type="info">
+보안상 절대 경로(`/...`)나 상위 경로 탈출(`..`)이 포함된 항목은 거부됩니다.
+</Callout>
+
+## 데이터셋 내보내기
+
+<Steps>
+1. **데이터셋 우클릭 → 데이터셋 내보내기**
+
+   데이터셋 카드(또는 expansion 헤더)를 우클릭해 컨텍스트 메뉴를 열고 **데이터셋 내보내기**를 선택합니다.
+
+   <DocsImage
+     src="/docs/datasets/context-menu.png"
+     alt="데이터셋 우클릭 메뉴 — Edit / Augment / 다운샘플 / Merge / Export / Delete"
+     status="missing"
+   />
+
+2. **저장 위치 선택**
+
+   Chromium 계열 브라우저(Chrome, Edge 등)는 File System Access API를 지원하므로 OS 네이티브 **"다른 이름으로 저장"** 다이얼로그가 먼저 뜹니다. 위치와 파일명을 정하면 백엔드가 데이터셋 폴더를 `.tar.gz`로 압축해 스트리밍하면서 선택한 경로에 바로 기록합니다.
+
+   File System Access API를 지원하지 않는 브라우저(Firefox 등)에서는 별도 다이얼로그 없이 기본 다운로드 폴더로 자동 저장됩니다.
+
+   <DocsImage
+     src="/docs/datasets/export-03-save-dialog.png"
+     alt="OS 네이티브 저장 다이얼로그 — 제안된 파일명 표시"
+     status="missing"
+   />
+
+3. **완료 확인**
+
+   "데이터셋을 내보냈습니다." 알림이 뜨면 종료입니다. 파일명은 `<dataset_name>_<id>.tar.gz`입니다(이름의 영숫자·`.`·`_`·`-` 외 문자는 `_`로 치환됩니다).
+</Steps>
+
+## 데이터셋 불러오기
+
+<Steps>
+1. **워크스페이스 확인**
+
+   현재 워크스페이스가 선택되어 있는지 확인합니다. 선택되지 않은 상태에서 불러오기 버튼을 누르면 알림만 뜨고 다이얼로그는 열리지 않습니다.
+
+2. **데이터셋 불러오기 클릭**
+
+   데이터셋 탭(또는 워크스페이스 data 탭) 상단의 **데이터셋 불러오기** 버튼을 누릅니다.
+
+   <DocsImage
+     src="/docs/datasets/import-01-button.png"
+     alt="데이터셋 탭 상단의 데이터셋 불러오기 버튼"
+     status="missing"
+   />
+
+3. **아카이브 선택**
+
+   OS 네이티브 파일 선택 다이얼로그가 열립니다. `.tar.gz`, `.tgz`, `.tar`, `.zip` 중 하나를 선택합니다.
+
+   <DocsImage
+     src="/docs/datasets/import-02-file-picker.png"
+     alt="OS 네이티브 파일 선택 다이얼로그 — 아카이브 선택"
+     status="missing"
+   />
+
+4. **추출 및 등록**
+
+   업로드가 끝나면 백엔드가 새 데이터셋 행을 만들고 아카이브 내용을 `DATASET_DIR/<new_id>/`로 풀어 넣습니다. 새 데이터셋의 이름은 **별도 입력 없이 아카이브 파일명에서 확장자를 떼어낸 stem**이 됩니다 (예: `pick_v1_42.tar.gz` → `pick_v1_42`). 새 데이터셋은 현재 워크스페이스에 자동으로 귀속됩니다.
+
+   <DocsImage
+     src="/docs/datasets/import-03-listed.png"
+     alt="새 데이터셋이 목록에 추가된 모습"
+     status="missing"
+   />
+
+5. **완료 확인**
+
+   "데이터셋을 가져왔습니다." 알림이 뜨면 종료입니다. 실패 시에는 "데이터셋 가져오기에 실패했습니다." 알림과 함께 백엔드가 만든 임시 행/폴더를 자동으로 정리합니다.
+</Steps>
+
+## 라운드트립 호환
+
+한 머신에서 내보낸 `.tar.gz`는 다른 머신의 불러오기로 그대로 받을 수 있고, 받은 데이터셋은 다시 내보낼 수 있습니다. 같은 LeRobot v2.1 레이아웃(`meta/`, `data/`, `videos/`)을 데이터셋 루트에 그대로 유지하기 때문에 [학습](/docs/training/dataset-select)이나 [에피소드 편집](/docs/datasets/episode-edit) 같은 후속 작업도 동일하게 동작합니다.
+
+<Callout type="tip">
+[삭제](/docs/datasets/edit#delete)는 디스크의 에피소드 파일까지 함께 지워 복구가 불가능합니다. 큰 데이터셋을 정리하기 전에는 먼저 내보내기로 백업해 두세요.
+</Callout>
