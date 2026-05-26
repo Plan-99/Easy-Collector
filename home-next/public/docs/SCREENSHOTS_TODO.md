@@ -184,14 +184,14 @@
 이미 수집된 데이터셋이 있어야 캡처할 수 있는 화면들.
 
 - [ ] `edit-00-context-menu.png` — 데이터셋 우클릭 메뉴 — Edit / Augment / Merge / Delete
-- [ ] `edit-01-edit.png` — Edit Dataset 폼
-- [ ] `edit-02-merge.png` — Merge Dataset 폼
-- [ ] `edit-03-remap.png` — metadata remap (sensor/robot select)
-- [ ] `edit-04-delete.png` — Delete 확인
+- [x] `edit-01-edit.png` — Edit Dataset 폼
+- [x] `edit-02-merge.png` — Merge Dataset 폼
+- [x] `edit-03-remap.png` — metadata remap (sensor/robot select)
+- [x] `edit-04-delete.png` — Delete 확인
 - [ ] `augment-01-context-menu.png` — 데이터셋 우클릭 — Augment Dataset 메뉴
 - [ ] `augment-02-dialog.png` — DataAugmentationDialog 전체
-- [ ] `episode-edit-01-panel.png` — 데이터셋 탭 — 에피소드 클릭 시 우측 EpisodePanel
-- [ ] `episode-edit-02-trim.png` — Trim 슬라이더 + Apply 버튼
+- [x] `episode-edit-01-panel.png` — 데이터셋 탭 — 에피소드 클릭 시 우측 EpisodePanel
+- [x] `episode-edit-02-trim.png` — Trim 슬라이더 + Apply 버튼
 
 ---
 

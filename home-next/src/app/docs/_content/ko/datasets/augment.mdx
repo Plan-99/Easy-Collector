@@ -1,6 +1,6 @@
 ---
 title: 데이터셋 증강
-description: 색상·노이즈·perspective 변환으로 한 에피소드에서 여러 학습 샘플 생성. 일괄 변경 패널의 한 섹션으로 통합되었습니다.
+description: 색상·노이즈·perspective 변환으로 한 에피소드에서 여러 학습 샘플을 생성합니다. 일괄 변경 패널의 Augmentation 섹션에서 적용합니다.
 section: datasets
 order: 4
 sourceRefs:
@@ -12,32 +12,26 @@ related:
 lastVerifiedVersion: 5.0.0
 ---
 
-증강(Augmentation)은 같은 에피소드를 여러 변형으로 늘려 학습의 일반화 성능을 높이는 기법입니다.
+증강(Augmentation)은 같은 에피소드를 여러 변형으로 늘려 학습의 일반화 성능을 높이는 기법입니다. 색상·노이즈·perspective 같은 시각 변환을 무작위로 섞어 한 에피소드에서 여러 학습 샘플을 만들어냅니다.
 
-<Callout type="info">
-**증강은 [일괄 변경 (Batch Edit)](/docs/datasets/batch-edit) 패널의 한 섹션으로 통합되었습니다.** 기존 풀스크린 *Data Augmentation Dialog* 는 제거되었고, 데이터셋 우클릭 메뉴의 *Augmentation* 항목도 **Batch Edit** 항목으로 합쳐졌습니다.
-</Callout>
+## 어디서 여나
 
-## 새 위치
-
-좌측 네비의 **데이터셋 탭**에서 다음 중 하나로 BatchEditPanel을 열고 **Augmentation** 섹션을 펼치세요.
+좌측 네비의 **데이터셋 탭**에서 다음 중 하나로 [일괄 변경(Batch Edit)](/docs/datasets/batch-edit) 패널을 열고 **Augmentation** 섹션을 펼칩니다.
 
 - 트리에서 **데이터셋 폴더 라벨**을 클릭
 - 데이터셋 우클릭 → **Batch Edit**
 
-## 무엇이 같고 무엇이 달라졌나
+## 사용법
 
-| 항목 | 예전 (Data Augmentation Dialog) | 현재 (BatchEditPanel → Augmentation) |
-|---|---|---|
-| Lightness / HSV / Disturbances / Salt & Pepper / Gaussian / Perspective | ✅ | ✅ (동일) |
-| 반복 횟수 (Repeat) | 다이얼로그 안 입력 | 섹션 상단의 **Repeat** 필드 (1~20) |
-| Crop / Rotate 같이 적용 | ✘ | ✅ (같은 패널의 별도 섹션) |
-| 출력 데이터셋 이름 | 다이얼로그 끝의 입력 | 패널 상단 출력 이름 입력 (기본값 `<원본>_transformed`) |
-| 진행률 이벤트 | `augmentation_progress` | `transform_progress` (구 이벤트도 호환 유지) |
-| 백엔드 엔드포인트 | `POST /dataset/<id>/augment` | `POST /dataset/<id>/transform` (구 엔드포인트는 wrapper로 유지) |
+`Augmentation` 섹션의 **Enable 토글**을 켠 뒤 다음 항목을 설정합니다.
 
-증강 옵션 자체의 의미와 슬라이더 범위는 그대로입니다. 자세한 설명은 [일괄 변경 → Augmentation 섹션](/docs/datasets/batch-edit#augmentation-섹션)을 참고하세요.
+- **Repeat** *(1~20)* — 에피소드당 만들 변형 개수. `N`을 입력하면 원본 1개당 무작위 변형 N개가 추가 생성됩니다.
+- **Lightness / HSV / Disturbances / Salt & Pepper / Gaussian / Perspective** — 각 효과의 토글과 슬라이더로 강도를 조정합니다.
+
+옵션을 마치면 패널 상단의 **출력 이름**(기본값 `<원본>_transformed`)을 확인하고 하단의 **Apply** 를 누릅니다. 원본 데이터셋은 그대로 유지되며, 새 데이터셋이 목록에 추가됩니다.
+
+옵션별 세부 의미와 슬라이더 범위는 [일괄 변경 → Augmentation 섹션](/docs/datasets/batch-edit#augmentation-섹션)을 참고하세요.
 
 <Callout type="tip">
-증강은 새로운 에피소드 파일을 생성합니다. 원본은 그대로 유지되니 안심하고 실행하세요. `repeat=N`이면 원본 1개당 N개의 무작위 변형 에피소드가 만들어집니다.
+증강 한 번에 다운샘플 / 크롭 / 회전을 같이 적용하려면 같은 패널에서 해당 섹션의 토글을 추가로 켜면 됩니다. 변환은 한 패스 안에서 **augment ×Repeat → downsample → crop → rotate** 순서로 처리됩니다.
 </Callout>
