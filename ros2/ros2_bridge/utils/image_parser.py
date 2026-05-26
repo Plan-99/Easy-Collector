@@ -2,11 +2,14 @@ import cv2
 import numpy as np
 
 def fetch_image_with_config(image, config):
+    # Pipeline order:  crop (raw coords) → rotate → resize
+    # Mirrors backend/utils/image_parser.py and the export_templates copy.
     if 'cropped_area' in config and config['cropped_area']:
         area = config['cropped_area']
         xy_start = (area[0], area[1])
-        xy_end = (area[2],area[3])
+        xy_end = (area[2], area[3])
         image = image[xy_start[1]:xy_end[1], xy_start[0]:xy_end[0]]
+
     if 'rotate' in config:
         angle = config['rotate']
         if angle == 90:
@@ -15,10 +18,11 @@ def fetch_image_with_config(image, config):
             image = cv2.rotate(image, cv2.ROTATE_180)
         elif angle == 270:
             image = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
-    if 'resize' in config:
+
+    if 'resize' in config and config['resize']:
         size = config['resize']
         image = cv2.resize(image, size)
-    
+
     return image
 
 def ros_image_to_numpy(image_msg):

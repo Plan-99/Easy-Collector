@@ -160,7 +160,14 @@
                     </div>
                 </div>
             </div>
-            <div v-else-if="checkpoint" class="row q-mb-sm">
+            <!--
+              inference 상태 바 — checkpoint 가 선택되어 있고 *추론 자체* 가
+              pending / 실행 중인 동안만 띄운다. DAgger 흐름은 checkpoint 를
+              계속 선택해둔 채로 record_episode 를 띄우는데, 이때 status 는
+              'inferencing' 으로 바뀐다 → 이 분기 대신 아래의 데이터 수집
+              분기 (v-else) 로 흘러가야 한다.
+            -->
+            <div v-else-if="checkpoint && (status === 'pending' || status === 'testing')" class="row q-mb-sm">
                 <div
                     class="col bg-dark border-rounded text-white row flex flex-center q-col-gutter-x-sm"
                     v-if="status === 'pending'"
@@ -260,6 +267,16 @@
                             </q-item>
                         </q-list>
                     </q-btn-dropdown>
+                    <q-btn
+                        color="amber"
+                        text-color="dark"
+                        :label="$t('daggerBtn')"
+                        icon="school"
+                        class="q-mr-sm"
+                        @click="openDaggerDialog"
+                    >
+                        <q-tooltip>{{ $t('daggerDialogDesc') }}</q-tooltip>
+                    </q-btn>
                     <q-btn
                         color="white"
                         text-color="red"
@@ -442,6 +459,89 @@
                 </div>
             </div>
         </div>
+
+        <!-- DAgger 다이얼로그 — 추론 중에 stuck 발생 시 그 자세에서 즉시 텔레옵으로 -->
+        <q-dialog v-model="showDaggerDialog" persistent>
+            <q-card dark class="bg-secondary text-white" style="min-width: 480px; max-width: 600px;">
+                <q-card-section class="bg-dark">
+                    <div class="text-h6 row items-center">
+                        <q-icon name="school" color="amber" class="q-mr-sm" />
+                        {{ $t('daggerDialogTitle') }}
+                    </div>
+                </q-card-section>
+                <q-card-section>
+                    <div class="text-caption text-grey-4 q-mb-md">
+                        {{ $t('daggerDialogDesc') }}
+                    </div>
+                    <div class="column q-gutter-y-md">
+                        <q-select
+                            v-model="selectedDatasetId"
+                            dense outlined dark bg-color="dark"
+                            :label="$t('selectDataset')"
+                            :options="datasets"
+                            option-label="name"
+                            option-value="id"
+                            map-options
+                            emit-value
+                        />
+                        <q-input
+                            v-model="languageInstruction"
+                            dense outlined dark bg-color="dark"
+                            :label="$t('languageInstruction')"
+                            clearable
+                        />
+                        <q-select
+                            v-model="teleType"
+                            dense outlined dark bg-color="dark"
+                            :options="teleTypeOptions"
+                            map-options emit-value
+                            :label="$t('teleoperationType')"
+                        />
+                        <div class="row q-col-gutter-sm">
+                            <q-input
+                                v-if="teleType !== 'keyboard'"
+                                v-model.number="collectionHz"
+                                dense outlined dark bg-color="dark"
+                                :label="$t('replayHzLabel')"
+                                class="col"
+                                type="number"
+                                :min="1"
+                            />
+                            <q-input
+                                v-if="teleType === 'keyboard'"
+                                v-model.number="eeStepSize"
+                                dense outlined dark bg-color="dark"
+                                :label="$t('collectionStepSize')"
+                                class="col"
+                                type="number"
+                                step="0.0001"
+                            />
+                        </div>
+                        <q-input
+                            v-if="teleType === 'motion_planning'"
+                            v-model="ros2Service"
+                            dense outlined dark bg-color="dark"
+                            :label="$t('ros2ServiceName')"
+                            :placeholder="$t('ros2ServiceNamePlaceholder')"
+                            :hint="$t('ros2ServiceNameHint')"
+                        />
+                    </div>
+                </q-card-section>
+                <q-card-actions align="right" class="q-pa-md">
+                    <q-btn flat :label="$t('cancel')" color="grey-4" :disable="daggerBusy" v-close-popup />
+                    <q-btn
+                        unelevated
+                        color="amber"
+                        text-color="dark"
+                        icon="school"
+                        :label="$t('daggerStartBtn')"
+                        :loading="daggerBusy"
+                        :disable="!selectedDatasetId"
+                        @click="submitDagger"
+                    />
+                </q-card-actions>
+            </q-card>
+        </q-dialog>
 
         <!-- Vive 모드 선택 다이얼로그 (v-if 체인 외부) -->
         <q-dialog v-model="viveRobotDialog" persistent>
@@ -866,10 +966,20 @@ function startDataCollection() {
 
 function confirmViveMode(effectiveTeleType) {
     viveRobotDialog.value = false;
-    _doStartDataCollection(effectiveTeleType);
+    // DAgger 경유 진입이면 home pose 이동을 강제로 끈다. 일반 vive 시작이면
+    // 옵션 없이 기존 동작.
+    const options = _pendingDaggerVive ? { forceNoHomepose: true } : {};
+    _pendingDaggerVive = false;
+    _doStartDataCollection(effectiveTeleType, options);
 }
 
-function _doStartDataCollection(effectiveTeleType) {
+function _doStartDataCollection(effectiveTeleType, options = {}) {
+    // ``forceNoHomepose`` 는 DAgger 흐름 전용 — 추론 → 수집 전환 시 사용자가
+    // 누른 시점에서 즉시 텔레옵으로 넘기고 싶기 때문에 home pose 이동을
+    // 강제로 비활성화한다. 일반 collection 흐름은 옵션 없이 호출 → 기존 값
+    // (moveHomposeInDataCollection.value) 그대로 사용.
+    const moveHomepose = options.forceNoHomepose ? false : moveHomposeInDataCollection.value;
+
     if (effectiveTeleType === 'keyboard') {
         addKeyboardListener();
     }
@@ -883,7 +993,7 @@ function _doStartDataCollection(effectiveTeleType) {
     // 백엔드가 sensor init/env setup/home pose move 까지 끝내고 첫
     // moving_homepose:false emit 을 보내기 전까지는 사용자 입력이 들어오면 안된다.
     // 백엔드 setup 만 3~5초 걸려서 그 사이 keyboardHandler 가 그대로 작동했었음.
-    if (moveHomposeInDataCollection.value && effectiveTeleType !== 'externel' && effectiveTeleType !== 'vive_only') {
+    if (moveHomepose && effectiveTeleType !== 'externel' && effectiveTeleType !== 'vive_only') {
         movingHomepose.value = true;
     }
     const payload = {
@@ -892,7 +1002,7 @@ function _doStartDataCollection(effectiveTeleType) {
         sensors: props.sensors,
         tele_type: effectiveTeleType,
         assembly_id: props.workspace.assembly_id,
-        move_homepose: moveHomposeInDataCollection.value,
+        move_homepose: moveHomepose,
         move_homepose_duration: Number(moveHomposeDuration.value) || 5.0,
         hz: collectionHz.value,
         language_instruction: languageInstruction.value || '',
@@ -900,13 +1010,14 @@ function _doStartDataCollection(effectiveTeleType) {
     if (teleType.value === 'motion_planning' && ros2Service.value) {
         payload.ros2_service = ros2Service.value;
     }
-    api.post(`/dataset/${selectedDatasetId.value}/:start_collection`, payload).catch((error) => {
+    return api.post(`/dataset/${selectedDatasetId.value}/:start_collection`, payload).catch((error) => {
         viveInitializing.value = false;
         console.error('Error starting data collection:', error);
         Notify.create({
             color: 'negative',
             message: t('errorStartCollection')
         });
+        throw error;
     });
 }
 
@@ -1269,6 +1380,69 @@ function stopInference() {
         });
     });
 }
+
+// ─── DAgger flow ─────────────────────────────────────────────────────────
+// 추론 중 stuck 상태에서 사용자가 "여기서부터 내가 직접 빠져나오는 걸
+// 보여줄게" 라고 선언하는 흐름. 흐름은 두 단계:
+//   1. 현재 추론 프로세스를 중지 (stopInference)
+//   2. home pose 이동 없이 (forceNoHomepose) 곧바로 데이터 수집 시작
+// 백엔드는 record_episode 가 시작될 때 첫 프레임의 로봇 자세를 episode
+// 시작점으로 잡으므로, robot이 어디에 있든 그 위치부터 텔레옵 데이터가
+// 기록된다 — 별도 백엔드 변경 없이 동작.
+const showDaggerDialog = ref(false);
+const daggerBusy = ref(false);
+
+function openDaggerDialog() {
+    if (!selectedDatasetId.value && props.datasets?.length) {
+        // 다이얼로그 열릴 때 데이터셋이 비어있으면 첫 항목으로 prefill
+        selectedDatasetId.value = props.datasets[0].id;
+    }
+    // DAgger 의 핵심은 "stuck 상태에서 즉시 탈출 시연"이므로 버튼을 누르는
+    // 순간 추론을 끊는다. 사용자가 다이얼로그를 취소해도 추론은 다시 자동
+    // 시작되지 않는데 — 어차피 stuck 인 정책을 계속 두는 것보단 멈춰두는
+    // 게 안전. 다이얼로그에서 폼 입력하는 동안 백엔드 process_manager 가
+    // :stop_test 정리를 끝낸다 → submitDagger 시점엔 start_collection 이
+    // 깔끔하게 받아간다.
+    stopInference();
+    showDaggerDialog.value = true;
+}
+
+async function submitDagger() {
+    if (!selectedDatasetId.value) {
+        Notify.create({ color: 'negative', message: t('selectDatasetRequired') });
+        return;
+    }
+    // vive_external 은 실로봇 동행 여부를 별도로 묻는 패턴이 있는데, DAgger
+    // 는 "현재 자세에서 즉시 텔레옵" 이 핵심이라 vive_only(이미지+EE만) 로
+    // 강등하면 의미가 깨진다. vive 가 필요하면 사용자가 미리 다른 텔레옵
+    // 으로 바꾸도록 안내 — 다이얼로그 안의 q-select 에서 바로 바꿀 수 있다.
+    daggerBusy.value = true;
+    try {
+        // 추론은 openDaggerDialog 시점에 이미 끊었음. 여기선 곧바로 수집 시작.
+        if (teleType.value === 'vive_external') {
+            showDaggerDialog.value = false;
+            // 기존 vive 확인 흐름으로 이양 — confirmViveMode 가 _doStartDataCollection
+            // 호출. forceNoHomepose 옵션 전달이 필요하므로 한 번만 쓰는 플래그로
+            // 우회한다.
+            _pendingDaggerVive = true;
+            viveRobotDialog.value = true;
+            daggerBusy.value = false;
+            return;
+        }
+        await _doStartDataCollection(teleType.value, { forceNoHomepose: true });
+        showDaggerDialog.value = false;
+    } catch (err) {
+        console.error('DAgger start failed:', err);
+        Notify.create({ color: 'negative', message: t('errorStartDagger') });
+    } finally {
+        daggerBusy.value = false;
+    }
+}
+
+// vive_external 경유 DAgger 흐름: confirmViveMode 콜백이 _doStartDataCollection
+// 을 호출할 때 forceNoHomepose 를 전달해야 한다. 한 번 쓰고 비우는 단방향
+// 플래그라서 ref 가 아닌 모듈 스코프 변수로 둔다 — 반응성 필요 없음.
+let _pendingDaggerVive = false;
 
 function startReplay() {
     replayProgress.value = 0;

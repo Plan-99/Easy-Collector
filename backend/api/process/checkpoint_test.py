@@ -112,6 +112,35 @@ def checkpoint_test(
     oti_rl = False
     move_reward = 1.0
 
+    # ─── Inference image pipeline sanity log ─────────────────────────────
+    # Prints, ONCE at start, the per-sensor crop/resize values that will
+    # feed every inference step. If these are missing/wrong, the model
+    # gets a different image shape than at training time and inference
+    # silently degrades. Compare against the trained dataset's image
+    # shape (e.g. ds 89 sensor_5 = 110×150 → resize (200,150) + crop
+    # (87,0,197,150) on the resized frame). The order applied by
+    # fetch_image_with_config is: SAM3 → resize → crop → rotate.
+    try:
+        _img_size = (task or {}).get('sensor_img_size')
+        _crop = (task or {}).get('sensor_cropped_area')
+        _rot = (task or {}).get('sensor_rotate')
+        print(
+            f"[checkpoint_test] task name={(task or {}).get('name')!r} "
+            f"sensor_img_size={_img_size} sensor_cropped_area={_crop} "
+            f"sensor_rotate={_rot}",
+            flush=True,
+        )
+        if not _img_size or not _crop:
+            print(
+                "[checkpoint_test][WARN] sensor_img_size or sensor_cropped_area "
+                "missing from task — fetch_image_with_config will skip that step. "
+                "Verify the workspace task settings were saved and that the "
+                "request payload includes them.",
+                flush=True,
+            )
+    except Exception as _e:
+        print(f"[checkpoint_test] sanity-log failed: {_e}", flush=True)
+
     # action_hz / inference_hz 정규화.
     # - hz (legacy) 는 두 값의 fallback. 명시 안 한 경우 모두 동일하게 설정 → 기존 동작.
     # - inference_hz 미지정 + re_inference_steps>1 이면 action_hz / re_inference_steps
@@ -357,6 +386,14 @@ def checkpoint_test(
         # step. Used to upscale the heatmap PNG to match the live WebRTC feed.
         _vm_orig_sizes: dict = {}
 
+        # gradcam 은 forward+backward 를 다시 돌릴 preprocessed batch 가 필요.
+        # `policy_input_t` 는 main loop 의 else 분기에서만 정의되고, relative_ee_pos
+        # 모델은 추론 자체가 백그라운드 스레드 (_do_rel_ee_inference) 에서 일어나
+        # main loop 스코프에는 batch 가 존재하지 않는다. 그래서 forward 직전마다
+        # 양쪽 경로에서 같은 슬롯에 stash 해두고, gradcam path 가 그걸 읽도록 한다.
+        # ※ 단일 슬롯 — gradcam 은 최신 batch 한 개만 필요, 동기화 없이 GIL 의존.
+        _vm_last_batch: dict = {'value': None}
+
         # 환경 및 RL 에이전트 초기화
         state_dim = sum(agent.joint_len for agent in agents)
         tutorial = any((s.get('settings') or {}).get('is_tutorial') for s in (sensors or []))
@@ -587,6 +624,7 @@ def checkpoint_test(
                 for _sensor in sensors:
                     _img = obs_snap['images'][f'sensor_{_sensor["id"]}']
                     _sid = str(_sensor['id'])
+                    _raw_shape = getattr(_img, 'shape', None)
                     _img = fetch_image_with_config(_img, {
                         'sensor_id': _sid,
                         'sam3': (task.get('sensor_sam3') or {}).get(_sid),
@@ -597,6 +635,21 @@ def checkpoint_test(
                     if hasattr(_img, 'ndim') and _img.ndim == 3 and _img.shape[2] == 3:
                         _img = _img[:, :, ::-1]
                         _img = np.ascontiguousarray(_img)
+                    # Log the raw→post-pipeline shape ONCE per sensor so the user
+                    # can confirm the inference path produces the same image
+                    # shape the model was trained on. Stored on the function obj
+                    # so each sensor logs exactly once across all inference steps.
+                    _seen = getattr(checkpoint_test, '_img_shape_seen', None)
+                    if _seen is None:
+                        _seen = set(); checkpoint_test._img_shape_seen = _seen
+                    if _sid not in _seen:
+                        _seen.add(_sid)
+                        print(
+                            f"[checkpoint_test] sensor_{_sid} raw={_raw_shape} "
+                            f"→ after fetch_image_with_config={getattr(_img, 'shape', None)} "
+                            f"→ process_image target={image_resolution}",
+                            flush=True,
+                        )
                     _pixel_range = '-11' if policy_obj['type'] == 'PI05' else '01'
                     _img = process_image(_img, vision_backbone, to_cuda=True, pixel_range=_pixel_range, image_resolution=image_resolution)
                     _policy_input[f'observation.images.sensor_{_sensor["id"]}'] = _img.unsqueeze(0)
@@ -608,6 +661,11 @@ def checkpoint_test(
                             _lang = [_lang]
                         _policy_input['task'] = _lang
                     _policy_input = preprocessor(_policy_input)
+
+                # Gradcam 이 main loop 의 _vm 분기에서 잡을 수 있도록 stash.
+                # relative_ee_pos 경로는 main loop 의 policy_input_t 가 정의되지
+                # 않는데, 여기서 stash 해두면 main loop 가 다음 iter 에서 읽는다.
+                _vm_last_batch['value'] = _policy_input
 
                 policy.reset()
                 if hasattr(policy, 'predict_action_chunk'):
@@ -888,6 +946,11 @@ def checkpoint_test(
                             policy_input_t['task'] = _lang
                         policy_input_t = preprocessor(policy_input_t)
 
+                    # gradcam 이 chunk-pop 스텝에서도 batch 를 잡을 수 있도록
+                    # 매 re-inference 마다 최신 preprocessed batch 를 stash 해 둔다.
+                    # bg thread (_do_rel_ee_inference) 와 동일한 슬롯.
+                    _vm_last_batch['value'] = policy_input_t
+
                     if action_key_norm == 'relative_ee_pos':
                         # full chunk를 한번에 받아서 delta로 변환 후 queue에 넣음
                         policy.reset()
@@ -1036,7 +1099,43 @@ def checkpoint_test(
             # Uses the same forward pass for 'attention' (persistent hooks) —
             # essentially free. 'gradcam' needs a separate backward → expensive.
             _vm_method = task_control.get('vision_map_method')
-            if _vm_method and _vm_holder is not None and 'policy_input_t' in dir():
+            # Method-specific availability gates:
+            #   - 'attention' needs only the holder (last forward's captured
+            #     weights). policy_input_t may or may not be defined this step
+            #     — irrelevant. Previously this branch was wrongly gated on
+            #     policy_input_t too, so chunk-internal steps never emitted.
+            #   - 'gradcam' needs a fresh forward+backward → requires the
+            #     latest preprocessed batch. Read it from `_vm_last_batch`
+            #     (stashed by both main-loop else branch and bg-thread
+            #     _do_rel_ee_inference) so relative_ee_pos / chunk-pop steps
+            #     still work — `policy_input_t in dir()` was unreliable here.
+            _vm_can_run = False
+            _vm_gradcam_batch = _vm_last_batch.get('value')
+            if _vm_method and _vm_holder is not None:
+                if _vm_method == 'attention':
+                    _vm_can_run = _vm_holder.get('w') is not None and bool(_vm_holder.get('cam_shapes'))
+                elif _vm_method == 'gradcam':
+                    _vm_can_run = _vm_gradcam_batch is not None
+
+            # One-time diagnostic so we can pinpoint why heatmaps might not appear.
+            if _vm_method and not getattr(checkpoint_test, '_vm_diag_seen', False):
+                checkpoint_test._vm_diag_seen = True
+                _w_state = (
+                    'set(shape=' + str(tuple(_vm_holder['w'].shape)) + ')'
+                    if (_vm_holder and _vm_holder.get('w') is not None) else 'None'
+                )
+                print(
+                    f"[InferenceVisionMap][diag] method={_vm_method!r} "
+                    f"holder_set={_vm_holder is not None} "
+                    f"holder.w={_w_state} "
+                    f"holder.cam_shapes={_vm_holder.get('cam_shapes') if _vm_holder else None} "
+                    f"last_batch_set={_vm_gradcam_batch is not None} "
+                    f"orig_sizes={_vm_orig_sizes} "
+                    f"can_run={_vm_can_run}",
+                    flush=True,
+                )
+
+            if _vm_can_run:
                 try:
                     if _vm_method == 'attention':
                         from .vision_map import render_attention_heatmaps_from_holder
@@ -1046,13 +1145,20 @@ def checkpoint_test(
                     elif _vm_method == 'gradcam':
                         from .vision_map import compute_vision_map_from_preprocessed_batch
                         _vm_heatmaps = compute_vision_map_from_preprocessed_batch(
-                            policy=policy, batch=policy_input_t,
+                            policy=policy, batch=_vm_gradcam_batch,
                             ordered_sensors=_vm_ordered_sensors,
                             target_hw_per_sensor=_vm_orig_sizes,
                             method='gradcam',
                         )
                     else:
                         _vm_heatmaps = {}
+                    if not getattr(checkpoint_test, '_vm_emit_seen', False):
+                        checkpoint_test._vm_emit_seen = True
+                        print(
+                            f"[InferenceVisionMap][diag] first render method={_vm_method} "
+                            f"sensors_emitted={list(_vm_heatmaps.keys()) if _vm_heatmaps else '(empty)'}",
+                            flush=True,
+                        )
                     if _vm_heatmaps:
                         socketio_instance.emit('inference_vision_map', {
                             'step': step_num,
@@ -1062,10 +1168,14 @@ def checkpoint_test(
                 except Exception as e:
                     print(f'[InferenceVisionMap] step={step_num} method={_vm_method} error: {e}')
 
-            # === Grad-CAM (10스텝마다) ===
-            if gradcam_enabled and step_num % 10 == 0 and 'policy_input_t' in dir():
+            # === Grad-CAM (10스텝마다, 레거시 'gradcam' 이벤트) ===
+            # Same batch-stash mechanism as the new inference_vision_map path
+            # so this works for relative_ee_pos / chunk-pop steps where
+            # policy_input_t isn't defined in the main-loop scope.
+            _gc_legacy_batch = _vm_last_batch.get('value')
+            if gradcam_enabled and step_num % 10 == 0 and _gc_legacy_batch is not None:
                 try:
-                    heatmaps = policy.compute_gradcam(policy_input_t)
+                    heatmaps = policy.compute_gradcam(_gc_legacy_batch)
                     gradcam_payload = {}
                     for cam_idx, heatmap in heatmaps.items():
                         # 히트맵을 원본 이미지에 overlay하여 base64로 변환

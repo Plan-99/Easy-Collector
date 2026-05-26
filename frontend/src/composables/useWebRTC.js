@@ -32,7 +32,9 @@ export function useWebRTC() {
         };
 
         const offer = await peerConnection.createOffer({ offerToReceiveVideo: true });
+        if (pc.value !== peerConnection || peerConnection.signalingState === 'closed') return null;
         await peerConnection.setLocalDescription(offer);
+        if (pc.value !== peerConnection || peerConnection.signalingState === 'closed') return null;
 
         const response = await fetch(`${streaming_server}/offer`, {
             method: "POST",
@@ -42,6 +44,7 @@ export function useWebRTC() {
 
         const answer = await response.json();
 
+        if (pc.value !== peerConnection || peerConnection.signalingState === 'closed') return null;
         await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
 
         streamId.value = answer.stream_id;

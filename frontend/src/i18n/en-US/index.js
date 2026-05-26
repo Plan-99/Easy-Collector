@@ -574,6 +574,14 @@ export default {
   errorStopReplay: 'Error stopping replay',
   inferenceStopped: 'Inference stopped',
 
+  // ───── DAgger (Dataset Aggregation) ─────
+  daggerBtn: 'DAgger',
+  daggerDialogTitle: 'DAgger Data Collection',
+  daggerDialogDesc:
+    'Stop inference and immediately switch to teleoperation from the current robot pose (no home-pose move). Use this when the policy gets stuck — record how you escape.',
+  daggerStartBtn: 'Stop & Collect',
+  errorStartDagger: 'Failed to start DAgger collection',
+
   // ───── Tutorial hints ─────
   tutorialRobotIntro:
     'A list of registered robots. Click a card to move it from the bottom of the screen. In tutorial mode, a virtual practice robot is added automatically.',

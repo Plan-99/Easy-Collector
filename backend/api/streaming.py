@@ -17,6 +17,12 @@ from aiohttp import web
 import aiohttp_cors
 from av import VideoFrame
 
+# Single source of truth for the per-sensor crop/rotate/resize pipeline.
+# Used by inference, dataset replay, failure detection, and now the live
+# WebRTC preview here — having one canonical implementation means a fix to
+# the order/semantics only ever needs to land in one place.
+from ..utils.image_parser import fetch_image_with_config
+
 # --- 전역 변수 ---
 pcs = set()
 stream_config = {}
@@ -76,35 +82,26 @@ class GRPCImageStreamTrack(VideoStreamTrack):
                 print(f"[GRPCStream] {self.stream_id} stream error: {e}")
 
     def _apply_config(self, cv_image):
-        """crop, rotate, resize 적용."""
-        config = self._config
-        h, w = cv_image.shape[:2]
+        """Delegate to the canonical per-sensor transform pipeline.
 
-        # Crop
-        if config.get('cropped_area'):
-            area = config['cropped_area']
-            x1 = max(0, min(area[0], w - 1))
-            y1 = max(0, min(area[1], h - 1))
-            x2 = max(x1 + 1, min(area[2], w))
-            y2 = max(y1 + 1, min(area[3], h))
-            cv_image = cv_image[y1:y2, x1:x2]
-            if cv_image.size == 0:
+        Was a duplicate inline implementation of resize/crop/rotate that
+        could drift from ``fetch_image_with_config`` (the one inference
+        and dataset capture use). Now both paths share the same function
+        — ordering, semantics, and edge-case handling stay in sync by
+        construction.
+
+        Guards against an empty result post-crop (e.g. degenerate box)
+        and falls back to the input frame so the WebRTC track never
+        publishes a zero-sized buffer.
+        """
+        try:
+            out = fetch_image_with_config(cv_image, self._config or {})
+            if out is None or getattr(out, 'size', 0) == 0:
                 return cv_image
-
-        # Rotate
-        angle = config.get('rotate', 0)
-        if angle in [90, 180, 270]:
-            rotation_map = {90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180, 270: cv2.ROTATE_90_COUNTERCLOCKWISE}
-            cv_image = cv2.rotate(cv_image, rotation_map[angle])
-
-        # Resize
-        target_size = config.get('resize')
-        if (target_size and len(target_size) == 2
-                and isinstance(target_size[0], int) and isinstance(target_size[1], int)
-                and target_size[0] > 0 and target_size[1] > 0):
-            cv_image = cv2.resize(cv_image, (target_size[0], target_size[1]))
-
-        return cv_image
+            return out
+        except Exception as e:
+            print(f"[GRPCStream] {self.stream_id} _apply_config error: {e}")
+            return cv_image
 
     def update_config(self, config):
         self._config.update(config)

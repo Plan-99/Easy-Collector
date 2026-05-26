@@ -240,7 +240,6 @@
                                     show_original_video
                                 ></web-rtc-video>
                                 <div
-                                    class="crop-area"
                                     :style="cropAreaStyle"
                                     v-if="cropAreaStyle.width"
                                 ></div>
@@ -252,22 +251,30 @@
                                         {{ selectedWorkspace.sensor_cropped_area[focused.id] ? `${selectedWorkspace.sensor_cropped_area[focused.id][2] - selectedWorkspace.sensor_cropped_area[focused.id][0]} x ${selectedWorkspace.sensor_cropped_area[focused.id][3] - selectedWorkspace.sensor_cropped_area[focused.id][1]}` : $t('workspaceCroppedAreaNotSet') }}
                                     </div>
                                 </div>
-                                <div class="row q-gutter-x-sm">
+                                <!-- Numeric draft inputs — apply via the button so typing doesn't
+                                     thrash the workspace model mid-keystroke. Drag-box and reset
+                                     paths still write directly to sensor_cropped_area; the watcher
+                                     keeps cropDraft in sync with those. -->
+                                <div class="row q-gutter-x-sm items-center">
                                     <q-input
-                                        v-for="(val, index) in ['x1', 'y1', 'x2', 'y2']"
+                                        v-for="(label, index) in ['x1', 'y1', 'x2', 'y2']"
                                         :key="index"
-                                        dense
-                                        outlined
-                                        dark
+                                        dense outlined dark hide-bottom-space
                                         bg-color="dark"
                                         class="col"
-                                        v-model.number="selectedWorkspace.sensor_cropped_area[focused.id][index]"
-                                        @update:model-value="updateWorkspaceDeviceSetting({ 
-                                            device_type: 'sensors',
-                                            key: 'cropped_area',
-                                            setting: selectedWorkspace.sensor_cropped_area,
-                                        });"
-                                    ></q-input>
+                                        :placeholder="label"
+                                        v-model.number="cropDraft[index]"
+                                        @keyup.enter="applyCropDraft"
+                                    />
+                                    <q-btn
+                                        flat dense round
+                                        :color="isCropDraftDirty ? 'primary' : 'grey-6'"
+                                        icon="check"
+                                        :disable="!isCropDraftDirty"
+                                        @click="applyCropDraft"
+                                    >
+                                        <q-tooltip>{{ $t('apply') }}</q-tooltip>
+                                    </q-btn>
                                 </div>
                                 
                             </div>
@@ -1469,7 +1476,12 @@ const cropAreaStyle = computed(() => {
     const width = Math.abs(cropStartPoint.value.x - cropEndPoint.value.x);
     const height = Math.abs(cropStartPoint.value.y - cropEndPoint.value.y);
 
+    // Static styles inlined here (was a scoped .crop-area rule) per the
+    // project's no-custom-CSS policy. Dynamic dimensions follow.
     return {
+        position: 'absolute',
+        border: '2px dashed red',
+        pointerEvents: 'none',
         left: `${left}px`,
         top: `${top}px`,
         width: `${width}px`,
@@ -1567,6 +1579,53 @@ function resetCroppedArea() {
         device_type: 'sensors',
         key: 'cropped_area',
         setting: selectedWorkspace.value.sensor_cropped_area
+    });
+}
+
+// Local draft state for the cropped-area q-inputs. Typing in the inputs only
+// mutates this draft — the server update fires when the user clicks the apply
+// button (or when drag-box / reset writes directly to sensor_cropped_area,
+// which is mirrored back here via the watcher below). Without this, every
+// keystroke pushed a partial value to the backend → the workspace model
+// re-emitted reactive updates mid-typing → the input visibly reset itself.
+const cropDraft = ref([0, 0, 0, 0]);
+
+watch(
+    [() => focused.value?.id, () => selectedWorkspace.value?.sensor_cropped_area],
+    () => {
+        const sid = focused.value?.id;
+        const area = sid != null ? selectedWorkspace.value?.sensor_cropped_area?.[sid] : null;
+        cropDraft.value = Array.isArray(area) && area.length === 4
+            ? area.map((v) => Number(v) || 0)
+            : [0, 0, 0, 0];
+    },
+    { deep: true, immediate: true },
+);
+
+const isCropDraftDirty = computed(() => {
+    const sid = focused.value?.id;
+    if (sid == null) return false;
+    const cur = selectedWorkspace.value?.sensor_cropped_area?.[sid];
+    if (!Array.isArray(cur) || cur.length !== 4) return true;
+    return cropDraft.value.some((v, i) => Number(v) !== Number(cur[i]));
+});
+
+function applyCropDraft() {
+    if (!focused.value?.id) return;
+    const [maxW, maxH] = focused.value.resolution || [0, 0];
+    const clamp = (v, max) => Math.max(0, Math.min(max, Number(v) || 0));
+    const clamped = [
+        clamp(cropDraft.value[0], maxW),
+        clamp(cropDraft.value[1], maxH),
+        clamp(cropDraft.value[2], maxW),
+        clamp(cropDraft.value[3], maxH),
+    ];
+    selectedWorkspace.value.sensor_cropped_area[focused.value.id] = clamped;
+    cropDraft.value = [...clamped];
+    updateWorkspaceDeviceSetting({
+        device_type: 'sensors',
+        key: 'cropped_area',
+        setting: selectedWorkspace.value.sensor_cropped_area,
     });
 }
 
@@ -1815,15 +1874,3 @@ function testSam3Preview() {
         });
 }
 </script>
-<style>
-.crop-area {
-    position: absolute;
-    border: 2px dashed red;
-    pointer-events: none;
-}
-.crop-area-saved {
-    position: absolute;
-    border: 2px solid green;
-    pointer-events: none;
-}
-</style>

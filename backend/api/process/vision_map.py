@@ -279,11 +279,18 @@ def _compute_gradcam_maps(policy, batch: dict, preprocessor
     does the predicted motion come from" signal.
     """
     activations: List[torch.Tensor] = []
-    gradients: List[torch.Tensor] = []
 
     def _fwd(_m, _i, out):
         fmap = out['feature_map'] if isinstance(out, dict) else out
-        fmap.retain_grad()
+        # retain_grad() 는 requires_grad=True 인 텐서에만 호출 가능. 추론 경로의
+        # batch 는 보통 torch.no_grad() 안에서 만들어져서 fmap.requires_grad=False
+        # 가 자주 발생 → 그 때 에러 던지지 말고 그냥 capture 만 함. 아래 backward
+        # 후 fmap.grad 가 None 으로 남으면 activation magnitude fallback 으로 처리.
+        if fmap.requires_grad:
+            try:
+                fmap.retain_grad()
+            except RuntimeError:
+                pass
         activations.append(fmap)
 
     backbone = policy.model.backbone
@@ -297,6 +304,17 @@ def _compute_gradcam_maps(policy, batch: dict, preprocessor
         if policy.config.image_features:
             b = dict(b)
             from lerobot.utils.constants import OBS_IMAGES
+            # Gradcam 은 image 입력에 grad 가 흘러야 backbone 활성화의 .grad 가
+            # 채워짐. 호출자가 넘긴 텐서는 no_grad 컨텍스트에서 만들어졌을 수
+            # 있으니 여기서 clone + requires_grad_(True) 로 leaf 화해 grad 트래킹.
+            for _k in list(b.keys()):
+                _v = b[_k]
+                if (
+                    isinstance(_v, torch.Tensor)
+                    and _v.is_floating_point()
+                    and _k.startswith('observation.images.')
+                ):
+                    b[_k] = _v.detach().clone().requires_grad_(True)
             b[OBS_IMAGES] = [b[key] for key in policy.config.image_features]
 
         # Enable grads even though eval() — by default torch.no_grad isn't on.

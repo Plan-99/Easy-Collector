@@ -574,6 +574,14 @@ export default {
   errorStopReplay: '리플레이 중지 중 오류',
   inferenceStopped: '추론이 중지되었습니다',
 
+  // ───── DAgger (Dataset Aggregation) ─────
+  daggerBtn: 'DAgger',
+  daggerDialogTitle: 'DAgger 데이터 수집',
+  daggerDialogDesc:
+    '추론을 중지하고 홈 포즈 이동 없이 현재 자세에서 바로 텔레옵으로 전환합니다. 정책이 stuck 상태일 때 어떻게 빠져나오는지 시연 데이터로 남깁니다.',
+  daggerStartBtn: '추론 중지 후 수집',
+  errorStartDagger: 'DAgger 수집 시작 실패',
+
   // ───── Tutorial hints ─────
   tutorialRobotIntro:
     '등록된 로봇을 모아둔 곳이에요. 카드를 누르면 화면 아래에서 직접 움직여볼 수 있고, 튜토리얼에선 연습용 가상 로봇이 자동으로 들어와 있어요.',

@@ -2,17 +2,22 @@ import cv2
 import numpy as np
 
 def fetch_image_with_config(image, config):
-    # SAM3 segmentation runs first, on the original-resolution frame, so text
-    # prompts and stored boxes are anchored to the raw camera coordinates.
-    # No-op when sam3 is missing/disabled or the extension is not installed.
+    # Pipeline order:  sam3 (raw) → crop (raw coords) → rotate → resize
+    #
+    # ``cropped_area`` is in raw camera pixel coordinates. SAM3 runs first
+    # on the original-resolution frame so text prompts and stored boxes are
+    # anchored to raw camera coordinates. No-op when sam3 is missing/disabled
+    # or the extension is not installed.
     if config.get('sam3'):
         from .sam3_helper import apply_sam3_to_image
         image = apply_sam3_to_image(image, config.get('sensor_id'), config['sam3'])
+
     if 'cropped_area' in config and config['cropped_area']:
         area = config['cropped_area']
         xy_start = (area[0], area[1])
-        xy_end = (area[2],area[3])
+        xy_end = (area[2], area[3])
         image = image[xy_start[1]:xy_end[1], xy_start[0]:xy_end[0]]
+
     if 'rotate' in config:
         angle = config['rotate']
         if angle == 90:
@@ -21,10 +26,11 @@ def fetch_image_with_config(image, config):
             image = cv2.rotate(image, cv2.ROTATE_180)
         elif angle == 270:
             image = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
-    if 'resize' in config:
+
+    if 'resize' in config and config['resize']:
         size = config['resize']
         image = cv2.resize(image, size)
-    
+
     return image
 
 def ros_image_to_numpy(image_msg):

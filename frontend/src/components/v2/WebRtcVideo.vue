@@ -97,6 +97,7 @@ const setupWebRTC = () => {
       videoElement.value.srcObject = newStream;
     }
   }).then((res) => {
+    if (!res) return;
     stream_id = res.stream_id;
     console.log(stream_id)
   })
