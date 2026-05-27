@@ -775,10 +775,19 @@ class EpisodicDataset(torch.utils.data.Dataset):
         item['language_instruction'] = language_instruction
         for sensor_id in self.sensor_ids:
             processed_images = []
-            # Pick aug based on whether this sensor is configured as wrist-mounted.
+            # Pick aug based on whether this view's *physical sensor* is wrist-mounted.
+            # Multi-view: sensor_id 가 view_key 일 수도 있음 ("5" 또는 "5_2"). wrist
+            # 판정은 같은 물리 sensor 의 모든 view 에 동일 적용 — wrist_sensor_ids
+            # 는 항상 물리 ID 기준.
             # Wrist cams: ColorJitter only (preserve spatial geometry).
             # Other cams: full aug (crop+rotate+jitter).
-            if int(sensor_id) in getattr(self, 'wrist_sensor_ids', set()):
+            _vk = str(sensor_id)
+            _phys_sid_str = _vk.split('_', 1)[0]
+            try:
+                _phys_sid = int(_phys_sid_str)
+            except ValueError:
+                _phys_sid = None
+            if _phys_sid is not None and _phys_sid in getattr(self, 'wrist_sensor_ids', set()):
                 aug = getattr(self, '_image_augment_color_only', None)
             else:
                 aug = getattr(self, '_image_augment_full', None)
@@ -1247,10 +1256,19 @@ class FullScanDataset(EpisodicDataset):
         item['language_instruction'] = language_instruction
         for sensor_id in self.sensor_ids:
             processed_images = []
-            # Pick aug based on whether this sensor is configured as wrist-mounted.
+            # Pick aug based on whether this view's *physical sensor* is wrist-mounted.
+            # Multi-view: sensor_id 가 view_key 일 수도 있음 ("5" 또는 "5_2"). wrist
+            # 판정은 같은 물리 sensor 의 모든 view 에 동일 적용 — wrist_sensor_ids
+            # 는 항상 물리 ID 기준.
             # Wrist cams: ColorJitter only (preserve spatial geometry).
             # Other cams: full aug (crop+rotate+jitter).
-            if int(sensor_id) in getattr(self, 'wrist_sensor_ids', set()):
+            _vk = str(sensor_id)
+            _phys_sid_str = _vk.split('_', 1)[0]
+            try:
+                _phys_sid = int(_phys_sid_str)
+            except ValueError:
+                _phys_sid = None
+            if _phys_sid is not None and _phys_sid in getattr(self, 'wrist_sensor_ids', set()):
                 aug = getattr(self, '_image_augment_color_only', None)
             else:
                 aug = getattr(self, '_image_augment_full', None)

@@ -93,26 +93,61 @@
                         >
                             <q-card class="bg-dark">
                                 <q-card-section>
+                                    <!--
+                                      Multi-view: 한 카드 = 한 물리 sensor. 카드 안의 chip 들이
+                                      그 sensor 의 view 목록 (같은 sensor_id 가 sensor_ids 에 N 번
+                                      등장하면 chip 도 N 개). chip 클릭 → focused = 그 view →
+                                      아래 패널이 그 view 의 crop/rotate/sam3 를 편집. "+" 는 같은
+                                      sensor 의 view 를 한 번 더 append (다른 sensor 추가는
+                                      아래의 "+ Add Sensor" 버튼).
+                                      Single-view 환경 (기존) 에선 chip 한 개 ("기본") + "+" 만
+                                      보여 기존 UI 와 거의 동일.
+                                    -->
                                     <div
-                                        class="q-pa-sm q-px-md q-my-sm border-rounded row"
-                                        v-for="sensor in selectedSensors" 
+                                        class="q-pa-sm q-px-md q-my-sm border-rounded"
+                                        v-for="sensor in selectedSensors"
                                         :key="sensor.id"
                                         :class="sensor.status === 'on' ? 'bg-green-10' : 'bg-grey-8'"
                                     >
-                                        <div>{{ sensor.name }}</div>
-                                        <q-space />
-                                        <q-toggle
-                                            :model-value="sensor.status === 'on'"
-                                            dense
-                                            color="positive"
-                                            @click="toggleSensor(sensor)"
-                                            v-if="sensor.type !== 'custom'"
-                                        ></q-toggle>
-                                        <div v-else>
-                                            <div class="text-caption text-grey" v-if="sensor.status === 'off'">{{ $t('topicOff') }}</div>
-                                            <div class="text-caption text-positive" v-else-if="sensor.status === 'on'">{{ $t('topicOn') }}</div>
+                                        <div class="row items-center">
+                                            <div>{{ sensor.name }}</div>
+                                            <q-space />
+                                            <q-toggle
+                                                :model-value="sensor.status === 'on'"
+                                                dense
+                                                color="positive"
+                                                @click="toggleSensor(sensor)"
+                                                v-if="sensor.type !== 'custom'"
+                                            ></q-toggle>
+                                            <div v-else>
+                                                <div class="text-caption text-grey" v-if="sensor.status === 'off'">{{ $t('topicOff') }}</div>
+                                                <div class="text-caption text-positive" v-else-if="sensor.status === 'on'">{{ $t('topicOn') }}</div>
+                                            </div>
+                                            <q-inner-loading :showing="sensor.status === 'loading'"></q-inner-loading>
                                         </div>
-                                        <q-inner-loading :showing="sensor.status === 'loading'"></q-inner-loading>
+                                        <!-- View chips for this sensor + "+" button -->
+                                        <div class="row q-mt-sm q-gutter-xs items-center">
+                                            <q-chip
+                                                v-for="view in selectedViews.filter(v => v.sensorId === Number(sensor.id))"
+                                                :key="view.viewKey"
+                                                dense clickable
+                                                :color="focused.viewKey === view.viewKey ? 'primary' : 'grey-9'"
+                                                text-color="white"
+                                                :removable="view.occurrence > 0"
+                                                @click="focusView(view)"
+                                                @remove="removeView(view.viewKey)"
+                                            >
+                                                {{ view.occurrence === 0 ? $t('workspaceViewMain') : `view ${view.occurrence + 1}` }}
+                                            </q-chip>
+                                            <q-btn
+                                                dense flat round size="sm"
+                                                icon="add"
+                                                color="primary"
+                                                @click="addView(sensor.id)"
+                                            >
+                                                <q-tooltip>{{ $t('workspaceAddView') }}</q-tooltip>
+                                            </q-btn>
+                                        </div>
                                     </div>
                                     <q-btn outline
                                         class="full-width"
@@ -234,7 +269,7 @@
                                     :topic="focused.read_topic"
                                     :msg-type="focused.read_topic_msg"
                                     class="border-rounded"
-                                    :key="focused.id"
+                                    :key="focused.viewKey || focused.id"
                                     :loading="focused.status !== 'on'"
                                     v-if="focused.status !== 'off'"
                                     show_original_video
@@ -248,7 +283,7 @@
                                 <div class="row justify-between">
                                     <div class="text-caption">{{ $t('workspaceCroppedAreaLabel') }}</div>
                                     <div>
-                                        {{ selectedWorkspace.sensor_cropped_area[focused.id] ? `${selectedWorkspace.sensor_cropped_area[focused.id][2] - selectedWorkspace.sensor_cropped_area[focused.id][0]} x ${selectedWorkspace.sensor_cropped_area[focused.id][3] - selectedWorkspace.sensor_cropped_area[focused.id][1]}` : $t('workspaceCroppedAreaNotSet') }}
+                                        {{ selectedWorkspace.sensor_cropped_area[focused.viewKey || focused.id] ? `${selectedWorkspace.sensor_cropped_area[focused.viewKey || focused.id][2] - selectedWorkspace.sensor_cropped_area[focused.viewKey || focused.id][0]} x ${selectedWorkspace.sensor_cropped_area[focused.viewKey || focused.id][3] - selectedWorkspace.sensor_cropped_area[focused.viewKey || focused.id][1]}` : $t('workspaceCroppedAreaNotSet') }}
                                     </div>
                                 </div>
                                 <!-- Numeric draft inputs — apply via the button so typing doesn't
@@ -285,7 +320,7 @@
                                     outlined
                                     dark
                                     bg-color="dark"
-                                    v-model="selectedWorkspace.sensor_rotate[focused.id]"
+                                    v-model="selectedWorkspace.sensor_rotate[focused.viewKey || focused.id]"
                                     :options="[0, 90, 180, 270]"
                                     :label="$t('workspaceRotationDegrees')"
                                     @update:model-value="updateWorkspaceDeviceSetting({
@@ -765,6 +800,7 @@ import MonitoringWindow from 'src/components/v2/MonitoringWindow.vue';
 import CheckpointInfo from 'src/components/v2/CheckpointInfo.vue';
 import WebRtcVideo from 'src/components/v2/WebRtcVideo.vue';
 import TutorialHint from 'src/components/v2/TutorialHint.vue';
+import { enumerateViews, viewKey as makeViewKey } from 'src/utils/sensorView';
 
 const processStore = useProcessStore();
 const modulesStore = useModulesStore();
@@ -848,12 +884,39 @@ const selectedSensors = computed(() => {
     if (!selectedWorkspace.value) {
         return [];
     }
-    return selectedWorkspace.value.sensors.map((sensor) => {
+    // Multi-view: backend 의 ``sensors`` 배열은 sensor_ids 와 1:1 매칭이라
+    // 같은 sensor_id 가 N 번 등장하면 sensor object 도 N 개로 들어온다 (모두
+    // 동일 객체 — view 는 카드 안의 chip 으로 표현하지 카드 자체가 중복되면
+    // 안 된다). 여기서 first-occurrence 기준 dedup → 카드 한 장 = 한 물리 센서.
+    const seen = new Set();
+    return selectedWorkspace.value.sensors.filter((sensor) => {
+        const sid = Number(sensor.id);
+        if (seen.has(sid)) return false;
+        seen.add(sid);
+        return true;
+    }).map((sensor) => {
         const handler = useSensor(sensor);
         sensor.handler = handler;
         // Topic visibility는 topicStore가 push로 추적 — type별 분기 불필요.
         return sensor;
     });
+});
+
+// Multi-view: workspace 의 ``sensor_ids`` 가 같은 sensor_id 를 여러 번 포함할 수
+// 있다 (한 카메라의 다른 ROI 를 별도 view 로 기록). 각 view 는 (sensor 객체,
+// view_key, occurrence) 의 묶음. UI 가 view 단위 카드를 그리고, focused 가
+// view_key 를 들고 다닌다. 기존 single-view 워크스페이스는 view_key === String(id)
+// 라 모든 sensor_cropped_area / sensor_rotate / sensor_sam3 lookup 이 그대로 작동.
+const selectedViews = computed(() => {
+    if (!selectedWorkspace.value) return [];
+    const sids = selectedWorkspace.value.sensor_ids || [];
+    const sensorById = new Map(selectedSensors.value.map((s) => [Number(s.id), s]));
+    return enumerateViews(sids).map(({ sensorId, viewKey, occurrence }) => ({
+        sensor: sensorById.get(sensorId) || null,
+        sensorId,
+        viewKey,
+        occurrence,
+    })).filter((v) => v.sensor != null);
 });
 
 function listSensors() {
@@ -922,8 +985,10 @@ watch(commonSensorResolution, (newRes) => {
 }, { deep: true });
 
 function updateAllSensorResolutions(width, height) {
-    for(const sensorId of selectedWorkspace.value.sensor_ids) {
-        selectedWorkspace.value.sensor_img_size[sensorId] = [width, height];
+    // Multi-view: 모든 view 각각의 key 로 갱신. 같은 sensor_id 두 view 가 있어도
+    // 첫 view 는 "5", 두 번째는 "5_2" 라 별도 entry 가 됨.
+    for (const { viewKey } of enumerateViews(selectedWorkspace.value.sensor_ids || [])) {
+        selectedWorkspace.value.sensor_img_size[viewKey] = [width, height];
     }
 
     updateWorkspaceDeviceSetting({
@@ -947,6 +1012,106 @@ function saveSensorSettings(form) {
     return updateWorkspace({ sensor_ids: form.sensor_ids });
 }
 
+// Multi-view view add/remove. sensor_ids 가 ordered list of int 이고 같은
+// sensor_id 가 N 번 등장하면 N 개의 view 가 생긴다 (첫 view 는 suffix 없는
+// key, 그 이후엔 _2, _3 ...). 새 view 는 *기존 view 의 설정을 복사* 해서
+// 시작 — 사용자가 "같은 카메라의 다른 영역" 을 고를 때 crop 만 다시 잡으면
+// 되니까 가장 흔한 워크플로우에 맞춤. fresh 가 좋으면 사용자가 reset 하면 됨.
+function addView(sensorId) {
+    if (!selectedWorkspace.value) return;
+    const ws = selectedWorkspace.value;
+    const sids = (ws.sensor_ids || []).slice();
+    const sidInt = Number(sensorId);
+    // 같은 sensor_id 가 몇 번째 등장하는지 세서 새 view 의 key 산출
+    const existingOccurrences = sids.filter((x) => Number(x) === sidInt).length;
+    const newViewKey = makeViewKey(sidInt, existingOccurrences);
+    // 가장 최근 view 의 설정을 새 view 로 복사 (없으면 빈 값)
+    const lastOcc = existingOccurrences - 1;
+    const sourceKey = lastOcc >= 0 ? makeViewKey(sidInt, lastOcc) : String(sidInt);
+    const copyDictValue = (dict) => {
+        if (!dict) return null;
+        const src = dict[sourceKey];
+        if (src == null) return null;
+        return JSON.parse(JSON.stringify(src));
+    };
+    const newCrop = copyDictValue(ws.sensor_cropped_area);
+    const newSize = copyDictValue(ws.sensor_img_size);
+    const newRot = ws.sensor_rotate ? ws.sensor_rotate[sourceKey] : null;
+    const newSam3 = copyDictValue(ws.sensor_sam3);
+
+    sids.push(sidInt);
+    ws.sensor_ids = sids;
+    ws.sensor_cropped_area = { ...(ws.sensor_cropped_area || {}), [newViewKey]: newCrop };
+    ws.sensor_img_size = { ...(ws.sensor_img_size || {}), [newViewKey]: newSize };
+    ws.sensor_rotate = { ...(ws.sensor_rotate || {}), [newViewKey]: newRot || 0 };
+    ws.sensor_sam3 = { ...(ws.sensor_sam3 || {}), [newViewKey]: newSam3 };
+
+    return updateWorkspace({
+        sensor_ids: sids,
+        sensor_cropped_area: ws.sensor_cropped_area,
+        sensor_img_size: ws.sensor_img_size,
+        sensor_rotate: ws.sensor_rotate,
+        sensor_sam3: ws.sensor_sam3,
+    });
+}
+
+function removeView(viewKey) {
+    if (!selectedWorkspace.value) return;
+    const ws = selectedWorkspace.value;
+    const views = selectedViews.value;
+    const idx = views.findIndex((v) => v.viewKey === viewKey);
+    if (idx < 0) return;
+    const targetSid = views[idx].sensorId;
+    // sensor_ids 에서 같은 sensor_id 의 N 번째 occurrence 를 제거.
+    // N === views 내 그 sensor 의 occurrence index.
+    const targetOcc = views[idx].occurrence;
+    let seen = 0;
+    const newSids = [];
+    for (const sid of ws.sensor_ids || []) {
+        if (Number(sid) === targetSid) {
+            if (seen === targetOcc) { seen += 1; continue; } // skip this one
+            seen += 1;
+        }
+        newSids.push(sid);
+    }
+    // 해당 viewKey 의 dict entry 들 제거. 그리고 같은 sensor 의 뒤쪽 view 들의
+    // key 를 한 칸씩 당겨야 함 (예: view_2 삭제 시 view_3 → view_2).
+    const reindexDict = (dict) => {
+        if (!dict) return dict;
+        const out = { ...dict };
+        delete out[viewKey];
+        // 뒤쪽 occurrence shift
+        let occ = targetOcc + 1;
+        while (true) {
+            const oldKey = makeViewKey(targetSid, occ);
+            if (!(oldKey in out)) break;
+            const newKey = makeViewKey(targetSid, occ - 1);
+            out[newKey] = out[oldKey];
+            delete out[oldKey];
+            occ += 1;
+        }
+        return out;
+    };
+    ws.sensor_ids = newSids;
+    ws.sensor_cropped_area = reindexDict(ws.sensor_cropped_area);
+    ws.sensor_img_size = reindexDict(ws.sensor_img_size);
+    ws.sensor_rotate = reindexDict(ws.sensor_rotate);
+    ws.sensor_sam3 = reindexDict(ws.sensor_sam3);
+
+    // focused 가 삭제된 view 였으면 비움
+    if (focused.value?.viewKey === viewKey) {
+        focused.value = {};
+    }
+
+    return updateWorkspace({
+        sensor_ids: newSids,
+        sensor_cropped_area: ws.sensor_cropped_area,
+        sensor_img_size: ws.sensor_img_size,
+        sensor_rotate: ws.sensor_rotate,
+        sensor_sam3: ws.sensor_sam3,
+    });
+}
+
 function updateWorkspace(form) {
     console.log('Updating workspace with form:', form);
     return api.put(`/task/${selectedWorkspace.value.id}`, form).then(() => {
@@ -962,6 +1127,24 @@ function updateWorkspaceDeviceSetting(form) {
 }
 
 const focused = ref({});
+
+// Multi-view: view 클릭 시 focused 에 viewKey + sensor 객체 모두 넣는다.
+// 기존 `focused.id` 기반 코드 (robot pose 등) 와 호환되도록 `id` 도 그대로 유지.
+function focusView(view) {
+    if (!view || !view.sensor) return;
+    if (view.sensor.status !== 'on') return;
+    if (focused.value && focused.value.viewKey === view.viewKey) {
+        focused.value = {};
+        return;
+    }
+    focused.value = {
+        ...view.sensor,
+        device_type: 'sensor',
+        viewKey: view.viewKey,
+        occurrence: view.occurrence,
+    };
+}
+
 watch(selectedWorkspaceId, (newVal) => {
     if (!newVal) {
         return;
@@ -1142,7 +1325,9 @@ async function saveDataset(form) {
 function checkDatasetCompatibility(form) {
 
     const workspaceRobotTypes = robots.value.map(r => "robot_" + r.id).sort();
-    const workspaceSensorTypes = selectedSensors.value.map(s => "sensor_" + s.id).sort();
+    // Multi-view: 데이터셋의 sensor feature 는 view_key 별로 분리되어 있으므로
+    // 비교도 view_key 단위로 ("sensor_5", "sensor_5_2", "sensor_7" 등).
+    const workspaceSensorTypes = selectedViews.value.map(v => "sensor_" + v.viewKey).sort();
 
     const datasetRobotTypes = ref([]);
     const datasetSensorTypes = ref([]);
@@ -1530,11 +1715,17 @@ function cancelCrop() {
     }
 }
 
+// Multi-view: focusedKey 는 sensor 영역에선 view_key, 그 외 (robot home_pose
+// 등) 에선 sensor/robot id. focused 가 view 면 viewKey, 아니면 id.
+function focusedKey() {
+    return focused.value?.viewKey || focused.value?.id;
+}
+
 function saveCroppedArea() {
     if (!focused.value.id) return;
     const videoEl = videoContainer.value;
     if (!videoEl) return;
-    
+
     const videoRect = videoEl.querySelector('video').getBoundingClientRect();
     const containerRect = videoEl.getBoundingClientRect();
 
@@ -1547,7 +1738,7 @@ function saveCroppedArea() {
     const y1_rel = Math.min(cropStartPoint.value.y, cropEndPoint.value.y) - (videoRect.top - containerRect.top);
     const x2_rel = Math.max(cropStartPoint.value.x, cropEndPoint.value.x) - (videoRect.left - containerRect.left);
     const y2_rel = Math.max(cropStartPoint.value.y, cropEndPoint.value.y) - (videoRect.top - containerRect.top);
-    
+
     const x1 = Math.round(x1_rel * scaleX);
     const y1 = Math.round(y1_rel * scaleY);
     const x2 = Math.round(x2_rel * scaleX);
@@ -1558,9 +1749,9 @@ function saveCroppedArea() {
     const x2_clamped = Math.max(0, Math.min(focused.value.resolution[0], x2));
     const y2_clamped = Math.max(0, Math.min(focused.value.resolution[1], y2));
 
-    selectedWorkspace.value.sensor_cropped_area[focused.value.id] = [x1_clamped, y1_clamped, x2_clamped, y2_clamped];
-        
-    updateWorkspaceDeviceSetting({ 
+    selectedWorkspace.value.sensor_cropped_area[focusedKey()] = [x1_clamped, y1_clamped, x2_clamped, y2_clamped];
+
+    updateWorkspaceDeviceSetting({
         device_type: 'sensors',
         key: 'cropped_area',
         setting: selectedWorkspace.value.sensor_cropped_area
@@ -1569,7 +1760,7 @@ function saveCroppedArea() {
 
 function resetCroppedArea() {
     if (!focused.value.id) return;
-    selectedWorkspace.value.sensor_cropped_area[focused.value.id] = [
+    selectedWorkspace.value.sensor_cropped_area[focusedKey()] = [
         0,
         0,
         focused.value.resolution[0],
@@ -1591,10 +1782,10 @@ function resetCroppedArea() {
 const cropDraft = ref([0, 0, 0, 0]);
 
 watch(
-    [() => focused.value?.id, () => selectedWorkspace.value?.sensor_cropped_area],
+    [() => focused.value?.viewKey, () => focused.value?.id, () => selectedWorkspace.value?.sensor_cropped_area],
     () => {
-        const sid = focused.value?.id;
-        const area = sid != null ? selectedWorkspace.value?.sensor_cropped_area?.[sid] : null;
+        const key = focusedKey();
+        const area = key != null ? selectedWorkspace.value?.sensor_cropped_area?.[key] : null;
         cropDraft.value = Array.isArray(area) && area.length === 4
             ? area.map((v) => Number(v) || 0)
             : [0, 0, 0, 0];
@@ -1603,9 +1794,9 @@ watch(
 );
 
 const isCropDraftDirty = computed(() => {
-    const sid = focused.value?.id;
-    if (sid == null) return false;
-    const cur = selectedWorkspace.value?.sensor_cropped_area?.[sid];
+    const key = focusedKey();
+    if (key == null) return false;
+    const cur = selectedWorkspace.value?.sensor_cropped_area?.[key];
     if (!Array.isArray(cur) || cur.length !== 4) return true;
     return cropDraft.value.some((v, i) => Number(v) !== Number(cur[i]));
 });
@@ -1620,7 +1811,7 @@ function applyCropDraft() {
         clamp(cropDraft.value[2], maxW),
         clamp(cropDraft.value[3], maxH),
     ];
-    selectedWorkspace.value.sensor_cropped_area[focused.value.id] = clamped;
+    selectedWorkspace.value.sensor_cropped_area[focusedKey()] = clamped;
     cropDraft.value = [...clamped];
     updateWorkspaceDeviceSetting({
         device_type: 'sensors',
@@ -1755,7 +1946,7 @@ const sam3Cfg = computed(() => {
         return { ...SAM3_DEFAULT };
     }
     const map = selectedWorkspace.value.sensor_sam3 || {};
-    const cur = map[focused.value.id] || {};
+    const cur = map[focusedKey()] || {};
     return {
         ...SAM3_DEFAULT,
         ...cur,
@@ -1791,9 +1982,9 @@ function updateSam3(patch) {
     if (!selectedWorkspace.value.sensor_sam3) {
         selectedWorkspace.value.sensor_sam3 = {};
     }
-    const sid = focused.value.id;
-    const cur = { ...sam3Cfg.value, ...selectedWorkspace.value.sensor_sam3[sid] };
-    selectedWorkspace.value.sensor_sam3[sid] = { ...cur, ...patch };
+    const key = focusedKey();
+    const cur = { ...sam3Cfg.value, ...selectedWorkspace.value.sensor_sam3[key] };
+    selectedWorkspace.value.sensor_sam3[key] = { ...cur, ...patch };
     persistSam3();
 }
 

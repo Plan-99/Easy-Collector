@@ -13,19 +13,19 @@
                     :loading="vp.sensor.status !== 'on'"
                     v-if="vp.sensor.status !== 'off'"
                     :class="{
-                        'border-primary': focused.id === vp.sensor.id && focused.device_type === 'sensor',
+                        'border-primary': focused.viewKey === vp.viewKey && focused.device_type === 'sensor',
                     }"
-                    @click="focusSensorRobot(vp.sensor, 'sensor')"
-                    :resize="viewportImgSize(vp.workspace, vp.sensor.id)"
-                    :cropped_area="viewportCropArea(vp.workspace, vp.sensor.id)"
-                    :rotate="viewportRotate(vp.workspace, vp.sensor.id)"
-                    :overlay-src="status === 'testing' && inferenceVisionMapOn ? inferenceHeatmaps[`sensor_${vp.sensor.id}`] : null"
+                    @click="focusSensorRobot(vp.sensor, 'sensor', vp.viewKey)"
+                    :resize="viewportImgSize(vp.workspace, vp.viewKey, vp.sensor.id)"
+                    :cropped_area="viewportCropArea(vp.workspace, vp.viewKey, vp.sensor.id)"
+                    :rotate="viewportRotate(vp.workspace, vp.viewKey, vp.sensor.id)"
+                    :overlay-src="status === 'testing' && inferenceVisionMapOn ? inferenceHeatmaps[`sensor_${vp.viewKey}`] : null"
                 ></web-rtc-video>
                 <div class="full-height border-white bg-dark border-rounded flex flex-center" v-else>
                     <q-btn round flat icon="play_arrow" text-color="white" size="xl" @click="vp.sensor.handler.startSensor(vp.sensor)"></q-btn>
                 </div>
                 <q-chip color="blue-10" text-color="white" class="absolute-top-left" style="top: 20px; left: 15px; z-index: 2">
-                    {{ vp.sensor.name }} {{ $t('sensorSuffix') }}<span v-if="vp.workspaceName"> · {{ vp.workspaceName }}</span>
+                    {{ vp.sensor.name }}<span v-if="vp.occurrence > 0"> · view {{ vp.occurrence + 1 }}</span> {{ $t('sensorSuffix') }}<span v-if="vp.workspaceName"> · {{ vp.workspaceName }}</span>
                 </q-chip>
             </div>
         </div>
@@ -655,6 +655,7 @@ import EpisodeViewer from 'src/components/v2/EpisodeViewer.vue';
 import FormDialog from './FormDialog.vue';
 import { DEFAULT_KEYBOARD_SETTINGS, AXIS_TO_EE_INDEX, normalizeEventKey } from 'src/configs/teleopDefaults';
 import TutorialHint from './TutorialHint.vue';
+import { enumerateViews } from 'src/utils/sensorView';
 
 
 const { socket } = useSocket();
@@ -703,43 +704,52 @@ const focused = defineModel('focused', {
     default: () => ({ id: null, device_type: null })
 });
 
-// 각 viewport 가 (workspace, sensor) 쌍을 표현. 다중 workspace 인 Planner 모드에서
-// 같은 sensor 라도 workspace 마다 crop/resize/rotate 가 다르면 별개 viewport 로 분리.
-// 단일 workspace 모드(WorkspacePage 등)에선 기존과 동일하게 sensor 당 1 viewport.
+// Multi-view: 각 viewport = (workspace, view) 쌍. 한 workspace 가 같은 sensor 의
+// 여러 view 를 등록하면 그만큼 viewport 도 늘어남. Planner 모드 (props.workspaces)
+// 와 단일 workspace 모드 모두 같은 enumeration 으로 처리.
 const sensorViewports = computed(() => {
-    const sensorById = new Map(props.sensors.map(s => [s.id, s]));
+    const sensorById = new Map(props.sensors.map(s => [Number(s.id), s]));
+    const buildItems = (ws, wsName) => {
+        const sids = (ws && ws.sensor_ids) || [];
+        return enumerateViews(sids).map(({ sensorId, viewKey, occurrence }) => {
+            const live = sensorById.get(sensorId);
+            if (!live) return null;
+            return {
+                key: `${ws.id || 'ws'}-${viewKey}`,
+                workspace: ws,
+                workspaceName: wsName,
+                sensor: live,
+                viewKey,
+                occurrence,
+            };
+        }).filter(Boolean);
+    };
     if (props.workspaces && props.workspaces.length > 0) {
         const items = [];
         props.workspaces.forEach((ws) => {
-            (ws.sensors || []).forEach((wsSensor) => {
-                const live = sensorById.get(wsSensor.id);
-                if (!live) return;
-                items.push({
-                    key: `${ws.id}-${live.id}`,
-                    workspace: ws,
-                    workspaceName: ws.name || '',
-                    sensor: live,
-                });
-            });
+            items.push(...buildItems(ws, ws.name || ''));
         });
         return items;
     }
-    return props.sensors.map((s) => ({
-        key: String(s.id),
-        workspace: props.workspace || {},
-        workspaceName: '',
-        sensor: s,
-    }));
+    return buildItems(props.workspace || {}, '');
 });
 
-function viewportCropArea(ws, sensorId) {
-    return (ws && ws.sensor_cropped_area && ws.sensor_cropped_area[sensorId]) || {};
+// 모든 lookup: view_key 우선, 없으면 sensor_id 로 fallback (기존 single-view
+// dataset/task 호환).
+function viewportCropArea(ws, viewKey, sensorId) {
+    const d = ws && ws.sensor_cropped_area;
+    if (!d) return {};
+    return d[viewKey] || d[sensorId] || {};
 }
-function viewportImgSize(ws, sensorId) {
-    return (ws && ws.sensor_img_size && ws.sensor_img_size[sensorId]) || [640, 480];
+function viewportImgSize(ws, viewKey, sensorId) {
+    const d = ws && ws.sensor_img_size;
+    if (!d) return [640, 480];
+    return d[viewKey] || d[sensorId] || [640, 480];
 }
-function viewportRotate(ws, sensorId) {
-    return (ws && ws.sensor_rotate && ws.sensor_rotate[sensorId]) || 0;
+function viewportRotate(ws, viewKey, sensorId) {
+    const d = ws && ws.sensor_rotate;
+    if (!d) return 0;
+    return d[viewKey] || d[sensorId] || 0;
 }
 const selectedDatasetId = defineModel('selectedDatasetId', {
     type: [String, Number],
@@ -829,18 +839,35 @@ const monitoringHintKey = computed(() => {
     }
 });
 
-function focusSensorRobot(device, type) {
+// Multi-view: backend 의 record_episode / checkpoint_test / replay 는 ``sensors``
+// 배열을 view 와 1:1 매칭으로 받는다 (같은 sensor_id 가 N 번 들어와도 그대로
+// N 개로). WorkspacePage 가 카드 표시용으로 deduped `selectedSensors` 를 넘기지만,
+// 백엔드 payload 에는 sensor_ids 순서대로 펼친 list 가 필요하다.
+function expandSensorsForBackend() {
+    const sensorById = new Map((props.sensors || []).map((s) => [Number(s.id), s]));
+    const sids = props.workspace?.sensor_ids || [];
+    return sids.map((sid) => sensorById.get(Number(sid))).filter(Boolean);
+}
+
+function focusSensorRobot(device, type, viewKey = undefined) {
     if (device.status !== 'on') {
         return;
     }
-    if (focused.value && focused.value.id === device.id && focused.value.device_type === type) {
+    // Multi-view: 같은 sensor 의 다른 view 도 별개 focused 로 취급. viewKey 가
+    // 같이 일치할 때만 toggle off (그래야 다른 view 클릭 시 그쪽으로 전환).
+    const sameTarget = focused.value
+        && focused.value.id === device.id
+        && focused.value.device_type === type
+        && (type !== 'sensor' || focused.value.viewKey === viewKey);
+    if (sameTarget) {
         focused.value = {};
         return;
     }
 
     focused.value = {
         ...device, // device 객체의 모든 속성을 복사
-        device_type: type // device_type 속성을 추가 (또는 덮어쓰기)
+        device_type: type, // device_type 속성을 추가 (또는 덮어쓰기)
+        ...(type === 'sensor' && viewKey ? { viewKey } : {}),
     };
 }
 
@@ -999,7 +1026,7 @@ function _doStartDataCollection(effectiveTeleType, options = {}) {
     const payload = {
         task: props.workspace,
         robots: props.robots,
-        sensors: props.sensors,
+        sensors: expandSensorsForBackend(),
         tele_type: effectiveTeleType,
         assembly_id: props.workspace.assembly_id,
         move_homepose: moveHomepose,
@@ -1350,7 +1377,7 @@ function onInferenceSubmit(formData) {
         task: props.workspace,
         policy: checkpoint.value.policy,
         robot_ids: props.robots.map(r => r.id),
-        sensors: props.sensors,
+        sensors: expandSensorsForBackend(),
         checkpoint: checkpoint.value,
         move_homepose: !!formData.move_homepose,
         move_homepose_duration: Number(formData.move_homepose_duration) || 5.0,
@@ -1450,7 +1477,7 @@ function startReplay() {
     const payload = {
         episode: selectedEpisode.value,
         robot_ids: props.robots.map(r => r.id),
-        sensors: props.sensors,
+        sensors: expandSensorsForBackend(),
         task: props.workspace,
         action_type: replayActionType.value,
         hz: replayHz.value,

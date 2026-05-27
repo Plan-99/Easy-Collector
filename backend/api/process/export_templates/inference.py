@@ -279,16 +279,30 @@ class CheckpointInference:
 
         policy_input = {"observation.state": state_t}
 
-        # Images → tensors
+        # Images → tensors.
+        # Multi-view: sensor_ids 가 같은 sensor_id 를 N 번 포함하면 그만큼
+        # view_key 가 펼쳐진다. caller 의 ``images`` dict 는 view_key 기준
+        # (예: "sensor_5", "sensor_5_2") 으로 받는다.
+        # Sensor_id stable sort → 학습/inference 의 image_features 순서와 정합.
+        _seen_occ = {}
+        _view_pairs = []
         for sid in self.sensor_ids:
-            user_key = f"sensor_{sid}"
+            sid_int = int(sid)
+            occ = _seen_occ.get(sid_int, 0)
+            _seen_occ[sid_int] = occ + 1
+            vkey = str(sid_int) if occ == 0 else f"{sid_int}_{occ + 1}"
+            _view_pairs.append((sid_int, occ, vkey))
+        _view_pairs.sort(key=lambda t: (t[0], t[1]))
+        for _sid_int, _occ, vkey in _view_pairs:
+            user_key = f"sensor_{vkey}"
             if user_key not in images:
                 raise KeyError(
                     f"Missing image for {user_key!r}. "
-                    f"Required sensor_ids: {self.sensor_ids}"
+                    f"Required view keys derived from sensor_ids "
+                    f"{self.sensor_ids}: views=[{', '.join(self._view_keys())}]"
                 )
             img_t = _process_image(images[user_key]).to(self.device).unsqueeze(0)
-            policy_input[f"observation.images.sensor_{sid}"] = img_t
+            policy_input[f"observation.images.sensor_{vkey}"] = img_t
 
         # Preprocessor: rename → batch dim → device → normalize state/images
         policy_input = self.pre(policy_input)
@@ -300,6 +314,20 @@ class CheckpointInference:
         # Postprocessor: unnormalize back to raw units, move to CPU
         unnorm = self.post(raw_action)
         return unnorm.squeeze(0).detach().cpu().numpy()
+
+    def _view_keys(self):
+        """Diagnostic helper: list of view_keys derived from sensor_ids,
+        sorted by (sensor_id, occurrence) — same ordering as infer() loop."""
+        seen = {}
+        items = []
+        for sid in self.sensor_ids:
+            sid_int = int(sid)
+            occ = seen.get(sid_int, 0)
+            seen[sid_int] = occ + 1
+            vkey = str(sid_int) if occ == 0 else f"{sid_int}_{occ + 1}"
+            items.append((sid_int, occ, vkey))
+        items.sort(key=lambda t: (t[0], t[1]))
+        return [vkey for _sid, _occ, vkey in items]
 
 
 # ──────────────────────────────────────────────────────────────────────────────

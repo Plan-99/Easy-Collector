@@ -44,9 +44,19 @@ class ObsServiceServicer(pb_grpc.ObsServiceServicer):
             session_id = self._next_id
             self._next_id += 1
 
+        # Multi-view 지원: 같은 물리 sensor_id 가 workspace 내 여러 view 로
+        # 등장할 수 있다. shm 키는 *물리 sensor_id 기준* (suffix 없음) 으로
+        # 한 번만 쓴다 — raw frame 은 모든 view 가 공유하고, per-view 의
+        # crop/rotate/resize 는 consumer (record_episode/checkpoint_test) 가
+        # fetch_image_with_config 로 view_key 별로 적용한다.
+        # 따라서 호출자가 같은 sensor_id 를 중복 전달해도 한 번만 subscribe.
+        seen_ids: set = set()
         subs = []
         for sensor in sensors:
             sensor_id = sensor['id']
+            if sensor_id in seen_ids:
+                continue
+            seen_ids.add(sensor_id)
             msg_type = CompressedImage
             if sensor.get('read_topic_msg') == 'sensor_msgs/Image':
                 msg_type = Image
@@ -96,9 +106,15 @@ class ObsServiceServicer(pb_grpc.ObsServiceServicer):
             except Exception as e:
                 print(f"[ObsService] destroy_subscription error: {e}", flush=True)
 
-        # Clean up shm files for this session's sensors
+        # Clean up shm files for this session's sensors. Multi-view: 같은
+        # 물리 sensor_id 가 여러 view 로 등장할 수 있으니 dedup 후 한 번씩만 remove.
+        _seen_cleanup: set = set()
         for sensor in session.get('sensors', []):
-            sensor_key = f"sensor_{sensor['id']}"
+            sid = sensor['id']
+            if sid in _seen_cleanup:
+                continue
+            _seen_cleanup.add(sid)
+            sensor_key = f"sensor_{sid}"
             self.image_bridge.remove(sensor_key)
 
         print(f"[ObsService] Session {request.id} stopped", flush=True)

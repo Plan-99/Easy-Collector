@@ -621,38 +621,59 @@ def checkpoint_test(
                 if policy_obj['type'] == 'PI05':
                     _lang = language_instruction if (language_instruction and str(language_instruction).strip()) else task.get('name', '')
                     _policy_input['language_instruction'] = _lang
-                for _sensor in sensors:
-                    _img = obs_snap['images'][f'sensor_{_sensor["id"]}']
-                    _sid = str(_sensor['id'])
+                # Multi-view: same physical sensor can appear multiple times in
+                # ``sensors`` (each with its own view_key + crop/rotate/resize).
+                # The raw frame comes from physical 'sensor_{id}' shm; per-view
+                # transforms are applied independently. policy_input keys use
+                # view_key so the model sees one input per view.
+                # Sensor_id stable sort → 같은 sensor 의 view 들이 인접.
+                # build_features/append_episode 와 동일 ordering 이라 모델의
+                # image_features 순서와도 일치.
+                from ...utils.sensor_view import view_key as _view_key
+                _sorted_sensors_bg = sorted(sensors, key=lambda _s: int(_s['id']))
+                _view_occ: dict = {}
+                for _sensor in _sorted_sensors_bg:
+                    _sid_int = int(_sensor['id'])
+                    _occ = _view_occ.get(_sid_int, 0)
+                    _view_occ[_sid_int] = _occ + 1
+                    _vkey = _view_key(_sid_int, _occ)
+                    _sid = str(_sid_int)  # physical id (raw frame lookup)
+                    _img = obs_snap['images'][f'sensor_{_sid}']
                     _raw_shape = getattr(_img, 'shape', None)
+                    # Per-view config: prefer vkey-specific entry, fall back to
+                    # physical sid for backward compat with single-view tasks.
+                    _t_size = task.get('sensor_img_size') or {}
+                    _t_crop = task.get('sensor_cropped_area') or {}
+                    _t_rot = task.get('sensor_rotate') or {}
+                    _t_sam3 = task.get('sensor_sam3') or {}
                     _img = fetch_image_with_config(_img, {
-                        'sensor_id': _sid,
-                        'sam3': (task.get('sensor_sam3') or {}).get(_sid),
-                        'resize': task['sensor_img_size'][_sid],
-                        'cropped_area': task['sensor_cropped_area'][_sid],
-                        'rotate': task['sensor_rotate'][_sid],
+                        'sensor_id': _vkey,
+                        'sam3': _t_sam3.get(_vkey) or _t_sam3.get(_sid),
+                        'resize': _t_size.get(_vkey) or _t_size.get(_sid),
+                        'cropped_area': _t_crop.get(_vkey) or _t_crop.get(_sid),
+                        'rotate': _t_rot.get(_vkey) or _t_rot.get(_sid),
                     })
                     if hasattr(_img, 'ndim') and _img.ndim == 3 and _img.shape[2] == 3:
                         _img = _img[:, :, ::-1]
                         _img = np.ascontiguousarray(_img)
-                    # Log the raw→post-pipeline shape ONCE per sensor so the user
+                    # Log the raw→post-pipeline shape ONCE per view so the user
                     # can confirm the inference path produces the same image
                     # shape the model was trained on. Stored on the function obj
-                    # so each sensor logs exactly once across all inference steps.
+                    # so each view logs exactly once across all inference steps.
                     _seen = getattr(checkpoint_test, '_img_shape_seen', None)
                     if _seen is None:
                         _seen = set(); checkpoint_test._img_shape_seen = _seen
-                    if _sid not in _seen:
-                        _seen.add(_sid)
+                    if _vkey not in _seen:
+                        _seen.add(_vkey)
                         print(
-                            f"[checkpoint_test] sensor_{_sid} raw={_raw_shape} "
+                            f"[checkpoint_test] sensor_{_vkey} (phys={_sid}) raw={_raw_shape} "
                             f"→ after fetch_image_with_config={getattr(_img, 'shape', None)} "
                             f"→ process_image target={image_resolution}",
                             flush=True,
                         )
                     _pixel_range = '-11' if policy_obj['type'] == 'PI05' else '01'
                     _img = process_image(_img, vision_backbone, to_cuda=True, pixel_range=_pixel_range, image_resolution=image_resolution)
-                    _policy_input[f'observation.images.sensor_{_sensor["id"]}'] = _img.unsqueeze(0)
+                    _policy_input[f'observation.images.sensor_{_vkey}'] = _img.unsqueeze(0)
 
                 if preprocessor is not None:
                     if policy_obj['type'] == 'PI05' and 'task' not in _policy_input:
@@ -894,21 +915,37 @@ def checkpoint_test(
                         # call eliminates a foot-gun that would silently revert to bad behavior
                         # if anyone ever short-circuited the preprocessor.
                     print(f"[INPUT] state: {qpos_t.shape} = {qpos_t[0].cpu().numpy()}")
-                    for sensor in sensors:
-                        image = obs_t['images'][f'sensor_{sensor["id"]}']
-                        sensor_id = str(sensor['id'])
+                    # Multi-view: see _do_rel_ee_inference for the same pattern.
+                    # 같은 sensor_id 가 sensors 안에서 여러 번 등장하면 각 view 마다
+                    # 독립적으로 crop/rotate/resize 적용 + view_key 별 policy input.
+                    # sensor_id stable sort → 학습 시점 features ordering 과 정합.
+                    from ...utils.sensor_view import view_key as _view_key
+                    _sorted_sensors_main = sorted(sensors, key=lambda _s: int(_s['id']))
+                    _view_occ_main: dict = {}
+                    for sensor in _sorted_sensors_main:
+                        _sid_int = int(sensor['id'])
+                        _occ = _view_occ_main.get(_sid_int, 0)
+                        _view_occ_main[_sid_int] = _occ + 1
+                        _vkey = _view_key(_sid_int, _occ)
+                        sensor_id = str(_sid_int)  # physical
+                        image = obs_t['images'][f'sensor_{sensor_id}']
+                        _t_size = task.get('sensor_img_size') or {}
+                        _t_crop = task.get('sensor_cropped_area') or {}
+                        _t_rot = task.get('sensor_rotate') or {}
+                        _t_sam3 = task.get('sensor_sam3') or {}
                         image = fetch_image_with_config(image, {
-                            'sensor_id': str(sensor_id),
-                            'sam3': (task.get('sensor_sam3') or {}).get(str(sensor_id)),
-                            'resize': task['sensor_img_size'][str(sensor_id)],
-                            'cropped_area': task['sensor_cropped_area'][str(sensor_id)],
-                            'rotate': task['sensor_rotate'][str(sensor_id)]
+                            'sensor_id': _vkey,
+                            'sam3': _t_sam3.get(_vkey) or _t_sam3.get(sensor_id),
+                            'resize': _t_size.get(_vkey) or _t_size.get(sensor_id),
+                            'cropped_area': _t_crop.get(_vkey) or _t_crop.get(sensor_id),
+                            'rotate': _t_rot.get(_vkey) or _t_rot.get(sensor_id),
                         })
                         # Capture the post-process frame size — this is what the
                         # WebRTC stream shows in the browser, so the heatmap PNG
-                        # must match this aspect (not the raw camera).
+                        # must match this aspect (not the raw camera). Indexed by
+                        # view_key (matches what compute_vision_map emits).
                         if hasattr(image, 'shape') and len(image.shape) >= 2:
-                            _vm_orig_sizes[f'sensor_{sensor["id"]}'] = (
+                            _vm_orig_sizes[f'sensor_{_vkey}'] = (
                                 int(image.shape[0]), int(image.shape[1])
                             )
                         # BGR → RGB. ros_image_to_numpy() returns BGR (cv2/OpenCV convention),
@@ -927,7 +964,7 @@ def checkpoint_test(
                         # PI05/PaliGemma pretrained weights expect [-1, 1]-ranged pixels.
                         _pixel_range = '-11' if policy_obj['type'] == 'PI05' else '01'
                         image = process_image(image, vision_backbone, to_cuda=True, pixel_range=_pixel_range, image_resolution=image_resolution)
-                        policy_input_t[f'observation.images.sensor_{sensor["id"]}'] = image.unsqueeze(0)
+                        policy_input_t[f'observation.images.sensor_{_vkey}'] = image.unsqueeze(0)
 
                     # Normalize observation inputs (state, images) using train-time stats.
                     # Shapes are already batched + on CUDA, so AddBatchDim/DeviceProcessor
@@ -1177,19 +1214,25 @@ def checkpoint_test(
                 try:
                     heatmaps = policy.compute_gradcam(_gc_legacy_batch)
                     gradcam_payload = {}
+                    # Multi-view: cam_idx 는 policy 의 image_features 순서. 그
+                    # 순서는 sensors 의 view enumeration 순서와 1:1 매칭이므로
+                    # 같은 enumeration 으로 view_key 를 다시 구한다.
+                    from ...utils.sensor_view import enumerate_views as _enum_views
+                    _view_list = _enum_views([s['id'] for s in sensors])
                     for cam_idx, heatmap in heatmaps.items():
-                        # 히트맵을 원본 이미지에 overlay하여 base64로 변환
-                        sensor = sensors[cam_idx] if cam_idx < len(sensors) else None
-                        if sensor is not None:
-                            import base64
-                            sensor_id = str(sensor['id'])
-                            resize = task['sensor_img_size'].get(sensor_id, [640, 480])
-                            w, h = resize[0], resize[1]
-                            heatmap_resized = cv2.resize(heatmap, (w, h))
-                            heatmap_color = cv2.applyColorMap((heatmap_resized * 255).astype(np.uint8), cv2.COLORMAP_JET)
-                            _, buf = cv2.imencode('.jpg', heatmap_color, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                            b64 = base64.b64encode(buf).decode('utf-8')
-                            gradcam_payload[f'sensor_{sensor["id"]}'] = b64
+                        if cam_idx >= len(_view_list):
+                            continue
+                        _sid_int, _vkey = _view_list[cam_idx]
+                        _sid_str = str(_sid_int)
+                        import base64
+                        _t_size = task.get('sensor_img_size') or {}
+                        resize = _t_size.get(_vkey) or _t_size.get(_sid_str, [640, 480])
+                        w, h = resize[0], resize[1]
+                        heatmap_resized = cv2.resize(heatmap, (w, h))
+                        heatmap_color = cv2.applyColorMap((heatmap_resized * 255).astype(np.uint8), cv2.COLORMAP_JET)
+                        _, buf = cv2.imencode('.jpg', heatmap_color, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                        b64 = base64.b64encode(buf).decode('utf-8')
+                        gradcam_payload[f'sensor_{_vkey}'] = b64
                     if gradcam_payload:
                         socketio_instance.emit('gradcam', gradcam_payload)
                 except Exception as e:
@@ -1356,15 +1399,27 @@ def checkpoint_test(
                     obs_t1 = ts_next.observation
                     qpos_t1 = torch.from_numpy(np.concatenate([item['qpos'] for item in obs_t1['robot_states'].values()])).float().cuda().unsqueeze(0)
                     policy_input_t1 = {'observation.state': qpos_t1}
-                    for sensor in sensors:
-                        sensor_id = str(sensor['id'])
+                    # Multi-view: same pattern as main loop.
+                    from ...utils.sensor_view import view_key as _view_key
+                    _sorted_sensors_rl = sorted(sensors, key=lambda _s: int(_s['id']))
+                    _view_occ_rl: dict = {}
+                    for sensor in _sorted_sensors_rl:
+                        _sid_int = int(sensor['id'])
+                        _occ = _view_occ_rl.get(_sid_int, 0)
+                        _view_occ_rl[_sid_int] = _occ + 1
+                        _vkey = _view_key(_sid_int, _occ)
+                        sensor_id = str(_sid_int)
                         image = obs_t1['images'][f'sensor_{sensor_id}']
+                        _t_size = task.get('sensor_img_size') or {}
+                        _t_crop = task.get('sensor_cropped_area') or {}
+                        _t_rot = task.get('sensor_rotate') or {}
+                        _t_sam3 = task.get('sensor_sam3') or {}
                         image = fetch_image_with_config(image, {
-                            'sensor_id': sensor_id,
-                            'sam3': (task.get('sensor_sam3') or {}).get(sensor_id),
-                            'resize': task['sensor_img_size'][sensor_id],
-                            'cropped_area': task['sensor_cropped_area'][sensor_id].get('cropped_area', None),
-                            'rotate': task['sensor_rotate'][sensor_id]
+                            'sensor_id': _vkey,
+                            'sam3': _t_sam3.get(_vkey) or _t_sam3.get(sensor_id),
+                            'resize': _t_size.get(_vkey) or _t_size.get(sensor_id),
+                            'cropped_area': _t_crop.get(_vkey) or _t_crop.get(sensor_id),
+                            'rotate': _t_rot.get(_vkey) or _t_rot.get(sensor_id),
                         })
                         # BGR → RGB (same fix as the main inference path above; ros_image_to_numpy
                         # returns BGR but training data on disk is RGB).
@@ -1374,7 +1429,7 @@ def checkpoint_test(
                         # PI05/PaliGemma pretrained weights expect [-1, 1]-ranged pixels.
                         _pixel_range = '-11' if policy_obj['type'] == 'PI05' else '01'
                         image = process_image(image, vision_backbone, to_cuda=True, pixel_range=_pixel_range, image_resolution=image_resolution)
-                        policy_input_t1[f'observation.images.sensor_{sensor_id}'] = image.unsqueeze(0)
+                        policy_input_t1[f'observation.images.sensor_{_vkey}'] = image.unsqueeze(0)
                     state_t1 = policy.select_action(policy_input_t1).squeeze(0).cpu().numpy()
                 
                 replay_buffer.push(state_t, noise_t, reward_t, state_t1, done=False)

@@ -72,8 +72,39 @@
                                             {{ dataset.episodes.length }}
                                         </div>
                                     </q-img>
-                                    <div class="text-bold q-mt-md">{{ dataset.name }}</div>
+                                    <div class="text-bold q-mt-md ellipsis">{{ dataset.name }}</div>
                                 </q-card-section>
+                                <q-slide-transition>
+                                    <q-card-section
+                                        v-if="selectedDatasetIds.includes(dataset.id)"
+                                        class="q-pa-none q-mt-md"
+                                    >
+                                        <div class="row items-center justify-between q-mb-xs">
+                                            <div class="text-caption text-grey-5">
+                                                {{ $t('trainDatasetWeight') }}
+                                            </div>
+                                            <div class="text-caption text-primary text-weight-bold">
+                                                ×{{ getWeightLabel(getDatasetWeight(dataset.id)) }}
+                                            </div>
+                                        </div>
+                                        <q-btn-toggle
+                                            :model-value="getDatasetWeight(dataset.id)"
+                                            @update:model-value="setDatasetWeight(dataset.id, $event)"
+                                            :options="weightOptions"
+                                            spread
+                                            no-caps
+                                            unelevated
+                                            dense
+                                            size="sm"
+                                            toggle-color="primary"
+                                            color="dark"
+                                            text-color="grey-4"
+                                            class="border-grey border-rounded"
+                                        >
+                                            <q-tooltip>{{ $t('trainDatasetWeightTooltip') }}</q-tooltip>
+                                        </q-btn-toggle>
+                                    </q-card-section>
+                                </q-slide-transition>
                             </q-card>
                         </div>
                     </div>
@@ -543,6 +574,26 @@ const stepper = ref(null);
 // Step 1: Dataset Selection
 const availableDatasets = ref([]);
 const selectedDatasetIds = ref([]);
+// 데이터셋별 샘플링 비중 — key: dataset.id, value: 0.5 | 1 | 2 | 3 | 5.
+// 기본값 1 (균등). 사용자가 카드에서 ×N 으로 바꿀 때 여기 들어감.
+// 체크 해제했다가 다시 선택해도 값이 유지되도록 별도 dict 로 관리.
+const datasetWeights = ref({});
+const weightOptions = [
+    { label: '×½', value: 0.5 },
+    { label: '×1', value: 1 },
+    { label: '×2', value: 2 },
+    { label: '×3', value: 3 },
+    { label: '×5', value: 5 },
+];
+function getDatasetWeight(id) {
+    return datasetWeights.value[id] ?? 1;
+}
+function setDatasetWeight(id, v) {
+    datasetWeights.value = { ...datasetWeights.value, [id]: v };
+}
+function getWeightLabel(v) {
+    return v === 0.5 ? '½' : String(v);
+}
 
 // Step 2: Policy Selection
 const checkpoints = ref([]);
@@ -1031,7 +1082,10 @@ function createCheckpoint() {
         task_id: selectedWorkspaceId.value,
         policy_id: selectedPolicy.value,
         load_model_id: selectedCheckpoint.value,
-        dataset_info: Object.fromEntries(selectedDatasetIds.value.map(d => [d, { episode_num: availableDatasets.value.find(ds => ds.id === d).episodes.length }])),
+        dataset_info: Object.fromEntries(selectedDatasetIds.value.map(d => [d, {
+            episode_num: availableDatasets.value.find(ds => ds.id === d).episodes.length,
+            weight: getDatasetWeight(d),
+        }])),
         name: newCheckpointName.value,
         train_settings: trainingPayload
     }).then((res) => {
@@ -1184,7 +1238,3 @@ onMounted(async () => {
     // }
 });
 </script>
-
-<style scoped>
-/* Add any specific styles for this page here */
-</style>

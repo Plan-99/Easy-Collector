@@ -156,17 +156,44 @@ def _parse_args() -> argparse.Namespace:
 # ──────────────────────────────────────────────────────────────────────────────
 # Setup helpers
 # ──────────────────────────────────────────────────────────────────────────────
-def _resolve_sensor_config(meta: dict, sensor_id) -> dict:
-    """Pull the per-sensor crop / rotate / resize / sam3 config from the task block."""
+def _resolve_sensor_config(meta: dict, view_key: str, sensor_id) -> dict:
+    """Pull the per-view crop / rotate / resize / sam3 config from the task block.
+
+    Multi-view: 같은 물리 sensor 의 view 들은 (sensor_5, sensor_5_2 …) 별도
+    설정을 가질 수 있어 view_key 로 lookup. view_key 가 없으면 sensor_id 로
+    fallback (single-view 환경 호환).
+    """
     sid_str = str(sensor_id)
+    vkey = str(view_key)
     task = meta.get("task", {}) or {}
+    def _pick(field, default=None):
+        d = task.get(field) or {}
+        if vkey in d:
+            return d.get(vkey)
+        return d.get(sid_str, default)
     return {
-        "sensor_id": sid_str,
-        "sam3": (task.get("sensor_sam3") or {}).get(sid_str),
-        "cropped_area": (task.get("sensor_cropped_area") or {}).get(sid_str),
-        "rotate": (task.get("sensor_rotate") or {}).get(sid_str, 0),
-        "resize": (task.get("sensor_img_size") or {}).get(sid_str),
+        "sensor_id": vkey,
+        "sam3": _pick("sensor_sam3"),
+        "cropped_area": _pick("sensor_cropped_area"),
+        "rotate": _pick("sensor_rotate", 0),
+        "resize": _pick("sensor_img_size"),
     }
+
+
+def _enumerate_view_keys_for_sensors(sensors):
+    """``sensors`` 는 sensor_ids 순서 (중복 포함). 결과는 (sensor_id, occurrence)
+    오름차순 정렬 — features 순서와 일치. backend ``enumerate_views`` /
+    ``task_model._enumerate_view_keys`` 와 동일 규칙."""
+    seen = {}
+    items = []
+    for s in sensors:
+        sid = int(s["id"])
+        idx = seen.get(sid, 0)
+        seen[sid] = idx + 1
+        vkey = str(sid) if idx == 0 else f"{sid}_{idx + 1}"
+        items.append((s, sid, idx, vkey))
+    items.sort(key=lambda t: (t[1], t[2]))
+    return [(sensor, vkey) for sensor, _sid, _occ, vkey in items]
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -260,19 +287,25 @@ def main() -> int:
                      for a in agents]
                 )
 
-                # 3) Per-sensor crop/rotate/resize using the same task config
+                # 3) Per-view crop/rotate/resize using the same task config
                 #    that EasyTrainer used when collecting and training.
+                #    Multi-view: 같은 물리 sensor 의 여러 view 마다 독립 crop.
+                #    raw frame 은 sensor_{id} 단위로 한 번만 읽고 (image_dict 캐시)
+                #    view 별로 fetch_image_with_config 으로 가공.
                 images = {}
-                for sensor in sensors:
+                raw_cache = {}
+                for sensor, vkey in _enumerate_view_keys_for_sensors(sensors):
                     sid = sensor["id"]
-                    raw = obs["images"][f"sensor_{sid}"]
-                    cfg = _resolve_sensor_config(meta, sid)
+                    if sid not in raw_cache:
+                        raw_cache[sid] = obs["images"][f"sensor_{sid}"]
+                    raw = raw_cache[sid]
+                    cfg = _resolve_sensor_config(meta, vkey, sid)
                     processed = fetch_image_with_config(raw, cfg)
                     # process_image inside CheckpointInference expects RGB. Our
                     # ros_image_to_numpy returns BGR (OpenCV convention). Flip.
                     if processed.ndim == 3 and processed.shape[2] == 3:
                         processed = processed[:, :, ::-1]
-                    images[f"sensor_{sid}"] = np.ascontiguousarray(processed)
+                    images[f"sensor_{vkey}"] = np.ascontiguousarray(processed)
 
                 # 4) Inference
                 action = inf.infer(qpos_concat, images)

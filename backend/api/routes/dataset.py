@@ -161,10 +161,16 @@ def edit_datasets_metadata(id):
     features = info.get("features", {})
     episodes = _read_jsonl(os.path.join(folder_path, EPISODES_PATH))
 
+    # ``new_id`` 는 두 형태를 모두 허용:
+    #   - 정수/숫자문자열 ("7") → "sensor_7" 로 prefix
+    #   - 이미 view_key 형태 ("7_2") → "sensor_7_2" 로 prefix
+    # multi-view 환경에서 한 view 를 다른 view 로 remap 하는 케이스를 위함.
+    def _to_sensor_col(v):
+        return f"observation.images.sensor_{v}"
     sensor_col_remap = {}
     for old_name, new_id in sensor_mappings.items():
         old_col = f"observation.images.{old_name}"
-        new_col = f"observation.images.sensor_{new_id}"
+        new_col = _to_sensor_col(new_id)
         if old_col in features:
             sensor_col_remap[old_col] = new_col
 

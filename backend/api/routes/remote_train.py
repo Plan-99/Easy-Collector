@@ -325,12 +325,17 @@ def _build_train_config(checkpoint):
     }
 
 
-def _tar_datasets(dataset_ids, tar_path):
+def _tar_datasets(dataset_ids, tar_path, dataset_weights=None):
     """Create a tar.gz bundle of the requested dataset directories.
 
     Single dataset: bundle contents at archive root (meta/, data/, videos/).
     Multi dataset: merge into a temp dir first (non-destructive), then tar that
     so training_server sees a single LeRobot-format dataset.
+
+    ``dataset_weights``: optional dict {dataset_id: float}. When merging,
+    writes ``meta/episode_sample_weights.json`` (a flat list of floats indexed
+    by the new episode index) so training_server can build a
+    ``WeightedRandomSampler``. Irrelevant for the single-dataset case.
     """
     dataset_ids = [str(x) for x in dataset_ids]
     for ds_id in dataset_ids:
@@ -346,19 +351,25 @@ def _tar_datasets(dataset_ids, tar_path):
 
     merge_dir = tempfile.mkdtemp(prefix='et_merge_')
     try:
-        _merge_datasets_to_dir(dataset_ids, merge_dir)
+        _merge_datasets_to_dir(dataset_ids, merge_dir, dataset_weights=dataset_weights)
         with tarfile.open(tar_path, 'w:gz') as tar:
             tar.add(merge_dir, arcname='.')
     finally:
         shutil.rmtree(merge_dir, ignore_errors=True)
 
 
-def _merge_datasets_to_dir(dataset_ids, output_dir):
+def _merge_datasets_to_dir(dataset_ids, output_dir, dataset_weights=None):
     """Merge multiple LeRobot datasets into output_dir as a single dataset.
 
     First dataset becomes the base (full copy). Subsequent datasets get their
     episodes appended with re-indexed parquet/video/image paths and merged
     tasks.jsonl. Source datasets are not modified.
+
+    ``dataset_weights``: optional dict {dataset_id (str): float}. When provided
+    and any weight ≠ 1.0, writes ``meta/episode_sample_weights.json`` — a flat
+    list of floats indexed by the *new* (post-merge) episode index. The
+    training_server reads this and builds a WeightedRandomSampler so episodes
+    from a dataset with weight=W are sampled W× as often as weight=1 episodes.
     """
     from ...utils.lerobot_io import (
         _read_json, _write_json, _read_jsonl, _write_jsonl, _append_jsonl,
@@ -378,6 +389,15 @@ def _merge_datasets_to_dir(dataset_ids, output_dir):
     if os.path.isdir(output_dir):
         shutil.rmtree(output_dir)
     shutil.copytree(base_path, output_dir, symlinks=False)
+
+    # Per-new-episode-index sampling weights. Base dataset contributes
+    # episodes 0..(N_base-1) all with base_weight; subsequent datasets append.
+    weights_lookup = {str(k): float(v) for k, v in (dataset_weights or {}).items()}
+    def _w(ds_id):
+        return weights_lookup.get(str(ds_id), 1.0)
+    base_info_initial = get_dataset_info(output_dir) or {}
+    n_base = int(base_info_initial.get('total_episodes', 0))
+    episode_weights = [_w(base_id)] * n_base
 
     for tgt_id in dataset_ids[1:]:
         tgt_id = str(tgt_id)
@@ -458,6 +478,16 @@ def _merge_datasets_to_dir(dataset_ids, output_dir):
                 {'episode_index': new_ep_idx, 'stats': ep_stats},
                 os.path.join(output_dir, EPISODES_STATS_PATH),
             )
+            episode_weights.append(_w(tgt_id))
+
+    # Only emit the sidecar when at least one weight diverges from 1.0 —
+    # otherwise uniform sampling stays implicit and training_server skips the
+    # WeightedRandomSampler path entirely.
+    if any(abs(w - 1.0) > 1e-6 for w in episode_weights):
+        weights_path = os.path.join(output_dir, 'meta', 'episode_sample_weights.json')
+        os.makedirs(os.path.dirname(weights_path), exist_ok=True)
+        with open(weights_path, 'w') as f:
+            json.dump(episode_weights, f)
 
 
 def _tar_checkpoint(checkpoint_id, tar_path):
@@ -608,6 +638,22 @@ def run_training_job(checkpoint, server_url, callback_url,
             _emit_log(socketio_instance, log_id, '[ERROR] No datasets assigned to checkpoint', 'error')
             return CheckpointModel.STATUS_FAILED
 
+        # Per-dataset sampling weights (frontend "샘플링 비중"). Legacy
+        # dataset_info entries lack the field — default to 1.0.
+        dataset_weights = {}
+        for ds_id, meta in (config['dataset_info'] or {}).items():
+            if isinstance(meta, dict) and 'weight' in meta:
+                try:
+                    dataset_weights[str(ds_id)] = float(meta['weight'])
+                except (TypeError, ValueError):
+                    dataset_weights[str(ds_id)] = 1.0
+            else:
+                dataset_weights[str(ds_id)] = 1.0
+        _non_default = {k: v for k, v in dataset_weights.items() if abs(v - 1.0) > 1e-6}
+        if _non_default and len(dataset_ids) > 1:
+            _emit_log(socketio_instance, log_id,
+                      f'Per-dataset sampling weights: {_non_default}')
+
         # Multi-dataset: backend merges into a temp dir and uploads as a single
         # synthetic bundle so training_server stays single-dataset oriented.
         if len(dataset_ids) > 1:
@@ -622,7 +668,7 @@ def run_training_job(checkpoint, server_url, callback_url,
         with tempfile.NamedTemporaryFile(suffix='.tar.gz', delete=False) as tmp:
             tar_path = tmp.name
         try:
-            _tar_datasets(dataset_ids, tar_path)
+            _tar_datasets(dataset_ids, tar_path, dataset_weights=dataset_weights)
             size_mb = os.path.getsize(tar_path) / (1024 * 1024)
             _emit_log(socketio_instance, log_id, f'Uploading dataset ({size_mb:.1f} MB)...')
             with open(tar_path, 'rb') as f:

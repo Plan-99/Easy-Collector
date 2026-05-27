@@ -5,7 +5,7 @@ import torch
 import os
 import re
 import shutil
-from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.data import TensorDataset, DataLoader, WeightedRandomSampler
 import json
 from types import SimpleNamespace
 from lerobot.configs.types import PolicyFeature, FeatureType
@@ -1580,9 +1580,17 @@ class EpisodicDataset(torch.utils.data.Dataset):
         _pixel_range = '-11' if self.policy_type == 'PI05' else '01'
         for sensor_id in self.sensor_ids:
             processed_images = []
+            # Multi-view: sensor_id 가 view_key ("5" or "5_2") 일 수 있음. wrist
+            # 판정은 항상 물리 sensor_id 기준.
             # Wrist cams: ColorJitter only (preserve spatial geometry).
             # Other cams: full aug (RandomResizedCrop + RandomRotation + ColorJitter).
-            if int(sensor_id) in getattr(self, 'wrist_sensor_ids', set()):
+            _vk = str(sensor_id)
+            _phys_sid_str = _vk.split('_', 1)[0]
+            try:
+                _phys_sid = int(_phys_sid_str)
+            except ValueError:
+                _phys_sid = None
+            if _phys_sid is not None and _phys_sid in getattr(self, 'wrist_sensor_ids', set()):
                 aug = getattr(self, '_image_augment_color_only', None)
             else:
                 aug = getattr(self, '_image_augment_full', None)
@@ -2076,9 +2084,17 @@ class FullScanDataset(EpisodicDataset):
         _pixel_range = '-11' if self.policy_type == 'PI05' else '01'
         for sensor_id in self.sensor_ids:
             processed_images = []
+            # Multi-view: sensor_id 가 view_key ("5" or "5_2") 일 수 있음. wrist
+            # 판정은 항상 물리 sensor_id 기준.
             # Wrist cams: ColorJitter only (preserve spatial geometry).
             # Other cams: full aug (RandomResizedCrop + RandomRotation + ColorJitter).
-            if int(sensor_id) in getattr(self, 'wrist_sensor_ids', set()):
+            _vk = str(sensor_id)
+            _phys_sid_str = _vk.split('_', 1)[0]
+            try:
+                _phys_sid = int(_phys_sid_str)
+            except ValueError:
+                _phys_sid = None
+            if _phys_sid is not None and _phys_sid in getattr(self, 'wrist_sensor_ids', set()):
                 aug = getattr(self, '_image_augment_color_only', None)
             else:
                 aug = getattr(self, '_image_augment_full', None)
@@ -2167,18 +2183,55 @@ def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_tra
     # ColorJitter-only (audit-doc bug #31). val/eval: augment=False.
     train_dataset = EpisodicDataset(train_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys, augment=True, wrist_sensor_ids=_wrist_set, image_resolution=image_resolution)
     val_dataset = EpisodicDataset(val_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys, augment=False, wrist_sensor_ids=_wrist_set, image_resolution=image_resolution)
+
+    # Per-episode sampling weights sidecar (written by the backend when
+    # multiple datasets with non-uniform weights are merged). Absent file ⇒
+    # uniform sampling (legacy path).
+    train_sampler = None
+    weights_path = os.path.join(dataset_dir, 'meta', 'episode_sample_weights.json')
+    if os.path.exists(weights_path):
+        try:
+            with open(weights_path, 'r') as f:
+                ep_weights_all = json.load(f)
+            # Align with train_indices (post split + skipped_episodes filter).
+            # Each train_indices[i] is the original episode index in the merged
+            # dataset, which matches the position in ep_weights_all.
+            per_sample = [float(ep_weights_all[int(ei)]) for ei in train_indices]
+            if any(w <= 0 for w in per_sample):
+                raise ValueError('non-positive weight found')
+            train_sampler = WeightedRandomSampler(
+                weights=per_sample,
+                num_samples=len(per_sample),
+                replacement=True,
+            )
+            uniq = sorted(set(round(w, 4) for w in per_sample))
+            print(f'[CONFIG] WeightedRandomSampler enabled — {len(per_sample)} train episodes, '
+                  f'unique weights={uniq}', flush=True)
+        except Exception as e:
+            print(f'[CONFIG][WARN] failed to load episode_sample_weights.json '
+                  f'({weights_path}): {e} — falling back to uniform sampling.', flush=True)
+            train_sampler = None
+
     # Keep workers alive across epochs so EpisodicDataset._ep_cache (and OS page
     # cache backing the mmap'd frame .npy files) survives between epochs.
-    loader_kwargs = dict(
-        shuffle=True,
+    common_loader_kwargs = dict(
         pin_memory=True,
         num_workers=num_workers,
     )
     if num_workers > 0:
-        loader_kwargs["persistent_workers"] = True
-        loader_kwargs["prefetch_factor"] = 4
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train, **loader_kwargs)
-    val_dataloader = DataLoader(val_dataset, batch_size=batch_size_val, **loader_kwargs)
+        common_loader_kwargs["persistent_workers"] = True
+        common_loader_kwargs["prefetch_factor"] = 4
+    if train_sampler is not None:
+        # sampler is mutually exclusive with shuffle in DataLoader.
+        train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train,
+                                      sampler=train_sampler, **common_loader_kwargs)
+    else:
+        train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train,
+                                      shuffle=True, **common_loader_kwargs)
+    # Validation always samples uniformly so the reported loss reflects the
+    # natural episode distribution — weights only bias training optimization.
+    val_dataloader = DataLoader(val_dataset, batch_size=batch_size_val,
+                                shuffle=True, **common_loader_kwargs)
 
     input_features = {k: v for k, v in train_dataset.info.items() if k.startswith("observation")}
     output_features = {k: v for k, v in train_dataset.info.items() if k.startswith("action")}
