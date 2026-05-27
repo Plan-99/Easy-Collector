@@ -651,17 +651,49 @@ def main(args):
             train_settings['has_succeed'] = True
             print('[INFO] succeed flag detected in dataset.', flush=True)
 
-    # Auto-detect sensor_ids from dataset features if not provided
-    if not sensor_ids:
-        features = info.get('features', {})
-        for feat_key in features:
-            if feat_key.startswith('observation.images.sensor_'):
-                sid = feat_key.replace('observation.images.sensor_', '')
-                try:
-                    sensor_ids.append(int(sid))
-                except ValueError:
-                    sensor_ids.append(sid)
-        print(f'[INFO] Auto-detected sensor_ids: {sensor_ids}', flush=True)
+    # Multi-view: 데이터셋의 ``observation.images.*`` features 가 canonical
+    # view_key 목록 (예: "5", "5_2", "7", "7_2"). task.sensor_ids 는 *물리*
+    # ID 의 ordered list (중복 포함) 라 그대로 학습에 쓰면 EpisodicDataset 이
+    # 같은 image_dict key 를 덮어써서 feature 수가 collapse 된다. 따라서
+    # 항상 features 에서 view_key 를 뽑아 학습 input 의 ground truth 로 삼는다.
+    # 정렬: (physical_sid, occurrence) 오름차순 — frontend / record / inference
+    # 와 동일 ordering.
+    features = info.get('features', {})
+    _view_keys_from_features = [
+        feat_key.replace('observation.images.sensor_', '')
+        for feat_key in features
+        if feat_key.startswith('observation.images.sensor_')
+    ]
+
+    def _view_key_sort_key(vk):
+        s = str(vk)
+        if '_' in s:
+            head, tail = s.split('_', 1)
+            try:
+                return (int(head), int(tail))
+            except ValueError:
+                return (1 << 30, s)  # 비정형 키는 맨 뒤
+        try:
+            return (int(s), 1)  # occurrence 0 (suffix 없는 view) 는 1 로 처리해서
+                                # "5" 가 "5_2" 보다 먼저 오게 — "_2" 는 (5,2)
+        except ValueError:
+            return (1 << 30, s)
+    # 위 key 함수는 suffix 없는 view 를 (sid, 1) 로 두고, "_2" 는 (sid, 2),
+    # "_3" 는 (sid, 3) 으로 두므로 "5", "5_2", "5_3", "7" 순서 보장.
+    _view_keys_from_features.sort(key=_view_key_sort_key)
+
+    if _view_keys_from_features:
+        if sensor_ids and list(sensor_ids) != _view_keys_from_features:
+            print(
+                f'[INFO] Overriding config.sensor_ids={sensor_ids} with view_keys '
+                f'derived from dataset features={_view_keys_from_features} '
+                f'(multi-view canonical ordering).',
+                flush=True,
+            )
+        sensor_ids = _view_keys_from_features
+    elif not sensor_ids:
+        sensor_ids = _view_keys_from_features
+    print(f'[INFO] sensor_ids (view_keys) used for training: {sensor_ids}', flush=True)
 
     print(f"[CONFIG] obs_state_keys: {obs_state_keys}, action_key: {action_key}", flush=True)
 

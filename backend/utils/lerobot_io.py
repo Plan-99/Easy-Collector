@@ -504,15 +504,15 @@ def append_episode(dataset_dir, timesteps, agents, sensors, task,
                 img = ts.observation['images'][f'sensor_{s_id}']
 
                 if fetch_image_fn is not None:
+                    # `or` 대신 lookup_view_setting — rotate=0 같은 falsy 정상값이
+                    # sensor 기본값으로 잘못 fallback 되는 버그 방지.
+                    from .sensor_view import lookup_view_setting as _lvs
                     img = fetch_image_fn(img, {
                         'sensor_id': vkey,  # SAM3 tracker key 일치
                         'sam3': sam3_cfg,
-                        'resize': (task.get('sensor_img_size') or {}).get(vkey)
-                                  or (task.get('sensor_img_size') or {}).get(s_id),
-                        'cropped_area': (task.get('sensor_cropped_area') or {}).get(vkey)
-                                  or (task.get('sensor_cropped_area') or {}).get(s_id, {}),
-                        'rotate': (task.get('sensor_rotate') or {}).get(vkey)
-                                  or (task.get('sensor_rotate') or {}).get(s_id, 0),
+                        'resize': _lvs(task.get('sensor_img_size'), vkey, s_id),
+                        'cropped_area': _lvs(task.get('sensor_cropped_area'), vkey, s_id, default={}),
+                        'rotate': _lvs(task.get('sensor_rotate'), vkey, s_id, default=0),
                     })
 
                 if isinstance(img, np.ndarray):

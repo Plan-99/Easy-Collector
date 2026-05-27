@@ -642,16 +642,15 @@ def checkpoint_test(
                     _raw_shape = getattr(_img, 'shape', None)
                     # Per-view config: prefer vkey-specific entry, fall back to
                     # physical sid for backward compat with single-view tasks.
-                    _t_size = task.get('sensor_img_size') or {}
-                    _t_crop = task.get('sensor_cropped_area') or {}
-                    _t_rot = task.get('sensor_rotate') or {}
-                    _t_sam3 = task.get('sensor_sam3') or {}
+                    # `or` 대신 lookup_view_setting 사용 — rotate=0 같은 falsy
+                    # 정상값이 sensor 기본값으로 잘못 fallback 되는 버그 방지.
+                    from ...utils.sensor_view import lookup_view_setting as _lvs
                     _img = fetch_image_with_config(_img, {
                         'sensor_id': _vkey,
-                        'sam3': _t_sam3.get(_vkey) or _t_sam3.get(_sid),
-                        'resize': _t_size.get(_vkey) or _t_size.get(_sid),
-                        'cropped_area': _t_crop.get(_vkey) or _t_crop.get(_sid),
-                        'rotate': _t_rot.get(_vkey) or _t_rot.get(_sid),
+                        'sam3': _lvs(task.get('sensor_sam3'), _vkey, _sid),
+                        'resize': _lvs(task.get('sensor_img_size'), _vkey, _sid),
+                        'cropped_area': _lvs(task.get('sensor_cropped_area'), _vkey, _sid),
+                        'rotate': _lvs(task.get('sensor_rotate'), _vkey, _sid, default=0),
                     })
                     if hasattr(_img, 'ndim') and _img.ndim == 3 and _img.shape[2] == 3:
                         _img = _img[:, :, ::-1]
@@ -929,16 +928,13 @@ def checkpoint_test(
                         _vkey = _view_key(_sid_int, _occ)
                         sensor_id = str(_sid_int)  # physical
                         image = obs_t['images'][f'sensor_{sensor_id}']
-                        _t_size = task.get('sensor_img_size') or {}
-                        _t_crop = task.get('sensor_cropped_area') or {}
-                        _t_rot = task.get('sensor_rotate') or {}
-                        _t_sam3 = task.get('sensor_sam3') or {}
+                        from ...utils.sensor_view import lookup_view_setting as _lvs
                         image = fetch_image_with_config(image, {
                             'sensor_id': _vkey,
-                            'sam3': _t_sam3.get(_vkey) or _t_sam3.get(sensor_id),
-                            'resize': _t_size.get(_vkey) or _t_size.get(sensor_id),
-                            'cropped_area': _t_crop.get(_vkey) or _t_crop.get(sensor_id),
-                            'rotate': _t_rot.get(_vkey) or _t_rot.get(sensor_id),
+                            'sam3': _lvs(task.get('sensor_sam3'), _vkey, sensor_id),
+                            'resize': _lvs(task.get('sensor_img_size'), _vkey, sensor_id),
+                            'cropped_area': _lvs(task.get('sensor_cropped_area'), _vkey, sensor_id),
+                            'rotate': _lvs(task.get('sensor_rotate'), _vkey, sensor_id, default=0),
                         })
                         # Capture the post-process frame size — this is what the
                         # WebRTC stream shows in the browser, so the heatmap PNG
@@ -1410,16 +1406,13 @@ def checkpoint_test(
                         _vkey = _view_key(_sid_int, _occ)
                         sensor_id = str(_sid_int)
                         image = obs_t1['images'][f'sensor_{sensor_id}']
-                        _t_size = task.get('sensor_img_size') or {}
-                        _t_crop = task.get('sensor_cropped_area') or {}
-                        _t_rot = task.get('sensor_rotate') or {}
-                        _t_sam3 = task.get('sensor_sam3') or {}
+                        from ...utils.sensor_view import lookup_view_setting as _lvs
                         image = fetch_image_with_config(image, {
                             'sensor_id': _vkey,
-                            'sam3': _t_sam3.get(_vkey) or _t_sam3.get(sensor_id),
-                            'resize': _t_size.get(_vkey) or _t_size.get(sensor_id),
-                            'cropped_area': _t_crop.get(_vkey) or _t_crop.get(sensor_id),
-                            'rotate': _t_rot.get(_vkey) or _t_rot.get(sensor_id),
+                            'sam3': _lvs(task.get('sensor_sam3'), _vkey, sensor_id),
+                            'resize': _lvs(task.get('sensor_img_size'), _vkey, sensor_id),
+                            'cropped_area': _lvs(task.get('sensor_cropped_area'), _vkey, sensor_id),
+                            'rotate': _lvs(task.get('sensor_rotate'), _vkey, sensor_id, default=0),
                         })
                         # BGR → RGB (same fix as the main inference path above; ros_image_to_numpy
                         # returns BGR but training data on disk is RGB).

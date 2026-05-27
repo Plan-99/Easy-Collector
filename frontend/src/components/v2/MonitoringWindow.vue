@@ -735,21 +735,29 @@ const sensorViewports = computed(() => {
 });
 
 // 모든 lookup: view_key 우선, 없으면 sensor_id 로 fallback (기존 single-view
-// dataset/task 호환).
+// dataset/task 호환). `??` 가 아니라 `in` 체크로 "키 존재" 를 판별 — rotation=0
+// 같은 falsy 정상값이 fallback 으로 잘못 넘어가는 버그를 막는다 (`||` 사용 시
+// d["5_2"]=0 → falsy → d["5"]=270 로 빠짐).
 function viewportCropArea(ws, viewKey, sensorId) {
     const d = ws && ws.sensor_cropped_area;
     if (!d) return {};
-    return d[viewKey] || d[sensorId] || {};
+    if (viewKey in d) return d[viewKey];
+    if (sensorId in d) return d[sensorId];
+    return {};
 }
 function viewportImgSize(ws, viewKey, sensorId) {
     const d = ws && ws.sensor_img_size;
     if (!d) return [640, 480];
-    return d[viewKey] || d[sensorId] || [640, 480];
+    if (viewKey in d) return d[viewKey];
+    if (sensorId in d) return d[sensorId];
+    return [640, 480];
 }
 function viewportRotate(ws, viewKey, sensorId) {
     const d = ws && ws.sensor_rotate;
     if (!d) return 0;
-    return d[viewKey] || d[sensorId] || 0;
+    if (viewKey in d) return d[viewKey];
+    if (sensorId in d) return d[sensorId];
+    return 0;
 }
 const selectedDatasetId = defineModel('selectedDatasetId', {
     type: [String, Number],

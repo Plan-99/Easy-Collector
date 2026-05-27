@@ -166,11 +166,16 @@ def _resolve_sensor_config(meta: dict, view_key: str, sensor_id) -> dict:
     sid_str = str(sensor_id)
     vkey = str(view_key)
     task = meta.get("task", {}) or {}
+    # 명시적 키 존재 체크 — `or` 는 rotate=0 같은 falsy 정상값을 잘못 fallback.
     def _pick(field, default=None):
-        d = task.get(field) or {}
+        d = task.get(field)
+        if not isinstance(d, dict):
+            return default
         if vkey in d:
-            return d.get(vkey)
-        return d.get(sid_str, default)
+            return d[vkey]
+        if sid_str in d:
+            return d[sid_str]
+        return default
     return {
         "sensor_id": vkey,
         "sam3": _pick("sensor_sam3"),

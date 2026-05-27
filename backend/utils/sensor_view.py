@@ -119,6 +119,35 @@ def parse_view_key(vkey: str) -> Tuple[int, int]:
     return int(head), n - 1
 
 
+def lookup_view_setting(view_dict, view_key, sensor_id, default=None):
+    """``view_dict`` 에서 view_key 우선, 없으면 sensor_id (문자열 또는 int) 로
+    fallback. **키 존재 여부로 판단** — Python ``or`` 는 ``0`` / 빈 list / 빈
+    dict 도 falsy 라 정상 값이 fallback 으로 잘못 빠지는 버그 (예: rotation=0
+    인 view 가 같은 카메라 다른 view 의 rotation 값으로 collapse) 를 막는다.
+
+    >>> lookup_view_setting({'5': 270, '5_2': 0}, '5_2', 5, default=999)
+    0
+    >>> lookup_view_setting({'5': 270}, '5_2', 5, default=999)
+    270
+    >>> lookup_view_setting({'5': 270}, '5_2', '5', default=999)
+    270
+    >>> lookup_view_setting({}, '5_2', 5, default=999)
+    999
+    >>> lookup_view_setting(None, '5_2', 5, default=999)
+    999
+    """
+    if not isinstance(view_dict, dict):
+        return default
+    if view_key in view_dict:
+        return view_dict[view_key]
+    sid_str = str(sensor_id)
+    if sid_str in view_dict:
+        return view_dict[sid_str]
+    if sensor_id in view_dict:
+        return view_dict[sensor_id]
+    return default
+
+
 def is_same_sensor(vkey_a: str, vkey_b: str) -> bool:
     """두 view_key 가 같은 물리 센서를 가리키는지.
 
