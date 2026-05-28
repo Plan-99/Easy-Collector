@@ -15,7 +15,11 @@ RUN sed -i 's/archive.ubuntu.com/mirror.kakao.com/g' /etc/apt/sources.list && \
     sed -i 's/security.ubuntu.com/mirror.kakao.com/g' /etc/apt/sources.list
 
 # ROS 2 packages (realsense는 모듈로 분리됨, 런타임에 설치)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# apt-get upgrade 가 필요한 이유: ros:humble 베이스에 박혀있는 libcap2/libcurl4/
+# libpng16-16 같은 라이브러리가 구버전이라, 우리가 설치하려는 -dev 패키지가
+# strict-pin 으로 요구하는 신버전과 충돌해 "held broken packages" 가 난다.
+# 사전 upgrade 로 베이스 라이브러리들을 한 번 끌어올려 해소한다.
+RUN apt-get update && apt-get -y upgrade && apt-get install -y --no-install-recommends \
     ros-humble-usb-cam \
     ros-humble-image-transport-plugins \
     # Robot control
