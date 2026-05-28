@@ -481,10 +481,23 @@ def run_setup_wizard(self: "MainWindow") -> bool:
             QMessageBox.critical(dlg, "오류", f"설치 실패 (code={code})")
 
     def _start_docker_build():
-        log.append("[INSTALL] docker compose build --no-cache ...")
+        # rebuild_images.sh 가 두 단계를 처리한다:
+        #   1) base 이미지(easytrainer-{backend,ros2}-base:latest)가 없으면 먼저 빌드
+        #   2) 그 위에 modules 레이어(easytrainer-{backend,ros2}:latest) 빌드
+        # `docker compose build` 만 호출하면 base 이미지를 docker.io 에서 pull 하려다
+        # 신규 환경에서 "pull access denied" 로 실패한다.
+        rebuild_script = self.project_root / "scripts" / "rebuild_images.sh"
         proc = QProcess(dlg)
-        program, prefix = get_compose_cmd()
-        proc.setProgram(program); proc.setArguments([*prefix, "build", "--no-cache"]); proc.setWorkingDirectory(str(self.project_root))
+        if rebuild_script.is_file():
+            log.append(f"[INSTALL] bash {rebuild_script} all ...")
+            proc.setProgram("bash")
+            proc.setArguments([str(rebuild_script), "all"])
+        else:
+            # 폴백: rebuild_images.sh 가 없으면 종전대로 시도 (base 가 이미 있어야 성공)
+            log.append("[INSTALL][WARN] scripts/rebuild_images.sh 가 없어 docker compose build 로 폴백합니다.")
+            program, prefix = get_compose_cmd()
+            proc.setProgram(program); proc.setArguments([*prefix, "build", "--no-cache"])
+        proc.setWorkingDirectory(str(self.project_root))
         progress_state["tracking"] = True
         def _append(is_err=False):
             try:

@@ -3102,7 +3102,28 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                     pass
 
         self.show_update_progress_panel("Docker 이미지를 빌드하는 중입니다...")
-        self.run_compose(["build", "--no-cache"], on_finish=_after_build)
+        # rebuild_images.sh 가 있으면 base+modules 두 단계를 처리한다.
+        # (`docker compose build` 만으로는 base 이미지가 없는 신규 환경에서
+        # docker.io pull 실패함.)
+        rebuild_script = self.project_root / "scripts" / "rebuild_images.sh"
+        proc_idle = self.process is None or self.process.state() == QProcess.NotRunning
+        if rebuild_script.is_file() and proc_idle:
+            self.append_log(f"[UPGRADE] bash {rebuild_script} all ...")
+            self.process = QProcess(self)
+            self.process.setProgram("bash")
+            self.process.setArguments([str(rebuild_script), "all"])
+            self.process.setWorkingDirectory(str(self.project_root))
+            self.process.readyReadStandardOutput.connect(
+                lambda: self._read_stream(self.process, False)
+            )
+            self.process.readyReadStandardError.connect(
+                lambda: self._read_stream(self.process, True)
+            )
+            self.process.finished.connect(_after_build)
+            self.process.finished.connect(lambda *_: self.update_state_label())
+            self.process.start()
+        else:
+            self.run_compose(["build", "--no-cache"], on_finish=_after_build)
 
     def _show_upgrade_error(self, detail: str):
         self._upgrade_in_progress = False
