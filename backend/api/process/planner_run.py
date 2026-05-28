@@ -264,6 +264,263 @@ def _run_joint_position(block, ctx, task_control):
                     pass
 
 
+def _is_tool_agent(agent):
+    """Tool agents (e.g. standalone gripper) don't have EE / IK — they take an
+    absolute joint position instead of an EE delta.
+    """
+    return getattr(agent, 'role', None) == 'tool' or getattr(agent, 'ik_solver', None) is None
+
+
+def _run_move_relative_ee(block, ctx, task_control):
+    """Move arms by ``deltas[<arm_id>]`` (6-DOF EE delta from current EE pose),
+    and tools by ``tool_positions[<tool_id>]`` (absolute joint position).
+
+    Two separate dicts because the semantics differ: arms accept a relative
+    EE delta (delta is added to ``get_ee_position()`` at runtime), tools take
+    an absolute joint command (no EE — just open/close to a target).
+
+    ``deltas``: per-arm 6 floats [dx, dy, dz, drx, dry, drz].
+    ``tool_positions``: per-tool list of absolute joint values (length matches
+    the tool's ``joint_names``).
+
+    is_moving polling + cancel pattern mirrors joint_position.
+    """
+    workspace = ctx['workspaces_by_id'].get(block.get('workspace_id'))
+    if workspace is None:
+        raise RuntimeError(f"workspace_id={block.get('workspace_id')} not found")
+
+    robots = (workspace.get('assembly') or {}).get('robots') or []
+    deltas = block.get('deltas') or {}
+    tool_positions = block.get('tool_positions') or {}
+
+    arm_targets = []   # list of (agent, target_ee_dict)
+    tool_targets = []  # list of (agent, abs_joint_position)
+    for robot in robots:
+        agent = ctx['agents'].get(int(robot['id']))
+        if agent is None:
+            raise RuntimeError(
+                f"robot '{robot.get('name')}' (id={robot['id']}) is not running — turn it on first"
+            )
+
+        # Diagnostic: 첫 실행 시 한 번씩 agent 의 분기 판정 근거 출력.
+        print(
+            f"[MoveRelEE] block='{block.get('name')}' robot={robot.get('id')} "
+            f"({robot.get('name')}) agent.role={getattr(agent, 'role', None)!r} "
+            f"agent.ik_solver={getattr(agent, 'ik_solver', None)!r} "
+            f"is_tool={_is_tool_agent(agent)} "
+            f"deltas_has={str(robot['id']) in (deltas or {})} "
+            f"tool_pos_has={str(robot['id']) in (tool_positions or {})}",
+            flush=True,
+        )
+
+        if _is_tool_agent(agent):
+            pos = tool_positions.get(str(robot['id'])) or tool_positions.get(robot['id'])
+            if pos is None:
+                continue
+            if not isinstance(pos, (list, tuple)):
+                raise RuntimeError(
+                    f"block '{block.get('name')}' tool_positions for robot "
+                    f"{robot['id']} must be a list"
+                )
+            tool_targets.append((agent, [float(v) for v in pos]))
+            continue
+
+        # Arm path
+        delta_vec = deltas.get(str(robot['id'])) or deltas.get(robot['id'])
+        if delta_vec is None:
+            continue
+        if not isinstance(delta_vec, (list, tuple)) or len(delta_vec) != 6:
+            raise RuntimeError(
+                f"block '{block.get('name')}' deltas for robot {robot['id']} "
+                f"must be a 6-element list [dx,dy,dz,drx,dry,drz]"
+            )
+        current_ee = agent.get_ee_position()
+        print(
+            f"[MoveRelEE] arm robot={robot.get('id')} current_ee={current_ee}",
+            flush=True,
+        )
+        if not current_ee:
+            raise RuntimeError(
+                f"robot '{robot.get('name')}' returned empty EE pose — make sure IK is configured"
+            )
+        target_ee = {}
+        d = [float(v) for v in delta_vec]
+        for ee_name, cur in current_ee.items():
+            cur = list(cur)
+            # cur 가 [x,y,z,rx,ry,rz] (6) 또는 [x,y,z,rx,ry,rz,gripper] (7) 일 수
+            # 있음. 앞 6 dim 에만 delta 더하고 뒤는 그대로 유지.
+            new_pose = list(cur)
+            for i in range(min(6, len(new_pose))):
+                new_pose[i] = float(cur[i]) + d[i]
+            target_ee[ee_name] = new_pose
+        print(
+            f"[MoveRelEE] arm robot={robot.get('id')} delta={delta_vec} "
+            f"target_ee={target_ee}",
+            flush=True,
+        )
+        arm_targets.append((agent, target_ee))
+
+    if not arm_targets and not tool_targets:
+        print(f"[WARN] block '{block.get('name')}' has no targets, skipping")
+        return
+
+    duration = float(block.get('duration', 3.0))
+    print(
+        f"[MoveRelEE] dispatching arm_targets={len(arm_targets)} "
+        f"tool_targets={len(tool_targets)} duration={duration}s",
+        flush=True,
+    )
+    for agent, target in arm_targets:
+        agent.move_ee_to(target, duration=duration)
+    for agent, pos in tool_targets:
+        agent.move_to(pos, duration=duration)
+
+    timeout_at = time.time() + max(30.0, duration + 5.0)
+    agents_only = [a for a, _ in arm_targets] + [a for a, _ in tool_targets]
+    try:
+        while time.time() < timeout_at:
+            if task_control['stop']:
+                print('[NOTICE] move_relative_ee interrupted by stop signal')
+                for a in agents_only:
+                    try:
+                        a.cancel_move_to()
+                    except Exception as e:
+                        print(f"[WARN] cancel_move_to failed: {e}")
+                break
+            if not any(a.is_moving for a in agents_only):
+                break
+            time.sleep(0.1)
+        else:
+            print('[WARNING] move_relative_ee timed out — moving on')
+            for a in agents_only:
+                try:
+                    a.cancel_move_to()
+                except Exception:
+                    pass
+    finally:
+        if task_control.get('stop'):
+            for a in agents_only:
+                try:
+                    a.cancel_move_to()
+                except Exception:
+                    pass
+
+
+def _run_replay_episode(block, ctx, task_control):
+    """Replay a recorded episode by streaming its ``action.joint`` (qaction) frame
+    by frame to every robot in the workspace. No policy inference — just a
+    deterministic playback of the captured trajectory.
+
+    Behavior:
+      1. (optional) ``agent.move_to(first_qpos)`` for each robot, wait until
+         ``is_moving`` clears, then sleep ``settle_sec``.
+      2. Iterate frames 1..N at ``hz`` calling ``agent.move_joint_step(qaction)``.
+      3. Stop check every frame; on stop, cancel any in-flight ``move_to``.
+
+    Block keys:
+      workspace_id, dataset_id, episode_index, hz, move_to_first, settle_sec.
+    """
+    from ...utils.lerobot_io import read_episode
+    from ...configs.global_configs import DATASET_DIR
+
+    workspace = ctx['workspaces_by_id'].get(block.get('workspace_id'))
+    if workspace is None:
+        raise RuntimeError(f"workspace_id={block.get('workspace_id')} not found")
+
+    robots = (workspace.get('assembly') or {}).get('robots') or []
+    agents_by_id = {}
+    for robot in robots:
+        agent = ctx['agents'].get(int(robot['id']))
+        if agent is None:
+            raise RuntimeError(f"robot '{robot.get('name')}' (id={robot['id']}) is not running")
+        agents_by_id[int(robot['id'])] = agent
+
+    dataset_id = block.get('dataset_id')
+    if dataset_id is None:
+        raise RuntimeError("replay_episode: dataset_id is required")
+    episode_index = int(block.get('episode_index'))
+    hz = float(block.get('hz') or 20)
+    if hz <= 0:
+        raise RuntimeError(f"replay_episode: invalid hz={hz}")
+    move_to_first = bool(block.get('move_to_first', True))
+    settle_sec = float(block.get('settle_sec') or 0)
+
+    dataset_dir = os.path.join(DATASET_DIR, str(dataset_id))
+    if not os.path.isdir(dataset_dir):
+        raise RuntimeError(f"replay_episode: dataset dir not found: {dataset_dir}")
+
+    ep_data = read_episode(dataset_dir, episode_index)
+    states_by_robot = ep_data["states"]    # {robot_name: np.array (T, D)}
+    actions_by_robot = ep_data["actions"]  # {robot_name: np.array (T, D)}
+    num_frames = ep_data["num_frames"]
+
+    # Resolve agents for the dataset's robot_names. "robot_<id>" → agent id.
+    # Robots present in the dataset but not in the workspace are skipped (rather
+    # than failing) — common when datasets were captured with a superset of
+    # robots and the user just wants the matching subset to replay.
+    name_to_agent = {}
+    for robot_name in actions_by_robot.keys():
+        try:
+            aid = int(robot_name.replace("robot_", ""))
+        except ValueError:
+            continue
+        if aid in agents_by_id:
+            name_to_agent[robot_name] = agents_by_id[aid]
+
+    if not name_to_agent:
+        raise RuntimeError(
+            "replay_episode: no overlap between episode's robots "
+            f"({list(actions_by_robot.keys())}) and workspace's robots "
+            f"({list(agents_by_id.keys())})"
+        )
+
+    # 1) Move to first qpos.
+    if move_to_first:
+        for robot_name, agent in name_to_agent.items():
+            first_qpos = states_by_robot[robot_name][0].tolist()
+            agent.move_to(first_qpos, duration=5.0)
+        movers = list(name_to_agent.values())
+        timeout = 30.0
+        start_wait = time.time()
+        while time.time() - start_wait < timeout:
+            if task_control['stop']:
+                for a in movers:
+                    try:
+                        a.cancel_move_to()
+                    except Exception:
+                        pass
+                return
+            if not any(a.is_moving for a in movers):
+                break
+            time.sleep(0.05)
+        if settle_sec > 0:
+            t0 = time.time()
+            while time.time() - t0 < settle_sec:
+                if task_control['stop']:
+                    return
+                time.sleep(0.05)
+
+    # 2) Replay frames at hz. i=0 은 record_episode 의 reset 프레임(qaction 의미
+    # 없음) 이라 1 부터 시작 — read_dataset.py 와 동일한 규칙.
+    period = 1.0 / hz
+    next_tick = time.time()
+    for i in range(1, num_frames):
+        if task_control['stop']:
+            return
+        for robot_name, agent in name_to_agent.items():
+            qaction = actions_by_robot[robot_name][i]
+            agent.move_joint_step(qaction)
+        next_tick += period
+        remaining = next_tick - time.time()
+        if remaining > 0.002:
+            time.sleep(remaining - 0.002)
+        if remaining > 0:
+            while time.time() < next_tick:
+                pass
+        else:
+            next_tick = time.time()
+
+
 def _run_checkpoint(block, ctx, task_control):
     from ...database.models.checkpoint_model import Checkpoint as CheckpointModel
 
@@ -648,6 +905,8 @@ def _run_sync(block, ctx, task_control, group_id):
 
 _HANDLERS = {
     'joint_position': _run_joint_position,
+    'move_relative_ee': _run_move_relative_ee,
+    'replay_episode': _run_replay_episode,
     'checkpoint': _run_checkpoint,
     'timesleep': _run_timesleep,
     'query_pose': _run_query_pose,

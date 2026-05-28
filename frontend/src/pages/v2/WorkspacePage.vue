@@ -264,12 +264,18 @@
                                 @mouseleave="cancelCrop"
                                 ref="videoContainer"
                             >
+                                <!-- :key 를 일부러 안 박는다. view chip 을 바꿔도
+                                     컴포넌트가 reuse 되고 WebRtcVideo 내부 topic
+                                     watcher 가 새 topic 으로 다시 connect 함.
+                                     예전엔 focused.viewKey 변경마다 컴포넌트가
+                                     destroy/create 되어 매 클릭마다 새 WebRTC
+                                     stream 이 누적 → ros2 obs subscription 누수의
+                                     주요 원인이었음. -->
                                 <web-rtc-video
                                     :process-id="`sensor_${focused.id}`"
                                     :topic="focused.read_topic"
                                     :msg-type="focused.read_topic_msg"
                                     class="border-rounded"
-                                    :key="focused.viewKey || focused.id"
                                     :loading="focused.status !== 'on'"
                                     v-if="focused.status !== 'off'"
                                     show_original_video

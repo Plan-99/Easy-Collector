@@ -247,17 +247,26 @@
                                 <div
                                     v-for="(block, index) in (group.blocks || [])"
                                     :key="block.id"
-                                    class="planner-block-card column q-mr-xs"
-                                    :class="[
-                                        runningByGroup[group.id] === index ? 'bg-blue-grey-9' : 'bg-grey-10',
-                                        { 'block-card-active': isDragOver(group.id, index) || runningByGroup[group.id] === index }
-                                    ]"
+                                    class="column q-mr-xs"
+                                    :class="runningByGroup[group.id] === index ? 'bg-blue-grey-9' : 'bg-grey-10'"
                                     :draggable="!isRunning"
                                     @dragstart="onDragStart(group.id, index, $event)"
                                     @dragover.prevent="onDragOver(group.id, index, $event)"
                                     @drop="onDrop(group.id, index)"
                                     @dragend="onDragEnd"
-                                    :style="{ cursor: isRunning ? 'default' : 'grab' }"
+                                    :style="{
+                                        width: '160px',
+                                        minWidth: '160px',
+                                        maxWidth: '160px',
+                                        flexShrink: 0,
+                                        borderRadius: '6px',
+                                        overflow: 'hidden',
+                                        border: (isDragOver(group.id, index) || runningByGroup[group.id] === index)
+                                            ? '1px solid var(--q-primary)'
+                                            : '1px solid rgba(255,255,255,0.06)',
+                                        transition: 'border-color 0.15s ease',
+                                        cursor: isRunning ? 'default' : 'grab',
+                                    }"
                                 >
                                     <div :style="{ height: '3px', backgroundColor: blockTypeColor(block.type) }"></div>
                                     <div class="q-pa-xs col column">
@@ -289,8 +298,14 @@
                                             <span v-if="block.type === 'joint_position'">
                                                 {{ getWorkspaceName(block.workspace_id) }}
                                             </span>
+                                            <span v-else-if="block.type === 'move_relative_ee'">
+                                                {{ getWorkspaceName(block.workspace_id) }}
+                                            </span>
                                             <span v-else-if="block.type === 'checkpoint'">
                                                 {{ block.checkpoint_name }}
+                                            </span>
+                                            <span v-else-if="block.type === 'replay_episode'">
+                                                {{ block.dataset_name || `Dataset ${block.dataset_id}` }} · ep.{{ block.episode_index }}
                                             </span>
                                             <span v-else-if="block.type === 'timesleep'">—</span>
                                             <span v-else-if="block.type === 'sync'">
@@ -408,6 +423,22 @@
                             <div class="text-caption text-grey">{{ (detailBlock.positions?.[robot.id] || []).map(v => Number(v).toFixed(4)).join(', ') }}</div>
                         </div>
                     </template>
+                    <template v-if="detailBlock.type === 'move_relative_ee'">
+                        <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerBlockDetailsWorkspace') }}:</span> {{ getWorkspaceName(detailBlock.workspace_id) }}</div>
+                        <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerBlockDetailsDuration') }}:</span> {{ detailBlock.duration }}s</div>
+                        <div v-for="robot in getWorkspaceRobots(detailBlock.workspace_id)" :key="robot.id" class="q-mb-xs">
+                            <div class="text-bold text-caption">
+                                {{ robot.name }}
+                                <q-chip v-if="isToolRobot(robot)" dense color="amber-9" text-color="white" size="sm">tool</q-chip>
+                            </div>
+                            <div v-if="isToolRobot(robot)" class="text-caption text-grey">
+                                abs = [{{ (detailBlock.tool_positions?.[robot.id] || []).map(v => Number(v).toFixed(4)).join(', ') }}]
+                            </div>
+                            <div v-else class="text-caption text-grey">
+                                Δ = [{{ (detailBlock.deltas?.[robot.id] || [0,0,0,0,0,0]).map(v => Number(v).toFixed(4)).join(', ') }}]
+                            </div>
+                        </div>
+                    </template>
                     <template v-if="detailBlock.type === 'checkpoint'">
                         <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerBlockDetailsWorkspace') }}:</span> {{ getWorkspaceName(detailBlock.workspace_id) }}</div>
                         <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerBlockDetailsCheckpoint') }}:</span> {{ detailBlock.checkpoint_name }}</div>
@@ -417,6 +448,19 @@
                         </div>
                         <div class="q-mb-sm" v-else>
                             <span class="text-bold">{{ $t('plannerBlockDetailsDuration') }}:</span> {{ detailBlock.duration }}s
+                        </div>
+                    </template>
+                    <template v-if="detailBlock.type === 'replay_episode'">
+                        <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerBlockDetailsWorkspace') }}:</span> {{ getWorkspaceName(detailBlock.workspace_id) }}</div>
+                        <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerReplayDatasetLabel') }}:</span> {{ detailBlock.dataset_name || detailBlock.dataset_id }}</div>
+                        <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerReplayEpisodeLabel') }}:</span> {{ detailBlock.episode_index }}</div>
+                        <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerHzLabel') }}:</span> {{ detailBlock.hz }}</div>
+                        <div class="q-mb-sm">
+                            <span class="text-bold">{{ $t('plannerReplayMoveToFirst') }}:</span>
+                            {{ detailBlock.move_to_first ? 'yes' : 'no' }}
+                            <span v-if="detailBlock.move_to_first && detailBlock.settle_sec > 0">
+                                (+{{ detailBlock.settle_sec }}s)
+                            </span>
                         </div>
                     </template>
                     <template v-if="detailBlock.type === 'timesleep'">
@@ -465,7 +509,10 @@
                         <q-tab name="ee" :label="$t('plannerPoseTypeEE')" />
                     </q-tabs>
                     <q-separator dark />
-                    <div class="terminal-block q-mt-md">
+                    <div
+                        class="q-mt-md q-pa-sm"
+                        style="background: #0c1116; border: 1px solid rgba(255,255,255,0.08); border-radius: 6px;"
+                    >
                         <div class="row items-center q-mb-xs">
                             <q-icon name="circle" size="8px" color="red" class="q-mr-xs" />
                             <q-icon name="circle" size="8px" color="amber" class="q-mr-xs" />
@@ -478,7 +525,9 @@
                                 <q-tooltip>{{ $t('plannerExampleCopy') }}</q-tooltip>
                             </q-btn>
                         </div>
-                        <pre class="terminal-code">{{ exampleNodeCode }}</pre>
+                        <pre
+                            style="margin: 0; color: #d6deeb; font-family: 'JetBrains Mono', 'Fira Code', Menlo, Consolas, monospace; font-size: 12px; line-height: 1.55; white-space: pre; overflow-x: auto; max-height: 480px;"
+                        >{{ exampleNodeCode }}</pre>
                     </div>
                     <div class="text-caption text-grey-5 q-mt-md">
                         {{ $t('plannerExampleNodeRunHint') }}
@@ -564,7 +613,7 @@
                                 >
                                     <div class="row items-center q-mb-sm">
                                         <q-icon name="bookmark" color="primary" class="q-mr-xs" />
-                                        <div class="text-caption text-primary text-uppercase letter-spacing-1">{{ $t('plannerSavedPosition') }}</div>
+                                        <div class="text-caption text-primary text-uppercase" style="letter-spacing: 1px;">{{ $t('plannerSavedPosition') }}</div>
                                         <q-space />
                                         <q-btn
                                             size="sm" unelevated color="primary"
@@ -612,6 +661,171 @@
                                 </div>
                             </div>
                         </div>
+                    </template>
+
+                    <!-- Move Relative EE Fields -->
+                    <template v-if="blockForm.type === 'move_relative_ee'">
+                        <TutorialHint class="q-mb-md" :text="$t('tutorialPlannerBlockMoveRelativeEE')" />
+                        <q-select
+                            v-if="formWorkspaceOptions.length > 1"
+                            dense outlined dark bg-color="dark"
+                            v-model="blockForm.workspace_id"
+                            :options="formWorkspaceOptions"
+                            :label="$t('plannerWorkspaceLabel')"
+                            class="q-mb-md"
+                            map-options
+                            emit-value
+                        ></q-select>
+                        <q-input
+                            dense outlined dark bg-color="dark"
+                            v-model.number="blockForm.duration"
+                            :label="$t('plannerDurationSeconds')"
+                            type="number"
+                            min="0.1"
+                            step="0.1"
+                            class="q-mb-md"
+                        ></q-input>
+                        <div v-if="blockForm.workspace_id">
+                            <div
+                                v-for="robot in getWorkspaceRobots(blockForm.workspace_id)"
+                                :key="robot.id"
+                                class="q-mb-md"
+                            >
+                                <div class="row items-center q-mb-sm">
+                                    <div class="text-subtitle2">{{ robot.name }}</div>
+                                    <q-chip
+                                        v-if="isToolRobot(robot)"
+                                        dense color="amber-9" text-color="white"
+                                        class="q-ml-sm"
+                                    >tool</q-chip>
+                                    <q-badge
+                                        :color="robot.status === 'on' ? 'positive' : 'grey'"
+                                        class="q-ml-sm"
+                                    >
+                                        {{ robot.status === 'on' ? $t('plannerOnline') : $t('plannerOffline') }}
+                                    </q-badge>
+                                </div>
+                                <!-- Arm: 6-DOF EE delta -->
+                                <div
+                                    v-if="!isToolRobot(robot) && Array.isArray(blockForm.deltas[robot.id])"
+                                    class="border-rounded border-cyan bg-dark q-pa-md"
+                                >
+                                    <div class="text-caption text-grey-5 q-mb-sm">
+                                        {{ $t('plannerRelativeEEHint') }}
+                                    </div>
+                                    <div class="row q-col-gutter-sm">
+                                        <div
+                                            v-for="(label, idx) in ['dx', 'dy', 'dz', 'drx', 'dry', 'drz']"
+                                            :key="idx"
+                                            class="col-4"
+                                        >
+                                            <q-input
+                                                dense outlined dark bg-color="dark"
+                                                hide-bottom-space
+                                                v-model.number="blockForm.deltas[robot.id][idx]"
+                                                :label="label"
+                                                type="number"
+                                                step="0.01"
+                                            ></q-input>
+                                        </div>
+                                    </div>
+                                </div>
+                                <!-- Tool: absolute joint values (no EE / IK) -->
+                                <div
+                                    v-else-if="isToolRobot(robot) && Array.isArray(blockForm.tool_positions[robot.id])"
+                                    class="border-rounded q-pa-md"
+                                    style="border: 1px solid #FF8F00; background: #1a1a1a;"
+                                >
+                                    <div class="text-caption text-grey-5 q-mb-sm">
+                                        {{ $t('plannerToolAbsoluteHint') }}
+                                    </div>
+                                    <div class="row q-col-gutter-sm">
+                                        <div
+                                            v-for="(jointName, jIdx) in (robot.joint_names || [`j${0}`])"
+                                            :key="jIdx"
+                                            class="col-4"
+                                        >
+                                            <q-input
+                                                dense outlined dark bg-color="dark"
+                                                hide-bottom-space
+                                                v-model.number="blockForm.tool_positions[robot.id][jIdx]"
+                                                :label="jointName"
+                                                type="number"
+                                                step="0.01"
+                                            ></q-input>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- Replay Episode Fields -->
+                    <template v-if="blockForm.type === 'replay_episode'">
+                        <TutorialHint class="q-mb-md" :text="$t('tutorialPlannerBlockReplayEpisode')" />
+                        <q-select
+                            v-if="formWorkspaceOptions.length > 1"
+                            dense outlined dark bg-color="dark"
+                            v-model="blockForm.workspace_id"
+                            :options="formWorkspaceOptions"
+                            :label="$t('plannerWorkspaceLabel')"
+                            class="q-mb-md"
+                            map-options
+                            emit-value
+                        ></q-select>
+                        <q-select
+                            v-if="blockForm.workspace_id"
+                            dense outlined dark bg-color="dark"
+                            v-model="blockForm.dataset_id"
+                            :options="datasetOptions"
+                            :label="$t('plannerReplayDatasetLabel')"
+                            class="q-mb-md"
+                            map-options
+                            emit-value
+                            :no-options-label="$t('plannerReplayNoDatasets')"
+                        ></q-select>
+                        <q-select
+                            v-if="blockForm.dataset_id != null"
+                            dense outlined dark bg-color="dark"
+                            v-model="blockForm.episode_index"
+                            :options="episodeOptions"
+                            :label="$t('plannerReplayEpisodeLabel')"
+                            class="q-mb-md"
+                            map-options
+                            emit-value
+                            :no-options-label="$t('plannerReplayNoEpisodes')"
+                        ></q-select>
+                        <q-input
+                            dense outlined dark bg-color="dark"
+                            v-model.number="blockForm.hz"
+                            :label="$t('plannerHzLabel')"
+                            :hint="$t('plannerReplayHzHint')"
+                            type="number"
+                            min="1"
+                            step="1"
+                            class="q-mb-md"
+                        ></q-input>
+                        <q-toggle
+                            v-model="blockForm.move_to_first"
+                            :label="$t('plannerReplayMoveToFirst')"
+                            color="primary"
+                            dark
+                            class="q-mb-xs"
+                        ></q-toggle>
+                        <div class="text-caption text-grey q-mb-md">
+                            {{ $t('plannerReplayMoveToFirstHint') }}
+                        </div>
+                        <q-input
+                            v-if="blockForm.move_to_first"
+                            dense outlined dark bg-color="dark"
+                            v-model.number="blockForm.settle_sec"
+                            :label="$t('plannerReplaySettleSec')"
+                            :hint="$t('plannerReplaySettleSecHint')"
+                            type="number"
+                            min="0"
+                            step="0.5"
+                            class="q-mb-md"
+                        ></q-input>
                     </template>
 
                     <!-- Checkpoint Fields -->
@@ -811,7 +1025,8 @@
                             />
                             <div
                                 v-if="queryPoseTestResult"
-                                class="terminal-block q-mt-sm q-pa-sm"
+                                class="q-mt-sm q-pa-sm"
+                                style="background: #0c1116; border: 1px solid rgba(255,255,255,0.08); border-radius: 6px;"
                             >
                                 <div
                                     :class="queryPoseTestResult.ok ? 'text-positive' : 'text-negative'"
@@ -826,7 +1041,7 @@
                                 </div>
                                 <pre
                                     v-if="queryPoseTestResult.pose"
-                                    class="terminal-code"
+                                    style="margin: 0; color: #d6deeb; font-family: 'JetBrains Mono', 'Fira Code', Menlo, Consolas, monospace; font-size: 12px; line-height: 1.55; white-space: pre; overflow-x: auto; max-height: 480px;"
                                 >{{ JSON.stringify(queryPoseTestResult.pose, null, 2) }}</pre>
                             </div>
                         </div>
@@ -1278,6 +1493,8 @@ function saveGroupBlocks(group) {
 
 const BLOCK_TYPE_COLORS = {
     joint_position: '#2196F3',
+    move_relative_ee: '#00BCD4',
+    replay_episode: '#4CAF50',
     checkpoint: '#9C27B0',
     timesleep: '#FF9800',
     sync: '#009688',
@@ -1322,6 +1539,47 @@ const filteredCheckpoints = computed(() => {
     return checkpoints.value.filter(c => c.task_id === blockForm.value.workspace_id);
 });
 
+// --- Datasets (for replay_episode block) ---
+// Cache keyed by workspace_id so switching workspaces in the form refetches only
+// when needed. Each entry: [{ id, name, episodes: [{ name, index, length }] }, ...].
+const datasetsByWorkspace = ref({});
+
+async function fetchDatasetsForWorkspace(workspaceId) {
+    if (workspaceId == null) return;
+    if (datasetsByWorkspace.value[workspaceId]) return;
+    try {
+        const { data } = await api.get('/datasets', { params: { task_id: workspaceId } });
+        datasetsByWorkspace.value = {
+            ...datasetsByWorkspace.value,
+            [workspaceId]: data.datasets || [],
+        };
+    } catch (e) {
+        console.error('Error fetching datasets:', e);
+    }
+}
+
+const filteredDatasets = computed(() => {
+    const ws = blockForm.value.workspace_id;
+    if (ws == null) return [];
+    return datasetsByWorkspace.value[ws] || [];
+});
+
+const datasetOptions = computed(() => filteredDatasets.value.map(d => ({
+    label: d.name || `Dataset ${d.id}`,
+    value: d.id,
+})));
+
+const episodeOptions = computed(() => {
+    const ds = filteredDatasets.value.find(d => d.id === blockForm.value.dataset_id);
+    if (!ds || !Array.isArray(ds.episodes)) return [];
+    return ds.episodes.map(ep => ({
+        label: `${ep.name} (${ep.length} frames)`,
+        value: ep.index,
+    }));
+});
+
+// (watch 들은 blockForm 정의 이후로 이동했음 — TDZ 회피)
+
 // --- Block Details ---
 const showBlockDetails = ref(false);
 const detailBlock = ref(null);
@@ -1353,6 +1611,18 @@ const blockForm = ref({
     move_homepose_duration: 5,
     move_homepose_settle_sec: 0,
     positions: {},
+    // move_relative_ee:
+    //   deltas:         { [arm_robot_id]:  [dx,dy,dz,drx,dry,drz] }
+    //   tool_positions: { [tool_robot_id]: [abs joint values, length = joint_names] }
+    // Tool agent (role='tool' or no IK) 는 EE 가 없어 절대 joint 값 사용.
+    deltas: {},
+    tool_positions: {},
+    // replay_episode: 데이터셋의 특정 에피소드를 qaction 으로 직접 replay.
+    dataset_id: null,
+    dataset_name: '',
+    episode_index: null,
+    move_to_first: true,
+    settle_sec: 0,
 });
 
 const formGroup = computed(() => plans.value.find(g => g.id === formGroupId.value) || null);
@@ -1405,6 +1675,13 @@ function openBlockForm(group) {
         move_homepose: true,
         move_homepose_duration: 5,
         positions: {},
+        deltas: {},
+        tool_positions: {},
+        dataset_id: null,
+        dataset_name: '',
+        episode_index: null,
+        move_to_first: true,
+        settle_sec: 0,
     };
     showBlockForm.value = true;
 }
@@ -1432,6 +1709,13 @@ function openEditBlockForm(group, block, index) {
         move_homepose_duration: typeof block.move_homepose_duration === 'number' ? block.move_homepose_duration : 5,
         move_homepose_settle_sec: typeof block.move_homepose_settle_sec === 'number' ? block.move_homepose_settle_sec : 0,
         positions: block.positions ? JSON.parse(JSON.stringify(block.positions)) : {},
+        deltas: block.deltas ? JSON.parse(JSON.stringify(block.deltas)) : {},
+        tool_positions: block.tool_positions ? JSON.parse(JSON.stringify(block.tool_positions)) : {},
+        dataset_id: block.dataset_id ?? null,
+        dataset_name: block.dataset_name || '',
+        episode_index: typeof block.episode_index === 'number' ? block.episode_index : null,
+        move_to_first: block.move_to_first === undefined ? true : !!block.move_to_first,
+        settle_sec: typeof block.settle_sec === 'number' ? block.settle_sec : 0,
     };
     showBlockForm.value = true;
 }
@@ -1461,6 +1745,62 @@ watch(() => blockForm.value.workspace_id, (newId, oldId) => {
     });
     blockForm.value.positions = positions;
 });
+
+// move_relative_ee: workspace 변경 시 arm 별 6-DOF delta 슬롯과 tool 별
+// 절대 joint 슬롯을 0 으로 초기화 (편집 모드면 기존 값 유지). tool 은 EE 가
+// 없어서 absolute joint 위치를 받는다.
+watch(() => blockForm.value.workspace_id, (newId, oldId) => {
+    if (blockForm.value.type !== 'move_relative_ee' || !newId) return;
+    const robots = getWorkspaceRobots(newId);
+    const isEditingInitialLoad = editingBlockIndex.value !== null && oldId === null;
+    const existingDeltas = blockForm.value.deltas || {};
+    const existingTools = blockForm.value.tool_positions || {};
+    const deltas = {};
+    const toolPositions = {};
+    robots.forEach(robot => {
+        if (isToolRobot(robot)) {
+            const dim = robot.joint_names?.length || robot.joint_dim || 1;
+            const prior = existingTools[robot.id];
+            if (isEditingInitialLoad && Array.isArray(prior) && prior.length === dim) {
+                toolPositions[robot.id] = [...prior];
+            } else {
+                toolPositions[robot.id] = Array(dim).fill(0);
+            }
+        } else {
+            const prior = existingDeltas[robot.id];
+            if (isEditingInitialLoad && Array.isArray(prior) && prior.length === 6) {
+                deltas[robot.id] = [...prior];
+            } else {
+                deltas[robot.id] = [0, 0, 0, 0, 0, 0];
+            }
+        }
+    });
+    blockForm.value.deltas = deltas;
+    blockForm.value.tool_positions = toolPositions;
+});
+
+// replay_episode: 워크스페이스 바뀌면 dataset 목록 lazy-load.
+watch(() => blockForm.value.workspace_id, (newId) => {
+    if (blockForm.value.type !== 'replay_episode' || !newId) return;
+    fetchDatasetsForWorkspace(newId);
+});
+
+// 폼 타입이 replay_episode 로 바뀌면 그 시점에도 dataset 로드.
+watch(() => blockForm.value.type, (newType) => {
+    if (newType === 'replay_episode' && blockForm.value.workspace_id != null) {
+        fetchDatasetsForWorkspace(blockForm.value.workspace_id);
+    }
+});
+
+// Tool 판정: role==='tool' 또는 ik_solver 가 없으면 tool. arm 은 6-DOF EE
+// 상대 이동, tool 은 절대 joint 위치.
+function isToolRobot(robot) {
+    if (!robot) return false;
+    if (robot.role === 'tool') return true;
+    // ik_solver 가 명시적으로 falsy/null 이면 IK 없는 agent → tool 로 간주
+    if (Object.prototype.hasOwnProperty.call(robot, 'ik_solver') && !robot.ik_solver) return true;
+    return false;
+}
 
 function applyCurrentPos(robot) {
     if (robot.jointState && robot.jointState.length) {
@@ -1525,11 +1865,23 @@ function saveBlock() {
         block.checkpoint_name = cp?.name || '';
     }
 
+    if (block.type === 'replay_episode' && block.dataset_id != null) {
+        const ds = (datasetsByWorkspace.value[block.workspace_id] || []).find(d => d.id === block.dataset_id);
+        block.dataset_name = ds?.name || '';
+    }
+
     if (!block.name) {
         if (block.type === 'joint_position') {
             block.name = t('plannerNameAutoMove', { workspace: getWorkspaceName(block.workspace_id) });
+        } else if (block.type === 'move_relative_ee') {
+            block.name = t('plannerNameAutoMoveRelativeEE', { workspace: getWorkspaceName(block.workspace_id) });
         } else if (block.type === 'checkpoint') {
             block.name = t('plannerNameAutoCheckpoint', { checkpoint: block.checkpoint_name });
+        } else if (block.type === 'replay_episode') {
+            block.name = t('plannerNameAutoReplayEpisode', {
+                dataset: block.dataset_name || block.dataset_id,
+                episode: block.episode_index,
+            });
         } else if (block.type === 'timesleep') {
             block.name = t('plannerNameAutoSleep', { duration: block.duration });
         } else if (block.type === 'sync') {
@@ -1903,35 +2255,3 @@ onMounted(async () => {
     pageLoading.value = false;
 });
 </script>
-
-<style scoped>
-.planner-block-card {
-    width: 160px;
-    min-width: 160px;
-    max-width: 160px;
-    flex-shrink: 0;
-    border-radius: 6px;
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    overflow: hidden;
-    transition: border-color 0.15s ease;
-}
-.planner-block-card.block-card-active {
-    border-color: var(--q-primary);
-}
-.terminal-block {
-    background: #0c1116;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 6px;
-    padding: 10px 12px;
-}
-.terminal-code {
-    margin: 0;
-    color: #d6deeb;
-    font-family: 'JetBrains Mono', 'Fira Code', Menlo, Consolas, monospace;
-    font-size: 12px;
-    line-height: 1.55;
-    white-space: pre;
-    overflow-x: auto;
-    max-height: 480px;
-}
-</style>

@@ -33,6 +33,27 @@ def _homogeneous_to_eepos(T: np.ndarray) -> np.ndarray:
     return np.concatenate([T[:3, 3], rotvec]).astype(np.float32)
 
 
+def _replicate_pad(arr: np.ndarray, target_len: int) -> np.ndarray:
+    """axis-0 으로 ``target_len`` 까지 채우되, 부족한 부분은 마지막 행을 복제.
+
+    이전엔 chunk 가 에피소드 끝을 넘어가면 zero-pad + ``is_pad`` mask 로 loss 에서
+    제외했다. 그러면 모델이 "에피소드 끝부분에서 어떤 action 을 내야 하는가" 를
+    학습할 기회가 없어, 추론 시 chunk[0] 자리에 succeed=1 이 나타나지 않는다
+    (라벨이 chunk 끝 쪽에만 살았기 때문). 마지막 frame 으로 replicate-pad 하면
+    "task 종료 후엔 마지막 자세 유지 + succeed=1" 이라는 inductive bias 가 자연
+    스럽게 형성된다. 호출자는 ``is_pad`` 를 0 으로 두어 loss 에서 padded slot 도
+    학습되게 해야 한다.
+    """
+    if arr.shape[0] == 0:
+        shape = (target_len,) + arr.shape[1:]
+        return np.zeros(shape, dtype=arr.dtype)
+    if arr.shape[0] >= target_len:
+        return arr[:target_len]
+    pad_count = target_len - arr.shape[0]
+    pad = np.broadcast_to(arr[-1:], (pad_count,) + arr.shape[1:]).copy()
+    return np.concatenate([arr, pad], axis=0)
+
+
 def compute_relative_trajectory_in_local_frame(
     future_eepos: np.ndarray, current_eepos: np.ndarray
 ) -> np.ndarray:
@@ -678,10 +699,14 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
         original_action_shape = (self.chunk_size, action_dim)
 
-        if episode_len <= self.chunk_size + self.n_obs_steps - 1:
-            start_ts = self.n_obs_steps - 1
+        # start_ts 범위: 이전엔 ``episode_len - chunk_size`` 까지였는데, 이 경우
+        # chunk[0] 자리에 에피소드 후반(succeed=1 라벨이 사는 자리)이 절대 안 들어가
+        # 학습 분포가 비뚤어진다 (추론 시 chunk[0]→0, chunk[end]→1 패턴 발생). 끝
+        # frame 까지 풀고 부족한 부분은 마지막 frame 으로 replicate-pad 한다.
+        if episode_len <= self.n_obs_steps:
+            start_ts = max(0, episode_len - 1)
         else:
-            start_ts = np.random.choice(np.arange(self.n_obs_steps - 1, episode_len - self.chunk_size))
+            start_ts = int(np.random.choice(np.arange(self.n_obs_steps - 1, episode_len)))
         end_ts = start_ts + self.chunk_size
 
         obs_step_start = start_ts - self.n_obs_steps + 1
@@ -706,7 +731,8 @@ class EpisodicDataset(torch.utils.data.Dataset):
                     img_array = np.zeros((224, 224, 3), dtype=np.uint8)
                 image_dict[key].append(img_array)
 
-        # Actions
+        # Actions — 에피소드 끝을 넘어가면 마지막 frame 으로 replicate-pad (succeed
+        # 도 포함). chunk_size 만큼의 full action 을 만든 뒤 분기별 변환.
         actual_end = min(episode_len, end_ts)
         action = action_data[start_ts:actual_end]
 
@@ -717,12 +743,13 @@ class EpisodicDataset(torch.utils.data.Dataset):
                 succeed = np.zeros((action.shape[0], 1), dtype=np.float32)
             action = np.concatenate([action, succeed], axis=1)
 
-        action_len = min(self.chunk_size, episode_len - start_ts)
+        action_len = min(self.chunk_size, max(0, episode_len - start_ts))
+        action = _replicate_pad(action, self.chunk_size)
 
-        padded_action = np.zeros(original_action_shape, dtype=np.float32)
         if _normalize_action_key(self.action_key) == 'relative_ee_pos' or (self.use_relative_trajectory and _normalize_action_key(self.action_key) == 'ee_delta'):
             # DexUMI style: chunk 의 미래 N 개 eepos 를 현재 eepos local frame 으로
             # 변환. eepos 가 없으면 (옛 dataset) legacy naive cumsum 으로 fallback.
+            # future_idx 가 clip 되어 자연스럽게 last-eepos 가 replicate 된다.
             eepos_data = ep.get("eepos_data")
             if eepos_data is not None and len(eepos_data) > start_ts:
                 future_idx = np.arange(start_ts + 1, start_ts + self.chunk_size + 1)
@@ -730,21 +757,26 @@ class EpisodicDataset(torch.utils.data.Dataset):
                 future_eepos = eepos_data[future_idx]
                 current_eepos = eepos_data[start_ts]
                 rel_traj = compute_relative_trajectory_in_local_frame(future_eepos, current_eepos)
-                padded_action[:action_len, :rel_traj.shape[1]] = rel_traj[:action_len]
+                padded_action = np.zeros(original_action_shape, dtype=np.float32)
+                padded_action[:, :rel_traj.shape[1]] = rel_traj
                 # any_has_succeed 면 action 의 마지막 컬럼이 succeed flag — rel_traj
-                # 는 eepos 차원만 다루므로 succeed slot 을 따로 복사.
+                # 는 eepos 차원만 다루므로 succeed slot 을 별도 복사. action 은 이미
+                # replicate-pad 되어 chunk_size 행을 가짐.
                 if any_has_succeed and action.shape[1] > rel_traj.shape[1]:
-                    padded_action[:action_len, rel_traj.shape[1]:] = action[:action_len, rel_traj.shape[1]:]
+                    padded_action[:, rel_traj.shape[1]:] = action[:, rel_traj.shape[1]:]
             else:
-                padded_action[:action_len] = delta_to_relative_trajectory(action[:action_len])
+                # Legacy fallback: no eepos. delta 누적은 패딩 행에서 drift 를
+                # 일으키므로 (마지막 delta 가 계속 더해짐) 옛 zero-pad 동작을 유지.
+                padded_action = np.zeros(original_action_shape, dtype=np.float32)
+                if action_len > 0:
+                    padded_action[:action_len] = delta_to_relative_trajectory(action[:action_len])
         elif _normalize_action_key(self.action_key) == 'relative_joint_pos':
             # chunk-anchored joint delta: action[t in chunk] - qpos[chunk_start].
             # anchor를 observation.qpos에서 직접 읽음 (obs_state_keys와 독립).
             # absolute dims (gripper/tool/done)는 dataset features에서 자동 추출.
             qpos_anchor_data = ep.get("qpos_anchor_data")
-            chunk_slice = action[:action_len]
             if qpos_anchor_data is not None and len(qpos_anchor_data) > start_ts:
-                action_dim = chunk_slice.shape[1]
+                action_dim = action.shape[1]
                 anchor_dim = qpos_anchor_data.shape[1]
                 _features = (self._dataset_info or {}).get('features', {})
                 _action_names = _features.get('action.joint', {}).get('names', [])
@@ -759,17 +791,19 @@ class EpisodicDataset(torch.utils.data.Dataset):
                     shared = min(anchor_dim, action_dim)
                     effective_mask = [True] * shared + [False] * (action_dim - shared)
                 anchor_at_start = qpos_anchor_data[start_ts]
-                delta_chunk = chunk_slice.copy()
+                padded_action = action.copy()
                 for i, is_delta in enumerate(effective_mask):
                     if is_delta and i < anchor_dim:
-                        delta_chunk[:, i] = delta_chunk[:, i] - anchor_at_start[i]
-                padded_action[:action_len] = delta_chunk
+                        padded_action[:, i] = padded_action[:, i] - anchor_at_start[i]
             else:
-                padded_action[:action_len] = chunk_slice
+                padded_action = action.copy()
         else:
-            padded_action[:action_len] = action
+            padded_action = action.copy()
+        # is_pad: 1=padded slot (옛 동작에선 loss 에서 제외됨). 이제 replicate-pad
+        # 로 "task 끝나면 마지막 자세 유지 + succeed=1" 이 학습 분포에 포함되도록
+        # 일관되게 0 으로 둔다. action_len 정보는 잃지만, replicated 슬롯도 정상
+        # 학습 시그널이라 마스킹할 이유가 없다.
         is_pad = np.zeros(self.chunk_size)
-        is_pad[action_len:] = 1
 
         item = dict()
         item['language_instruction'] = language_instruction

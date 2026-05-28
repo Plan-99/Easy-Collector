@@ -321,6 +321,15 @@ export default {
   plannerDurationSeconds: 'Duration (seconds)',
   plannerHzLabel: 'Inference Hz',
   plannerHzHint: 'How often the policy is queried per second.',
+  plannerReplayDatasetLabel: 'Dataset',
+  plannerReplayNoDatasets: 'No datasets exist for this workspace.',
+  plannerReplayEpisodeLabel: 'Episode',
+  plannerReplayNoEpisodes: 'No episodes in this dataset.',
+  plannerReplayHzHint: 'Replay rate (usually the same hz the episode was recorded at).',
+  plannerReplayMoveToFirst: 'Move to first frame before replay',
+  plannerReplayMoveToFirstHint: 'Smoothly move the robot to the episode\'s first qpos before starting playback. If off, replay starts from the current pose.',
+  plannerReplaySettleSec: 'Settle after first-frame move (sec)',
+  plannerReplaySettleSecHint: 'Brief wait after reaching the first frame before playback starts. 0 = no wait.',
   plannerUntilDone: 'Run until done',
   plannerMoveHomepose: 'Move to home pose at start',
   plannerUntilDoneHint: 'Advance to the next block when the done score exceeds the threshold. (Checkpoint must be trained with has_succeed.)',
@@ -361,7 +370,9 @@ export default {
   plannerUnknownError: 'unknown error',
   plannerSelectTypeError: 'Please select a block type first.',
   plannerNameAutoMove: 'Move ({workspace})',
+  plannerNameAutoMoveRelativeEE: 'Move Relative EE ({workspace})',
   plannerNameAutoCheckpoint: 'Run {checkpoint}',
+  plannerNameAutoReplayEpisode: 'Replay {dataset} ep.{episode}',
   plannerNameAutoSleep: 'Wait {duration}s',
   plannerStartingStatus: 'Starting...',
   plannerStartFailed: 'Failed to start the planner run.',
@@ -705,6 +716,14 @@ export default {
     'Five block types are available: joint position (move to a pose), checkpoint (run a trained AI), time delay, Query Pose (get a target pose from an external node), and Sync (make groups meet at the same point).',
   tutorialPlannerBlockJointPosition:
     'Sends the robot to a specific pose. Pick a workspace, then either jog the robot to a pose using the pendant (−/+ buttons) or hit "Apply Current Pose" to capture its current position. Duration (seconds) is how long the move should take.',
+  tutorialPlannerBlockMoveRelativeEE:
+    'Moves each robot\'s end-effector by a delta from its CURRENT pose (computed at runtime). Use small values (a few cm / radians) — the move is in world frame and interpolated over the given duration.',
+  tutorialPlannerBlockReplayEpisode:
+    'Picks one episode from a dataset and replays its recorded qpos step-by-step. No AI inference — deterministically reproduces the same trajectory.',
+  plannerRelativeEEHint:
+    'Delta from current EE pose at runtime (world frame, meters / radians).',
+  plannerToolAbsoluteHint:
+    'Absolute joint position for this tool (no EE / IK — values applied directly).',
   tutorialPlannerBlockCheckpoint:
     "Runs a trained AI (checkpoint) on the real robot. Pick a workspace and checkpoint, then set a duration (how long to run) or enable 'until done'. The 'move to home pose' toggle moves to a safe pose before starting.",
   tutorialPlannerBlockTimesleep:

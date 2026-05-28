@@ -425,10 +425,39 @@ class Agent:
                     ik_targets[name] = val_list
                     target_tool_values[name] = None
 
-        # 2. IK 풀기 (모든 팔을 한 번에 계산)
-        # current_lr_arm_motor_q에 현재 조인트 상태를 전달하여 연속성 확보
+        # 2. IK 풀기 — pink 의 solve_ik 는 task-space velocity 를 한 step 만
+        # 적분하는 incremental solver 라 한 번 호출로는 target 의 ~30-40% 만
+        # 진행한다 (teleop 처럼 매 step 호출하는 경로는 누적으로 도달).
+        # move_ee_to / move_ee_step 같은 one-shot 호출에선 수렴할 때까지
+        # 반복 호출해야 final_action 이 진짜 target 에 해당하는 joint config 가
+        # 된다. 안 그러면 robot 이 commanded delta 의 일부 거리만 이동.
+        # 수렴 판정은 position only (xyz 0.1mm) — rotation 은 axis-angle 의
+        # Euler wrap 으로 산술적 비교가 불안정해서 IK 가 orientation 도 함께
+        # 풀고 있다는 가정 하에 위치만으로 수렴 체크. orientation 비활성 task
+        # 라면 어차피 의미 없음.
+        max_iters = 200
+        tol_xyz = 1e-4   # 0.1 mm
+        q_iter = np.array(arm_js)
+        sol_q = None
         with self.ik_lock:
-            sol_q, _ = self.ik_solver.solve_ik(ik_targets, current_lr_arm_motor_q=np.array(arm_js))
+            for _ in range(max_iters):
+                sol_q, _ = self.ik_solver.solve_ik(
+                    ik_targets, current_lr_arm_motor_q=q_iter
+                )
+                if sol_q is None:
+                    break
+                q_iter = np.asarray(sol_q)
+                fk = self.ik_solver.get_ee_position(q_iter.tolist())
+                err = 0.0
+                for name, target_vec in ik_targets.items():
+                    cur_vec = fk.get(name)
+                    if cur_vec is None:
+                        err = float('inf')
+                        break
+                    dx = max(abs(cur_vec[i] - target_vec[i]) for i in range(3))
+                    err = max(err, dx)
+                if err < tol_xyz:
+                    break
 
         if sol_q is None:
             return None

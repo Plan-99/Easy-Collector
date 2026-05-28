@@ -321,6 +321,15 @@ export default {
   plannerDurationSeconds: '시간 (초)',
   plannerHzLabel: '추론 Hz',
   plannerHzHint: '초당 정책을 몇 번 호출할지 설정합니다.',
+  plannerReplayDatasetLabel: '데이터셋',
+  plannerReplayNoDatasets: '이 워크스페이스에 데이터셋이 없습니다.',
+  plannerReplayEpisodeLabel: '에피소드',
+  plannerReplayNoEpisodes: '이 데이터셋에 에피소드가 없습니다.',
+  plannerReplayHzHint: '에피소드를 어느 속도로 재생할지 (보통 녹화 시 hz와 동일).',
+  plannerReplayMoveToFirst: '첫 프레임 자세로 먼저 이동',
+  plannerReplayMoveToFirstHint: '재생 시작 전 로봇을 에피소드의 첫 프레임 qpos로 부드럽게 이동시킵니다. 끄면 현재 위치에서 바로 재생을 시작합니다.',
+  plannerReplaySettleSec: '첫 프레임 도달 후 대기 (초)',
+  plannerReplaySettleSecHint: '첫 프레임에 도달한 뒤 재생 시작 전 짧게 대기. 0이면 즉시 재생.',
   plannerUntilDone: 'Done 신호까지 실행',
   plannerMoveHomepose: '시작 시 홈포즈로 이동',
   plannerUntilDoneHint: 'done 점수가 임계값을 넘으면 다음 블록으로 넘어갑니다. (체크포인트가 has_succeed로 학습되어 있어야 함)',
@@ -361,7 +370,9 @@ export default {
   plannerUnknownError: '알 수 없는 오류',
   plannerSelectTypeError: '먼저 블록 종류를 선택하세요.',
   plannerNameAutoMove: '이동 ({workspace})',
+  plannerNameAutoMoveRelativeEE: 'EE 상대 이동 ({workspace})',
   plannerNameAutoCheckpoint: '{checkpoint} 실행',
+  plannerNameAutoReplayEpisode: '{dataset} ep.{episode} 재생',
   plannerNameAutoSleep: '{duration}초 대기',
   plannerStartingStatus: '시작 중...',
   plannerStartFailed: '플래너 실행 시작에 실패했습니다.',
@@ -706,6 +717,14 @@ export default {
     '블록은 5가지예요. 관절 위치(원하는 자세로 이동), 체크포인트(학습된 AI 실행), 시간 대기, Query Pose(외부 노드에서 목표 자세를 받아 이동), Sync(여러 그룹이 같은 지점에서 만나도록 대기).',
   tutorialPlannerBlockJointPosition:
     '로봇을 특정 자세로 보내는 블록이에요. 워크스페이스를 고른 뒤, 펜던트(−/+ 버튼)로 직접 자세를 만들거나 "현재 위치 적용" 버튼으로 지금 자세를 그대로 저장하세요. duration(초)은 해당 자세까지 이동하는 데 걸리는 시간이에요.',
+  tutorialPlannerBlockMoveRelativeEE:
+    '실행 시점의 현재 EE 자세를 기준으로 정해진 만큼 상대 이동하는 블록이에요. 값은 작게 (수 cm / 라디안) 입력하세요. world frame 기준이고 duration 동안 보간 이동합니다.',
+  tutorialPlannerBlockReplayEpisode:
+    '데이터셋에서 에피소드 하나를 골라 녹화된 qpos를 그대로 따라 재생하는 블록이에요. AI 추론 없이 deterministic하게 같은 trajectory를 재현합니다.',
+  plannerRelativeEEHint:
+    '실행 시점의 현재 EE 자세 기준 상대 이동값 (world frame, 미터 / 라디안).',
+  plannerToolAbsoluteHint:
+    '이 도구의 절대 joint 위치 (EE/IK 없음 — 값을 그대로 적용).',
   tutorialPlannerBlockCheckpoint:
     '학습한 AI(체크포인트)를 실제로 돌리는 블록이에요. 워크스페이스 + 체크포인트를 고르고, duration(몇 초 돌릴지) 또는 "성공할 때까지" 옵션을 켜세요. "홈으로 이동" 토글을 켜면 시작 전 안전한 자세로 먼저 이동해요.',
   tutorialPlannerBlockTimesleep:
