@@ -271,8 +271,10 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
         """빌트인 로봇용 interpolation_node 기동 (StartRobotDriver 내부에서 호출).
 
         SDK 모드 / 토픽 모드를 settings 로부터 자동 분기. 빌트인 로봇은 launch
-        패키지가 동일 namespace 안에서 read_topic 을 expose 하므로 output_topic
-        은 마지막 segment(=상대 경로) 로 충분하다.
+        패키지가 동일 namespace 안에서 controller 명령 토픽을 expose 하므로
+        output_topic 은 leading '/' 만 제거한 상대 경로로 전달한다 — controller
+        가 `<controller_name>/commands` 같은 하위 경로에 listen 해도 namespace
+        밑에서 그대로 resolve 된다.
         """
         interp_id = self._interp_process_id(robot_id)
         self._stop(interp_id)
@@ -300,8 +302,19 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
                 'read_topic': 'interpolated_joint_cmd',
             }
         else:
-            write_topic = settings.get('write_topic', '/joint_states').rsplit('/', 1)[-1]
+            # backend (robot_model) 이 write_topic 에 이미 `/ec_robot_<id>/`
+            # prefix 를 붙여 보내므로 그대로 절대 경로로 사용한다 — ROS2 는 leading
+            # `/` 가 있으면 node namespace 를 무시하므로 controller 가 nested 경로
+            # (`<controller_name>/commands`) 를 쓰는 robot (omx, rbpodo, kinova) 도
+            # 정상 매칭된다.
+            write_topic = settings.get('write_topic', '/joint_states')
             params = {'output_topic': write_topic}
+            # 컨트롤러가 std_msgs/Float64MultiArray 또는 trajectory_msgs/JointTrajectory
+            # 를 받는 경우 module.json 의 write_topic_msg 를 그대로 노드 param 으로
+            # 넘긴다. 미지정 시 interpolation_node default(sensor_msgs/JointState).
+            msg_type = settings.get('write_topic_msg')
+            if msg_type:
+                params['output_msg_type'] = msg_type
 
         # module.json driver.interpolation_hz 가 명시되면 노드 publish_rate 로 전달.
         # 미지정 시 interpolation_node 의 ROS param default(200Hz)가 적용된다.

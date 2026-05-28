@@ -169,6 +169,19 @@ class Agent:
 
         self.is_waiting_for_goal = False
 
+        # Subscribe to write_topic so external publishers (e.g. a motion
+        # planner in tutorial mode) populate self.joint_actions for
+        # record_episode. Built-in robots with interpolation/driver also
+        # publish here and the subscription just echoes their own command,
+        # which is harmless (the value is identical to what move_joint_step
+        # set).
+        self.write_topic_sub = None
+        write_topic = robot.get('write_topic')
+        if write_topic and self.write_topic_msg == 'sensor_msgs/JointState':
+            self.write_topic_sub = node.create_subscription(
+                JointStateMsg, write_topic,
+                self._external_action_cb, 10)
+
         self.ee_pos_cmd = None
         self.last_ee_delta = None  # keyboard 모드에서 raw EE delta 저장
 
@@ -193,6 +206,10 @@ class Agent:
         if hasattr(self, 'read_topic_sub') and self.read_topic_sub is not None:
             self.node.destroy_subscription(self.read_topic_sub)
             self.read_topic_sub = None
+
+        if hasattr(self, 'write_topic_sub') and self.write_topic_sub is not None:
+            self.node.destroy_subscription(self.write_topic_sub)
+            self.write_topic_sub = None
 
         if hasattr(self, '_interp_pub') and self._interp_pub is not None:
             self.node.destroy_publisher(self._interp_pub)
@@ -637,6 +654,23 @@ class Agent:
                 self.joint_actions = msg
         except Exception as e:
             print(f"[ERROR] joint_action_cb: {e}")
+
+    def _external_action_cb(self, msg):
+        # JointState 가 robot.joint_names 순서가 아닐 수 있으므로 매핑.
+        try:
+            names = list(getattr(msg, 'name', []))
+            positions = list(getattr(msg, 'position', []))
+            ordered = []
+            for jn in self.joint_names:
+                try:
+                    idx = names.index(jn)
+                    ordered.append(float(positions[idx]))
+                except (ValueError, IndexError):
+                    ordered.append(0.0)
+            with self.js_mutex:
+                self.joint_actions = ordered
+        except Exception as e:
+            print(f"[ERROR] _external_action_cb: {e}")
 
     def tool_state_cb(self, msg):
         try:
