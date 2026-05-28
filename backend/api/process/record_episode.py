@@ -277,7 +277,24 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                     task_control['stop'] = True
                     return
 
-                leader = Leader(node, agents, socketio_instance, teleop._settings)
+                # Leader.__init__ 은 baudrate 스캔 + DxlController 초기화로
+                # 수 초 동안 블로킹된다. task_control 을 넘겨 그 안에서도 stop
+                # 신호에 반응할 수 있게 한다.
+                leader = Leader(node, agents, socketio_instance, teleop._settings,
+                                task_control=task_control)
+
+                # 초기화 도중 stop 을 받았거나 일부 포트만 초기화한 경우 즉시 정리하고 나간다.
+                # workflow 를 시작하면 abort 흔적이 남은 채로 sync 시도 → 더 오래 걸리고
+                # 에러 출력만 많아진다.
+                if task_control['stop'] or getattr(leader, 'init_aborted', False):
+                    print('Stopping during leader init as requested.')
+                    # __init__ 도중 일부 포트가 열렸을 수 있으므로 닫아준다.
+                    for port, ctrl in getattr(leader, 'dxl_controllers', {}).items():
+                        try:
+                            ctrl.portHandler.closePort()
+                        except Exception:
+                            pass
+                    return
 
                 socketio_instance.start_background_task(
                     target=leader.leader_teleop_workflow,
@@ -285,26 +302,46 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                 )
 
                 while not leader.is_synced:
-                    # print('[NOTICE] Waiting for leader teleoperation to sync...')
+                    # Stop 버튼: task_control['stop'] 만 세팅되고 leader 백그라운드
+                    # 태스크가 빠져나가도, 이 outer loop 가 stop 체크를 안 하면 영원히
+                    # is_synced=False 인 채로 대기 → UI 가 0% 에 멈춘 채 record_episode
+                    # 의 finally / task_wrapper.finally 가 실행되지 않아 stop_process
+                    # 이벤트가 발행되지 않는다.
+                    if task_control['stop']:
+                        print('Stopping during leader sync as requested.')
+                        return
+                    # sync 도중 leader workflow 가 예외/실패로 미리 종료한 경우
+                    # is_cleaned_up 이 True 가 된다. 이 때 더 기다리면 무한 대기이므로
+                    # stop 으로 간주하고 빠져나간다.
+                    if getattr(leader, 'is_cleaned_up', False):
+                        print('[ERROR] Leader workflow exited before sync — aborting recording.')
+                        task_control['stop'] = True
+                        return
                     time.sleep(0.1)
 
             # joint commands 대기 (keyboard는 사용자 입력 전까지 actions 없으므로 스킵)
+            # NOTE: agent.joint_actions (cache) 는 subscribe_state_stream gRPC stream
+            # 의 callback 에서만 채워진다. record_episode 는 그 stream 을 구독하지 않고
+            # 진입하므로 캐시는 영원히 None — get_joint_actions() RPC 로 직접 폴링.
             if tele_type != 'keyboard':
                 wait_timeout = 60.0 if tele_type == 'motion_planning' else 5.0
                 for agent in agents:
-                    if agent.joint_actions is None:
+                    actions = agent.get_joint_actions()
+                    if actions is None:
                         print(f'[NOTICE] Waiting for joint commands from robot {agent.id}...')
                         elapsed = 0.0
-                        while agent.joint_actions is None:
+                        while actions is None:
                             if task_control['stop']:
                                 return
                             time.sleep(0.1)
                             elapsed += 0.1
-                            if elapsed >= wait_timeout:
+                            actions = agent.get_joint_actions()
+                            if actions is None and elapsed >= wait_timeout:
                                 print(f'[ERROR] No joint commands from robot {agent.id} after {wait_timeout}s timeout')
                                 task_control['stop'] = True
                                 return
                         print(f'[NOTICE] Joint commands received from robot {agent.id} ({elapsed:.1f}s)')
+                    agent.joint_actions = actions  # cache 갱신
             else:
                 # keyboard: 사용자가 키 누르기 전엔 joint_actions가 None이라 dataset에
                 # 빈 action 배열이 저장되고 replay 시 0벡터로 들어가 로봇이 영점으로 가는

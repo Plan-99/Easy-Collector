@@ -1,7 +1,7 @@
 {
   "id": "robot_omx",
   "name": "OMX",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "category": "robot",
   "description": "ROBOTIS OMX: 5-DOF arm + 1-DOF revolute gripper (gripper_joint_2 mimics gripper_joint_1). Dynamixel USB serial bridge via ros2_control. Arm + gripper are driven as a single JointGroupPositionController over /joint_group_position_controller/commands.",
   "install": {
@@ -44,7 +44,7 @@
           -6.283185307179586,
           -6.283185307179586,
           -6.283185307179586,
-          -6.283185307179586
+          -0.1
         ],
         "joint_upper_bounds": [
           6.283185307179586,
@@ -52,7 +52,7 @@
           6.283185307179586,
           6.283185307179586,
           6.283185307179586,
-          6.283185307179586
+          2.0
         ],
         "tool_inner": true,
         "tool_index": [
@@ -60,7 +60,7 @@
         ],
         "ik_available": true,
         "custom_fields": [
-          "port_name"
+          "serial_port"
         ]
       },
       "driver": {
@@ -83,7 +83,7 @@
           "launch_file": "omx_f_easytrainer.launch.py",
           "args": {
             "namespace": "{namespace}",
-            "port_name": "{port_name|/dev/ttyACM0}",
+            "port_name": "{serial_port|/dev/ttyACM0}",
             "use_mock_hardware": "false"
           }
         }
@@ -95,6 +95,8 @@
           "gripper_joint_1",
           "gripper_joint_2"
         ],
+        "position_cost": 1.0,
+        "orientation_cost": 0.0,
         "ee_definitions": [
           {
             "name": "ee",

@@ -37,7 +37,7 @@ class _SimpleRate:
         self._last = time.monotonic()
 
 class Leader():
-    def __init__(self, node, agents, socketio_instance, teleop_setting) -> None:
+    def __init__(self, node, agents, socketio_instance, teleop_setting, task_control=None) -> None:
         # ROS 노드 초기화ur5e/ur5e_scaled_pos_joint_traj_controller/command
         self.node = node
         self.socketio_instance = socketio_instance
@@ -65,16 +65,29 @@ class Leader():
 
         grouped_by_port = self.group_joints_by_port()
         self.dxl_controllers = {}
+        # init_aborted: __init__ 도중 stop 신호를 받아 일부 포트만 초기화하고
+        # 빠져나온 경우 True. record_episode 가 이 플래그를 보고 leader_teleop_workflow
+        # 를 시작하지 않고 즉시 정리한다.
+        self.init_aborted = False
         for port, joints in grouped_by_port.items():
+            # 진행 중 stop 신호: 다음 포트 초기화로 넘어가지 않는다.
+            if task_control is not None and task_control.get('stop'):
+                print('[Leader] init aborted before port init.', flush=True)
+                self.init_aborted = True
+                break
             # 매 포트의 실제 baudrate 자동 검출. teleop_setting 에 baudrate 가
             # 들어있지 않으므로(subscribe_dynamixel 가 자동 탐색한 값을 DB에
             # 저장하지 않음), Leader 시작 시점에서도 직접 ping-scan 해서 맞춰야 한다.
             # 안 그러면 DxlController 가 default 4M 로 포트를 열고 모터가 1M 에 있을 때
             # 모든 READ/WRITE 가 COMM_RX_TIMEOUT(-3001) 으로 죽는다.
+            # scan_ids_on_port 에 task_control 을 넘기면 1.5s 까지 가지 않고
+            # 50ms 단위로 stop 체크 → 즉시 abort 가능.
             matched_baud = None
             for b in SCAN_BAUDRATES:
+                if task_control is not None and task_control.get('stop'):
+                    break
                 try:
-                    ids = scan_ids_on_port(port, baudrate=b, task_control=None, timeout=1.5)
+                    ids = scan_ids_on_port(port, baudrate=b, task_control=task_control, timeout=1.5)
                 except Exception as e:
                     print(f"[Leader] baudrate probe failed on {port}@{b}: {e}", flush=True)
                     ids = []
@@ -82,6 +95,13 @@ class Leader():
                     matched_baud = b
                     print(f"[Leader] auto-detected baudrate {b} on {port}", flush=True)
                     break
+
+            # 스캔 도중 stop 신호 → DxlController 초기화(수백 ms ~ 1s) 도 건너뛴다.
+            if task_control is not None and task_control.get('stop'):
+                print('[Leader] init aborted during baudrate scan.', flush=True)
+                self.init_aborted = True
+                break
+
             if matched_baud is None:
                 matched_baud = SCAN_BAUDRATES[0]
                 print(
@@ -232,8 +252,13 @@ class Leader():
 
         - Operating Mode 5 (Current-based Position) 가정.
         - Goal_Position = open_tick (gripper_dxl_range[0]),
-          Current_Limit 을 작게 설정해 사용자가 손가락 힘으로 닫을 수 있게 한다.
+          Current_Limit + Goal_Current 를 작게 설정해 사용자가 손가락 힘으로
+          닫을 수 있게 한다.
         - torque on → 손을 놓으면 open 으로 복귀.
+
+        Current_Limit (EEPROM, 38) 은 최대 한계만 잡고, 실제 스프링 힘은
+        Goal_Current (RAM, 102) 가 결정한다. Goal_Current 를 명시적으로 쓰지
+        않으면 이전 세션 값이나 0 이 남아 있어서 스프링이 미약하거나 사라진다.
         """
         dxl_id = joint['dxl_id']
         open_tick = int(joint['gripper_dxl_range'][0])
@@ -242,8 +267,11 @@ class Leader():
         time.sleep(0.01)
         dxl_controller.enable_torque_for_ids([dxl_id])
         time.sleep(0.01)
+        # Goal_Current 명시 설정 — torque enable 직후 자동 리셋되는 값에 의존하지 않는다.
+        dxl_controller.write_goal_current(dxl_id, DEFAULT_GRIPPER_SPRING_BACK_CURRENT_LIMIT)
+        time.sleep(0.01)
         dxl_controller.write_goal_position(dxl_id, open_tick)
-        print(f"[gripper spring-back] ID {dxl_id} → open_tick {open_tick}, current_limit {DEFAULT_GRIPPER_SPRING_BACK_CURRENT_LIMIT}", flush=True)
+        print(f"[gripper spring-back] ID {dxl_id} → open_tick {open_tick}, current_limit/goal_current {DEFAULT_GRIPPER_SPRING_BACK_CURRENT_LIMIT}", flush=True)
 
     def _release_arm_torque(self, port):
         """포트 내 arm 모터 토크를 모드에 따라 안전하게 해제.

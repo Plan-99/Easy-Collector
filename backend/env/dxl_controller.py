@@ -253,6 +253,12 @@ class DxlController:
         print(f"[remove_torque] called on dxl_ids={self.dxl_ids}", flush=True)
         traceback.print_stack()
         for index, dxl_id in enumerate(self.dxl_ids):
+            # current-based 모드(0=Current, 5=Current-based Position)인 그리퍼는
+            # 스프링백을 유지해야 하므로 torque off 하지 않는다.
+            if dxl_id in self.gripper_dxl_ids and self.operating_modes.get(dxl_id) in (
+                OP_MODE_CURRENT, OP_MODE_CURRENT_POSITION
+            ):
+                continue
             with self.port_lock:
                 dxl_comm_result, dxl_error = self.packetHandler.write1ByteTxRx(self.portHandler, dxl_id, torque_enable_address, 0)
             if dxl_comm_result != dxl.COMM_SUCCESS:
