@@ -763,7 +763,12 @@ def run_setup_wizard(self: "MainWindow") -> bool:
                 "-v", "/opt/easytrainer:/opt/easytrainer",
                 # backend.database.models imports lerobot_io which imports the
                 # vendored lerobot package — needs to be on PYTHONPATH.
-                "-e", "PYTHONPATH=/root:/root/backend/lerobot/src",
+                # /root/backend 도 필수 — deploy.yml 의 PyArmor obfuscation 이
+                # backend/pyarmor_runtime_000000/ 를 생성하고 backend/__init__.py
+                # 가 `from pyarmor_runtime_000000 import __pyarmor__` 를 top-level
+                # import 로 해석하기 때문. 빠지면 fresh deb 설치의 마이그레이션
+                # 단계에서 ModuleNotFoundError 발생.
+                "-e", "PYTHONPATH=/root:/root/backend:/root/backend/lerobot/src",
                 "--entrypoint", "bash",
                 "easytrainer-backend:latest",
                 "-c", migrate_cmd,
