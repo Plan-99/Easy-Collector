@@ -64,12 +64,14 @@ def xyzaxayaz_to_se3(xyzaxayaz):
 # ## 🚀 Main Class: IK_Solver (using pink)
 # ---------------------------------------------------------------------------
 class IK_Solver:
-    def __init__(self, 
-                 urdf_path, 
-                 joints_to_lock, 
+    def __init__(self,
+                 urdf_path,
+                 joints_to_lock,
                  ee_definitions,
                  dt=0.01, # Timestep for IK integration
                  solver='proxqp',
+                 position_cost=1.0,
+                 orientation_cost=1.0,
                  **kwargs): # Absorb unused parameters
         
         np.set_printoptions(precision=5, suppress=True, linewidth=200)
@@ -117,12 +119,15 @@ class IK_Solver:
         # Re-create data object after model modifications
         self.data = self.model.createData()
 
-        # 3. Create pink FrameTasks for each end-effector
+        # 3. Create pink FrameTasks for each end-effector.
+        # position/orientation cost 는 module.json 에서 robot 별로 override 가능.
+        # 5-DOF 팔(OMX 등) 처럼 6-DOF SE(3) 를 풀 수 없는 under-actuated 로봇은
+        # orientation_cost 를 낮춰(또는 0) position 위주 IK 로 동작시켜야 한다.
         self.tasks = {
             name: FrameTask(
                 self.ee_frame_names[name],
-                position_cost=1.0, # High cost for position
-                orientation_cost=1.0 # High cost for orientation
+                position_cost=position_cost,
+                orientation_cost=orientation_cost,
             ) for name in self.ee_names
         }
 
