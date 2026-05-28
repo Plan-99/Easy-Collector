@@ -61,7 +61,7 @@ jobs:
           
           # 제외할 파일은 --exclude로 지정
           pyarmor gen -O temp_obf \
-            -r release/ui src \
+            -r release/ui backend \
             --exclude "backend/lerobot" \
             --exclude "release/ui/launcher.py"
 
@@ -82,11 +82,11 @@ jobs:
           if [ -n "$RUNTIME_DIR" ]; then
               echo "Runtime folder found: $RUNTIME_DIR"
 
-              # [Step A] Docker를 위해 src 안으로 '복사' (Copy)
-              # Docker 컨테이너가 src를 마운트할 때 런타임도 같이 가져가야 함
-              if [ -d "temp_obf/src" ]; then
-                  echo " -> Copying to src/ for Docker"
-                  cp -r "temp_obf/$RUNTIME_DIR" "temp_obf/src/"
+              # [Step A] Docker를 위해 backend 안으로 '복사' (Copy)
+              # Docker 컨테이너가 backend를 마운트할 때 런타임도 같이 가져가야 함
+              if [ -d "temp_obf/backend" ]; then
+                  echo " -> Copying to backend/ for Docker"
+                  cp -r "temp_obf/$RUNTIME_DIR" "temp_obf/backend/"
               fi
 
               # [Step B] 런처 UI 실행을 위해 release/ui 안으로 '이동' (Move)
@@ -103,7 +103,7 @@ jobs:
 
           echo "4. 난독화된 파일을 원본 폴더에 강제 덮어쓰기"
           # 이제 구조가 완벽합니다.
-          # - src/ 안에는 runtime 복사본이 있음
+          # - backend/ 안에는 runtime 복사본이 있음
           # - release/ui/ 안에는 runtime 원본이 이동됨
           cp -rf temp_obf/* .
           
