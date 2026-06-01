@@ -24,6 +24,29 @@ from ...utils.lerobot_io import (
 
 dataset_bp = Blueprint('dataset_bp', __name__)
 
+
+def _is_curriculum_owned(dataset):
+    """Curriculum 롤아웃이 생성한 데이터셋인지. 워크스페이스에서 편집/병합/삭제 차단 대상.
+
+    docs/design-docs/2026-05-29_curriculum-self-training.md 참고 — 변경은 커리큘럼
+    초기화(reset) 또는 실패 데이터 버리기(discard failure)로만 가능.
+    """
+    return dataset is not None and getattr(dataset, 'origin', 'manual') == 'curriculum'
+
+
+_CURRICULUM_LOCKED_MSG = (
+    'This dataset is owned by a Curriculum rollout and cannot be edited, merged, '
+    'or deleted here. Use the Curriculum page (reset / discard failure data) instead.'
+)
+
+
+def _guard_curriculum(dataset_id):
+    """Return (error_response, status) tuple if the dataset is curriculum-owned, else (None, None)."""
+    ds = DatasetModel.find(dataset_id)
+    if _is_curriculum_owned(ds):
+        return {'status': 'error', 'message': _CURRICULUM_LOCKED_MSG, 'locked': True}, 403
+    return None, None
+
 @dataset_bp.route('/datasets', methods=['GET'])
 def get_datasets():
     params = request.args
@@ -80,6 +103,8 @@ def update_dataset(id):
     dataset = DatasetModel.find(id)
     if not dataset:
         return {'status': 'error', 'message': 'Dataset not found'}, 404
+    if _is_curriculum_owned(dataset):
+        return {'status': 'error', 'message': _CURRICULUM_LOCKED_MSG, 'locked': True}, 403
 
     dataset.name = data.get('name', dataset.name)
     dataset.save()
@@ -92,6 +117,8 @@ def delete_dataset(id):
     dataset = DatasetModel.find(id)
     if not dataset:
         return {'status': 'error', 'message': 'Dataset not found'}, 404
+    if _is_curriculum_owned(dataset):
+        return {'status': 'error', 'message': _CURRICULUM_LOCKED_MSG, 'locked': True}, 403
 
     folder_path = os.path.join(DATASET_DIR, str(dataset.id))
     if os.path.exists(folder_path) and os.path.isdir(folder_path):
@@ -103,6 +130,9 @@ def delete_dataset(id):
 @dataset_bp.route('/dataset/<id>/<episode_name>', methods=['DELETE'])
 def delete_dataset_file(id, episode_name):
     """Delete a single episode from LeRobot dataset."""
+    err, code = _guard_curriculum(id)
+    if err:
+        return err, code
     folder_path = os.path.join(DATASET_DIR, id)
     if not os.path.exists(folder_path):
         return {'status': 'error', 'message': 'Dataset not found'}, 404
@@ -130,6 +160,9 @@ def get_datasets_metadata(id):
 @dataset_bp.route('/dataset/<id>/:edit_datasets_metadata', methods=['POST'])
 def edit_datasets_metadata(id):
     """Remap sensor/robot names in a LeRobot dataset."""
+    err, code = _guard_curriculum(id)
+    if err:
+        return err, code
     from ...utils.lerobot_io import (
         _read_json, _write_json, _read_jsonl, _write_jsonl,
         PARQUET_PATH_TEMPLATE, INFO_PATH, EPISODES_PATH, EPISODES_STATS_PATH,
@@ -409,6 +442,9 @@ def transform_dataset_route(id):
 
     Request body — see backend/api/process/transform_dataset.py docstring.
     """
+    err, code = _guard_curriculum(id)
+    if err:
+        return err, code
     data = request.json or {}
     name = data.get('name')
     task_id = data.get('task_id')
@@ -438,6 +474,9 @@ def augment_dataset_route(id):
     """Backward-compat wrapper — forwards to /transform with augmentation-only
     operations. Existing UI clients that haven't migrated still work.
     """
+    err, code = _guard_curriculum(id)
+    if err:
+        return err, code
     data = request.json or {}
     operations = {
         'augmentation': {
@@ -470,6 +509,9 @@ def merge_datasets():
 
     source_dataset = DatasetModel.find(source_dataset_id)
     target_datasets = [DatasetModel.find(int(tid)) for tid in target_dataset_ids]
+
+    if _is_curriculum_owned(source_dataset) or any(_is_curriculum_owned(d) for d in target_datasets):
+        return {'status': 'error', 'message': _CURRICULUM_LOCKED_MSG, 'locked': True}, 403
 
     merge_dataset(source_dataset, target_datasets)
 
@@ -662,6 +704,9 @@ def get_episode_video(id, episode_ref):
 
 @dataset_bp.route('/dataset/<id>/<episode_ref>/:set_language', methods=['POST'])
 def set_episode_language_route(id, episode_ref):
+    err, code = _guard_curriculum(id)
+    if err:
+        return err, code
     folder_path = os.path.join(DATASET_DIR, id)
     if not os.path.isdir(folder_path):
         return {'status': 'error', 'message': 'Dataset not found'}, 404
@@ -679,6 +724,9 @@ def set_episode_language_route(id, episode_ref):
 
 @dataset_bp.route('/dataset/<id>/<episode_ref>/:trim', methods=['POST'])
 def trim_episode_route(id, episode_ref):
+    err, code = _guard_curriculum(id)
+    if err:
+        return err, code
     folder_path = os.path.join(DATASET_DIR, id)
     if not os.path.isdir(folder_path):
         return {'status': 'error', 'message': 'Dataset not found'}, 404
@@ -700,6 +748,9 @@ def trim_episode_route(id, episode_ref):
 def downsample_episode_range_route(id, episode_ref):
     """Downsample frames inside [start, end) by ``factor`` (keep every Nth).
     Outside the range stays untouched. Used by the dataset page's 배속 button."""
+    err, code = _guard_curriculum(id)
+    if err:
+        return err, code
     folder_path = os.path.join(DATASET_DIR, id)
     if not os.path.isdir(folder_path):
         return {'status': 'error', 'message': 'Dataset not found'}, 404
@@ -720,6 +771,9 @@ def downsample_episode_range_route(id, episode_ref):
 
 @dataset_bp.route('/dataset/<id>/:batch_delete', methods=['POST'])
 def batch_delete_episodes(id):
+    err, code = _guard_curriculum(id)
+    if err:
+        return err, code
     folder_path = os.path.join(DATASET_DIR, id)
     if not os.path.isdir(folder_path):
         return {'status': 'error', 'message': 'Dataset not found'}, 404
@@ -777,6 +831,10 @@ def batch_move_episodes():
     if not src_id or not dst_id:
         return {'status': 'error', 'message': 'source/target dataset_id required'}, 400
 
+    # 이동은 source 에서 에피소드를 제거하므로 curriculum 소유 데이터셋은 차단.
+    if _is_curriculum_owned(DatasetModel.find(src_id)) or _is_curriculum_owned(DatasetModel.find(dst_id)):
+        return {'status': 'error', 'message': _CURRICULUM_LOCKED_MSG, 'locked': True}, 403
+
     src_dir = os.path.join(DATASET_DIR, src_id)
     dst_dir = os.path.join(DATASET_DIR, dst_id)
     if not os.path.isdir(src_dir) or not os.path.isdir(dst_dir):
@@ -816,6 +874,9 @@ def downsample_dataset_route(id):
     """Backward-compat wrapper — forwards to /transform with downsample-only
     operations. Older UI builds still use this; new UI should call /transform.
     """
+    err, code = _guard_curriculum(id)
+    if err:
+        return err, code
     data = request.json or {}
     keep = int(data.get('keep', 1))
     every = int(data.get('every', 2))

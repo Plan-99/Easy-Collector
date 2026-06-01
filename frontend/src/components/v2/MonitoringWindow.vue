@@ -3,7 +3,10 @@
         <TutorialHint v-if="!monitorOnly" :text="$t(monitoringHintKey)" class="q-mb-sm" />
         <div class="bg-secondary border-rounded column q-px-sm col">
         <div :class="[monitorOnly ? 'col' : 'col-6', 'row flex felx-center q-col-gutter-x-sm']" v-if="sensorViewports.length > 0">
-            <div v-for="vp in sensorViewports" :key="vp.key" class="col q-py-sm relative-position">
+            <!-- v-show 로 숨김 (v-if 아님) — 숨겨도 WebRtcVideo 가 unmount 되지
+                 않아 PC/track 이 살아있다. v-if 면 매 토글마다 WebRTC 재협상이
+                 일어나 streaming server 부하 + 짧은 black screen 발생. -->
+            <div v-for="vp in sensorViewports" :key="vp.key" v-show="isViewportVisible(vp)" class="col q-py-sm relative-position">
                 <web-rtc-video
                     :process-id="`sensor_${vp.sensor.id}`"
                     :topic="vp.sensor.read_topic"
@@ -61,8 +64,12 @@
         <div v-else :class="[monitorOnly ? 'col' : 'col-5', 'border-rounded border-white bg-dark flex flex-center']">
             <div class="text-white">{{ $t('noRobotsMsg') }}</div>
         </div>
-        <template v-if="!monitorOnly">
-        <div class="flex flex-center col" v-if="!isRobotSensorAllOn">
+        <template v-if="!monitorOnly || correctionMode">
+        <!-- correctionMode 에서는 'startAllDevices' 체크 우회 — 커리큘럼이 이미
+             필요한 device 를 켜놓은 상태이고, props.sensors 가 모든 워크스페이스
+             의 union 이라 다른 워크스페이스의 sensor 가 off 일 수 있다 (그건
+             교정 record 와 무관). -->
+        <div class="flex flex-center col" v-if="!isRobotSensorAllOn && !correctionMode">
             <div class="text-yellow">{{ $t('startAllDevices') }}</div>
         </div>
         <div class="col q-py-sm" v-else>
@@ -697,7 +704,59 @@ const props = defineProps({
         type: Array,
         default: null,
     },
+    // (선택) Planner 같은 multi-view 모드에서 일부 viewport 만 화면에 노출하고
+    // 싶을 때 사용. **viewport 자체는 항상 마운트** (WebRTC PC 가 destroy/create
+    // 를 반복하지 않도록) 하고, ``v-show`` 로 숨김. 값 종류:
+    //   - ``null`` (기본): 모두 노출 (기존 동작)
+    //   - ``'primary'``: 물리 센서 당 첫 번째 view (occurrence=0) 만 노출
+    //   - ``Set<string>``: 해당 viewKey 만 노출 (예: 체크포인트가 학습된 view 들)
+    visibleViewKeys: {
+        type: [Object, String, Set],
+        default: null,
+    },
+    // CurriculumPage 의 교정 record_episode 흐름 — monitorOnly=true 와도
+    // 호환되도록 바텀 record 패널을 강제 노출. record_episode 의 outer 루프
+    // 가 iter=1 로 호출되어 1 에피소드 후 종료되고, MonitoringWindow 는
+    // 일반 record 와 동일한 progress / Success / Complete / Throw / Stop UI 를
+    // 그대로 사용한다 (간격/Success 버튼 등 일관성 유지). 버튼 클릭 시 부모
+    // (CurriculumPage) 가 후속 resume 신호를 보내도록 추가 emit 만.
+    correctionMode: {
+        type: Boolean,
+        default: false,
+    },
 });
+
+// 교정 record 종료 시 CurriculumPage 가 적절한 resume 신호 (next / fallback /
+// 전체 stop) 를 보내도록 emit. completeEpisode/throwEpisode/stopDataCollection
+// 의 API 호출은 그대로 두고 (record_episode 워커 정상 종료), 추가로 emit 만.
+const emit = defineEmits(['correction-done', 'correction-throw', 'correction-stop']);
+
+// "primary" 모드용: sensorViewports 를 순회하며 처음 만난 sensor 의 viewport 만
+// 살린다. workspace 가 여러 개라도 같은 물리 센서는 한 번만 노출 → "기본 센서 뷰".
+const primaryViewportKeys = computed(() => {
+    const seenSids = new Set();
+    const keys = new Set();
+    for (const vp of sensorViewports.value) {
+        const sid = vp.sensor?.id;
+        if (sid == null) continue;
+        if (seenSids.has(sid)) continue;
+        seenSids.add(sid);
+        keys.add(vp.key);
+    }
+    return keys;
+});
+
+// 한 viewport 를 화면에 보일지 여부. props.visibleViewKeys 의 mode 에 따라 분기.
+// 핵심: 숨기더라도 컴포넌트는 마운트 상태 유지 → WebRTC 연결은 끊기지 않는다.
+//   Set 매칭 키는 ``vp.key`` (``${workspaceId}-${viewKey}``) — 같은 viewKey 가
+//   여러 workspace 에 있어도 정확히 한 workspace 의 viewport 만 노출 가능.
+function isViewportVisible(vp) {
+    const v = props.visibleViewKeys;
+    if (v == null) return true;
+    if (v === 'primary') return primaryViewportKeys.value.has(vp.key);
+    if (v instanceof Set) return v.has(String(vp.key));
+    return true;
+}
 
 const focused = defineModel('focused', {
     type: Object,
@@ -851,9 +910,10 @@ const monitoringHintKey = computed(() => {
 // 배열을 view 와 1:1 매칭으로 받는다 (같은 sensor_id 가 N 번 들어와도 그대로
 // N 개로). WorkspacePage 가 카드 표시용으로 deduped `selectedSensors` 를 넘기지만,
 // 백엔드 payload 에는 sensor_ids 순서대로 펼친 list 가 필요하다.
-function expandSensorsForBackend() {
+function expandSensorsForBackend(taskSource = null) {
+    const ws = taskSource || props.workspace;
     const sensorById = new Map((props.sensors || []).map((s) => [Number(s.id), s]));
-    const sids = props.workspace?.sensor_ids || [];
+    const sids = ws?.sensor_ids || [];
     return sids.map((sid) => sensorById.get(Number(sid))).filter(Boolean);
 }
 
@@ -1013,7 +1073,10 @@ function _doStartDataCollection(effectiveTeleType, options = {}) {
     // 누른 시점에서 즉시 텔레옵으로 넘기고 싶기 때문에 home pose 이동을
     // 강제로 비활성화한다. 일반 collection 흐름은 옵션 없이 호출 → 기존 값
     // (moveHomposeInDataCollection.value) 그대로 사용.
+    // ``taskOverride`` 는 curriculum 교정 흐름 전용 — 실패한 체크포인트의
+    // max_steps 를 task.episode_len 으로 덮어쓰기 위해 사용.
     const moveHomepose = options.forceNoHomepose ? false : moveHomposeInDataCollection.value;
+    const taskForBackend = options.taskOverride || props.workspace;
 
     if (effectiveTeleType === 'keyboard') {
         addKeyboardListener();
@@ -1032,21 +1095,31 @@ function _doStartDataCollection(effectiveTeleType, options = {}) {
         movingHomepose.value = true;
     }
     const payload = {
-        task: props.workspace,
+        task: taskForBackend,
         robots: props.robots,
-        sensors: expandSensorsForBackend(),
+        sensors: expandSensorsForBackend(taskForBackend),
         tele_type: effectiveTeleType,
-        assembly_id: props.workspace.assembly_id,
+        assembly_id: taskForBackend.assembly_id,
         move_homepose: moveHomepose,
         move_homepose_duration: Number(moveHomposeDuration.value) || 5.0,
         hz: collectionHz.value,
         language_instruction: languageInstruction.value || '',
     };
+    // ``options.iter`` — record_episode 의 outer 루프 횟수. 교정 흐름은 1 episode
+    // 후 자동 종료가 필요해서 iter=1 로 호출 → 사용자가 완료/버리기/중지 중
+    // 어떤 걸 누르더라도 outer 루프가 한 번 돌고 끝나서 stop_process emit 이
+    // 발생, CurriculumPage 가 적절한 resume 신호를 보낸다.
+    if (options.iter != null) {
+        payload.iter = options.iter;
+    }
     if (teleType.value === 'motion_planning' && ros2Service.value) {
         payload.ros2_service = ros2Service.value;
     }
     return api.post(`/dataset/${selectedDatasetId.value}/:start_collection`, payload).catch((error) => {
         viveInitializing.value = false;
+        // 실패 시 등록한 listener 도 정리해야 다음 시도에서 중복 등록 안 됨.
+        if (effectiveTeleType === 'keyboard') removeKeyboardListener();
+        removeSucceedKeyListener();
         console.error('Error starting data collection:', error);
         Notify.create({
             color: 'negative',
@@ -1055,6 +1128,26 @@ function _doStartDataCollection(effectiveTeleType, options = {}) {
         throw error;
     });
 }
+
+// CurriculumPage 교정 흐름 진입점 — 외부에서 ref 로 호출. 내부 refs 를
+// cfg 에 맞춰 동기화한 뒤 일반 record 흐름 (_doStartDataCollection) 으로
+// 위임 → keyboard / succeed listener, moving_homepose 처리 등이 그대로
+// 재사용된다. 직접 ``/:start_collection`` 을 호출하지 말 것 (listener 누락).
+function startCorrectionRecording(cfg) {
+    selectedDatasetId.value = cfg.datasetId;
+    teleType.value = cfg.teleType || 'keyboard';
+    collectionHz.value = Number(cfg.hz) || 20;
+    languageInstruction.value = cfg.languageInstruction || '';
+    // 교정은 실패 직후 위치에서 시연이므로 home pose 이동 강제 off.
+    moveHomposeInDataCollection.value = false;
+    return _doStartDataCollection(teleType.value, {
+        forceNoHomepose: true,
+        taskOverride: cfg.taskOverride,
+        iter: 1,  // single-episode 모드 — 완료/버리기 후 record_episode 자동 종료.
+    });
+}
+
+defineExpose({ startCorrectionRecording });
 
 function cancelViveInit() {
     viveInitializing.value = false;
@@ -1229,6 +1322,7 @@ function completeEpisode() {
             message: t('errorCompleteEpisode'),
         });
     });
+    if (props.correctionMode) emit('correction-done');
 }
 
 function setSucceed() {
@@ -1243,6 +1337,7 @@ function throwEpisode() {
     api.post(`/dataset/${selectedDatasetId.value}/:throw_episode`).catch((error) => {
         console.error('Error throwing episode:', error);
     });
+    if (props.correctionMode) emit('correction-throw');
 }
 
 const succeedKeyHandler = (event) => {
@@ -1294,6 +1389,7 @@ function stopDataCollection() {
     api.post(`/dataset/${selectedDatasetId.value}/:stop_collection`).then(() => {
         collectingProgress.value = 0;
     })
+    if (props.correctionMode) emit('correction-stop');
 }
 
 const hz = ref(10);

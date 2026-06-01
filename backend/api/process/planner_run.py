@@ -34,6 +34,11 @@ import traceback
 from .checkpoint_test import checkpoint_test
 
 
+# 그룹 스레드 별 현재 실행 중인 group_id 를 보관. 핸들러가 ctx 가 아닌 thread-local
+# 로 그룹 id 를 읽어가도록 해서 다른 그룹의 동시 실행과 race 가 안 나도록.
+_thread_local = threading.local()
+
+
 def _emit(socketio_instance, event, payload):
     if socketio_instance is None:
         return
@@ -549,7 +554,9 @@ def _run_checkpoint(block, ctx, task_control):
     duration = float(block.get('duration') or 30)
     until_done = bool(block.get('until_done'))
     # block 단위 home pose 토글: 기본 True (frontend default 와 일치).
-    # move_homepose 가 켜져있을 때만 checkpoint_test 의 go_home_first / move_homepose 가 True.
+    # 켜져 있으면 inference 시작 직전에 한 번 home 으로 이동. 이전엔 episode_len
+    # 마다 강제로 home 복귀하는 부수 효과도 있었으나 제거됨 — 사용자가 명시적으로
+    # 멈출 때까지 inference 가 자유롭게 흐른다.
     move_homepose = bool(block.get('move_homepose', True))
     try:
         move_homepose_duration = float(block.get('move_homepose_duration') or 5.0)
@@ -563,8 +570,20 @@ def _run_checkpoint(block, ctx, task_control):
         done_threshold = float(block.get('done_threshold') if block.get('done_threshold') is not None else 0.5)
     except (TypeError, ValueError):
         done_threshold = 0.5
+    # 실패 판정 step 한도. 0/None 이면 비활성 (실패 판정 없음). until_done 모드에서
+    # done 신호가 안 떨어진 채 이 step 수에 도달하면 실패로 간주.
+    max_steps = block.get('max_steps')
+    try:
+        max_steps = int(max_steps) if max_steps is not None else None
+        if max_steps is not None and max_steps <= 0:
+            max_steps = None
+    except (TypeError, ValueError):
+        max_steps = None
     sub_control = {'stop': False, 'done': False, 'done_threshold': done_threshold if until_done else None}
     preloaded = (ctx.get('preloaded') or {}).get(block.get('checkpoint_id'))
+    # record 를 넘기면 checkpoint_test 가 매 step 마다 ``record['steps']`` 를 갱신.
+    # step-based 실패 판정용.
+    record: dict = {}
 
     def _runner():
         try:
@@ -586,7 +605,7 @@ def _run_checkpoint(block, ctx, task_control):
                 temporal_ensemble_coeff=block.get('temporal_ensemble_coeff', 0.01),
                 action_type=block.get('action_type'),
                 preloaded=preloaded,
-                go_home_first=move_homepose,
+                record=record,
             )
         except Exception:
             print(f"[ERROR] checkpoint_test failed: {traceback.format_exc()}")
@@ -595,6 +614,11 @@ def _run_checkpoint(block, ctx, task_control):
     thread.start()
 
     deadline = None if until_done else time.time() + duration
+    failed = False
+    last_emit_step = -1
+    block_id = block.get('id')
+    group_id = getattr(_thread_local, 'group_id', None)
+    socketio = ctx['socketio']
     try:
         while True:
             if task_control['stop']:
@@ -604,12 +628,51 @@ def _run_checkpoint(block, ctx, task_control):
                 break
             if deadline is not None and time.time() >= deadline:
                 break
+            cur_step = int(record.get('steps') or 0)
+            # UI 가 checkpoint 블록 카드에 "현재 스텝 / max_steps" 뱃지를 보여줄 수
+            # 있도록 step 변동분만 emit (불필요한 트래픽 억제).
+            if cur_step != last_emit_step:
+                last_emit_step = cur_step
+                _emit(socketio, 'planner_block_progress', {
+                    'group_id': group_id,
+                    'block_id': block_id,
+                    'step': cur_step,
+                    'max_steps': max_steps,
+                })
+            if max_steps is not None and cur_step >= max_steps:
+                failed = True
+                print(
+                    f"[PLANNER] checkpoint block '{block.get('name')}' failed: reached max_steps={max_steps} "
+                    f"without done signal"
+                )
+                break
             time.sleep(0.1)
     finally:
         sub_control['stop'] = True
         thread.join(timeout=15)
         if thread.is_alive():
             print('[WARNING] checkpoint_test thread did not exit within 15s')
+
+    # 실패 + fallback 블록 지정 → ``_run_group`` 에 "이 id 의 블록으로 jump" 신호.
+    # 핸들러 안에서 직접 fallback 을 돌리지 않고 _run_group 이 다음 블록으로
+    # 정상 실행하게 해야:
+    #   1) UI 가 planner_block_start 를 받아 fallback 블록이 포커스됨
+    #   2) fallback 이 끝나면 그 뒤 블록부터 plan 이 자연스럽게 계속 진행됨
+    # 사용자가 stop 누른 경우엔 jump 도 트리거하지 않는다.
+    if failed and not task_control.get('stop'):
+        fb_id = block.get('fallback_block_id')
+        fb = (ctx.get('block_by_id') or {}).get(fb_id) if fb_id else None
+        if fb:
+            print(
+                f"[PLANNER] block '{block.get('name')}' failed → jumping to fallback "
+                f"'{fb.get('name')}' (id={fb_id})"
+            )
+            _thread_local.jump_to_block_id = fb_id
+        else:
+            print(
+                f"[WARNING] checkpoint block '{block.get('name')}' failed but no fallback "
+                f"resolvable (fallback_block_id={block.get('fallback_block_id')!r})"
+            )
 
 
 def _run_timesleep(block, ctx, task_control):
@@ -920,8 +983,13 @@ def _run_group(group, ctx, task_control, repeat_count, infinite, total_iteration
     """Execute a single group's plan in this thread. Returns ``(status, error)``."""
     socketio_instance = ctx['socketio']
     group_id = group['id']
+    # 핸들러가 emit 할 때 group_id 를 알 수 있도록 thread-local 에 적재.
+    _thread_local.group_id = group_id
+    _thread_local.jump_to_block_id = None
     plan = list(group.get('blocks') or [])
     total = len(plan)
+    # block_id → index 매핑 — fallback jump 시 빠르게 위치 찾기 위함.
+    id_to_index = {b.get('id'): i for i, b in enumerate(plan) if b.get('id')}
 
     _emit(socketio_instance, 'planner_group_start', {
         'group_id': group_id,
@@ -935,16 +1003,25 @@ def _run_group(group, ctx, task_control, repeat_count, infinite, total_iteration
             return 'stopped', None
 
         iteration += 1
+        # 매 iteration 시작 시 jump flag 초기화 — 직전 iteration 의 fallback 신호가
+        # 새 iteration 으로 새지 않도록.
+        _thread_local.jump_to_block_id = None
         _emit(socketio_instance, 'planner_iteration_start', {
             'group_id': group_id,
             'iteration': iteration,
             'total_iterations': total_iterations,
         })
 
-        for index, block in enumerate(plan):
+        # for 가 아닌 while 로 — fallback jump 처리 시 index 를 자유롭게 옮기기
+        # 위해. 한 iteration 안에서 같은 블록을 두 번 실행하는 무한 루프 방지를
+        # 위해 visited 도 두지는 않음 (사용자가 repeat / 무한 모드를 의도적으로
+        # 쓸 수 있고, 같은 블록 재실행 자체는 정상 시나리오).
+        index = 0
+        while index < total:
             if task_control['stop']:
                 return 'stopped', None
 
+            block = plan[index]
             handler = _HANDLERS.get(block.get('type'))
             block_summary = {
                 'group_id': group_id,
@@ -986,6 +1063,24 @@ def _run_group(group, ctx, task_control, repeat_count, infinite, total_iteration
             if block_status == 'stopped':
                 return 'stopped', None
 
+            # 핸들러가 fallback jump 신호를 남겼는지 확인. 있으면 그 블록의
+            # plan 내 index 로 점프 → 그 다음 iteration step 에서 fallback 이
+            # 정상 블록처럼 실행되고 (block_start emit), 끝나면 그 뒤 블록부터
+            # plan 이 자연스럽게 이어진다.
+            jump_id = getattr(_thread_local, 'jump_to_block_id', None)
+            if jump_id:
+                _thread_local.jump_to_block_id = None
+                target = id_to_index.get(jump_id)
+                if target is not None:
+                    index = target
+                    continue
+                print(
+                    f"[WARNING] [{group_id}] jump target block_id={jump_id!r} not in "
+                    f"this group's plan — continuing sequentially"
+                )
+
+            index += 1
+
     return 'finished', None
 
 
@@ -1023,6 +1118,15 @@ def planner_run(groups, workspaces, app, socketio_instance, task_control,
         print(f"[PLANNER] sync barriers: "
               f"{ {sid: sorted(b.expected) for sid, b in sync_barriers.items()} }")
 
+    # fallback_block_id 로 다른 블록을 참조해 실패 시 디스패치할 수 있도록 모든
+    # 블록의 id→block 매핑을 미리 만들어 ctx 에 넣는다. (curriculum_rollout 의
+    # block_by_id 와 동일 패턴.)
+    block_by_id = {}
+    for grp in groups:
+        for blk in grp.get('blocks') or []:
+            if blk.get('id'):
+                block_by_id[blk['id']] = blk
+
     ctx = {
         'app': app,
         'agents': getattr(app, 'agents', {}),
@@ -1030,6 +1134,7 @@ def planner_run(groups, workspaces, app, socketio_instance, task_control,
         'workspaces_by_id': {ws['id']: ws for ws in workspaces},
         'preloaded': preloaded,
         'sync_barriers': sync_barriers,
+        'block_by_id': block_by_id,
     }
 
     # 그룹별 상태 수집. 한 그룹이 error여도 다른 그룹은 자기 일을 끝내도록 둠

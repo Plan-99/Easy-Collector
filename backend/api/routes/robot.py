@@ -29,8 +29,11 @@ def get_robots():
 
     processes = set(current_app.pm.list_processes())
     try:
+        # ros2 bridge 의 gRPC worker pool 이 streaming RPC 로 포화되면 이 호출이
+        # 무한 대기하면서 라우트 자체가 30s+ 멈춤. fast 쿼리이므로 짧은 timeout 으로
+        # fallback (못 받으면 ros2 process 목록 없이 그냥 backend pm 만 사용).
         client = get_bridge_client()
-        ros2_procs = client.driver.ListProcesses(pb.Empty())
+        ros2_procs = client.driver.ListProcesses(pb.Empty(), timeout=2.0)
         processes.update(ros2_procs.names)
     except Exception:
         pass

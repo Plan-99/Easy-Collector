@@ -103,9 +103,10 @@ def checkpoint_test(
     language_instruction=None,  # optional VLA prompt for PI0.5; falls back to task['name']
     inference_episode_len=None,  # planner feature: inference 시 별도 episode_len 지정
     preloaded=None,
-    go_home_first=True,
     action_hz=None,       # 로봇 명령 송신 rate. 미지정 시 hz 와 동일 (back-compat).
     inference_hz=None,    # 모델 inference 호출 rate. 미지정 시 action_hz / re_inference_steps.
+    record=None,          # curriculum 롤아웃 녹화 버퍼. dict 를 넘기면 step 마다
+                          # timesteps/succeed_flags 를 채우고 'steps' 를 라이브 갱신한다.
     ):
 
     agents = sorted(agents, key=lambda a: a.id)
@@ -399,9 +400,10 @@ def checkpoint_test(
         tutorial = any((s.get('settings') or {}).get('is_tutorial') for s in (sensors or []))
         env = RemoteEnv(agents, sensors, tutorial=tutorial)
         vision_backbone = policy_obj.get('vision_backbone')
-        # 추론 1 에피소드 길이 — move_homepose가 켜져 있으면 이 step 만큼 추론한 뒤
-        # 다시 home으로 돌아간다. 프론트에서 명시한 값이 있으면 그것을 쓰고,
-        # 없으면 task의 episode_len * 2를 기본값으로 사용.
+        # 추론 1 에피소드 길이 — UI 진행도 표시(``inference_progress`` emit) 의
+        # 분모로 사용. 이전엔 이 step 마다 home 복귀하는 cycle 의 길이였지만 그
+        # 동작은 제거됨. 프론트에서 명시한 값이 있으면 그것을 쓰고, 없으면 task 의
+        # episode_len * 2 를 기본값으로 사용.
         _base_ep_len = int(task.get('episode_len', 300))
         if inference_episode_len:
             episode_len = max(1, int(inference_episode_len))
@@ -485,7 +487,10 @@ def checkpoint_test(
         probing_freqs = np.linspace(0.1, 0.4, joint_len) * 2 * np.pi
 
         policy.reset()
-        if go_home_first:
+        # 초기 homepose 이동은 ``move_homepose`` toggle 로만 트리거. 이전엔 별도
+        # ``go_home_first`` flag 가 있어 호출자가 빠뜨리면 기본값 True 로 강제
+        # 이동했는데, 이는 UI 토글을 무시하는 경로라 제거.
+        if move_homepose:
             _move_to_homepose(env.agents, home_pose, task_control, socketio_instance, duration=move_homepose_duration, settle_sec=move_homepose_settle_sec)
             if task_control['stop']:
                 return
@@ -724,27 +729,20 @@ def checkpoint_test(
                 _deltas_local = relative_trajectory_to_delta(_raw_np, current_eepos=_curr_eepos_local)
                 return _deltas_local
 
+        # curriculum 녹화 버퍼 초기화 (opt-in). 호출자가 record dict 를 넘긴 경우만.
+        if record is not None:
+            record.setdefault('timesteps', [])
+            record.setdefault('succeed_flags', [])
+            record['steps'] = 0
+
         start = time.time()
         while not task_control['stop']:
-            if step_num % episode_len == 0 and step_num != 0 and move_homepose:
-                print(f"Episode finished. Total Reward: {episode_reward:.4f}")
-                episode_reward = 0.0
-                policy.reset()
-                rel_action_queue.clear()
-                pi05_chunk_queue.clear()  # PI0.5 chunk queue도 reset 시 비우기
-                _move_to_homepose(env.agents, home_pose, task_control, socketio_instance, duration=move_homepose_duration, settle_sec=move_homepose_settle_sec)
-                if task_control['stop']:
-                    return
-                ts = env.reset()
-                for agent in agents:
-                    if agent.role != 'tool' and agent.ik_solver is not None:
-                        prev_qpos_dict[agent.id] = ts.observation['robot_states'][agent.id]['qpos']
-                # 새 episode 시작 — soft start 다시 활성화 (홈에서 정책 첫 cmd 까지 부드럽게).
-                first_step = True
-                print('Robot moved to homepose')
-                socketio_instance.emit('inference_progress', {
-                    'progress': 0.0, 'step': 0, 'episode_len': episode_len,
-                })
+            # 이 step 의 succeed 라벨 (has_succeed 일 때만 갱신).
+            _frame_succeed = 0.0
+            # 이전엔 ``step_num % episode_len == 0`` 마다 강제로 homepose 로 복귀
+            # + policy.reset + env.reset 를 했지만, 사용자가 명시적으로 끝내지
+            # 않는 한 home 으로 돌아가지 않는 게 자연스러운 동작이라 제거.
+            # (until_done / task_control['stop'] / max_timesteps 경로로만 종료.)
 
             if move_homepose:
                 ep_step = step_num % episode_len
@@ -1262,6 +1260,7 @@ def checkpoint_test(
             if has_succeed:
                 succeed_val = final_action[-1]
                 final_action = final_action[:-1]
+                _frame_succeed = 1.0 if float(succeed_val) > 0.5 else 0.0
                 socketio_instance.emit('inference_succeed', {'succeed': bool(succeed_val > 0.5), 'score': round(float(succeed_val), 4)})
                 # Planner "until done": signal the outer loop when score exceeds threshold.
                 done_threshold = task_control.get('done_threshold') if isinstance(task_control, dict) else None
@@ -1381,6 +1380,16 @@ def checkpoint_test(
                 print('[INFER] Soft start 완료 — 정상 추론 loop 진입')
 
             ts_next = env.record_step()
+
+            # curriculum 녹화: 적용된 action 이 담긴 ts_next 와 이 step 의 succeed
+            # 라벨을 버퍼에 적재. 'steps' 는 outer 핸들러가 max_steps 판정에 쓰도록 라이브 갱신.
+            if record is not None:
+                try:
+                    record['timesteps'].append(ts_next)
+                    record['succeed_flags'].append(_frame_succeed)
+                except Exception as _rec_e:
+                    print(f"[checkpoint_test] record append failed: {_rec_e}", flush=True)
+                record['steps'] = step_num + 1
 
             # === d. OTI-RL 학습 ===
             if oti_rl:

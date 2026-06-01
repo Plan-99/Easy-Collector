@@ -26,6 +26,15 @@ class Dataset(SoftDeleteModel):
 
     name = CharField(null=True)
     task_id = IntegerField(null=True)
+    # ── Curriculum 소유 데이터셋 표식 ────────────────────────────────────────
+    # origin == 'curriculum' 인 데이터셋은 워크스페이스 UI에서 편집/병합/삭제 차단.
+    # 커리큘럼 초기화(reset) 또는 실패 데이터 버리기(discard failure)로만 변경.
+    # docs/design-docs/2026-05-29_curriculum-self-training.md 참고.
+    origin = CharField(null=True, default='manual')  # 'manual' | 'curriculum'
+    stage_id = IntegerField(null=True)
+    checkpoint_group_id = IntegerField(null=True)
+    checkpoint_id = IntegerField(null=True)
+    role = CharField(null=True)  # 'success' | 'failure' | 'dagger'
     created_at = DateTimeField(default=datetime.datetime.now)
     updated_at = DateTimeField(default=datetime.datetime.now)
     deleted_at = DateTimeField(null=True)

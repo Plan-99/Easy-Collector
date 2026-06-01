@@ -22,12 +22,18 @@ from backend.database.models.assembly_model import Assembly
 from backend.database.models.teleoperator_model import Teleoperator
 from backend.database.models.robot_pose_model import RobotPose
 from backend.database.models.planner_model import Planner
+from backend.database.models.curriculum_model import Curriculum
+from backend.database.models.checkpoint_group_model import CheckpointGroup
+from backend.database.models.stage_model import Stage
+from backend.database.models.rollout_model import Rollout
+from backend.database.models.rollout_result_model import RolloutResult
 
 
 ALL_MODELS = [
     Robot, Sensor, Policy, Gripper, LeaderRobotPreset,
     Task, Dataset, Checkpoint, Assembly, Teleoperator,
     RobotPose, Planner,
+    Curriculum, CheckpointGroup, Stage, Rollout, RolloutResult,
 ]
 
 
@@ -99,12 +105,44 @@ def _migrate_checkpoint_status():
         print(f"  Warning: checkpoint status migration: {e}")
 
 
+def _recompute_stage_counts():
+    """Stage.success_count / failure_count 를 rollout_results 의 ground truth
+    로 재계산.
+
+    과거 per-cp 카운팅 (한 rollout 안에서 cp 마다 +1) 코드로 부풀어 있던
+    카운트를 그룹 rollout 단위 (rollout_results 의 row 수) 로 정규화한다.
+    rollout_results 는 항상 1 rollout × 1 group = 1 row 로 기록되므로
+    재계산은 안전하고 idempotent. 매 startup 에 실행해도 부담 없음
+    (스테이지 수 × 가벼운 COUNT 쿼리 한 쌍).
+    """
+    try:
+        # success=True 행 개수 → success_count, success=False 행 개수 → failure_count.
+        # NULL stage_id 인 row 는 제외, soft-deleted 도 제외.
+        db.execute_sql(
+            "UPDATE stages SET success_count = ("
+            "  SELECT COUNT(*) FROM rollout_results r"
+            "  WHERE r.stage_id = stages.id"
+            "    AND r.success = 1 AND r.deleted_at IS NULL"
+            ") WHERE deleted_at IS NULL"
+        )
+        db.execute_sql(
+            "UPDATE stages SET failure_count = ("
+            "  SELECT COUNT(*) FROM rollout_results r"
+            "  WHERE r.stage_id = stages.id"
+            "    AND r.success = 0 AND r.deleted_at IS NULL"
+            ") WHERE deleted_at IS NULL"
+        )
+    except Exception as e:
+        print(f"  Warning: stage count recompute: {e}")
+
+
 def migrate():
     """Create tables that don't already exist, then ensure all columns are present."""
     db.connect(reuse_if_open=True)
     db.create_tables(ALL_MODELS, safe=True)
     _ensure_columns()
     _migrate_checkpoint_status()
+    _recompute_stage_counts()
     print(f"Migration complete. Ensured {len(ALL_MODELS)} tables exist with all columns.")
 
 

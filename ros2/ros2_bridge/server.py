@@ -72,9 +72,17 @@ def serve():
     # WaitForImages 가 같은 ImageBridgeWriter 로 frame 도착 여부를 검사한다.
     env_servicer.set_image_bridge(obs_servicer.image_bridge)
 
-    # gRPC 서버 설정
+    # gRPC 서버 설정.
+    #
+    # max_workers 가 너무 작으면 streaming RPC (``SubscribeImage`` 매 viewport,
+    # ``SubscribeRobotState`` 매 로봇, ``WatchTopics`` 등) 가 worker thread 를
+    # 영구 점유하면서 ``ListProcesses`` / ``ListTopics`` 같은 fast unary 쿼리가
+    # 큐에서 대기 → 라우트 30s 행. multi-view planner / curriculum monitor
+    # 사용 시 viewport 가 10+ 으로 쉽게 늘어나므로 넉넉히 잡아둔다. 메모리
+    # 부담은 거의 없고 (idle thread 는 1MiB 스택 정도) thread 누수도 daemon
+    # 으로 종료 시 정리됨.
     server = grpc.server(
-        futures.ThreadPoolExecutor(max_workers=20),
+        futures.ThreadPoolExecutor(max_workers=128),
         options=[
             ('grpc.max_send_message_length', 100 * 1024 * 1024),  # 100MB
             ('grpc.max_receive_message_length', 100 * 1024 * 1024),

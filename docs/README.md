@@ -25,6 +25,7 @@ EasyTrainer의 **단일 정보원(Single Source of Truth)**. Slack·메모리에
 | 2026-04-17 | [Remote Training Server 분리](design-docs/2026-04-17_remote-training-server.md) | 학습을 독립 Docker 서비스(포트 5100)로 분리 |
 | 2026-04-28 | [Launcher 인증 & 모듈 Entitlement](design-docs/2026-04-28_launcher-auth.md) | 시리얼 키 → Google OAuth Device Flow + Bearer 토큰 |
 | 2026-05-08 | [정적 / 동적 카메라 구분](design-docs/2026-05-08_camera-static-vs-dynamic.md) | crop은 정적 카메라 전용, segmentation은 둘 다 OK |
+| 2026-05-29 | [Curriculum 자가 학습](design-docs/2026-05-29_curriculum-self-training.md) | Planner 위 Curriculum 계층 — 자가 롤아웃·수집·재학습 루프 |
 
 ## 그 외 문서
 

@@ -508,11 +508,22 @@
                                 <template v-slot:header>
                                     <q-icon name="folder" class="q-mr-md" size="lg"></q-icon>
                                     <div class="col">
-                                        <div>{{ dataset.name }} ({{ dataset.id }})</div>
+                                        <div class="row items-center q-gutter-x-sm">
+                                            <span>{{ dataset.name }} ({{ dataset.id }})</span>
+                                            <!-- origin='curriculum' 인 데이터셋은 커리큘럼이 수집/관리.
+                                                 사용자가 직접 편집/병합/삭제하면 stage 와 어긋남. -->
+                                            <q-chip
+                                                v-if="dataset.origin === 'curriculum'"
+                                                size="sm" dense square
+                                                color="amber-9" text-color="white"
+                                                icon="auto_awesome"
+                                                :label="$t('curriculumDatasetChip')"
+                                            />
+                                        </div>
                                         <div class="text-caption">{{ dataset.episodes.length }} episodes</div>
                                          <q-menu context-menu>
                                             <q-list bordered separator>
-                                                <q-item clickable v-ripple v-close-popup @click="openEditDatasetForm(dataset)">
+                                                <q-item v-if="dataset.origin !== 'curriculum'" clickable v-ripple v-close-popup @click="openEditDatasetForm(dataset)">
                                                     <q-item-section>{{ $t('workspaceDatasetEdit') }}</q-item-section>
                                                     <q-item-section side>
                                                         <q-icon name="edit" size="xs" />
@@ -531,7 +542,7 @@
                                                         <q-icon name="compress" size="xs" />
                                                     </q-item-section>
                                                 </q-item>
-                                                <q-item clickable v-ripple v-close-popup @click="openMergeDatasetForm(dataset)">
+                                                <q-item v-if="dataset.origin !== 'curriculum'" clickable v-ripple v-close-popup @click="openMergeDatasetForm(dataset)">
                                                     <q-item-section>{{ $t('workspaceDatasetMerge') }}</q-item-section>
                                                     <q-item-section side>
                                                         <q-icon name="merge_type" size="xs" />
@@ -543,7 +554,7 @@
                                                         <q-icon name="file_download" size="xs" />
                                                     </q-item-section>
                                                 </q-item>
-                                                <q-item clickable v-ripple class="text-negative" @click="deleteDataset(dataset)">
+                                                <q-item v-if="dataset.origin !== 'curriculum'" clickable v-ripple class="text-negative" @click="deleteDataset(dataset)">
                                                     <q-item-section>{{ $t('workspaceDatasetDelete') }}</q-item-section>
                                                     <q-item-section side>
                                                         <q-icon color="negative" name="delete" size="xs" />

@@ -20,16 +20,18 @@ EasyTrainer is a robotics training and data collection platform for robot teleop
 ## Development Commands
 
 ### Docker (primary development environment)
+Compose services are `frontend`, `backend`, `ros2` (containers `easytrainer_frontend`, `easytrainer_backend`, `easytrainer_ros2`).
 ```bash
-docker compose up -d service          # Start services (GPU)
-docker compose -f docker-compose.cpu.yml up -d service  # CPU-only
-docker compose build                  # Rebuild container
-docker logs -f easy_collector_service # View logs
+docker compose up -d                       # Start all services (GPU)
+docker compose up -d backend               # Start a single service (frontend / backend / ros2)
+docker compose -f docker-compose.cpu.yml up -d  # CPU-only
+docker compose build                       # Rebuild images
+docker logs -f easytrainer_backend         # View logs (or easytrainer_frontend / easytrainer_ros2)
 ```
 
-### Frontend (inside container or locally in src/ui/)
+### Frontend (inside container or locally in frontend/)
 ```bash
-cd src/ui
+cd frontend
 npm run dev       # Quasar dev server with hot reload
 npm run build     # Production build
 npm run lint      # ESLint check
@@ -56,26 +58,30 @@ Manual sweep across the repo: `pre-commit run --all-files`. Hook definitions liv
 
 ## Architecture
 
-### Backend (`src/backend/`)
-- **`api/app.py`** — Flask-SocketIO app on port 5000. Registers 11+ route blueprints and manages ROS 2 node lifecycle.
-- **`api/routes/`** — REST API endpoints (robot, sensor, dataset, policy, task, checkpoint, teleoperator, assembly, planner, vla, leader_robot). Each is a Flask Blueprint.
+### Backend (`backend/`)
+- **`api/app.py`** — Flask-SocketIO app on port 5000. Registers the route blueprints (currently 16) and manages ROS 2 node lifecycle.
+- **`api/routes/`** — REST API endpoints (robot, robot_pose, sensor, dataset, policy, task, checkpoint, teleoperator, assembly, planner, vla, leader_robot, sim, remote_train, tutorial, module). Each is a Flask Blueprint.
 - **`api/process_manager.py`** — Manages subprocess lifecycle for long-running operations.
-- **`api/process/`** — Async subprocess scripts (record_episode, augment_dataset, merge_dataset, read_hdf5, test_vla).
-- **`database/`** — Orator ORM with SQLite. DB stored at `${EASYTRAINER_DATA_DIR}/database/main.db` (default `/opt/easytrainer/database/main.db`). Models in `models/`, migrations in `migrations/`.
+- **`api/process/`** — Async subprocess scripts (record_episode, augment_dataset, merge_dataset, read_dataset, test_vla, etc.).
+- **`database/`** — Peewee ORM with SQLite. DB stored at `${EASYTRAINER_DATA_DIR}/database/main.db` (default `/opt/easytrainer/database/main.db`). Models in `models/`; tables are created/migrated via `models.create_tables()` (run by the backend entrypoint, or `python -m backend.database.migrate`).
 - **`policies/`** — Policy implementations and utilities. Supports ACT, Diffusion, PI0, VLAsEn.
 - **`lerobot/`** — Integrated LeRobot library for imitation learning policies, datasets, and configs.
-- **`scripts/train.py`** — Main training entry point.
-- **`env/`** — Robot environment abstractions and agent implementations (Dynamixel, Unitree, Piper, Jaka).
+- **`scripts/train_fiper.py`** — Hydra-based training entry point (configs under `backend/fiper/configs`).
+- **`env/`** — Robot environment helpers (currently `dxl_controller.py` for Dynamixel). Per-vendor robot drivers live in `modules/robots/` and `ros2/`.
 
-### Frontend (`src/ui/`)
+### Frontend (`frontend/`)
+- **디자인/구현 패턴은 [frontend/DESIGN.md](frontend/DESIGN.md)를 반드시 먼저 참고할 것.** 페이지·컴포넌트를 만들거나 수정하기 전에 색상 팔레트, 페이지 골격, 카드 그리드/폼/알림 패턴, 공용 컴포넌트 재사용 규칙이 정리되어 있다.
 - **Framework:** Vue 3 + Quasar 2.16 + Vite, hash-mode routing
 - **State:** Pinia stores (e.g., `processStore.js`)
 - **API communication:** Axios to `http://localhost:5000/api`, Socket.IO for real-time, RosLib for ROS bridge
-- **Pages:** `src/ui/src/pages/v2/` — IndexPage, SensorPage, RobotPage, AssemblePage, WorkspacePage, TrainPage, DatasetPage, PlannerPage
-- **Routes:** defined in `src/ui/src/router/routes.js`
+- **Pages:** `frontend/src/pages/v2/` — IndexPage, SensorPage, RobotPage, AssemblePage, WorkspacePage, TrainPage, DatasetPage, PlannerPage, TeleoperationPage
+- **Routes:** defined in `frontend/src/router/routes.js`
 
-### Service Orchestration (`start_services.sh`)
-Entrypoint script (~700 lines) that handles memory detection, environment setup, config persistence, and starts backend API + frontend + ROS 2 services + streaming.
+### Service Orchestration
+There is no single orchestrator script. Each Docker service ships its own entrypoint:
+- **`backend/entrypoint.sh`** — runs DB migration (`create_tables`), installs module dependencies as a fallback (skipped when deps are baked into the image), then launches the Flask-SocketIO API.
+- **`frontend/entrypoint.sh`** — starts the Quasar dev server.
+- **`ros2/start_ros2_services.sh`** (via `ros2/entrypoint.sh`) — builds/sources the ROS 2 workspace and starts ROS 2 nodes/bridge and streaming.
 
 ### Key Environment Variables
 - `EASYTRAINER_DATA_DIR` — Persistent storage root (default `/opt/easytrainer`)
@@ -89,14 +95,14 @@ Entrypoint script (~700 lines) that handles memory detection, environment setup,
 - ESLint: Quasar recommended + Vue essential rules
 
 ### Backend
-- Python with Orator ORM for database operations
+- Python with Peewee ORM for database operations
 - Commit messages are typically in Korean
 
 ## Key Conventions
 - Container runs as privileged with host networking for device access
 - Persistent data (DB, config, logs) lives on host at `/opt/easytrainer/`
 - Docker volumes cache `node_modules` to avoid reinstalls
-- `src/` is bind-mounted into the container for live editing
+- `backend/`, `frontend/`, and `ros2/` are bind-mounted into their containers for live editing
 - The `lerobot/` directory under backend is a vendored copy, not an external dependency
 
 ## Modules

@@ -14,6 +14,37 @@ from ...configs.global_configs import resolve_checkpoint_dir
 
 checkpoint_bp = Blueprint('checkpoint_bp', __name__)
 
+def _serialize_checkpoints_full(rows):
+    """rows → full dicts, but task/policy 직렬화를 요청 단위로 memoize.
+
+    checkpoint.to_dict() 는 매 행마다 task.to_dict()(센서 등 재조회) + policy.to_dict()
+    를 호출한다. 48개 체크포인트가 같은 task 를 공유해도 매번 다시 풀어서 N+1 폭발(~12s).
+    같은 task_id/policy_id 는 한 번만 직렬화해서 재사용한다.
+    """
+    from ...database.models.task_model import Task
+    from ...database.models.policy_model import Policy
+
+    task_cache, policy_cache = {}, {}
+    out = []
+    for c in rows:
+        d = c._to_dict_shallow()
+        d['dataset_info'] = c._dataset_info
+        tid = c.task_id
+        if tid is not None and tid not in task_cache:
+            t = Task.find(tid)
+            task_cache[tid] = t.to_dict() if t else None
+        d['task'] = task_cache.get(tid)
+        pid = c.policy_id
+        if pid is not None and pid not in policy_cache:
+            p = Policy.find(pid)
+            policy_cache[pid] = p.to_dict() if p else None
+        d['policy'] = policy_cache.get(pid)
+        lm = c.load_model
+        d['load_model'] = lm._to_dict_shallow() if lm else None
+        out.append(d)
+    return out
+
+
 @checkpoint_bp.route('/checkpoints', methods=['GET'])
 def get_checkpoints():
     query_str = request.args.get('where', None)
@@ -35,7 +66,22 @@ def get_checkpoints():
             elif op == '<':
                 q = q.where(field < val)
 
-    checkpoints = [checkpoint.to_dict() for checkpoint in q]
+    # 워크스페이스(task) 종속 조회 — 셀렉트 채우기는 해당 워크스페이스 것만 가져오면 충분.
+    task_id = request.args.get('task_id')
+    if task_id is not None:
+        try:
+            q = q.where(CheckpointModel.task_id == int(task_id))
+        except (TypeError, ValueError):
+            pass
+
+    rows = list(q)
+
+    # light=1: task/policy/load_model 확장 없이 컬럼만 (셀렉트 채우기 전용, 빠름).
+    light = request.args.get('light') in ('1', 'true', 'True')
+    if light:
+        checkpoints = [c._to_dict_shallow() for c in rows]
+    else:
+        checkpoints = _serialize_checkpoints_full(rows)
     return {
         'status': 'success', 'checkpoints': checkpoints}, 200
 

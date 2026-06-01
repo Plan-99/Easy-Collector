@@ -35,7 +35,7 @@ BLOCK_CONFIGS = {
         'label': 'Checkpoint',
         'icon': 'psychology',
         'color': 'purple',
-        'keys': ['workspace_id', 'checkpoint_id', 'checkpoint_name', 'duration', 'until_done', 'done_threshold', 'hz', 're_inference_steps', 'temporal_ensemble_coeff', 'move_homepose', 'move_homepose_duration', 'move_homepose_settle_sec', 'name'],
+        'keys': ['workspace_id', 'checkpoint_id', 'checkpoint_name', 'duration', 'until_done', 'done_threshold', 'hz', 're_inference_steps', 'temporal_ensemble_coeff', 'move_homepose', 'move_homepose_duration', 'move_homepose_settle_sec', 'max_steps', 'fallback_block_id', 'name'],
     },
     'replay_episode': {
         # 데이터셋의 특정 에피소드를 frame 별 qaction 으로 직접 replay.
@@ -456,6 +456,15 @@ def _validate_plan_blocks(blocks, workspaces_by_id, agents, prefix_offset=0):
                         errors.append(f"{prefix}: done_threshold must be between 0 and 1")
                 except (TypeError, ValueError):
                     errors.append(f"{prefix}: done_threshold is invalid")
+            # max_steps: 실패 판정 step 한도. until_done 일 때만 의미 — done 신호
+            # 없이 이 step 에 도달하면 실패로 보고 fallback 블록을 실행.
+            if block.get('max_steps') is not None:
+                try:
+                    ms = int(block.get('max_steps'))
+                    if ms <= 0:
+                        errors.append(f"{prefix}: max_steps must be > 0")
+                except (TypeError, ValueError):
+                    errors.append(f"{prefix}: max_steps is invalid")
 
         elif btype == 'replay_episode':
             ws = workspaces_by_id.get(block.get('workspace_id'))

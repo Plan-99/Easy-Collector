@@ -18,7 +18,8 @@ def get_tasks():
         from ...bridge.client import get_bridge_client
         from ...bridge.generated import robot_bridge_pb2 as pb
         client = get_bridge_client()
-        ros2_procs = client.driver.ListProcesses(pb.Empty())
+        # 짧은 timeout — ros2 gRPC worker pool 포화 시 route 가 매달리지 않도록.
+        ros2_procs = client.driver.ListProcesses(pb.Empty(), timeout=2.0)
         processes.update(ros2_procs.names)
     except Exception:
         pass
@@ -43,7 +44,8 @@ def get_task(id):
         from ...bridge.client import get_bridge_client
         from ...bridge.generated import robot_bridge_pb2 as pb
         client = get_bridge_client()
-        ros2_procs = client.driver.ListProcesses(pb.Empty())
+        # 짧은 timeout — ros2 gRPC worker pool 포화 시 route 가 매달리지 않도록.
+        ros2_procs = client.driver.ListProcesses(pb.Empty(), timeout=2.0)
         processes.update(ros2_procs.names)
     except Exception:
         pass

@@ -31,20 +31,20 @@
 - [backend/api/app.py](backend/api/app.py) — Flask-SocketIO 진입점. 라우트 블루프린트 등록 + ROS 2 노드 매니저.
 - [backend/api/routes/](backend/api/routes/) — robot, sensor, dataset, policy, task, checkpoint, teleoperator, assembly, planner, vla, leader_robot 등 REST 블루프린트.
 - [backend/api/process_manager.py](backend/api/process_manager.py) + [backend/api/process/](backend/api/process/) — record_episode, augment_dataset, merge_dataset 등 장시간 서브프로세스.
-- [backend/database/](backend/database/) — Orator ORM (SQLite). `models/`, `migrations/`. DB는 `${EASYTRAINER_DATA_DIR}/database/main.db`.
+- [backend/database/](backend/database/) — Peewee ORM (SQLite). `models/` (테이블 생성/마이그레이션은 `models.create_tables()` 또는 `python -m backend.database.migrate`). DB는 `${EASYTRAINER_DATA_DIR}/database/main.db`.
 - [backend/policies/](backend/policies/) — ACT, Diffusion, PI0, VLAsEn 정책 구현.
 - [backend/lerobot/](backend/lerobot/) — LeRobot 라이브러리 vendored 사본 (외부 의존이 아님).
-- [backend/env/](backend/env/) — 로봇 환경 추상화 (Dynamixel, Unitree, Piper, Jaka 등).
-- [backend/scripts/train.py](backend/scripts/train.py) — 학습 진입점.
-- [backend/sim/](backend/sim/), [backend/bridge/](backend/bridge/), [backend/extensions/](backend/extensions/), [backend/tools/](backend/tools/), [backend/utils/](backend/utils/).
+- [backend/env/](backend/env/) — 로봇 환경 헬퍼 (현재 `dxl_controller.py`, Dynamixel). 벤더별 로봇 드라이버는 `modules/robots/` 와 `ros2/` 에 있음.
+- [backend/scripts/train_fiper.py](backend/scripts/train_fiper.py) — Hydra 기반 학습 진입점.
+- [backend/sim/](backend/sim/), [backend/bridge/](backend/bridge/), [backend/fiper/](backend/fiper/), [backend/tools/](backend/tools/), [backend/utils/](backend/utils/).
 
-**스택:** Python, Flask-SocketIO, Orator ORM, SQLite, PyTorch (lerobot 경유).
+**스택:** Python, Flask-SocketIO, Peewee ORM, SQLite, PyTorch (lerobot 경유).
 
 **이런 요청이면 여기를 수정:**
 - "새 REST 엔드포인트 추가" → `api/routes/`에 블루프린트 추가 + `api/app.py`에 등록.
-- "데이터셋 마이그레이션, 컬럼 추가" → `database/migrations/` + `database/models/`.
-- "학습 도중 로그/체크포인트 처리 변경" → `api/process/`, `policies/`, `scripts/train.py`.
-- "기존 DB 모델 수정/조회 변경" → `database/models/` (Orator).
+- "데이터셋 스키마/컬럼 추가" → `database/models/` (수정 후 `create_tables()` / `python -m backend.database.migrate`로 반영).
+- "학습 도중 로그/체크포인트 처리 변경" → `api/process/`, `policies/`, `scripts/train_fiper.py`.
+- "기존 DB 모델 수정/조회 변경" → `database/models/` (Peewee).
 
 **주의:** 코드 수정 후 `bash scripts/quick_apply.sh ./ /opt/easytrainer/project` 필수.
 

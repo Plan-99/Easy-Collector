@@ -142,14 +142,24 @@
                                 <div class="col cursor-pointer"
                                     @click="selectDatasetForBatch(dataset)"
                                     :class="{ 'text-primary': selectedDatasetForBatch && selectedDatasetForBatch.id === dataset.id }">
-                                    <div>{{ dataset.name }} ({{ dataset.id }})</div>
+                                    <div class="row items-center q-gutter-x-sm">
+                                        <span>{{ dataset.name }} ({{ dataset.id }})</span>
+                                        <!-- origin='curriculum' 인 데이터셋은 커리큘럼 소유 — 편집/병합/삭제 차단. -->
+                                        <q-chip
+                                            v-if="dataset.origin === 'curriculum'"
+                                            size="sm" dense square
+                                            color="amber-9" text-color="white"
+                                            icon="auto_awesome"
+                                            :label="$t('curriculumDatasetChip')"
+                                        />
+                                    </div>
                                     <div class="text-caption text-grey-5">
                                         {{ dataset.episodes.length }} {{ $t('datasetEpisodesSuffix') }}
                                     </div>
                                 </div>
                                 <q-menu context-menu>
                                     <q-list bordered separator dark class="bg-dark text-white">
-                                        <q-item clickable v-ripple v-close-popup @click="openEditDatasetForm(dataset)">
+                                        <q-item v-if="dataset.origin !== 'curriculum'" clickable v-ripple v-close-popup @click="openEditDatasetForm(dataset)">
                                             <q-item-section>{{ $t('workspaceDatasetEdit') }}</q-item-section>
                                             <q-item-section side><q-icon name="edit" size="xs" color="grey-5" /></q-item-section>
                                         </q-item>
@@ -157,7 +167,7 @@
                                             <q-item-section>{{ $t('datasetBatchEdit') || $t('workspaceDatasetAugment') }}</q-item-section>
                                             <q-item-section side><q-icon name="auto_fix_high" size="xs" color="grey-5" /></q-item-section>
                                         </q-item>
-                                        <q-item clickable v-ripple v-close-popup @click="openMergeDatasetForm(dataset)">
+                                        <q-item v-if="dataset.origin !== 'curriculum'" clickable v-ripple v-close-popup @click="openMergeDatasetForm(dataset)">
                                             <q-item-section>{{ $t('workspaceDatasetMerge') }}</q-item-section>
                                             <q-item-section side><q-icon name="merge_type" size="xs" color="grey-5" /></q-item-section>
                                         </q-item>
@@ -165,11 +175,13 @@
                                             <q-item-section>{{ $t('workspaceExportDataset') }}</q-item-section>
                                             <q-item-section side><q-icon name="file_download" size="xs" color="grey-5" /></q-item-section>
                                         </q-item>
-                                        <q-separator dark />
-                                        <q-item clickable v-ripple class="text-negative" v-close-popup @click="deleteDataset(dataset)">
-                                            <q-item-section>{{ $t('workspaceDatasetDelete') }}</q-item-section>
-                                            <q-item-section side><q-icon color="negative" name="delete" size="xs" /></q-item-section>
-                                        </q-item>
+                                        <template v-if="dataset.origin !== 'curriculum'">
+                                            <q-separator dark />
+                                            <q-item clickable v-ripple class="text-negative" v-close-popup @click="deleteDataset(dataset)">
+                                                <q-item-section>{{ $t('workspaceDatasetDelete') }}</q-item-section>
+                                                <q-item-section side><q-icon color="negative" name="delete" size="xs" /></q-item-section>
+                                            </q-item>
+                                        </template>
                                     </q-list>
                                 </q-menu>
                                 <q-space />
