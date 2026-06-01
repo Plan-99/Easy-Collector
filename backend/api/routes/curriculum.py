@@ -542,6 +542,47 @@ def stop_rollout(id):
     return {'status': 'success', 'message': 'Rollout stopped'}, 200
 
 
+@curriculum_bp.route('/curriculum/<id>/:upgrade_now', methods=['POST'])
+def upgrade_now(id):
+    """현재 collecting 상태인 모든 그룹을 즉시 학습으로 전환 (강제 승급).
+
+    승급 조건 (mission target 도달) 을 무시하고 사용자 명시적 트리거. 그룹의
+    모든 stage 에 걸쳐 누적된 ``success`` + ``dagger`` 데이터셋 + base
+    데이터셋으로 학습 시작. 학습 끝나면 평소 graduation 흐름 그대로 다음 stage.
+
+    rollout 이 돌고 있는 동안 호출하면 안전상 거부 — stop_rollout 먼저.
+    """
+    curriculum = CurriculumModel.find(id)
+    if not curriculum:
+        return {'status': 'error', 'message': 'Curriculum not found'}, 404
+    proc_name = _rollout_process_name(curriculum.id)
+    if proc_name in current_app.pm.processes:
+        return {'status': 'error', 'message': 'Stop the rollout first'}, 409
+
+    from ..process.curriculum_train import _start_group_training
+    from ...database.models.checkpoint_group_model import CheckpointGroup as CheckpointGroupModel
+    promoted = []
+    for group in curriculum.checkpoint_groups:
+        if group.status != CheckpointGroupModel.STATUS_COLLECTING:
+            continue
+        stage = group.current_stage
+        if stage is None or stage.status != stage.STATUS_ACTIVE:
+            continue
+        try:
+            _start_group_training(
+                curriculum, group, stage, current_app.pm.socketio,
+                app=current_app._get_current_object(),
+            )
+            promoted.append(group.id)
+        except Exception as e:
+            print(f"[upgrade_now] group {group.id} failed: {e}")
+    return {
+        'status': 'success',
+        'promoted_group_ids': promoted,
+        'message': f'Triggered training for {len(promoted)} group(s)',
+    }, 200
+
+
 @curriculum_bp.route('/curriculum/<id>/:resume_after_failure', methods=['POST'])
 def resume_after_failure(id):
     """체크포인트 실패로 pause 된 롤아웃에 사용자 결정을 전달.

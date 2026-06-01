@@ -586,6 +586,10 @@ def _judge_and_store(rollout, ctx, save_probabilities):
         # group_success = 이 rollout 의 모든 cp 가 성공했는지. 한 cp 라도 실패면
         # rollout 전체가 실패. 사용자 멘탈모델 "1 trial = 1 파이프라인 한 번".
         group_success = bool(recs) and all(r['success'] for r in recs)
+        # 데이터셋 저장은 **cp 별** — 각 cp 가 자기 자신의 성공/실패 여부에 따라
+        # 해당 cp 의 success / failure 데이터셋으로 저장. 그룹이 실패해도 그
+        # rollout 안에서 성공한 cp 가 있으면 그 cp 의 success 데이터로 수집.
+        # 저장 확률은 **실패** 데이터에만 적용 (성공 데이터는 항상 저장).
         # _save_episode 의 lerobot_append_episode 가 mp4 인코딩으로 카메라 수
         # × episode 길이에 비례한 sync 인코딩 시간을 메인 thread 에서 잡아먹는다.
         # 사용자에게 "지금 저장 중" 임을 알리려고 시작/종료에 socket emit.
@@ -599,8 +603,8 @@ def _judge_and_store(rollout, ctx, save_probabilities):
                 'checkpoint_id': checkpoint_id,
                 'frames': frames,
             })
-        if group_success:
-            for r in recs:
+        for r in recs:
+            if r['success']:
                 ds = ds_map.get((r['checkpoint_id'], 'success')) or ds_map.get((str(r['checkpoint_id']), 'success'))
                 # 성공 에피소드: 종료 프레임 succeed=1 + 종료 프레임 10개 후미 패딩.
                 if ds is not None:
@@ -611,9 +615,8 @@ def _judge_and_store(rollout, ctx, save_probabilities):
                     saved_episodes.append({'checkpoint_id': r['checkpoint_id'], 'dataset_id': ds.id, 'role': 'success', 'steps': r['steps']})
                 if ds is not None:
                     _emit_saving(False)
-        else:
-            for r in recs:
-                # 진행된(녹화된) 체크포인트 에피소드만, 저장 확률 당첨 시 저장.
+            else:
+                # 실패 cp — 저장 확률 당첨 시에만 failure 데이터셋에 저장.
                 if random.random() <= prob:
                     ds = ds_map.get((r['checkpoint_id'], 'failure')) or ds_map.get((str(r['checkpoint_id']), 'failure'))
                     if ds is not None:

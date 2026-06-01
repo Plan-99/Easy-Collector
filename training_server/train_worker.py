@@ -82,6 +82,13 @@ def train(
     train_settings.pop('action_type', None)
     train_settings.pop('has_succeed', None)
     train_settings.pop('use_relative_trajectory', None)
+    # 메타 필드 — backend → training_server 전달용일 뿐 policy config 와 무관.
+    # curriculum 흐름에서 ``train_settings`` 에 함께 묶여서 들어오므로 여기서 빼지
+    # 않으면 ``ACTConfig(**train_settings)`` 가 ``unexpected keyword argument
+    # 'server_url'`` 로 TypeError 를 던진다. (이 메시지가 그대로 사용자에게
+    # 노출되어 "학습 서버 URL 이 없다" 로 오해를 일으킨다.)
+    train_settings.pop('server_url', None)
+    train_settings.pop('callback_url', None)
     policy_settings.pop('action_type', None)
     policy_settings.pop('obs_state_keys', None)
     # wrist_sensor_ids: read by main() before train(), but pop defensively in case

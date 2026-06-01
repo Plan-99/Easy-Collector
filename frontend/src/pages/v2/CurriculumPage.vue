@@ -216,6 +216,18 @@
           <div class="col-auto">
             <q-btn outline color="orange" icon="restart_alt" :label="t('currReset')" @click="resetCurriculum" />
           </div>
+          <div class="col-auto">
+            <!-- 강제 업그레이드 — mission target 미달이어도 현재 누적된
+                 success + dagger 데이터로 학습 시작. rollout 동작 중엔 비활성화. -->
+            <q-btn
+              outline color="purple-4"
+              icon="upgrade"
+              :label="t('currUpgradeNow')"
+              :disable="isRunning || upgradeBusy"
+              :loading="upgradeBusy"
+              @click="upgradeNow"
+            />
+          </div>
         </div>
         <q-separator dark class="q-mb-md" />
 
@@ -1308,6 +1320,30 @@ async function loadCurriculum (id) {
 }
 
 // ── curriculum CRUD ────────────────────────────────────────────────────────────
+const upgradeBusy = ref(false)
+// 강제 업그레이드 — 현재 collecting 상태의 모든 그룹에 대해 누적된 success +
+// dagger 데이터로 학습 시작 (mission target 미달이어도). 학습 끝나면 평소처럼
+// graduate → 다음 stage 로 진입.
+async function upgradeNow () {
+    if (!curriculum.value) return
+    upgradeBusy.value = true
+    try {
+        const { data } = await api.post(`/curriculum/${curriculum.value.id}/:upgrade_now`)
+        const n = (data?.promoted_group_ids || []).length
+        if (n > 0) {
+            Notify.create({ type: 'positive', message: t('currUpgradeStarted', { n }) })
+            await loadCurriculum(curriculum.value.id)
+        } else {
+            Notify.create({ type: 'warning', message: t('currUpgradeNoGroup') })
+        }
+    } catch (e) {
+        console.error('upgrade_now failed:', e)
+        Notify.create({ type: 'negative', message: e?.response?.data?.message || 'Upgrade failed' })
+    } finally {
+        upgradeBusy.value = false
+    }
+}
+
 async function resetCurriculum () {
   await api.post(`/curriculum/${curriculum.value.id}/:reset`)
   await loadCurriculum(curriculum.value.id)

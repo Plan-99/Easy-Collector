@@ -24,15 +24,31 @@ def _emit(socketio_instance, event, payload):
         pass
 
 
-def _success_datasets_for_checkpoint(group, checkpoint_id):
-    """그룹의 모든 stage 에 걸친, 이 체크포인트의 success 데이터셋 리스트."""
+def _training_datasets_for_checkpoint(group, checkpoint_id):
+    """그룹의 모든 stage 에 걸친, 이 체크포인트의 학습용 데이터셋 리스트.
+
+    포함: ``role in {'success', 'dagger'}`` (mission 승급 조건이
+    ``success + dagger >= target`` 이므로 학습에도 둘 다 들어가야 일관).
+    제외: 빈 데이터셋 (eps 0개) — ``meta/info.json`` 도 없어서 base 로
+    선택되면 ``_merge_datasets_to_dir`` 가 FileNotFoundError 로 fail.
+    """
     from ...database.models.dataset_model import Dataset as DatasetModel
     out = []
     for stage in group.stages:
         for ds in DatasetModel.all_active().where(DatasetModel.stage_id == stage.id):
-            if ds.role == 'success' and str(ds.checkpoint_id) == str(checkpoint_id):
-                out.append(ds)
+            if ds.role not in ('success', 'dagger'):
+                continue
+            if str(ds.checkpoint_id) != str(checkpoint_id):
+                continue
+            # 빈 데이터셋 (LeRobot 포맷 초기화 안 됨) 은 학습 머지에서 제외.
+            if not (ds.episodes or []):
+                continue
+            out.append(ds)
     return out
+
+
+# 구 함수명 호환 (기존 호출자가 있을 수 있음).
+_success_datasets_for_checkpoint = _training_datasets_for_checkpoint
 
 
 def _avg_success_episode_len(datasets):
@@ -100,10 +116,14 @@ def _escalate_criteria(group, stage):
     return out
 
 
-def _enqueue_training(curriculum, group, stage, socketio_instance):
+def _enqueue_training(curriculum, group, stage, socketio_instance, app=None):
     """그룹 내 각 체크포인트에 대해 이어학습 체크포인트를 생성하고 큐에 넣는다.
 
     base 데이터셋·training 파라미터는 체크포인트별 설정(group.checkpoint_settings)에서 읽는다.
+    ``app`` 은 background thread 에서 호출될 때를 위해 명시적으로 받음 — 안 받으면
+    flask current_app proxy 로 시도 (request 컨텍스트가 있을 때만 동작). curriculum
+    rollout 처럼 socketio.start_background_task 로 띄운 thread 에선 current_app 이
+    실패하므로 ctx['app'] 을 받아서 전달해야 한다.
     반환: {old_checkpoint_id: new_checkpoint_id}
     """
     from ...database.models.checkpoint_model import Checkpoint as CheckpointModel
@@ -113,11 +133,14 @@ def _enqueue_training(curriculum, group, stage, socketio_instance):
         cp_settings = {}
 
     scheduler = None
-    try:
-        from flask import current_app
-        scheduler = current_app.training_scheduler
-    except Exception:
-        scheduler = None
+    if app is not None:
+        scheduler = getattr(app, 'training_scheduler', None)
+    if scheduler is None:
+        try:
+            from flask import current_app
+            scheduler = current_app.training_scheduler
+        except Exception:
+            scheduler = None
 
     mapping = {}
     for cp_id in (group._get_json_field('checkpoint_ids') or []):
@@ -133,9 +156,9 @@ def _enqueue_training(curriculum, group, stage, socketio_instance):
         server_url = train_settings.get('server_url', '')
         callback_url = train_settings.get('callback_url', '')
 
-        success_datasets = _success_datasets_for_checkpoint(group, cp_id)
+        training_datasets = _training_datasets_for_checkpoint(group, cp_id)
         dataset_info = {}
-        for ds in success_datasets:
+        for ds in training_datasets:
             dataset_info[str(ds.id)] = {}
         for bid in base_ids:
             dataset_info[str(bid)] = {}
@@ -159,7 +182,16 @@ def _enqueue_training(curriculum, group, stage, socketio_instance):
             except Exception as e:
                 print(f"[curriculum_train] enqueue failed for ckpt {new_ckpt.id}: {e}")
         else:
-            print(f"[curriculum_train] no server_url — checkpoint {new_ckpt.id} created (status=waiting), not enqueued")
+            # 어느 쪽이 비어서 enqueue 가 스킵됐는지 정확히 노출. scheduler 가
+            # None 이면 거의 항상 background thread 에서 app context 가 없어서
+            # current_app proxy 가 실패한 경우 (caller 가 app= 안 넘긴 케이스).
+            reason_parts = []
+            if not scheduler:
+                reason_parts.append('no scheduler (app context missing)')
+            if not server_url:
+                reason_parts.append('no server_url in train_settings')
+            reason = ' + '.join(reason_parts) or 'unknown'
+            print(f"[curriculum_train] checkpoint {new_ckpt.id} created (status=waiting), not enqueued: {reason}")
         _emit(socketio_instance, 'curriculum_training_started', {
             'curriculum_id': curriculum.id,
             'checkpoint_group_id': group.id,
@@ -214,10 +246,10 @@ def check_and_promote(curriculum_id, ctx=None, socketio_instance=None):
                 break
         if not all_met:
             continue
-        _start_group_training(curriculum, group, stage, socketio_instance)
+        _start_group_training(curriculum, group, stage, socketio_instance, app=(ctx or {}).get('app'))
 
 
-def _start_group_training(curriculum, group, stage, socketio_instance):
+def _start_group_training(curriculum, group, stage, socketio_instance, app=None):
     """미션 달성 그룹: 현재 stage 완료 처리 + 체크포인트 순차 학습 큐잉 + status=training.
 
     checkpoint_ids 전진과 다음 stage 생성은 학습 완료(graduation) 시점으로 미룬다.
@@ -231,7 +263,7 @@ def _start_group_training(curriculum, group, stage, socketio_instance):
     stage.status = StageModel.STATUS_COMPLETED
     stage.save()
 
-    mapping = _enqueue_training(curriculum, group, stage, socketio_instance)
+    mapping = _enqueue_training(curriculum, group, stage, socketio_instance, app=app)
 
     fresh = CheckpointGroupModel.find(group.id)
     if not mapping:
