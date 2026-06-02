@@ -751,6 +751,14 @@ def download_module(
                     downloaded += len(chunk)
                     if on_progress:
                         on_progress(downloaded, total)
+        # Guard against a dropped connection: a short file vs the advertised
+        # size means a truncated download — fail with a clear error here rather
+        # than a confusing "tar 압축 해제 실패" later (and never install a partial).
+        if total and downloaded < total:
+            raise RuntimeError(
+                f"모듈 다운로드가 중간에 끊겼습니다 ({downloaded}/{total} 바이트). "
+                f"네트워크 연결을 확인한 뒤 다시 시도하세요."
+            )
 
         # Extract and install
         # module.json에서 메타정보 추출

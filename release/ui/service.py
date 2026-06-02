@@ -585,6 +585,7 @@ class RuntimeServiceMixin:
                 stderr=subprocess.DEVNULL,
                 text=True,
                 check=False,
+                timeout=30,
             )
             return bool((res.stdout or "").strip())
         except Exception:
@@ -599,6 +600,7 @@ class RuntimeServiceMixin:
                 stderr=subprocess.DEVNULL,
                 text=True,
                 check=False,
+                timeout=30,
             )
             payload = (res.stdout or "").strip()
             if payload:
@@ -619,6 +621,7 @@ class RuntimeServiceMixin:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=True,
+                timeout=15,
             )
             return True
         except Exception:
@@ -786,11 +789,14 @@ class RuntimeServiceMixin:
                 shlex.quote(group),
                 shlex.quote(str(path)),
             )
+            # timeout so a polkit auth dialog with no agent (or no response)
+            # can't hang the launcher/update forever — fail to a clear error instead.
             res = subprocess.run(
                 ["pkexec", "/bin/sh", "-c", cmd],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=False,
+                timeout=120,
             )
             return res.returncode == 0
         except Exception:
@@ -822,9 +828,39 @@ class RuntimeServiceMixin:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=False,
+                timeout=120,
             )
             return res.returncode == 0
         except Exception:
+            return False
+
+    def _run_pkexec_shell_cmd(self, cmd: str, timeout: int = 300) -> bool:
+        """Run an arbitrary shell command as root via a single pkexec auth prompt.
+        Used by the full-uninstall flow to remove system files / the deb package.
+        Returns True only if pkexec ran and the command exited 0; False on a
+        missing pkexec, a cancelled/failed auth, a timeout, or a non-zero exit."""
+        if not shutil.which("pkexec"):
+            return False
+        try:
+            res = subprocess.run(
+                ["pkexec", "/bin/sh", "-c", cmd],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                check=False,
+                timeout=timeout,
+            )
+            if res.stdout:
+                try:
+                    self.append_log(f"[UNINSTALL] {res.stdout.strip()}")
+                except Exception:
+                    pass
+            return res.returncode == 0
+        except Exception as e:
+            try:
+                self.append_log(f"[UNINSTALL][ERROR] pkexec 실패: {e}")
+            except Exception:
+                pass
             return False
 
     def _ensure_app_and_project_writable(self, force_auth: bool = False) -> bool:
@@ -850,6 +886,7 @@ class RuntimeServiceMixin:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=True,
+                timeout=15,
             )
             return res.returncode == 0
         except Exception:
@@ -940,7 +977,7 @@ class RuntimeServiceMixin:
             running = set()
             try:
                 out = subprocess.check_output(
-                    ["docker", "ps", "--format", "{{.Names}}"], text=True
+                    ["docker", "ps", "--format", "{{.Names}}"], text=True, timeout=30
                 )
                 running = {n.strip() for n in out.splitlines() if n.strip()}
             except Exception:
@@ -953,6 +990,7 @@ class RuntimeServiceMixin:
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     check=False,
+                    timeout=60,
                 )
         except Exception:
             # Non-fatal; compose will still emit the conflict if removal fails
