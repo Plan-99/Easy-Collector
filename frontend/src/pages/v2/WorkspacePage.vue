@@ -84,7 +84,10 @@
                     <q-tab name="data" :label="$t('workspaceTabData')"></q-tab>
                     <q-tab name="inference" :label="$t('workspaceTabInference')"></q-tab>
                 </q-tabs>
-                <div v-if="selectedTab === 'setting'" class="q-pt-md q-px-sm text-white">
+                <div v-if="selectedTab === 'setting' && !workspaceDetailReady" class="flex flex-center q-pa-xl text-grey">
+                    <q-spinner color="primary" size="3em" class="q-mr-md" />
+                </div>
+                <div v-if="selectedTab === 'setting' && workspaceDetailReady" class="q-pt-md q-px-sm text-white">
                     <TutorialHint class="q-mb-sm" :text="$t('tutorialWorkspaceSetting')" />
                     <q-list dark bordered separator class="border-rounded bg-dark" >
                         <q-expansion-item
@@ -868,11 +871,52 @@ function saveWorkspace (form) {
 };
 
 function listWorkspaces() {
+    // 드롭다운 / 카드 그리드 용 — light 만 받음. 사용자가 workspace 를 선택하면
+    // ``ensureWorkspaceDetail`` 이 sensors / assembly / settings 등 풀 필드를
+    // lazy 로 채워넣는다.
+    // 단 — updateWorkspace / saveWorkspace 가 PUT 후 listWorkspaces 를 재호출
+    // 하므로, 이전에 detail 까지 merge 된 workspace 가 있으면 그 detail 을
+    // 보존해야 한다 (안 그러면 선택된 워크스페이스의 sensors / assembly 가
+    // 통째로 사라져서 "사용 가능한 센서 없음" 으로 빠짐).
     return api.get('/tasks').then((response) => {
-        workspaces.value = response.data.tasks;
+        const fresh = response.data.tasks || [];
+        const prev = new Map(workspaces.value.map(w => [w.id, w]));
+        workspaces.value = fresh.map(ws => {
+            const old = prev.get(ws.id);
+            return (old && old.assembly !== undefined) ? { ...ws, ...old } : ws;
+        });
         workspaces.value.push({ id: 'new', name: t('workspaceSelectCreateNew') });
     });
 }
+
+// 선택된 workspace 의 풀 detail 을 lazy fetch + 원래 객체에 in-place merge.
+// ``workspaceDetailReady`` 는 template/computed 가 sensors/assembly/home_pose
+// 같은 nested 필드를 안전하게 접근하기 위한 guard — light payload 만 들어있는
+// 사이에 컴포넌트가 렌더되어 ``.sensors.filter`` 같은 호출이 throw 하는 걸 방지.
+const workspaceDetailReady = ref(false);
+async function ensureWorkspaceDetail(id) {
+    if (id === 'new' || id == null) return;
+    const i = workspaces.value.findIndex(w => w.id === id);
+    if (i < 0) return;
+    if (workspaces.value[i].assembly !== undefined) {
+        workspaceDetailReady.value = true;   // 이미 detail
+        return;
+    }
+    try {
+        const res = await api.get(`/tasks/${id}`);
+        const detail = res.data?.task;
+        if (detail) workspaces.value[i] = { ...workspaces.value[i], ...detail };
+        workspaceDetailReady.value = true;
+    } catch (e) {
+        console.error('ensureWorkspaceDetail:', e);
+    }
+}
+watch(selectedWorkspaceId, (v) => {
+    // 새 workspace 로 바뀌면 일단 false 로 — 이전 workspace 의 heavy panel 이
+    // 잠시라도 새 (light) selectedWorkspace 와 매칭되어 렌더되는 걸 막는다.
+    workspaceDetailReady.value = false;
+    if (v) ensureWorkspaceDetail(v);
+});
 
 const selectedWorkspace = computed(() => {
     return workspaces.value.find(w => w.id === selectedWorkspaceId.value) || {};
@@ -906,7 +950,8 @@ const selectedSensors = computed(() => {
     // 동일 객체 — view 는 카드 안의 chip 으로 표현하지 카드 자체가 중복되면
     // 안 된다). 여기서 first-occurrence 기준 dedup → 카드 한 장 = 한 물리 센서.
     const seen = new Set();
-    return selectedWorkspace.value.sensors.filter((sensor) => {
+    // light payload 면 ``sensors`` 가 undefined 라 .filter 가 throw 한다.
+    return (selectedWorkspace.value.sensors || []).filter((sensor) => {
         const sid = Number(sensor.id);
         if (seen.has(sid)) return false;
         seen.add(sid);
@@ -1169,7 +1214,13 @@ watch(selectedWorkspaceId, (newVal) => {
     focused.value = {};
     listDatasets();
     listCheckpoints();
-    initCommonSensorResolution();
+});
+
+// sensor_img_size 등 nested 필드는 detail 가 로드된 뒤에만 안전하게 읽을 수
+// 있다. selectedWorkspaceId 가 바뀌면 일단 false → ensureWorkspaceDetail
+// 후 true 로 전이 → 이 watch 가 initCommonSensorResolution 을 안전히 호출.
+watch(workspaceDetailReady, (ready) => {
+    if (ready && selectedWorkspaceId.value) initCommonSensorResolution();
 });
 
 function toggleRobot(robot) {

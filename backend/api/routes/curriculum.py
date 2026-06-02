@@ -747,6 +747,10 @@ def curriculum_dashboard(id):
             'checkpoint_ids': cp_ids,
             'cp_labels': cp_labels,
             'stages': stages_out,
+            # 모션 블록별 노이즈 spec (rate/offset) — 프론트 상세 패널에서
+            # stage 의 성공률을 곱해 효과적인 ± 범위를 표시.
+            'block_noise': group._get_json_field('block_noise') or {},
+            'motion_block_ids': group._get_json_field('motion_block_ids') or [],
         })
     return {'status': 'success', 'groups': out_groups}, 200
 

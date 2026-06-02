@@ -10,6 +10,7 @@ Stage Mission(예: 성공 데이터 N개) 달성을 감지하면:
 docs/design-docs/2026-05-29_curriculum-self-training.md 참고.
 """
 import os
+import re
 
 from ...configs.global_configs import DATASET_DIR
 from ...utils.lerobot_io import get_episode_count
@@ -24,21 +25,50 @@ def _emit(socketio_instance, event, payload):
         pass
 
 
+def _checkpoint_ancestors(checkpoint_id):
+    """``load_model_id`` 체인을 거슬러 올라가며 ancestor 체크포인트 id 들을
+    모은다 (자기 자신 포함). graduate 마다 새 cp 가 ``load_model_id=old_cp``
+    로 생성되므로 이 체인이 곧 동일 cp 의 stage-수직 계보다.
+    """
+    from ...database.models.checkpoint_model import Checkpoint as CheckpointModel
+    seen = set()
+    cur = checkpoint_id
+    while cur is not None and cur not in seen:
+        try:
+            cur_int = int(cur)
+        except (TypeError, ValueError):
+            break
+        seen.add(cur_int)
+        ck = CheckpointModel.find(cur_int)
+        if ck is None:
+            break
+        cur = ck.load_model_id
+    return seen
+
+
 def _training_datasets_for_checkpoint(group, checkpoint_id):
-    """그룹의 모든 stage 에 걸친, 이 체크포인트의 학습용 데이터셋 리스트.
+    """그룹의 모든 stage 에 걸친, 이 체크포인트 (및 그 ancestor 들) 의 학습용
+    데이터셋 리스트.
 
     포함: ``role in {'success', 'dagger'}`` (mission 승급 조건이
     ``success + dagger >= target`` 이므로 학습에도 둘 다 들어가야 일관).
+    체크포인트 매칭은 ancestor 체인 — graduate 시 cp id 가 바뀌므로
+    (예: stage0=cp112 → graduate → stage1=cp117) 단순히 현재 cp id 로만
+    필터하면 이전 stage 의 데이터가 모두 빠진다. load_model_id 를 타고
+    올라가 동일 계보의 모든 cp id 에 대한 데이터를 포함시킨다.
     제외: 빈 데이터셋 (eps 0개) — ``meta/info.json`` 도 없어서 base 로
     선택되면 ``_merge_datasets_to_dir`` 가 FileNotFoundError 로 fail.
     """
     from ...database.models.dataset_model import Dataset as DatasetModel
+    ancestor_ids = _checkpoint_ancestors(checkpoint_id)
+    ancestor_strs = {str(a) for a in ancestor_ids}
     out = []
     for stage in group.stages:
         for ds in DatasetModel.all_active().where(DatasetModel.stage_id == stage.id):
             if ds.role not in ('success', 'dagger'):
                 continue
-            if str(ds.checkpoint_id) != str(checkpoint_id):
+            # ancestor 체인 안의 cp 데이터만 포함 (lateral 다른 cp 의 데이터는 제외).
+            if str(ds.checkpoint_id) not in ancestor_strs:
                 continue
             # 빈 데이터셋 (LeRobot 포맷 초기화 안 됨) 은 학습 머지에서 제외.
             if not (ds.episodes or []):
@@ -166,8 +196,12 @@ def _enqueue_training(curriculum, group, stage, socketio_instance, app=None):
             print(f"[curriculum_train] cp {cp_id}: no datasets to train on, skip")
             continue
 
+        # naming: 매 graduation 마다 ``_s{N}`` 을 누적하면 ``base_s1_s2_s3``
+        # 처럼 길어지므로 기존 접미사를 제거하고 현재 stage 번호로 한 번만 붙임.
+        # 예: "base" → "base_s1", "base_s1" → "base_s2", "foo_bar_s3" → "foo_bar_s4".
+        base_name = re.sub(r'(_s\d+)+$', '', old.name or 'cp')
         new_ckpt = CheckpointModel.create(
-            name=f"{old.name or 'cp'}_s{stage.index + 1}",
+            name=f"{base_name}_s{stage.index + 1}",
             task_id=old.task_id,
             policy_id=old.policy_id,
             dataset_info=dataset_info,
@@ -378,16 +412,75 @@ def _graduate_group(curriculum_id, group, completed_stage, mapping, plan_ctx, so
     })
 
 
+def notify_checkpoint_finished(checkpoint_id, socketio_instance=None):
+    """학습 끝난 체크포인트가 어느 curriculum 의 training_map 에 있는지 찾아
+    있으면 ``check_training_done`` 호출. rollout 이 안 돌고 있어도 graduation
+    이 진행되도록 — 업그레이드 버튼 흐름에서 필수.
+
+    training_scheduler 가 체크포인트 종료 직후 호출 (TERMINAL status 진입 시).
+    """
+    from ...database.models.checkpoint_group_model import CheckpointGroup as CheckpointGroupModel
+    from ...database.models.curriculum_model import Curriculum as CurriculumModel
+
+    try:
+        cp_id = int(checkpoint_id)
+    except (TypeError, ValueError):
+        return
+
+    # 이 checkpoint 가 training_map 에 있는 training 그룹 찾기.
+    target_group = None
+    for group in CheckpointGroupModel.all_active().where(
+        CheckpointGroupModel.status == CheckpointGroupModel.STATUS_TRAINING
+    ):
+        tmap = group._get_json_field('training_map') or {}
+        try:
+            if any(int(v) == cp_id for v in tmap.values()):
+                target_group = group
+                break
+        except (TypeError, ValueError):
+            continue
+    if target_group is None:
+        return
+
+    curriculum = CurriculumModel.find(target_group.curriculum_id)
+    if not curriculum:
+        return
+
+    # planner.plans 를 로드해 함께 넘김 — graduation 시 플래너 블록의
+    # checkpoint_id 를 새 id 로 교체 + 영속화 하기 위함. plans 없이 호출하면
+    # 블록 교체 없이 그룹/스테이지만 갱신돼 다음 rollout 에서도 옛 cp 가 돈다.
+    planner = curriculum.planner
+    plans = None
+    if planner is not None:
+        try:
+            from ..routes.planner import _ensure_plans_loaded
+            plans = _ensure_plans_loaded(planner)
+        except Exception as e:
+            print(f"[curriculum_train] _ensure_plans_loaded failed: {e}")
+
+    try:
+        check_training_done(curriculum.id, plans, planner, socketio_instance)
+    except Exception:
+        import traceback as _tb
+        print(f"[curriculum_train] check_training_done failed:\n{_tb.format_exc()}")
+
+
 def _replace_planner_checkpoints(plan_ctx, mapping):
     """플래너의 체크포인트 블록 checkpoint_id 를 mapping(old→new)으로 교체하고 DB 에 영속화.
 
     plan_ctx = (plans_list, planner_model). plans_list 를 in-place 수정해 롤아웃 루프가
     다음 패스부터 새 체크포인트를 쓰게 하고, planner.plans 에도 저장한다.
+
+    ``checkpoint_name`` 도 함께 새 cp 이름으로 refresh — 프론트엔드는 블록 카드에
+    block.checkpoint_name 을 표시하는데 이게 블록 생성 시점에 캐시되므로 graduation
+    후에도 옛 이름이 노출되는 버그가 있었다.
     """
+    from ...database.models.checkpoint_model import Checkpoint as CheckpointModel
     plans, planner = plan_ctx if isinstance(plan_ctx, tuple) else (plan_ctx, None)
     if not plans:
         return
     changed = False
+    name_cache = {}
     for grp in plans:
         for blk in grp.get('blocks') or []:
             if blk.get('type') == 'checkpoint':
@@ -395,6 +488,11 @@ def _replace_planner_checkpoints(plan_ctx, mapping):
                 new = mapping.get(str(old))
                 if new is not None and new != old:
                     blk['checkpoint_id'] = new
+                    # cached checkpoint_name 도 새 cp 이름으로 갱신.
+                    if new not in name_cache:
+                        ck = CheckpointModel.find(new)
+                        name_cache[new] = (ck.name if ck else None) or ''
+                    blk['checkpoint_name'] = name_cache[new]
                     changed = True
     if changed and planner is not None:
         try:

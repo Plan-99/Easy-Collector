@@ -674,10 +674,29 @@ watch(selectedWorkspaceId, (newVal) => {
 });
 
 function listWorkspaces() {
+    // 드롭다운 용 — light 만 받음. 선택 시 ``ensureWorkspaceDetail`` 가 해당
+    // workspace 에 sensors / assembly 를 lazy 로 채워넣어 wristSensorOptions 등
+    // 풀 필드 의존 computed 가 동작.
     return api.get('/tasks').then((response) => {
-        workspaces.value = response.data.tasks;
+        workspaces.value = response.data.tasks || [];
     });
 }
+
+// 선택된 workspace 의 풀 detail 을 lazy fetch + 원래 객체에 in-place merge.
+// 이미 sensors 가 있으면 skip — 같은 페이지 세션에서 한 번만 가져옴.
+async function ensureWorkspaceDetail(id) {
+    const i = workspaces.value.findIndex(w => w.id === id);
+    if (i < 0) return;
+    if (workspaces.value[i].sensors) return;   // 이미 detail 들어있음
+    try {
+        const res = await api.get(`/tasks/${id}`);
+        const detail = res.data?.task;
+        if (detail) workspaces.value[i] = { ...workspaces.value[i], ...detail };
+    } catch (e) {
+        console.error('ensureWorkspaceDetail:', e);
+    }
+}
+watch(selectedWorkspaceId, (v) => { if (v) ensureWorkspaceDetail(v); });
 
 // wrist_sensor_select 필드용 옵션. 현재 선택된 workspace의 sensors 목록.
 const wristSensorOptions = computed(() => {

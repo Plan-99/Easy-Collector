@@ -349,6 +349,14 @@ def main():
         training_scheduler.start()
         print("TrainingScheduler started (single worker, FIFO queue)")
 
+        # 재시작 직전에 학습 중이던 체크포인트들에 대해 polling 재개. backend
+        # 가 죽었다 깨어나도 training_server 의 학습 결과를 놓치지 않게.
+        try:
+            from .routes.remote_train import resume_inflight_trainings
+            resume_inflight_trainings(app, socketio)
+        except Exception as _e:
+            print(f"[resume_inflight] failed: {_e}")
+
         # WebRTC streaming 서버 시작 (port 5002, 별도 스레드)
         from .streaming import start_streaming_server
         streaming_thread = threading.Thread(

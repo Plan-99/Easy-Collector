@@ -2,6 +2,20 @@
 // 새 키 추가 시 영어 / 한국어 모두 동시에 갱신할 것.
 
 export default {
+  // ───── Global status bar ─────
+  globalStatusOpen: '상태창 열기',
+  globalStatusCollapse: '접기',
+  globalStatusSensor: '센서',
+  globalStatusRobot: '로봇',
+  globalStatusTraining: '학습',
+  globalStatusEmptySensor: '등록된 센서가 없습니다',
+  globalStatusEmptyRobot: '등록된 로봇이 없습니다',
+  globalStatusSensorOff: '센서를 켜면 화면이 표시됩니다',
+  globalStatusNoTraining: '진행 중인 학습이 없습니다',
+  globalStatusTrainingRunning: '학습 중',
+  globalStatusTrainingQueued: '대기 중',
+  globalStatusOpenTrainingDialog: '학습 화면 열기',
+
   // ───── Common / shared ─────
   appTitle: 'Easy Trainer',
   failed: '작업이 실패했습니다',
@@ -912,6 +926,11 @@ export default {
   currUpgradeNow: '업그레이드',
   currUpgradeStarted: '{n}개 그룹 학습 시작',
   currUpgradeNoGroup: '학습할 collecting 그룹이 없습니다',
+  currStageCriteriaTitle: '판정 조건 (체크포인트별)',
+  currStageNoiseTitle: '노이즈 ± 범위 (모션 블록별, 현재 stage 성공률 기준)',
+  currStageNoiseNone: '이 그룹의 모션 블록에 설정된 노이즈가 없습니다.',
+  currStageMaxSteps: '최대 스텝',
+  currStageThreshold: '성공 임계값',
   currFailureCount: '실패',
   currDiscardFailure: '실패 데이터 버리기',
   currDiscardDone: '실패 데이터를 버렸습니다',

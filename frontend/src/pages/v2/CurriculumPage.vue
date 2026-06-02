@@ -294,17 +294,59 @@
                 </template>
               </div>
 
-              <!-- 우: stage별 그래프 -->
+              <!-- 우: stage별 성공률 그래프 -->
               <div class="col-12 col-md-6">
                 <div class="text-caption q-mb-xs">{{ t('currSuccessRate') }}</div>
                 <div style="height: 130px">
                   <StageLineChart :labels="stageLabels(dg)" :values="successRateSeries(dg)" :label="t('currSuccessRate')" color="#42A5F5" />
                 </div>
-                <div class="text-caption q-mt-sm q-mb-xs">{{ t('currAvgLen') }}</div>
-                <div style="height: 130px">
-                  <StageLineChart :labels="stageLabels(dg)" :values="avgLenSeries(dg)" :label="t('currAvgLen')" color="#26A69A" />
-                </div>
               </div>
+
+              <!-- 둘째 row: 좌(판정 조건) / 우(노이즈 ± 범위). stage 선택 시만 -->
+              <template v-if="dashSelectedStage(dg)">
+                <div class="col-12 col-md-6">
+                  <div class="text-caption q-mb-xs">{{ t('currStageCriteriaTitle') }}</div>
+                  <q-markup-table dark flat dense class="bg-grey-10">
+                    <thead>
+                      <tr>
+                        <th class="text-left">CP</th>
+                        <th>{{ t('currStageMaxSteps') }}</th>
+                        <th>{{ t('currStageThreshold') }}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="cp in dg.checkpoint_ids" :key="`crit-${cp}`">
+                        <td class="text-left">{{ (dg.cp_labels && dg.cp_labels[cp]) || checkpointLabel(cp) }}</td>
+                        <td>{{ criteriaFor(dg, cp).max_steps ?? '—' }}</td>
+                        <td>{{ criteriaFor(dg, cp).success_threshold ?? '—' }}</td>
+                      </tr>
+                    </tbody>
+                  </q-markup-table>
+                </div>
+
+                <div class="col-12 col-md-6">
+                  <div class="text-caption q-mb-xs">{{ t('currStageNoiseTitle') }}</div>
+                  <div v-if="!noiseBlocks(dg).length" class="text-grey text-caption q-pa-sm">
+                    {{ t('currStageNoiseNone') }}
+                  </div>
+                  <q-markup-table v-else dark flat dense class="bg-grey-10">
+                    <thead>
+                      <tr>
+                        <th class="text-left">Block</th>
+                        <th v-for="axis in NOISE_AXES" :key="`hdr-${axis}`">{{ axis }}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="entry in noiseBlocks(dg)" :key="`noise-${entry.blockId}`">
+                        <td class="text-left">{{ entry.label }}</td>
+                        <td v-for="axis in NOISE_AXES" :key="`cell-${entry.blockId}-${axis}`">
+                          {{ formatNoiseRange(entry.spec, axis, dashSelectedStage(dg)?.success_rate || 0) }}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </q-markup-table>
+                </div>
+              </template>
             </div>
           </q-card-section>
         </q-card>
@@ -1243,8 +1285,12 @@ async function loadDeviceWorkspaces () {
   const planner = planners.value.find((p) => p.id === selectedPlannerId.value)
   const taskIds = planner?.task_ids || []
   if (!taskIds.length) { deviceWorkspaces.value = []; return }
-  const { data } = await api.get('/tasks')
-  const tasks = (data.tasks || []).filter((w) => taskIds.includes(w.id))
+  // 전체 task 목록을 풀로 받지 않고, 플래너에 포함된 task 만 detail 로 병렬
+  // fetch. light /tasks 호출 자체는 생략 — 어차피 taskIds 가 이미 있음.
+  const results = await Promise.all(
+    taskIds.map((id) => api.get(`/tasks/${id}`).then((r) => r.data?.task).catch(() => null))
+  )
+  const tasks = results.filter(Boolean)
   // PlannerPage 와 동일하게 sensor/robot 에 핸들러를 붙여 on/off 제어.
   tasks.forEach((ws) => {
     ;(ws.sensors || []).forEach((s) => {
@@ -1494,12 +1540,34 @@ function rateDenom (stage) {
   return (Number(stage.success_count) || 0)
        + (Number(stage.failure_count) || 0)
 }
-function avgLenSeries (dg) {
-  // stage별 체크포인트 평균 길이의 평균(그룹 대표값).
-  return (dg.stages || []).map((s) => {
-    const vals = Object.values(s.checkpoints || {}).map((c) => c.avg_success_len || 0).filter((v) => v > 0)
-    return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : 0
+// 선택된 stage 의 체크포인트별 판정 조건 (success_criteria 의 entry).
+function criteriaFor (dg, cpId) {
+  const st = dashSelectedStage(dg)
+  const crit = (st && st.success_criteria) || {}
+  return crit[cpId] || crit[String(cpId)] || {}
+}
+
+// 이 그룹의 모션 블록 + 그 블록의 노이즈 spec 묶음. 사용자가 등록한 노이즈만
+// (block_noise 에 entry 가 있는 블록만) 표시.
+function noiseBlocks (dg) {
+  const bn = dg.block_noise || {}
+  const blockById = new Map(plannerBlocks.value.map((b) => [b.id, b]))
+  return Object.entries(bn).map(([blockId, spec]) => {
+    const blk = blockById.get(blockId)
+    return {
+      blockId,
+      spec,
+      label: blk?.name || `${blk?.type || 'block'} #${blockId}`,
+    }
   })
+}
+
+// 한 축의 ± 최댓값을 사람-친화적으로: ``±(SR × |rate| + |offset|)``.
+function formatNoiseRange (spec, axis, successRate) {
+  const r = Math.abs(Number((spec?.rate || {})[axis]) || 0)
+  const o = Math.abs(Number((spec?.offset || {})[axis]) || 0)
+  const max = Math.round(((Number(successRate) || 0) * r + o) * 1000) / 1000
+  return max ? `±${max}` : '0'
 }
 
 async function discardFailureByGroup (groupId) {

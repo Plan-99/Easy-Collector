@@ -234,3 +234,19 @@ class Task(SoftDeleteModel):
         assembly = self.assembly
         data['assembly'] = assembly.to_dict() if assembly else None
         return data
+
+    def light_dict(self):
+        """리스트/드롭다운 용 경량 payload — sensor/assembly resolve, view-key
+        computation, runtime 조회 모두 skip. 한 row 당 DB 추가 쿼리 0회.
+        상세 사항이 필요한 호출자는 ``/tasks/<id>`` 로 따로 fetch.
+        """
+        return {
+            'id': self.id,
+            'name': self.name,
+            'image': self.image,
+            'episode_len': self.episode_len,
+            'assembly_id': self.assembly_id,
+            'sensor_ids': self._sensor_ids,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }

@@ -412,6 +412,9 @@ const selectedWorkspaceId = ref(null);
 const pageLoading = ref(true);
 
 function listWorkspaces() {
+    // 드롭다운 표시 (option-label='name' option-value='id') 외에 workspace 의
+    // 다른 필드를 안 쓰므로 light 응답으로 충분. 백엔드 기본값이 light 라 별도
+    // 파라미터 없이 호출.
     return api.get('/tasks').then((res) => {
         workspaces.value = res.data.tasks || [];
     });

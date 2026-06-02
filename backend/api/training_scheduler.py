@@ -50,8 +50,8 @@ class TrainingScheduler:
 
         self._lock = threading.RLock()
         self._cond = threading.Condition(self._lock)
-        # checkpoint_id → {server_url, callback_url}; FIFO ordering = queued_at.
-        self._jobs: dict[int, dict] = {}
+        # DB 가 single source of truth — server_url 등 job 메타도 모두
+        # ``checkpoint.train_settings`` 에 영속화. in-memory 큐 없음.
         self._current_id: Optional[int] = None
         self._current_stop: Optional[threading.Event] = None
         self._stop_scheduler = threading.Event()
@@ -82,27 +82,36 @@ class TrainingScheduler:
     # ------------------------------------------------------------------
     def enqueue(self, checkpoint_id: int, server_url: str,
                 callback_url: str = '') -> bool:
-        """체크포인트를 큐에 넣고 status='queued'로 표시. 이미 active이면 no-op.
+        """체크포인트를 큐에 넣고 status='queued'로 표시. ``server_url`` /
+        ``callback_url`` 은 ``train_settings`` 에 영속화 — backend 재시작 후에도
+        worker 가 DB 만 보고 실행할 수 있게.
 
-        Returns True if newly enqueued, False if already active (queued/running).
+        Returns True if newly enqueued, False if already active.
         """
         ckpt = CheckpointModel.find(checkpoint_id)
         if ckpt is None:
             return False
         if ckpt.status in CheckpointModel.ACTIVE_STATUSES:
-            # 이미 큐에 있거나 실행 중 — idempotent.
+            # 이미 풀(waiting/queued) 또는 실행 중 — idempotent. server_url
+            # 만 갱신해서 추후 worker pickup 이 가능하도록.
+            ts = ckpt._get_json_field('train_settings') or {}
+            ts['server_url'] = server_url
+            ts['callback_url'] = callback_url
+            ckpt.train_settings = ts
+            ckpt.save()
+            self._emit_queue_changed()
             return False
 
         with self._cond:
+            ts = ckpt._get_json_field('train_settings') or {}
+            ts['server_url'] = server_url
+            ts['callback_url'] = callback_url
+            ckpt.train_settings = ts
             ckpt.status = CheckpointModel.STATUS_QUEUED
             ckpt.queued_at = datetime.datetime.now()
             ckpt.started_at = None
             ckpt.finished_at = None
             ckpt.save()
-            self._jobs[checkpoint_id] = {
-                'server_url': server_url,
-                'callback_url': callback_url,
-            }
             self._cond.notify_all()
 
         self._emit_queue_changed()
@@ -123,11 +132,11 @@ class TrainingScheduler:
                 self._current_stop.set()
                 return 'stopping'
 
-            # 2) 큐에 대기 중이면 status=canceled로 표시 후 즉시 soft-delete.
-            #    canceled 상태로 row를 남겨두면 사용자에게 의미 없는 흔적만 보이므로
-            #    바로 deleted_at을 set해서 모든 listing에서 사라지게 한다.
-            if ckpt.status == CheckpointModel.STATUS_QUEUED:
-                self._jobs.pop(checkpoint_id, None)
+            # 2) 풀(waiting/queued) 대기 중이면 status=canceled 표시 후 즉시
+            #    soft-delete. canceled 상태로 row 를 남기면 사용자에게 의미
+            #    없는 흔적만 보이므로 바로 deleted_at 을 set 해서 모든 listing
+            #    에서 사라지게 한다.
+            if ckpt.status in CheckpointModel.POOL_STATUSES:
                 ckpt.status = CheckpointModel.STATUS_CANCELED
                 ckpt.finished_at = datetime.datetime.now()
                 ckpt.save()
@@ -156,22 +165,37 @@ class TrainingScheduler:
                 recent: [<checkpoint_dict>, ...],   # 최근 종료 N건 (finished/failed)
             }
         """
-        with self._lock:
-            running_id = self._current_id
-
+        # DB 가 single source of truth — in-memory 큐를 들고 있지 않는다.
+        # status='running' 인 row 가 진짜 실행 중인 체크포인트.
         running = None
-        if running_id is not None:
-            ckpt = CheckpointModel.find(running_id)
-            if ckpt is not None:
-                running = ckpt.to_dict()
+        try:
+            running_row = (
+                CheckpointModel.select()
+                .where(
+                    CheckpointModel.status == CheckpointModel.STATUS_RUNNING,
+                    CheckpointModel.deleted_at.is_null(),
+                )
+                .order_by(CheckpointModel.started_at.desc())
+                .first()
+            )
+            if running_row is not None:
+                running = running_row.to_dict()
+        except Exception:
+            pass
 
+        # queue 는 ``waiting`` (curriculum 자동 생성) + ``queued`` (사용자 enqueue)
+        # 를 모두 포함 — 둘 다 worker 픽업 대상이며 사용자 입장에서 "학습 대기 중".
+        # 정렬은 queued_at (있으면) 우선, 없으면 created_at — 같은 큐 흐름.
         queued = list(
             CheckpointModel.select()
             .where(
-                CheckpointModel.status == CheckpointModel.STATUS_QUEUED,
+                CheckpointModel.status.in_(list(CheckpointModel.POOL_STATUSES)),
                 CheckpointModel.deleted_at.is_null(),
             )
-            .order_by(CheckpointModel.queued_at.asc())
+            .order_by(
+                CheckpointModel.queued_at.asc(nulls='LAST'),
+                CheckpointModel.created_at.asc(),
+            )
         )
 
         recent = list(
@@ -198,21 +222,55 @@ class TrainingScheduler:
     # Worker thread
     # ------------------------------------------------------------------
     def _next_queued(self) -> Optional[CheckpointModel]:
-        """가장 오래된 queued row를 가져온다 (FIFO). 없으면 None."""
-        return (
+        """가장 오래된 풀(waiting/queued) row 를 가져온다 (FIFO). 없으면 None.
+        train_settings.server_url 이 있는 행만 픽업 — 없는 건 사용자가 아직
+        설정 안 한 케이스(예: 수동 등록만 한 cp)라 그대로 둔다.
+        """
+        candidates = (
             CheckpointModel.select()
             .where(
-                CheckpointModel.status == CheckpointModel.STATUS_QUEUED,
+                CheckpointModel.status.in_(list(CheckpointModel.POOL_STATUSES)),
                 CheckpointModel.deleted_at.is_null(),
             )
-            .order_by(CheckpointModel.queued_at.asc())
-            .first()
+            .order_by(
+                CheckpointModel.queued_at.asc(nulls='LAST'),
+                CheckpointModel.created_at.asc(),
+            )
         )
+        for ckpt in candidates:
+            ts = ckpt._get_json_field('train_settings') or {}
+            if ts.get('server_url'):
+                return ckpt
+        return None
+
+    def _any_external_running(self) -> bool:
+        """이 scheduler 인스턴스가 관리하지 않는 'running' cp 가 DB 에 있는지.
+
+        backend 재시작 직후 ``_resume_polling`` 이 인계받은 cp 가 있을 수 있다.
+        이런 cp 가 끝나기 전에 새 queued 를 픽업하면 training_server (단일 worker
+        FIFO) 가 거부해서 즉시 failed 가 된다. 이 함수가 True 면 worker 루프는
+        다음 픽업을 미룬다.
+        """
+        try:
+            q = CheckpointModel.select().where(
+                CheckpointModel.status == CheckpointModel.STATUS_RUNNING,
+                CheckpointModel.deleted_at.is_null(),
+            )
+            return q.exists()
+        except Exception:
+            return False
 
     def _run(self) -> None:
         while not self._stop_scheduler.is_set():
             with self._cond:
                 while not self._stop_scheduler.is_set():
+                    # 외부 (resume_polling) 가 인계받은 running cp 가 있으면
+                    # 그게 끝날 때까지 대기 — 동시 enqueue 로 인한 즉시 failed
+                    # 방지. ``_current_id`` 는 None 이라 우리 worker 가 다른
+                    # job 을 시작하는 걸 막을 게 없으므로 명시적 guard.
+                    if self._any_external_running():
+                        self._cond.wait(timeout=5.0)
+                        continue
                     ckpt = self._next_queued()
                     if ckpt is not None:
                         break
@@ -221,10 +279,17 @@ class TrainingScheduler:
                 if self._stop_scheduler.is_set():
                     return
 
-                job_meta = self._jobs.pop(ckpt.id, None) or {}
-                # 'queued' → 'running'으로 atomic 전이. queued에서 다른 곳이
+                # train_settings 에서 server_url/callback_url 을 읽는다.
+                # ``_jobs`` 인메모리 dict 의존 제거 — backend 재시작 후에도
+                # 동일 동작 보장.
+                ts = ckpt._get_json_field('train_settings') or {}
+                job_meta = {
+                    'server_url': ts.get('server_url', ''),
+                    'callback_url': ts.get('callback_url', ''),
+                }
+                # waiting / queued → running 으로 atomic 전이. 풀에서 다른 곳이
                 # 가로챘으면 (cancel 등) 다시 루프.
-                if ckpt.status != CheckpointModel.STATUS_QUEUED:
+                if ckpt.status not in CheckpointModel.POOL_STATUSES:
                     continue
                 ckpt.status = CheckpointModel.STATUS_RUNNING
                 ckpt.started_at = datetime.datetime.now()
@@ -257,6 +322,7 @@ class TrainingScheduler:
             # 종료 처리 — fresh row를 다시 읽어 status가 외부에서 바뀐 상태(예:
             # cancel 직후 정리)이면 그대로 두고, 그 외는 결과 status로 마감.
             # canceled 결과는 soft-delete까지 — 흔적 없이 사라지게.
+            final_status = None
             with self._cond:
                 fresh = CheckpointModel.find(ckpt.id)
                 if fresh is not None:
@@ -264,6 +330,7 @@ class TrainingScheduler:
                         fresh.status = result
                     fresh.finished_at = datetime.datetime.now()
                     fresh.save()
+                    final_status = fresh.status
                     if result == CheckpointModel.STATUS_CANCELED:
                         try:
                             fresh.delete_instance()
@@ -272,6 +339,23 @@ class TrainingScheduler:
                 self._current_id = None
                 self._current_stop = None
             self._emit_queue_changed()
+
+            # ── 커리큘럼 graduation trigger ─────────────────────────────────
+            # 이 체크포인트가 curriculum 그룹의 training_map 에 있고 그룹의
+            # 모든 cp 가 TERMINAL 이면 check_training_done 이 자동으로
+            # graduate (플래너 블록 cp id 교체 + 새 stage 생성 + group 상태를
+            # collecting 으로 되돌림). rollout 이 안 돌고 있는 "업그레이드"
+            # 흐름에서도 동작.
+            if final_status in (
+                CheckpointModel.STATUS_FINISHED,
+                CheckpointModel.STATUS_FAILED,
+                CheckpointModel.STATUS_CANCELED,
+            ):
+                try:
+                    from .process.curriculum_train import notify_checkpoint_finished
+                    notify_checkpoint_finished(ckpt.id, self._socketio)
+                except Exception as e:
+                    print(f'[TrainingScheduler] curriculum graduation hook failed: {e}')
 
     # ------------------------------------------------------------------
     # Notifications

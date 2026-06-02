@@ -88,18 +88,16 @@ def _ensure_columns():
 def _migrate_checkpoint_status():
     """One-time data migration for the training queue state machine.
 
-    이전 status 'training' (단일 슬롯 시절)을 'running'으로 정규화하고, 부팅 시점에
-    'running' 상태인 row가 있다면 — 이는 backend가 학습 도중 죽었다는 뜻이므로 —
-    'failed'로 회수한다 (스케줄러가 다음 'queued' picking을 막지 않도록).
+    이전 status 'training' (단일 슬롯 시절) 을 'running' 으로 정규화한다.
+    부팅 시점의 ``running`` row 는 **자동으로 'failed' 처리하지 않는다** —
+    training_server (별도 프로세스) 에서 학습이 계속 진행 중일 가능성이 높기
+    때문. 대신 ``backend/api/app.py`` 의 startup hook 이 ``running`` 체크포인트
+    들에 대해 training_server 에 polling 을 재개해서 실제 상태를 확인 + 결과
+    처리한다 (``_resume_inflight_trainings`` 참고).
     """
     try:
         db.execute_sql(
             "UPDATE checkpoints SET status='running' WHERE status='training'"
-        )
-        db.execute_sql(
-            "UPDATE checkpoints SET status='failed', "
-            "finished_at=COALESCE(finished_at, datetime('now')) "
-            "WHERE status='running' AND deleted_at IS NULL"
         )
     except Exception as e:
         print(f"  Warning: checkpoint status migration: {e}")

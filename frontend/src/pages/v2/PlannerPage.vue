@@ -1129,26 +1129,48 @@ function openAddWorkspacesForm() {
     showAddWorkspacesForm.value = true;
 }
 
+// 다이얼로그 / 멀티셀렉트 옵션 용 — light 만 (드롭다운 label/value 만 필요).
+// 센서/로봇 핸들러 부착은 ``ensureWorkspaceDetails`` 가 실제로 plan 에 포함된
+// (selected) workspace 들에 대해서만 lazy 로 수행.
 function listAvailableWorkspaces() {
     return api.get('/tasks').then((response) => {
         const tasks = response.data?.tasks || [];
-        availableWorkspaces.value = tasks;
-        availableWorkspaces.value.forEach(workspace => {
-            (workspace.sensors || []).forEach(sensor => {
-                sensor.handler = useSensor(sensor);
-                if (sensor.type === 'custom') {
-                    sensor.handler.checkSensorTopic();
-                }
-            });
-            (workspace.assembly?.robots || []).forEach(robot => {
-                robot.handler = useRobot(robot);
-                if (robot.type === 'custom') {
-                    robot.handler.checkRobotTopic();
-                }
-            });
+        // 이전 detail 이 이미 있는 workspace 는 그 detail 유지 (handlers 보존).
+        const prev = new Map(availableWorkspaces.value.map(w => [w.id, w]));
+        availableWorkspaces.value = tasks.map(t => {
+            const old = prev.get(t.id);
+            return (old && old.sensors) ? { ...t, ...old } : t;
         });
     }).catch((error) => {
         console.error('Error fetching available workspaces:', error);
+    });
+}
+
+// 주어진 task id 들의 detail 을 lazy 로 병렬 fetch + sensor/robot 핸들러 부착.
+// 이미 detail 이 있는 (sensors 채워진) 항목은 skip — 같은 세션에서 한 번만.
+async function ensureWorkspaceDetails(ids) {
+    const need = (ids || []).filter(id => {
+        const w = availableWorkspaces.value.find(x => x.id === id);
+        return w && !w.sensors;
+    });
+    if (!need.length) return;
+    const results = await Promise.all(
+        need.map(id => api.get(`/tasks/${id}`).then(r => r.data?.task).catch(() => null))
+    );
+    results.forEach((detail) => {
+        if (!detail) return;
+        const i = availableWorkspaces.value.findIndex(w => w.id === detail.id);
+        if (i < 0) return;
+        const merged = { ...availableWorkspaces.value[i], ...detail };
+        (merged.sensors || []).forEach(sensor => {
+            sensor.handler = useSensor(sensor);
+            if (sensor.type === 'custom') sensor.handler.checkSensorTopic();
+        });
+        (merged.assembly?.robots || []).forEach(robot => {
+            robot.handler = useRobot(robot);
+            if (robot.type === 'custom') robot.handler.checkRobotTopic();
+        });
+        availableWorkspaces.value[i] = merged;
     });
 }
 
@@ -1168,7 +1190,11 @@ function repollCustomDevices() {
 }
 
 function listSelectedWorkspaces() {
-    selectedWorkspaceIds.value = selectedPlanner.value.task_ids || [];
+    const ids = selectedPlanner.value.task_ids || [];
+    selectedWorkspaceIds.value = ids;
+    // plan 에 실제로 포함된 workspace 들의 풀 detail 만 lazy fetch — 드롭다운에만
+    // 나타나는 workspace 는 light 로 충분.
+    ensureWorkspaceDetails(ids);
 }
 
 function removeWorkspace(workspaceId) {
@@ -1730,9 +1756,24 @@ function openEditBlockForm(group, block, index) {
     showBlockForm.value = true;
 }
 
+// 블록 id 는 plan 전체에 걸쳐 유일하면 됨. 과거에는 ``Date.now() + 랜덤`` 의
+// base36 문자열이었는데 사용자 식별성이 낮아 sequential 정수(문자열) 로 변경.
+// 기존 데이터의 문자열 id 와도 공존 — parseInt 가 NaN 을 돌려주므로 max 계산에
+// 영향 없음. 새 id 만 1, 2, 3, ... 으로 늘어남.
+function nextBlockId() {
+    let maxN = 0;
+    for (const grp of (plans.value || [])) {
+        for (const b of (grp.blocks || [])) {
+            const n = parseInt(b?.id, 10);
+            if (Number.isFinite(n) && n > maxN) maxN = n;
+        }
+    }
+    return String(maxN + 1);
+}
+
 function copyBlock(group, block, index) {
     const copied = JSON.parse(JSON.stringify(block));
-    copied.id = Date.now().toString(36) + Math.random().toString(36).substring(2, 7);
+    copied.id = nextBlockId();
     copied.name = (copied.name || '') + ' (copy)';
     group.blocks.splice(index + 1, 0, copied);
     saveGroupBlocks(group);
@@ -1873,7 +1914,7 @@ function saveBlock() {
 
     const isEditing = editingBlockIndex.value !== null;
     const block = {
-        id: isEditing ? grp.blocks[editingBlockIndex.value].id : Date.now().toString(36) + Math.random().toString(36).substring(2, 7),
+        id: isEditing ? grp.blocks[editingBlockIndex.value].id : nextBlockId(),
         type: blockForm.value.type,
     };
 

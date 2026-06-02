@@ -2,6 +2,20 @@
 // Group new entries by feature area when adding.
 
 export default {
+  // ───── Global status bar ─────
+  globalStatusOpen: 'Status panel',
+  globalStatusCollapse: 'Collapse',
+  globalStatusSensor: 'Sensors',
+  globalStatusRobot: 'Robots',
+  globalStatusTraining: 'Training',
+  globalStatusEmptySensor: 'No sensors registered',
+  globalStatusEmptyRobot: 'No robots registered',
+  globalStatusSensorOff: 'Turn the sensor on to see the feed',
+  globalStatusNoTraining: 'No training in progress',
+  globalStatusTrainingRunning: 'Training',
+  globalStatusTrainingQueued: 'Queued',
+  globalStatusOpenTrainingDialog: 'Open training page',
+
   // ───── Common / shared ─────
   appTitle: 'Easy Trainer',
   failed: 'Action failed',
@@ -911,6 +925,11 @@ export default {
   currUpgradeNow: 'Upgrade',
   currUpgradeStarted: 'Training started for {n} group(s)',
   currUpgradeNoGroup: 'No collecting group to upgrade',
+  currStageCriteriaTitle: 'Judgment criteria (per checkpoint)',
+  currStageNoiseTitle: 'Noise ± range (per motion block, scaled by stage success rate)',
+  currStageNoiseNone: 'No noise configured on this group\'s motion blocks.',
+  currStageMaxSteps: 'Max steps',
+  currStageThreshold: 'Success threshold',
   currFailureCount: 'Failure',
   currDiscardFailure: 'Discard Failure Data',
   currDiscardDone: 'Failure data discarded',
