@@ -438,10 +438,54 @@ class UpdateManager:
             except Exception:
                 continue
 
-    def _download_file(self, url: str, dest: Path, progress_cb=None):
+    def _download_file(self, url: str, dest: Path, progress_cb=None,
+                       connect_timeout: int = 30, stall_timeout: int = 60):
+        """Download `url` -> `dest` with a stall watchdog so a dead or trickling
+        connection can never hang the updater indefinitely. If no new bytes
+        arrive for `stall_timeout` seconds, the socket is force-closed and a
+        clear error is raised — the caller turns that into a failed update with
+        a message instead of an endless spinner. `connect_timeout` is the
+        per-socket read timeout (a hard stall trips this first)."""
+        import socket
+        import threading
+        import time as _time
         tmp = dest.with_suffix(dest.suffix + ".part")
         req = request.Request(url, headers={"User-Agent": "EasyTrainer"})
-        with request.urlopen(req, timeout=30) as resp, tmp.open("wb") as f:
+        # The socket timeout is the PRIMARY stall guard: it stays on the socket
+        # for every recv(), so a dead/trickle-free connection raises
+        # socket.timeout after stall_timeout on its own — no thread needed to
+        # interrupt the blocked read. (resp.close() from another thread does NOT
+        # unblock an in-progress recv on CPython; only the socket timeout or a
+        # shutdown() does.) connect_timeout bounds the initial connect.
+        sock_timeout = max(1, min(connect_timeout, stall_timeout))
+        resp = request.urlopen(req, timeout=sock_timeout)
+        last_data = [_time.monotonic()]
+        stalled = [False]
+        stop_watch = threading.Event()
+
+        # Backstop watchdog: shutdown() (unlike close()) DOES interrupt a recv
+        # blocked in another thread, covering the rare case the socket timeout
+        # doesn't fire (e.g. a slow trickle that resets the per-recv timer).
+        raw_sock = None
+        try:
+            raw_sock = resp.fp.raw._sock  # type: ignore[attr-defined]
+        except Exception:
+            raw_sock = None
+
+        def _watchdog():
+            while not stop_watch.wait(1.0):
+                if _time.monotonic() - last_data[0] > stall_timeout:
+                    stalled[0] = True
+                    for fn in (lambda: raw_sock.shutdown(socket.SHUT_RDWR), resp.close):
+                        try:
+                            fn()
+                        except Exception:
+                            pass
+                    return
+
+        watcher = threading.Thread(target=_watchdog, daemon=True)
+        watcher.start()
+        try:
             total = None
             try:
                 total = int(resp.getheader("Content-Length") or 0)
@@ -454,20 +498,53 @@ class UpdateManager:
                     pass
             downloaded = 0
             last_percent = -1
-            while True:
-                chunk = resp.read(1024 * 1024)
-                if not chunk:
-                    break
-                f.write(chunk)
-                if total and progress_cb:
-                    downloaded += len(chunk)
-                    percent = int((downloaded / total) * 100)
-                    if percent != last_percent:
-                        last_percent = percent
-                        try:
-                            progress_cb(min(percent, 100))
-                        except Exception:
-                            pass
+            with tmp.open("wb") as f:
+                while True:
+                    try:
+                        chunk = resp.read(1024 * 1024)
+                    except Exception as e:
+                        # socket.timeout (primary guard) or the watchdog's
+                        # shutdown both surface here → report as a stall.
+                        if stalled[0] or isinstance(e, (socket.timeout, TimeoutError)):
+                            raise RuntimeError(
+                                f"다운로드가 {stall_timeout}초 동안 진행되지 않아 중단했습니다. "
+                                f"네트워크 연결을 확인한 뒤 다시 시도하세요."
+                            )
+                        raise
+                    if not chunk:
+                        # An empty read can be a genuine EOF OR the watchdog's
+                        # shutdown() forcing recv() to return 0 mid-download —
+                        # the latter must surface as a stall, not "complete".
+                        if stalled[0]:
+                            raise RuntimeError(
+                                f"다운로드가 {stall_timeout}초 동안 진행되지 않아 중단했습니다. "
+                                f"네트워크 연결을 확인한 뒤 다시 시도하세요."
+                            )
+                        break
+                    last_data[0] = _time.monotonic()
+                    f.write(chunk)
+                    if total and progress_cb:
+                        downloaded += len(chunk)
+                        percent = int((downloaded / total) * 100)
+                        if percent != last_percent:
+                            last_percent = percent
+                            try:
+                                progress_cb(min(percent, 100))
+                            except Exception:
+                                pass
+        finally:
+            stop_watch.set()
+            try:
+                resp.close()
+            except Exception:
+                pass
+        # Guard against silent truncation: a short file vs the advertised size
+        # means the connection dropped mid-download — don't install a partial deb.
+        if total and downloaded < total:
+            raise RuntimeError(
+                f"다운로드가 중간에 끊겼습니다 ({downloaded}/{total} 바이트). "
+                f"네트워크 연결을 확인한 뒤 다시 시도하세요."
+            )
         tmp.replace(dest)
         if progress_cb and total:
             try:
@@ -481,7 +558,9 @@ class UpdateManager:
         extract_root.mkdir(parents=True, exist_ok=True)
         dpkg = shutil.which("dpkg-deb")
         if dpkg:
-            result = subprocess.run([dpkg, "-x", str(deb_path), str(extract_root)], capture_output=True, text=True)
+            # timeout so a wedged extraction can't hang the update forever.
+            result = subprocess.run([dpkg, "-x", str(deb_path), str(extract_root)],
+                                    capture_output=True, text=True, timeout=600)
             if result.returncode == 0:
                 return
             self._log(f"[UPDATE][WARN] dpkg-deb 실패: {result.stderr.strip()}")
@@ -491,14 +570,14 @@ class UpdateManager:
             raise RuntimeError("deb 압축 해제 도구(dpkg-deb/ar/tar)를 찾지 못했습니다.")
         tmp_dir = extract_root / ".ar"
         tmp_dir.mkdir(parents=True, exist_ok=True)
-        subprocess.run([ar_bin, "x", str(deb_path)], cwd=str(tmp_dir), check=True)
+        subprocess.run([ar_bin, "x", str(deb_path)], cwd=str(tmp_dir), check=True, timeout=600)
         data_tar = None
         for cand in tmp_dir.glob("data.tar.*"):
             data_tar = cand
             break
         if not data_tar:
             raise RuntimeError("deb payload를 찾을 수 없습니다.")
-        subprocess.run([tar_bin, "-xf", str(data_tar), "-C", str(extract_root)], check=True)
+        subprocess.run([tar_bin, "-xf", str(data_tar), "-C", str(extract_root)], check=True, timeout=600)
 
     def _sync_payload(self, payload_root: Path):
         if not payload_root.exists():
@@ -509,10 +588,12 @@ class UpdateManager:
         except Exception:
             script = None
         if script and script.is_file():
+            # timeout so a stuck rsync/copy can't hang the update indefinitely.
             result = subprocess.run(
                 [str(script), str(payload_root), str(self._window.project_root)],
                 capture_output=True,
                 text=True,
+                timeout=900,
             )
             self._log_output(result)
             if result.returncode == 0:

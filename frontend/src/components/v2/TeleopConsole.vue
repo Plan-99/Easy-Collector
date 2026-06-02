@@ -140,7 +140,10 @@ function toggleRobot(robot) {
     if (!robot.handler) return
     if (robot.status === 'on') {
         if (robot.handler.stopRobot) robot.handler.stopRobot()
-    } else if (robot.status !== 'loading') {
+    } else if (robot.status === 'loading') {
+        // 로딩 중 토글 = 진행 중인 시작 취소.
+        if (robot.handler.stopRobot) robot.handler.stopRobot()
+    } else {
         if (robot.handler.startRobot) robot.handler.startRobot()
     }
 }

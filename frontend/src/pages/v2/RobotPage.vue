@@ -62,7 +62,12 @@
                         class="q-mt-sm"
                         :text="$t('tutorialRobotCard')"
                     />
-                    <q-inner-loading :showing="robot.status === 'loading'">
+                    <!-- pointer-events: none — 로딩 중에도 토글을 눌러 진행 중인 시작을
+                         취소할 수 있어야 한다. 스피너는 시각 표시 전용. -->
+                    <q-inner-loading
+                        :showing="robot.status === 'loading'"
+                        style="pointer-events: none; background: rgba(0, 0, 0, 0.4)"
+                    >
                         <q-spinner-gears size="50px" color="primary" />
                     </q-inner-loading>
                 </q-card>
@@ -440,6 +445,10 @@ function toggleRobot(robot) {
         robot.handler.stopRobot().then(() => {
             // Keep watching to preserve logs/pendant view
         });
+    } else if (robot.status === 'loading') {
+        // 로딩 중 토글 = 진행 중인 시작 취소. backend StopRobotDriver 는
+        // 이미 떠 있는 드라이버를 정리하고, 아직 안 뜬 경우엔 no-op 라 안전.
+        robot.handler.stopRobot();
     } else if (robot.status === 'error') {
         // clean up lingering processes then retry start
         robot.handler.stopRobot().finally(() => {

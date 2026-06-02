@@ -15,10 +15,15 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      - name: Set up Python 3.10
+      # backend/Dockerfile.base 가 ubuntu:24.04 (= Python 3.12) 위에서 돌기 때문에
+      # PyArmor 도 동일 Python 버전으로 .so 를 만들어야 한다. 3.10 으로 빌드하면
+      # 컨테이너 안에서 `_PyFloat_Pack8` 같은 3.10 internal symbol 을 못 찾아서
+      # `from pyarmor_runtime_000000 import __pyarmor__` 가 ImportError 로 깨진다
+      # — fresh deb 설치 마이그레이션 단계에서 재현됨.
+      - name: Set up Python 3.12
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: '3.12'
 
       - name: Install Dependencies
         run: |
@@ -60,10 +65,34 @@ jobs:
           echo "1. 난독화 시작 (결과물은 임시폴더 temp_obf에 저장)"
           
           # 제외할 파일은 --exclude로 지정
+          # PyArmor trial 라이센스는 파일당 ~32KB 한도가 있어, 이를 넘는
+          # 파일은 "out of license" 로 실패한다. 다음 두 종류를 제외한다:
+          #   1) 큰 vendored/generated/library 파일 (IP 가치 낮음)
+          #   2) IP 가치는 있지만 32KB 넘어서 trial 한도 위반인 backend 파일
+          #      → 정식 라이센스 구매 후 다시 난독화 대상에 포함시킬 것
+          #   3) release/ui 의 큰 파일 — 어차피 PyInstaller 바이너리로 통째로
+          #      bundling 된 뒤 cleanup 에서 .py 가 삭제되므로 obfuscation 가치 낮음
           pyarmor gen -O temp_obf \
-            -r release/ui src \
+            -r release/ui backend \
             --exclude "backend/lerobot" \
-            --exclude "release/ui/launcher.py"
+            --exclude "backend/fiper" \
+            --exclude "backend/tests" \
+            --exclude "backend/bridge/generated" \
+            --exclude "backend/tools/model_tester" \
+            --exclude "backend/utils/lerobot_io.py" \
+            --exclude "backend/api/process/checkpoint_test.py" \
+            --exclude "backend/api/process/leader_teleoperation.py" \
+            --exclude "backend/api/process/planner_run.py" \
+            --exclude "backend/api/process/export_templates" \
+            --exclude "backend/api/routes/dataset.py" \
+            --exclude "backend/api/routes/remote_train.py" \
+            --exclude "backend/policies/utils.py" \
+            --exclude "release/ui/launcher.py" \
+            --exclude "release/ui/modules.py" \
+            --exclude "release/ui/module_wizard.py" \
+            --exclude "release/ui/service.py" \
+            --exclude "release/ui/tools.py" \
+            --exclude "release/ui/installer.py"
 
           echo "2. 폴더 구조 맞추기 (ui -> release/ui)"
           
@@ -82,11 +111,11 @@ jobs:
           if [ -n "$RUNTIME_DIR" ]; then
               echo "Runtime folder found: $RUNTIME_DIR"
 
-              # [Step A] Docker를 위해 src 안으로 '복사' (Copy)
-              # Docker 컨테이너가 src를 마운트할 때 런타임도 같이 가져가야 함
-              if [ -d "temp_obf/src" ]; then
-                  echo " -> Copying to src/ for Docker"
-                  cp -r "temp_obf/$RUNTIME_DIR" "temp_obf/src/"
+              # [Step A] Docker를 위해 backend 안으로 '복사' (Copy)
+              # Docker 컨테이너가 backend를 마운트할 때 런타임도 같이 가져가야 함
+              if [ -d "temp_obf/backend" ]; then
+                  echo " -> Copying to backend/ for Docker"
+                  cp -r "temp_obf/$RUNTIME_DIR" "temp_obf/backend/"
               fi
 
               # [Step B] 런처 UI 실행을 위해 release/ui 안으로 '이동' (Move)
@@ -103,7 +132,7 @@ jobs:
 
           echo "4. 난독화된 파일을 원본 폴더에 강제 덮어쓰기"
           # 이제 구조가 완벽합니다.
-          # - src/ 안에는 runtime 복사본이 있음
+          # - backend/ 안에는 runtime 복사본이 있음
           # - release/ui/ 안에는 runtime 원본이 이동됨
           cp -rf temp_obf/* .
           

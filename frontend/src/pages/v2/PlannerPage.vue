@@ -107,7 +107,10 @@
                                             <div class="text-caption text-grey" v-if="sensor.status === 'off'">{{ $t('topicOff') }}</div>
                                             <div class="text-caption text-positive" v-else-if="sensor.status === 'on'">{{ $t('topicOn') }}</div>
                                         </div>
-                                        <q-inner-loading :showing="sensor.status === 'loading'"></q-inner-loading>
+                                        <q-inner-loading
+                                            :showing="sensor.status === 'loading'"
+                                            style="pointer-events: none; background: rgba(0, 0, 0, 0.4)"
+                                        ></q-inner-loading>
                                     </div>
                                     <div class="text-subtitle2 q-mt-md q-mb-sm">{{ $t('plannerRobotsTitle') }}</div>
                                     <div v-if="!workspace.assembly" class="text-caption text-grey q-mb-sm">{{ $t('plannerNoAssembly') }}</div>
@@ -129,7 +132,10 @@
                                             <div class="text-caption text-positive" v-else-if="robot.status === 'on'">{{ $t('topicOn') }}</div>
                                             <div class="text-caption text-negative" v-else-if="robot.status === 'error'">{{ $t('plannerErrorBadge') }}</div>
                                         </div>
-                                        <q-inner-loading :showing="robot.status === 'loading'"></q-inner-loading>
+                                        <q-inner-loading
+                                            :showing="robot.status === 'loading'"
+                                            style="pointer-events: none; background: rgba(0, 0, 0, 0.4)"
+                                        ></q-inner-loading>
                                     </div>
                                 </q-card-section>
                             </q-card>
@@ -1319,6 +1325,9 @@ function toggleSensor(sensor) {
     sensor.process_id = `sensor_${sensor.id}`;
     if (sensor.status === 'on') {
         sensor.handler.stopSensor();
+    } else if (sensor.status === 'loading') {
+        // 로딩 중 토글 = 진행 중인 시작 취소.
+        sensor.handler.stopSensor();
     } else {
         sensor.handler.startSensor();
     }
@@ -1328,6 +1337,9 @@ function toggleRobot(robot) {
     robot.process_id = `robot_${robot.id}`;
     const startFlow = () => robot.handler.startRobot();
     if (robot.status === 'on') {
+        robot.handler.stopRobot();
+    } else if (robot.status === 'loading') {
+        // 로딩 중 토글 = 진행 중인 시작 취소.
         robot.handler.stopRobot();
     } else if (robot.status === 'error') {
         robot.handler.stopRobot().finally(() => startFlow());

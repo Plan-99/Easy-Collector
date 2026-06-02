@@ -5,7 +5,11 @@ section: teleoperation
 order: 5
 sourceRefs:
   - frontend/src/components/v2/TeleSettingDialog.vue
-lastVerifiedVersion: 0.0.0
+  - backend/env/dxl_controller.py
+  - backend/api/process/leader_teleoperation.py
+  - backend/api/process/subscribe_dynamixel.py
+  - backend/api/routes/teleoperator.py
+lastVerifiedVersion: 5.0.0
 ---
 
 Easy Controller 모드는 사람이 **리더 팔(leader)** 을 직접 잡고 움직이면 그 자세를 그대로 따라가도록 **워커 팔(follower, 실제 로봇)** 을 제어하는 방식입니다. 키보드보다 자연스러운 동작을 만들기 좋아 양손 협조나 미세 조작에 적합합니다.
@@ -19,6 +23,21 @@ Easy Controller 모드는 사람이 **리더 팔(leader)** 을 직접 잡고 움
 - **별도 12 V 전원** — 모터에는 USB가 아니라 12 V 어댑터로 전원이 공급되어야 합니다. 전원이 없으면 모터가 검출되지 않습니다.
 
 리더 팔의 각 관절은 워커 팔의 같은 관절에 1:1로 대응되며, 사람이 리더를 움직일 때 측정된 각도가 워커의 목표 각도로 흘러갑니다.
+
+### 지원되는 리더 팔 종류
+
+Easy Trainer는 모터 동작 모드를 자동으로 감지하기 때문에, 같은 캘리브레이션 절차로 두 가지 종류의 리더 팔을 모두 다룰 수 있습니다.
+
+| 리더 팔 종류 | 모터 모드 | sync 동안의 처리 |
+|---|---|---|
+| **자체 제작 / 일반 리더 팔** | Position(3) 또는 Extended Position(4) | 그대로 사용 — 기존 동작과 동일 |
+| **ROBOTIS OMX (5-DoF) 리더 팔** | 대부분 Current(0), 그리퍼는 Current-based Position(5) | Current 모터는 sync 동안 임시로 Position으로 전환되었다가 종료 시 원복 |
+
+OMX처럼 출고 시 Current 모드로 설정된 모터도 별도 모드 변경 작업 없이 그대로 사용할 수 있습니다. 캘리브레이션이 끝나고 텔레옵을 중지하면 모터 모드가 자동으로 원래 값으로 돌아가므로 backdrivable(손으로 자유롭게 움직일 수 있는) 특성을 잃지 않아요.
+
+<Callout type="info">
+**ROBOTIS OMX는 OpenManipulator-X와 다른 제품입니다.** OMX는 5-DoF(omx_f variant)이고 OpenManipulator-X는 4-DoF입니다. 모터 모드 처리는 OMX 기준으로 검증되었습니다. OMX를 워커(slave)로 등록하는 절차는 [ROBOTIS OMX 로봇 페이지](/docs/robots/omx)를 참고하세요.
+</Callout>
 
 ## 사전 준비
 
@@ -52,7 +71,15 @@ Easy Controller 모드는 사람이 **리더 팔(leader)** 을 직접 잡고 움
 
 3. **좌측의 Start Easy Controller를 누릅니다.**
 
-   Easy Controller 프로세스가 시작되고, 아래 ProcessConsole에 검출된 Dynamixel 모터의 ID·port·current position이 로그로 찍힙니다. 모터가 검출되지 않으면 12 V 전원, USB 케이블, baudrate(기본 1 Mbps)를 차례로 점검하세요. 검출된 모터는 Stepper 1단계 하단의 **DXL 카드**(`ID xx (/dev/ttyUSBx)`) 영역에 자동으로 나열됩니다.
+   Easy Controller 프로세스가 시작되고, 아래 ProcessConsole에 검출된 Dynamixel 모터의 ID·port·current position이 로그로 찍힙니다. 검출된 모터는 Stepper 1단계 하단의 **DXL 카드**(`ID xx (/dev/ttyUSBx)`) 영역에 자동으로 나열됩니다.
+
+   <Callout type="info">
+   **baudrate는 자동으로 감지됩니다.** 시작 시 포트별로 **4 Mbps → 1 Mbps** 순서로 자동 시도하므로 사용자가 baudrate를 따로 설정할 필요가 없습니다. 이 자동 탐색 때문에 리더 시작이 **1.5~3초 정도 더 걸릴 수 있어요**. 로그에 어떤 baudrate가 잡혔는지 표시됩니다.
+
+   **팔로워가 점유 중인 포트는 자동으로 제외됩니다.** 워커 로봇이 이미 사용 중인 시리얼 포트는 리더 스캔에서 자동으로 건너뜁니다. (이전엔 점유된 포트를 열려다 무한 hang이 발생할 수 있었지만 이제 안전합니다.)
+   </Callout>
+
+   모터가 검출되지 않으면 12 V 전원, USB 케이블, baudrate(자동 탐색이 4 M/1 Mbps만 시도하므로 그 외 값으로 설정된 모터는 검출되지 않음)를 차례로 점검하세요.
 </Steps>
 
 ## Step 1 — 원점 설정 (Origin Setting)
@@ -143,6 +170,16 @@ Easy Controller 모드는 사람이 **리더 팔(leader)** 을 직접 잡고 움
 - **워커에 그리퍼가 없는 경우(토글 용도)** — Open 위치가 텔레옵 정지/재개의 기준점이 됩니다. 사람이 리더 손잡이를 **저장된 Open 위치보다 더 많이 열면** 텔레옵이 일시정지 되어 워커가 멈추고, 다시 손잡이를 **저장된 Open 위치까지 닫으면** 텔레옵이 재개되어 워커가 리더를 다시 따라가기 시작합니다. (Close 위치는 동작 범위의 반대쪽 끝을 정의하는 용도일 뿐, 토글 트리거에는 직접 쓰이지 않아요.)
 </Callout>
 
+### ROBOTIS OMX 그리퍼 — 스프링백(트리거) 동작
+
+ROBOTIS OMX의 그리퍼 모터는 출고 시 **Current-based Position(모드 5)** 으로 설정되어 있어요. 이 모드는 Easy Trainer가 자동으로 감지하며, 다음과 같이 **트리거 같은** 동작을 합니다.
+
+- 사람이 손잡이를 쥐고 닫으면 그리퍼가 닫힌 상태로 따라옵니다.
+- **손을 떼면 모터가 자동으로 Open 위치로 돌아갑니다** (저장한 Open 값으로 항상 복귀).
+- 즉 마우스 클릭처럼 "누르고 있는 동안 닫힘 / 떼면 열림" 으로 동작합니다.
+
+Position 모드 그리퍼처럼 손잡이를 어느 각도에 두면 그 각도가 그대로 유지되는 방식과 다르므로, OMX 리더를 처음 쓰는 분은 이 차이를 알아두세요. 별도 설정은 필요 없고 모드 감지가 자동으로 이뤄집니다.
+
 ## Step 3 — 관절 방향 설정 (Direction Setting)
 
 리더와 워커는 같은 형상이라도 모터를 반대로 끼웠거나 좌우 대칭으로 만들어 놓아 회전 방향이 반대인 관절이 흔히 있습니다. 이 단계에서 텔레옵을 켠 채 직접 움직여 보고 부호를 뒤집어 줍니다.
@@ -201,8 +238,12 @@ Easy Controller 모드는 사람이 **리더 팔(leader)** 을 직접 잡고 움
 
 ## 트러블슈팅
 
-- **모터가 검출되지 않습니다.** 12 V 어댑터가 켜져 있는지, U2D2가 잘 꽂혀 있는지, `ls /dev/ttyUSB*`로 포트가 보이는지 확인하세요. baudrate가 다른 모터(57600 등)는 R+ Manager로 1 Mbps로 통일하는 것이 편합니다.
+- **모터가 검출되지 않습니다.** 12 V 어댑터가 켜져 있는지, U2D2가 잘 꽂혀 있는지, `ls /dev/ttyUSB*`로 포트가 보이는지 확인하세요. Easy Trainer는 baudrate를 **4 Mbps와 1 Mbps에 한해서** 자동으로 시도하므로, 그 외 값(예: 57600)으로 설정된 모터는 R+ Manager로 1 Mbps 또는 4 Mbps로 통일해 주세요.
+- **리더 시작 후 검출까지 좀 걸립니다.** baudrate 자동 탐색 때문에 포트별로 4 Mbps → 1 Mbps 순서로 시도합니다. 보통 1.5~3초 정도이며 정상입니다.
 - **ttyUSB 포트가 매번 다르게 잡힙니다.** udev rule로 시리얼 번호별로 고정 alias(`/dev/dxl_left`, `/dev/dxl_right`)를 만드세요. 또는 슬롯의 ttyUSB 버튼으로 매번 순환시켜 맞춥니다.
 - **워커가 시작 직후 갑자기 점프합니다.** Step 1의 Origin이 안 맞은 것입니다. 리더와 워커를 같은 자세로 다시 맞추고 Origin을 다시 잡으세요. Step 4의 Max step을 잠시 작게 줄이는 것도 안전합니다.
 - **워커가 리더와 반대로 움직입니다.** Step 3의 토글이 누락된 관절입니다. 해당 관절 토글을 켜세요.
 - **Toggle Joint 모터가 워커에 영향을 주지 않습니다.** 정상입니다. 워커에 그리퍼가 없으면 Toggle Joint는 텔레옵 활성/비활성 트리거로만 쓰입니다.
+- **`There is no status packet` 에러가 자주 떴었습니다.** Easy Trainer가 검출 직후 모든 모터의 Status Return Level을 정상값으로 **자동 정규화**하므로 이 에러는 더 이상 나오지 않아야 합니다. 그래도 동일한 메시지가 보인다면 케이블 접촉/전원을 우선 점검하세요. (특히 ROBOTIS lerobot OMX 코드를 한 번이라도 같은 모터로 돌렸던 경우 해당 모터의 Status Return Level이 비표준 값으로 남아 있을 수 있는데, 이 케이스도 자동 복구 대상입니다.)
+- **OMX 리더 팔에서 텔레옵을 끄면 모터가 뻣뻣합니다.** OMX의 Current 모드 모터는 sync 동안 임시로 Position으로 전환되지만, **텔레옵이 정상 종료되면 원래 Current 모드로 자동 원복**되어 backdrivable로 돌아옵니다. 만약 강제 종료(kill)나 비정상 종료로 끝났다면 모드가 Position에 남아 뻣뻣할 수 있는데, 이 경우 Easy Controller를 한 번 더 시작했다가 정상 종료하면 원복됩니다.
+- **리더 로봇 중지 버튼을 눌렀는데 멈추지 않습니다.** 더 이상 발생하지 않아야 합니다. baudrate가 안 맞아 SDK가 busy-loop에 빠지더라도 Stop 신호를 받으면 **즉시 중지**됩니다. 그래도 멈추지 않으면 ProcessConsole 로그를 확인하고 이슈로 보고해 주세요.

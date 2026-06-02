@@ -2,8 +2,26 @@ from flask import Blueprint, request, current_app, Response
 import json
 from ...database.models.teleoperator_model import Teleoperator as TeleoperatorModel
 from ...database.models.assembly_model import Assembly as AssemblyModel
+from ...database.models.robot_model import Robot as RobotModel
 from ...api.process.subscribe_dynamixel import subscribe_dynamixel, scan_ids_on_port, get_available_ports
 from ...api.process.leader_teleoperation import Leader
+
+
+def _follower_serial_ports():
+    """DB에 등록된 (팔로워) 로봇이 점유 중인 serial_port 목록.
+
+    leader 스캔에서 이 포트들을 제외해야 — 이미 점유 중인 포트를 열려고 하면
+    Dynamixel SDK가 무한 대기할 수 있음.
+    """
+    ports = set()
+    try:
+        for robot in RobotModel.select().where(RobotModel.deleted_at.is_null()):
+            sp = robot.serial_port
+            if sp:
+                ports.add(sp)
+    except Exception as e:
+        print(f"[WARN] failed to collect follower serial ports: {e}")
+    return list(ports)
 
 
 teleoperator_bp = Blueprint('teleoperator', __name__)
@@ -20,8 +38,11 @@ def get_teleoperators():
 @teleoperator_bp.route('teleoperator:dxl_check', methods=['GET'])
 def dxl_check():
     ports = get_available_ports()
+    skip = set(_follower_serial_ports())
     res = {}
     for port in ports:
+        if port in skip:
+            continue
         connected_ids = scan_ids_on_port(port)
         res[port] = connected_ids
 
@@ -40,6 +61,7 @@ def dxl_read():
         f"subscribe_dxl",
         subscribe_dynamixel,
         socketio_instance=current_app.pm.socketio,
+        skip_ports=_follower_serial_ports(),
         log_id="start_leader_robot",
     )
 

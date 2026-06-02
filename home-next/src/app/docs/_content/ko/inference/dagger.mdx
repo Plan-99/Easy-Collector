@@ -1,0 +1,87 @@
+---
+title: DAgger (개입 데이터 수집)
+description: 추론 중 정책이 stuck 상태에 빠졌을 때 그 자세에서 즉시 텔레옵으로 전환해 "어떻게 빠져나오는지"를 추가 시연으로 남기는 흐름.
+section: inference
+order: 5
+sourceRefs:
+  - frontend/src/components/v2/MonitoringWindow.vue
+  - backend/api/process/checkpoint_test.py
+related:
+  - /docs/data-collection
+  - /docs/inference/run
+lastVerifiedVersion: 5.0.0
+---
+
+DAgger(Dataset Aggregation)는 학습된 정책을 **추론으로 굴려보다가 막히는 순간** 사람이 개입해 그 자세에서부터 직접 시연하고, 그 결과를 새로운 에피소드로 데이터셋에 추가하는 흐름입니다. Easy Trainer는 추론 → 텔레옵 전환을 **홈 포즈 이동 없이** 그 자리에서 바로 일으켜 stuck 상태의 정확한 시각적 컨텍스트를 보존합니다.
+
+## 어떤 상황에 쓰나
+
+| 상황 | DAgger가 유용한 이유 |
+|---|---|
+| 정책이 특정 자세에서 떨림·정체 (stuck) | 사람이 그 자세에서 빠져나오는 시연을 새 데이터로 추가 |
+| 처음 보는 물체 / 조명에서 실패 | 실패 직전의 frame을 시작점으로 시연 보강 |
+| 마지막 한 두 단계만 학습이 부족 | 끝맺음 동작을 강하게 보강 |
+
+학습된 분포가 익숙한 상황은 정책에게 맡기고, 어려운 순간만 사람이 시연하기 때문에 적은 라벨 비용으로 효과적으로 개선할 수 있습니다.
+
+## 사용 흐름
+
+<Steps>
+1. **체크포인트를 선택하고 [추론 실행](/docs/inference/run)을 시작합니다.**
+
+   정책이 stuck 상태에 들어갈 때까지 그대로 둡니다.
+
+2. **MonitoringWindow 상단의 노란 DAgger 버튼을 누릅니다.**
+
+   `school` 아이콘이 있는 amber 색 버튼입니다.
+
+   <DocsImage
+     src="/docs/inference/dagger-01-button.png"
+     alt="추론 중 MonitoringWindow 상단의 노란 DAgger 버튼"
+     status="missing"
+   />
+
+3. **DAgger 데이터 수집 다이얼로그가 열립니다.**
+
+   이 시점에 백엔드는 이미 추론을 끊고 정리를 끝낸 상태입니다. **로봇은 stuck이 발생한 그 자세에 그대로 머물러 있습니다** — Home Pose로 이동하지 않습니다.
+
+   다이얼로그에 다음 항목을 입력합니다.
+
+   - **Dataset** — 새로 만들 에피소드를 추가할 대상 데이터셋
+   - **Language Instruction** — 자연어 지시 (선택)
+   - **Teleop Type** — 키보드 / 리더 / Vive / Motion Planning 중 선택
+   - **Hz / Step Size** — 텔레옵 타입에 맞는 추가 옵션
+
+   <DocsImage
+     src="/docs/inference/dagger-02-dialog.png"
+     alt="DAgger 다이얼로그 — Dataset / Language Instruction / Teleop Type / Hz 입력"
+     status="missing"
+   />
+
+4. **추론 중지 후 수집 버튼을 누릅니다.**
+
+   다이얼로그가 닫히고 곧바로 텔레옵 + 데이터 수집이 시작됩니다. 일반 수집과 다른 점은 **Home Pose로 이동하는 단계가 강제로 비활성화**된다는 것입니다 (`forceNoHomepose=true`). 정책이 막혔던 그 자세에서 그대로 사람이 이어받아 시연합니다.
+
+5. **stuck 자세에서 빠져나오는 동작을 시연하고, 일반 수집과 동일하게 SUCCESS / DONE / STOP 으로 마무리합니다.**
+
+   생성된 에피소드는 선택한 데이터셋에 평범한 에피소드 한 건으로 저장됩니다. 이후 [학습](/docs/training)에 그대로 포함시켜 다시 학습하면 stuck 상황에서 빠져나오는 동작이 정책에 반영됩니다.
+</Steps>
+
+<Callout type="warning">
+DAgger는 stuck 자세에서 그대로 텔레옵을 시작하므로, 사람이 손잡이를 잡기 전까지 로봇은 마지막 추론 명령 위치에서 멈춰 있습니다. 그리퍼나 팔이 사람 손과 충돌하지 않는지 먼저 확인하고 시작하세요. 위험해 보이면 일반 추론과 마찬가지로 즉시 Stop을 누를 수 있습니다.
+</Callout>
+
+<Callout type="info">
+**왜 Home Pose로 이동하지 않나요?** stuck 상태의 정확한 시각·관절 컨텍스트를 보존하기 위해서입니다. Home Pose로 한 번 갔다가 시연을 시작하면 정책이 막힌 그 순간의 카메라 입력이 사라져 버려서 DAgger의 의미가 줄어듭니다.
+</Callout>
+
+## 일반 수집과 어떻게 다른가
+
+| 항목 | 일반 데이터 수집 | DAgger |
+|---|---|---|
+| 시작 자세 | Home Pose로 이동 후 시작 | 정책이 멈춘 자세 그대로 시작 |
+| 진입 경로 | 워크스페이스의 data 탭 → REC | MonitoringWindow 추론 중 → DAgger 버튼 |
+| 자연어 지시 / 데이터셋 선택 | data 탭 setup row 에서 직접 | DAgger 다이얼로그에서 직접 |
+| 저장 형태 | 새 에피소드 | 새 에피소드 (동일) |
+
+저장 형태는 동일하므로, 학습 시점에는 일반 에피소드와 DAgger 에피소드를 구분 없이 함께 사용할 수 있습니다.

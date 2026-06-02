@@ -86,6 +86,10 @@ def start_robot():
         if robot_dict.get('interpolation_hz') is not None:
             settings['interpolation_hz'] = robot_dict.get('interpolation_hz')
         settings['write_topic'] = robot_dict.get('write_topic', '')
+        # controller 가 Float64MultiArray / JointTrajectory 를 받는 경우 interp 노드가
+        # 알맞은 msg 로 직렬화하도록 write_topic_msg 도 같이 넘김. 미지정 시
+        # interpolation_node 기본값(sensor_msgs/JointState).
+        settings['write_topic_msg'] = robot_dict.get('write_topic_msg', '')
         settings['sdk_control'] = robot_dict.get('sdk_control', False)
         settings['sdk_type'] = robot_dict.get('sdk_type', '')
 

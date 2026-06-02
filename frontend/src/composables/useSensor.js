@@ -76,6 +76,10 @@ export function useSensor(sensor, sensorOnCallback = () => {}) {
     }, START_TIMEOUT_MS);
     return api.post('/sensor:start', sensor).catch((error) => {
       clearStartWatchdog();
+      // 사용자가 시작 중 토글로 취소한 경우 stopSensor 가 이미 'loading' → 'off' 로
+      // 옮긴 뒤 backend 가 start 를 거부/에러 반환할 수 있다. 'loading' 이 아니면
+      // error 로 덮어쓰지 않는다.
+      if (sensor.status !== 'loading') return;
       const msg = formatError(error);
       console.error('Error starting sensor:', msg);
       sensor.lastError = msg;
