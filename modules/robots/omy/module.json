@@ -1,0 +1,254 @@
+{
+  "id": "robot_omy",
+  "name": "OMY",
+  "version": "1.0.0",
+  "category": "robot",
+  "description": "ROBOTIS OMY: 6-DOF arm built on DYNAMIXEL-Y actuators. OMY-3M (arm only) and OMY-F3M (+ RH-P12-RN 2-finger gripper + RealSense D405). Driven via ros2_control as a single JointGroupPositionController over /joint_group_position_controller/commands. Arm bus defaults to /dev/ttyAMA2, gripper bus to /dev/ttyAMA4 (the OMY robot PC's onboard UARTs).",
+  "install": {
+    "ros2": {
+      "target": "ros2/ros2_ws/src",
+      "build": "colcon"
+    }
+  },
+  "dependencies": {
+    "apt": [
+      "ros-humble-ros2-control",
+      "ros-humble-ros2-controllers",
+      "ros-humble-dynamixel-sdk",
+      "ros-humble-dynamixel-hardware-interface",
+      "ros-humble-realsense2-description",
+      "ros-humble-xacro",
+      "sshpass"
+    ],
+    "pip": []
+  },
+  "check": {
+    "type": "path"
+  },
+  "robots": [
+    {
+      "type": "omy_3m",
+      "spec": {
+        "company": "ROBOTIS",
+        "role": "single_arm",
+        "joint_dim": 6,
+        "joint_names": [
+          "joint1",
+          "joint2",
+          "joint3",
+          "joint4",
+          "joint5",
+          "joint6"
+        ],
+        "joint_lower_bounds": [
+          -6.283185307179586,
+          -6.283185307179586,
+          -6.283185307179586,
+          -6.283185307179586,
+          -6.283185307179586,
+          -6.283185307179586
+        ],
+        "joint_upper_bounds": [
+          6.283185307179586,
+          6.283185307179586,
+          6.283185307179586,
+          6.283185307179586,
+          6.283185307179586,
+          6.283185307179586
+        ],
+        "tool_inner": false,
+        "tool_index": [],
+        "ik_available": true,
+        "custom_fields": [
+          "serial_port",
+          "ssh_host",
+          "ssh_user",
+          "ssh_port",
+          "ssh_password"
+        ]
+      },
+      "driver": {
+        "kind": "topic",
+        "interpolation": true,
+        "read_topic": "/joint_states",
+        "read_topic_msg": "sensor_msgs/JointState",
+        "write_topic": "/joint_group_position_controller/commands",
+        "write_topic_msg": "std_msgs/Float64MultiArray",
+        "launch": {
+          "package": "omy_bringup",
+          "launch_file": "omy_3m_easytrainer.launch.py",
+          "args": {
+            "namespace": "{namespace}",
+            "port_name": "{serial_port|/dev/ttyAMA2}",
+            "use_mock_hardware": "false"
+          }
+        },
+        "remote": {
+          "comment": "ssh_host 가 채워지면 로봇 PC(온보드)에서 드라이버 실행. EasyTrainer 는 동일 DDS 도메인(ROS_DOMAIN_ID=30)에서 토픽만 주고받는다. ROS 는 로봇 PC 의 docker 컨테이너 'open_manipulator' 안에서 돈다. container.sh 에 exec 서브커맨드가 없어 docker exec 직접 사용.",
+          "enabled_when": "ssh_host",
+          "host_field": "ssh_host",
+          "user_field": "ssh_user",
+          "port_field": "ssh_port",
+          "default_user": "root",
+          "default_port": 22,
+          "ros_domain_id": 30,
+          "read_topic": "/joint_states",
+          "write_topic": "/arm_controller/joint_trajectory",
+          "write_topic_msg": "trajectory_msgs/JointTrajectory",
+          "provision": [
+            {
+              "name": "checkout_jazzy",
+              "check": "cd /data/docker/open_manipulator && [ \"$(git rev-parse --abbrev-ref HEAD)\" = jazzy ]",
+              "run": "cd /data/docker/open_manipulator && git checkout jazzy && git pull",
+              "timeout": 300,
+              "optional": true
+            },
+            {
+              "name": "container_up",
+              "check": "docker ps --format '{{.Names}}' | grep -qx open_manipulator",
+              "run": "cd /data/docker/open_manipulator && ./docker/container.sh start",
+              "timeout": 900
+            }
+          ],
+          "launch": "docker exec -t -e ROS_DOMAIN_ID open_manipulator bash -lc 'source /opt/ros/jazzy/setup.bash && source /root/ros2_ws/install/setup.bash 2>/dev/null; ros2 launch open_manipulator_bringup omy_3m.launch.py'"
+        }
+      },
+      "ik": {
+        "urdf_path": "{ros2_root}/omy_description/urdf/omy_3m/omy_3m.urdf",
+        "urdf_package_dir": "{ros2_root}/omy_description/",
+        "joints_to_lock": [],
+        "position_cost": 1.0,
+        "orientation_cost": 0.0,
+        "ee_definitions": [
+          {
+            "name": "ee",
+            "parent": "joint6",
+            "offset": [
+              0.0,
+              -0.103,
+              0.0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "omy_f3m",
+      "spec": {
+        "company": "ROBOTIS",
+        "role": "single_arm",
+        "joint_dim": 7,
+        "joint_names": [
+          "joint1",
+          "joint2",
+          "joint3",
+          "joint4",
+          "joint5",
+          "joint6",
+          "rh_r1_joint"
+        ],
+        "joint_lower_bounds": [
+          -6.283185307179586,
+          -6.283185307179586,
+          -6.283185307179586,
+          -6.283185307179586,
+          -6.283185307179586,
+          -6.283185307179586,
+          0.0
+        ],
+        "joint_upper_bounds": [
+          6.283185307179586,
+          6.283185307179586,
+          6.283185307179586,
+          6.283185307179586,
+          6.283185307179586,
+          6.283185307179586,
+          1.13514578304
+        ],
+        "tool_inner": true,
+        "tool_index": [
+          6
+        ],
+        "ik_available": true,
+        "custom_fields": [
+          "serial_port",
+          "gripper_port",
+          "ssh_host",
+          "ssh_user",
+          "ssh_port",
+          "ssh_password"
+        ]
+      },
+      "driver": {
+        "kind": "topic",
+        "interpolation": true,
+        "read_topic": "/joint_states",
+        "read_topic_msg": "sensor_msgs/JointState",
+        "write_topic": "/joint_group_position_controller/commands",
+        "write_topic_msg": "std_msgs/Float64MultiArray",
+        "launch": {
+          "package": "omy_bringup",
+          "launch_file": "omy_f3m_easytrainer.launch.py",
+          "args": {
+            "namespace": "{namespace}",
+            "port_name": "{serial_port|/dev/ttyAMA2}",
+            "end_port_name": "{gripper_port|/dev/ttyAMA4}",
+            "use_mock_hardware": "false"
+          }
+        },
+        "remote": {
+          "comment": "ssh_host 가 채워지면 로봇 PC 의 docker 컨테이너 'open_manipulator' 안에서 stock follower_ai 런치를 실행. arm_controller(joint1-6+rh_r1_joint, JointTrajectory)로 팔+그리퍼를 한 토픽(/leader/joint_trajectory)으로 구동. EasyTrainer 는 동일 ROS_DOMAIN_ID=30 에서 토픽만 주고받는다.",
+          "enabled_when": "ssh_host",
+          "host_field": "ssh_host",
+          "user_field": "ssh_user",
+          "port_field": "ssh_port",
+          "default_user": "root",
+          "default_port": 22,
+          "ros_domain_id": 30,
+          "read_topic": "/joint_states",
+          "write_topic": "/leader/joint_trajectory",
+          "write_topic_msg": "trajectory_msgs/JointTrajectory",
+          "provision": [
+            {
+              "name": "checkout_jazzy",
+              "check": "cd /data/docker/open_manipulator && [ \"$(git rev-parse --abbrev-ref HEAD)\" = jazzy ]",
+              "run": "cd /data/docker/open_manipulator && git checkout jazzy && git pull",
+              "timeout": 300,
+              "optional": true
+            },
+            {
+              "name": "container_up",
+              "check": "docker ps --format '{{.Names}}' | grep -qx open_manipulator",
+              "run": "cd /data/docker/open_manipulator && ./docker/container.sh start",
+              "timeout": 900
+            }
+          ],
+          "launch": "docker exec -t -e ROS_DOMAIN_ID open_manipulator bash -lc 'source /opt/ros/jazzy/setup.bash && source /root/ros2_ws/install/setup.bash 2>/dev/null; ros2 launch open_manipulator_bringup omy_f3m_follower_ai.launch.py'"
+        }
+      },
+      "ik": {
+        "urdf_path": "{ros2_root}/omy_description/urdf/omy_f3m/omy_f3m.urdf",
+        "urdf_package_dir": "{ros2_root}/omy_description/",
+        "joints_to_lock": [
+          "rh_r1_joint",
+          "rh_r2",
+          "rh_l1",
+          "rh_l2"
+        ],
+        "position_cost": 1.0,
+        "orientation_cost": 0.0,
+        "ee_definitions": [
+          {
+            "name": "ee",
+            "parent": "joint6",
+            "offset": [
+              0.0,
+              -0.244,
+              0.0
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
