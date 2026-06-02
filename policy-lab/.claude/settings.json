@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "_note": "policy-lab 독립 하네스. EasyTrainer 의 프론트엔드 PostToolUse 훅(i18n/css/ui-test/manual)은 여기에 적용하지 않는다 — 랩은 정책 코드(training_server/backend)만 다룬다. 호스트 경로는 EASYTRAINER_ROOT=$(git rev-parse --show-toplevel).",
+  "permissions": {
+    "allow": [
+      "Bash(node:*)"
+    ]
+  }
+}
