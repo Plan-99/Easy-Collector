@@ -20,6 +20,7 @@ from ..configs.module_loader import (
     get_robot_driver_launch,
     get_sensor_driver_launch,
     get_robot_driver_hooks,
+    get_robot_driver_remote,
 )
 
 
@@ -104,6 +105,79 @@ def _build_argv_from_launch(launch: dict, ctx: dict) -> list[str] | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Remote (SSH) robot driver helpers
+#
+# 온보드 PC 를 가진 로봇(예: ROBOTIS OMY)은 드라이버를 로봇 PC 에서 직접 실행하고
+# EasyTrainer 는 같은 DDS 도메인에서 토픽만 주고받는다. driver.remote 블록이
+# 있고 settings 의 host_field(기본 ssh_host)가 채워져 있으면 아래 경로로 동작한다.
+#   1) payload 파일 scp (있으면)
+#   2) provision step 순차 실행 (check 성공 시 skip → 멱등)
+#   3) launch 명령을 ssh -tt 로 blocking 실행 (tracked subprocess)
+# 토픽은 DDS 로 흐르므로 보간 노드/agent 는 로컬 모드와 동일하게 동작한다.
+# ---------------------------------------------------------------------------
+
+def _remote_is_active(remote: dict | None, settings: dict) -> bool:
+    if not isinstance(remote, dict):
+        return False
+    host_field = remote.get('host_field', 'ssh_host')
+    return bool((settings or {}).get(host_field))
+
+
+def _remote_conn(remote: dict, settings: dict) -> tuple[str, str, str]:
+    """(user, host, port) 추출."""
+    host = settings.get(remote.get('host_field', 'ssh_host')) or ''
+    user = settings.get(remote.get('user_field', 'ssh_user')) or remote.get('default_user', 'root')
+    port = settings.get(remote.get('port_field', 'ssh_port')) or remote.get('default_port', 22)
+    return str(user), str(host), str(port)
+
+
+def _sshpass_prefix(remote: dict, settings: dict) -> tuple[list[str], bool]:
+    """password_field(기본 ssh_password) 가 채워져 있으면 (['sshpass','-p',pw], True),
+    아니면 ([], False). 암호 인증은 sshpass 가 ros2 컨테이너에 설치돼 있어야 한다
+    (모듈 apt deps 에 'sshpass' 추가)."""
+    pw = (settings or {}).get(remote.get('password_field', 'ssh_password'))
+    if pw:
+        return ['sshpass', '-p', str(pw)], True
+    return [], False
+
+
+def _ssh_auth_opts(use_pw: bool) -> list[str]:
+    """인증 방식별 ssh/scp 공통 옵션."""
+    if use_pw:
+        # sshpass 가 비밀번호 프롬프트를 먹이도록 password 인증 강제. 키 우선 시도로
+        # 프롬프트가 안 떠 sshpass 가 멈추는 것을 막는다.
+        return ['-o', 'PreferredAuthentications=password,keyboard-interactive',
+                '-o', 'PubkeyAuthentication=no']
+    # 키 기반: 비밀번호 프롬프트로 멈추지 않도록 BatchMode.
+    return ['-o', 'BatchMode=yes']
+
+
+def _ssh_base(remote: dict, settings: dict, interactive_tty: bool) -> list[str]:
+    user, host, port = _remote_conn(remote, settings)
+    prefix, use_pw = _sshpass_prefix(remote, settings)
+    argv = list(prefix) + ['ssh']
+    # -tt: launch(장기 실행) 는 TTY 강제 → 로컬 ssh 종료 시 원격 프로세스 트리에
+    # SIGHUP 전파. provision(단발) 은 -T 로 충분.
+    argv.append('-tt' if interactive_tty else '-T')
+    argv += [
+        '-o', 'StrictHostKeyChecking=accept-new',
+        '-o', 'ServerAliveInterval=10',
+        '-o', 'ServerAliveCountMax=3',
+        '-p', port,
+    ]
+    argv += _ssh_auth_opts(use_pw)
+    argv += [f'{user}@{host}']
+    return argv
+
+
+def _remote_inner(remote: dict, body: str, ctx: dict) -> str:
+    """원격에서 실행할 한 줄 sh. ros_domain_id export 를 앞에 붙이고 placeholder 치환."""
+    dom = remote.get('ros_domain_id')
+    prefix = f'export ROS_DOMAIN_ID={dom}; ' if dom is not None else ''
+    return _substitute_launch_args(prefix + body, ctx)
+
+
 class DriverServiceServicer(pb_grpc.DriverServiceServicer):
     def __init__(self, node):
         """
@@ -135,8 +209,21 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
             hooks = {}
         hook_module_id = hooks.get('module_id', '')
 
-        # Pre-launch hooks — driver 시작 전 (예: piper CAN setup script)
         ctx = _build_ctx('robot', robot_id, settings)
+
+        # ── 원격(SSH) 드라이버 분기 ───────────────────────────────────────
+        # driver.remote 가 있고 settings 에 ssh_host 가 차 있으면 로봇 PC 에서
+        # 드라이버를 실행한다. 로컬 pre_launch / SDK 분기 / ros2 launch 는 건너뛴다.
+        try:
+            remote = get_robot_driver_remote(rtype)
+        except Exception as e:
+            print(f"[driver_service] get_robot_driver_remote 실패: {e}", flush=True)
+            remote = None
+        if _remote_is_active(remote, settings):
+            return self._start_remote_robot_driver(
+                remote, robot_id, rtype, process_id, settings, ctx)
+
+        # Pre-launch hooks — driver 시작 전 (예: piper CAN setup script)
         for hook in hooks.get('pre_launch') or []:
             self._run_pre_launch_hook(hook, robot_id=robot_id, module_id=hook_module_id,
                                       ctx=ctx, log_name=process_id)
@@ -168,6 +255,144 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
 
         pid = proc.pid if proc else 0
         return pb.DriverStatus(success=True, message='Driver started', pid=pid)
+
+    # ------------------------------------------------------------------
+    # Remote (SSH) robot driver
+    # ------------------------------------------------------------------
+    def _start_remote_robot_driver(self, remote, robot_id, rtype, process_id, settings, ctx):
+        """driver.remote 경로: 로봇 PC 에 SSH 로 provisioning 후 launch 실행."""
+        user, host, port = _remote_conn(remote, settings)
+        if not host:
+            return pb.DriverStatus(success=False, message='ssh_host is empty')
+        print(f"[remote] {rtype} via ssh {user}@{host}:{port}", flush=True)
+
+        # 원격 모드 토픽 override (예: stock arm_controller 의 JointTrajectory).
+        # 보간 노드/agent 가 이 settings 를 참조하므로 launch 전에 덮어쓴다.
+        for key in ('read_topic', 'write_topic', 'write_topic_msg'):
+            if remote.get(key):
+                settings[key] = remote[key]
+
+        # 1) payload 파일 scp (멱등 — 매번 덮어써도 무방)
+        if not self._remote_copy_payload(remote, settings, log_name=process_id):
+            return pb.DriverStatus(success=False, message='Remote payload copy failed')
+
+        # 2) provision steps (check 성공 시 skip)
+        ok, msg = self._remote_provision(remote, settings, ctx, log_name=process_id)
+        if not ok:
+            return pb.DriverStatus(success=False, message=f'Remote provisioning failed: {msg}')
+
+        # 3) launch — blocking, tracked subprocess (ssh -tt)
+        launch_body = (remote.get('launch') or '').strip()
+        if not launch_body:
+            return pb.DriverStatus(success=False, message='remote.launch is empty')
+        inner = _remote_inner(remote, 'exec ' + launch_body, ctx)
+        command = _ssh_base(remote, settings, interactive_tty=True) + [inner]
+        proc = self._start_subprocess(process_id, command)
+        if proc is None:
+            return pb.DriverStatus(success=False, message='Failed to start remote launch')
+
+        # 보간 노드 (override 된 토픽 사용) + post_launch hooks
+        if settings.get('interpolation'):
+            self._spawn_interpolation_node_for_builtin(
+                robot_id=robot_id, rtype=rtype, settings=settings, log_name=process_id)
+        try:
+            hooks = get_robot_driver_hooks(rtype) or {}
+        except Exception:
+            hooks = {}
+        for hook in hooks.get('post_launch') or []:
+            self._run_post_launch_hook(hook, ctx=ctx)
+
+        return pb.DriverStatus(success=True, message='Remote driver started', pid=proc.pid)
+
+    def _remote_copy_payload(self, remote, settings, log_name) -> bool:
+        """remote.payload 의 파일들을 scp 로 로봇 PC 에 복사. 없으면 no-op."""
+        payload = remote.get('payload') or []
+        if not payload:
+            return True
+        user, host, port = _remote_conn(remote, settings)
+        for item in payload:
+            src = (item.get('src') or '').strip()
+            dst = (item.get('dst') or '').strip()
+            if not src or not dst:
+                continue
+            if not os.path.exists(src):
+                print(f"[remote/{log_name}] payload src not found: {src}", flush=True)
+                return False
+            # 원격 대상 디렉터리 보장
+            rc = self._run_blocking(
+                _ssh_base(remote, settings, interactive_tty=False)
+                + [f'mkdir -p {self._shell_quote(os.path.dirname(dst))}'],
+                log_name=log_name, timeout=30)
+            if rc != 0:
+                return False
+            prefix, use_pw = _sshpass_prefix(remote, settings)
+            scp = list(prefix) + ['scp', '-o', 'StrictHostKeyChecking=accept-new', '-P', port]
+            scp += _ssh_auth_opts(use_pw)
+            scp += ['-r', src, f'{user}@{host}:{dst}']
+            rc = self._run_blocking(scp, log_name=log_name, timeout=300)
+            if rc != 0:
+                print(f"[remote/{log_name}] scp failed: {src} → {dst}", flush=True)
+                return False
+            print(f"[remote/{log_name}] payload copied: {os.path.basename(src)}", flush=True)
+        return True
+
+    def _remote_provision(self, remote, settings, ctx, log_name) -> tuple[bool, str]:
+        """provision step 순차 실행. check 가 exit 0 이면 skip(멱등)."""
+        for i, step in enumerate(remote.get('provision') or []):
+            name = step.get('name') or f'step{i}'
+            check = (step.get('check') or '').strip()
+            run = (step.get('run') or '').strip()
+            timeout = float(step.get('timeout', 600))
+            optional = bool(step.get('optional'))
+            if check:
+                rc = self._run_blocking(
+                    _ssh_base(remote, settings, interactive_tty=False)
+                    + [_remote_inner(remote, check, ctx)],
+                    log_name=log_name, timeout=min(timeout, 60))
+                if rc == 0:
+                    print(f"[remote/{log_name}] provision '{name}': already done — skip", flush=True)
+                    continue
+            if not run:
+                continue
+            print(f"[remote/{log_name}] provision '{name}': running…", flush=True)
+            rc = self._run_blocking(
+                _ssh_base(remote, settings, interactive_tty=True)
+                + [_remote_inner(remote, run, ctx)],
+                log_name=log_name, timeout=timeout)
+            if rc != 0 and not optional:
+                return False, f"step '{name}' exited {rc}"
+        return True, ''
+
+    def _run_blocking(self, command, log_name, timeout) -> int:
+        """짧은 명령을 동기 실행하고 stdout/stderr 를 로그로 흘린다. 반환: returncode (timeout/예외 시 -1)."""
+        command = ['stdbuf', '-oL'] + command if os.name != 'nt' else command
+        try:
+            proc = subprocess.Popen(
+                command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1, start_new_session=(os.name != 'nt'))
+        except Exception as e:
+            print(f"[remote/{log_name}] spawn failed: {e}", flush=True)
+            return -1
+
+        def _reader():
+            try:
+                for line in proc.stdout:
+                    print(f"[{log_name}] {line.rstrip()}", flush=True)
+            except Exception:
+                pass
+        t = threading.Thread(target=_reader, daemon=True)
+        t.start()
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except Exception:
+                proc.kill()
+            print(f"[remote/{log_name}] command timed out after {timeout}s", flush=True)
+            return -1
+        t.join(timeout=2)
+        return proc.returncode
 
     def StopRobotDriver(self, request, context):
         self._stop(request.name)

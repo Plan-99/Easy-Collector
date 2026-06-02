@@ -34,6 +34,26 @@
                         outlined
                         dark
                         bg-color="dark"
+                        v-model="data.value"
+                        :type="data.reveal ? 'text' : 'password'"
+                        :placeholder="data.placeholder || ''"
+                        :autofocus="index === 0"
+                        class="q-mb-md q-mt-xs"
+                        v-else-if="data.type === 'password'"
+                    >
+                        <template v-slot:append>
+                            <q-icon
+                                :name="data.reveal ? 'visibility' : 'visibility_off'"
+                                class="cursor-pointer"
+                                @click="data.reveal = !data.reveal"
+                            />
+                        </template>
+                    </q-input>
+                    <q-input
+                        dense
+                        outlined
+                        dark
+                        bg-color="dark"
                         v-model.number="data.value"
                         type="number"
                         :autofocus="index === 0"
