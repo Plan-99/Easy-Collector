@@ -616,6 +616,18 @@
                                 <div v-else class="text-caption text-grey q-mb-sm">
                                     {{ $t('plannerPendantOffHint') }}
                                 </div>
+                                <!-- Always-visible "apply current pose" — move the robot with the
+                                     pendant above, then click to capture the current joints (works
+                                     even before any pose has been saved; the saved-pose card uses
+                                     the same button once a pose exists). -->
+                                <q-btn
+                                    v-if="robot.status === 'on'"
+                                    class="q-mt-sm"
+                                    size="sm" outline color="amber"
+                                    icon="my_location"
+                                    :label="$t('plannerApplyCurrentPos')"
+                                    @click="applyCurrentPos(robot)"
+                                />
                             </div>
                         </div>
                     </template>
