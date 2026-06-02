@@ -461,6 +461,17 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self.btn_exit.clicked.connect(self._on_exit_action)
         pill_layout.addWidget(self.btn_exit, 0, Qt.AlignHCenter)
 
+        # Dedicated, always-visible "완전 삭제" (full uninstall) button.
+        self.btn_uninstall = self._create_circle_button(
+            "🗑",
+            "완전 삭제",
+            None,
+        )
+        self.btn_uninstall.clicked.connect(self._on_uninstall_clicked)
+        pill_layout.addWidget(self.btn_uninstall, 0, Qt.AlignHCenter)
+        # The uninstall flow disables/re-enables this control via _uninstall_btn.
+        self._uninstall_btn = self.btn_uninstall
+
         self.state_label = QLabel("", self.pill)
         self.state_label.hide()
 
@@ -543,6 +554,11 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             self.pad_stack_exit,
             self._exit_action_buttons,
         ) = self._create_pad_exit_action_box(t("pad.exit"), self._exit_action, self._set_exit_action)
+        (
+            self.pad_box_uninstall,
+            self.pad_label_uninstall,
+            self.pad_stack_uninstall,
+        ) = self._create_pad_simple_box("완전 삭제 — EasyTrainer를 시스템에서 완전히 제거")
         self._pad_boxes = [
             self.pad_box_sync,
             self.pad_box_folder,
@@ -552,6 +568,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             self.pad_box_training,
             self.pad_box_lang,
             self.pad_box_exit,
+            self.pad_box_uninstall,
         ]
         self._pad_loading_panel = self._create_pad_loading_panel()
         self._pad_update_panel = self._create_pad_update_panel()
@@ -565,6 +582,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             self.pad_label_training,
             self.pad_label_lang,
             self.pad_label_exit,
+            self.pad_label_uninstall,
         ]
         self._pad_desc_stacks = [
             self.pad_stack_sync,
@@ -575,6 +593,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             self.pad_stack_training,
             self.pad_stack_lang,
             self.pad_stack_exit,
+            self.pad_stack_uninstall,
         ]
         self._update_pad_choice_labels()
         self._update_pad_choice_tooltips()
@@ -588,6 +607,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         pad_layout.addWidget(self.pad_box_training)
         pad_layout.addWidget(self.pad_box_lang)
         pad_layout.addWidget(self.pad_box_exit)
+        pad_layout.addWidget(self.pad_box_uninstall)
         try:
             self._right_pad.lower()  # keep the pad behind the pill so pill corners stay round
         except Exception:
@@ -872,6 +892,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                 getattr(self, "pad_box_training", None),
                 getattr(self, "pad_box_lang", None),
                 getattr(self, "pad_box_exit", None),
+                getattr(self, "pad_box_uninstall", None),
             ]
             for idx, box in enumerate(boxes):
                 if box is None or not box.isVisible():
@@ -1030,6 +1051,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             getattr(self, "btn_training", None),
             getattr(self, "btn_lang", None),
             getattr(self, "btn_exit", None),
+            getattr(self, "btn_uninstall", None),
         ]
         for idx, btn in enumerate(buttons):
             if btn is None:
@@ -2204,21 +2226,6 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         apply_stack.addWidget(ros_apply)
         apply_stack.setCurrentWidget(apply_placeholder)
         right_layout.addWidget(apply_stack_wrap, 0, Qt.AlignLeft | Qt.AlignBottom)
-        # Danger zone: completely uninstall EasyTrainer. Tucked into the settings
-        # hover-pad so it can't be hit by accident, and guarded by a typed
-        # confirmation in _on_uninstall_clicked.
-        uninstall_btn = QPushButton("완전 삭제", right_container)
-        uninstall_btn.setFixedHeight(16)
-        uninstall_btn.setCursor(Qt.PointingHandCursor)
-        uninstall_btn.setStyleSheet(
-            "QPushButton { background-color: rgb(40,20,20); color: #ff6b6b; border: 1px solid #7a2e2e; "
-            "border-radius: 4px; font-weight: 700; font-size: 10px; padding: 0px 8px; }"
-            "QPushButton:hover { background-color: #b02525; color: #ffffff; border: 1px solid #b02525; }"
-        )
-        uninstall_btn.setToolTip("EasyTrainer를 시스템에서 완전히 제거합니다 (데이터·패키지 포함, 되돌릴 수 없음)")
-        uninstall_btn.clicked.connect(self._on_uninstall_clicked)
-        right_layout.addWidget(uninstall_btn, 0, Qt.AlignLeft | Qt.AlignBottom)
-        self._uninstall_btn = uninstall_btn
         mode2_layout.addWidget(right_container, 0)
 
         def _parse_ros_domain(text: str) -> int | None:
