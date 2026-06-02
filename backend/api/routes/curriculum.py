@@ -489,6 +489,32 @@ def discard_failure(id):
     return {'status': 'success', 'message': 'Failure data discarded'}, 200
 
 
+@curriculum_bp.route('/stage/<id>/:reset', methods=['POST'])
+def reset_stage(id):
+    """스테이지 초기화 — 이 Stage 의 모든 데이터셋(success/failure/dagger) 내용을 비우고
+    success_count / failure_count 를 리셋. 데이터셋 행/구조는 유지한다."""
+    stage = StageModel.find(id)
+    if not stage:
+        return {'status': 'error', 'message': 'Stage not found'}, 404
+
+    # 롤아웃 진행 중엔 거부 — stop_rollout 먼저.
+    group = CheckpointGroupModel.find(stage.checkpoint_group_id)
+    if group:
+        proc_name = _rollout_process_name(group.curriculum_id)
+        if proc_name in current_app.pm.processes:
+            return {'status': 'error', 'message': 'Stop the rollout before resetting'}, 409
+
+    for ds in stage.datasets:
+        folder = os.path.join(DATASET_DIR, str(ds.id))
+        if os.path.isdir(folder):
+            shutil.rmtree(folder, ignore_errors=True)
+        os.makedirs(folder, exist_ok=True)
+    stage.success_count = 0
+    stage.failure_count = 0
+    stage.save()
+    return {'status': 'success', 'message': 'Stage reset'}, 200
+
+
 # ── Rollout 시작 / 정지 / 상태 ─────────────────────────────────────────────
 
 @curriculum_bp.route('/curriculum/<id>/:start_rollout', methods=['POST'])
@@ -730,6 +756,7 @@ def curriculum_dashboard(id):
             # 단위 에피소드 합) 라 분모에 포함하면 한 사건을 두 번 세게 된다.
             denom = succ + fail
             stages_out.append({
+                'id': stage.id,
                 'index': stage.index,
                 'status': stage.status,
                 'success_count': succ,

@@ -24,7 +24,7 @@
                     <div class="col-6">{{ $t('checkpointValueColumn') }}</div>
                 </div>
                 <q-scroll-area :style="`height: ${height}px;`" class="bg-dark">
-                    <div v-for="(value, key) in { finetuned_from: props.checkpoint.load_model?.name, ...props.checkpoint.train_settings }" :key="key">
+                    <div v-for="(value, key) in { finetuned_from: props.checkpoint.load_model_id ? `#${props.checkpoint.load_model_id}` : '-', ...props.checkpoint.train_settings }" :key="key">
                         <q-separator color="white"/>
                         <div class="row q-pa-sm">
                             <div class="col-6" style="word-wrap: break-word;">{{ key }}</div>

@@ -779,18 +779,18 @@
                             map-options
                             emit-value
                         ></q-select>
-                        <q-select
-                            v-if="blockForm.workspace_id"
-                            dense outlined dark bg-color="dark"
-                            v-model="blockForm.checkpoint_id"
-                            :options="filteredCheckpoints"
-                            :label="$t('plannerCheckpointLabel')"
-                            class="q-mb-md"
-                            map-options
-                            emit-value
-                            option-label="name"
-                            option-value="id"
-                        ></q-select>
+                        <div v-if="blockForm.workspace_id" class="q-mb-md">
+                            <div class="text-caption text-grey-5 q-mb-xs">{{ $t('plannerCheckpointLabel') }}</div>
+                            <q-btn
+                                outline
+                                no-caps
+                                color="primary"
+                                class="full-width"
+                                icon="account_tree"
+                                :label="blockForm.checkpoint_id ? `#${blockForm.checkpoint_id}` : $t('plannerSelectCheckpoint')"
+                                @click="showCheckpointPicker = true"
+                            />
+                        </div>
                         <q-toggle
                             v-model="blockForm.move_homepose"
                             :label="$t('plannerMoveHomepose')"
@@ -1019,6 +1019,26 @@
             </q-card>
         </q-dialog>
 
+        <!-- 체크포인트 선택 — git-graph 다이얼로그에서 노드 클릭으로 선택 -->
+        <q-dialog v-model="showCheckpointPicker">
+            <q-card class="bg-secondary border-rounded border-white" dark style="width: 920px; max-width: 95vw;">
+                <q-card-section class="bg-dark text-white row items-center">
+                    <div class="text-h6">{{ $t('plannerCheckpointLabel') }}</div>
+                    <q-space />
+                    <q-btn dense round flat icon="close" v-close-popup />
+                </q-card-section>
+                <q-separator />
+                <q-card-section class="bg-secondary">
+                    <CheckpointGraph
+                        :checkpoints="filteredCheckpoints"
+                        :selected-id="blockForm.checkpoint_id"
+                        height="440px"
+                        @node-click="onPickerNodeClick"
+                    />
+                </q-card-section>
+            </q-card>
+        </q-dialog>
+
     </q-page>
 </template>
 
@@ -1029,6 +1049,7 @@ import { api } from 'src/boot/axios';
 import FormDialog from 'src/components/v2/FormDialog.vue';
 import MonitoringWindow from 'src/components/v2/MonitoringWindow.vue';
 import PlannerBlockCard from 'src/components/v2/PlannerBlockCard.vue';
+import CheckpointGraph from 'src/components/v2/CheckpointGraph.vue';
 import RobotPendant from 'src/components/v2/RobotPendant.vue';
 import TutorialHint from 'src/components/v2/TutorialHint.vue';
 import { Notify, Loading } from 'quasar';
@@ -1552,6 +1573,13 @@ function listCheckpoints() {
     }).catch((error) => {
         console.error('Error fetching checkpoints:', error);
     });
+}
+
+// 체크포인트 선택 다이얼로그(그래프). 노드 클릭 시 해당 체크포인트를 블록에 지정하고 닫는다.
+const showCheckpointPicker = ref(false);
+function onPickerNodeClick(checkpoint) {
+    blockForm.value.checkpoint_id = checkpoint.id;
+    showCheckpointPicker.value = false;
 }
 
 const filteredCheckpoints = computed(() => {
