@@ -82,7 +82,7 @@
                             dense flat icon="remove" size="xs" class="text-white col-1"
                             @click="moveOneEE(i, j, -robotStepSize)"
                         ></q-btn>
-                        <div class="col text-center text-caption">{{ p_label }}</div>
+                        <div class="col text-center text-caption">{{ eeAxisLabel(ee_name, p_label) }}</div>
                         <div class="col text-center text-caption text-primary">
                             {{ props.robot.eePos && props.robot.eePos[ee_name] ? props.robot.eePos[ee_name][j]?.toFixed(4) : '0' }}
                         </div>
@@ -138,6 +138,16 @@ const props = defineProps({
         required: true
     }
 })
+
+// dual_arm 일 때는 축 라벨에 팔 구분을 붙인다 (예: left_x, right_ax).
+// L_ee → left_, R_ee → right_. 그 외(single_arm 'ee')는 라벨 그대로.
+function eeAxisLabel(ee_name, p_label) {
+    if (props.robot.role === 'dual_arm') {
+        const side = ee_name === 'L_ee' ? 'left_' : ee_name === 'R_ee' ? 'right_' : ''
+        return side + p_label
+    }
+    return p_label
+}
 
 function jointReading(i) {
     const src = props.robot.joint_pos || props.robot.jointState

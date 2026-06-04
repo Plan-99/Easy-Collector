@@ -7,7 +7,9 @@ cwd = os.getcwd()  # 예: /root/src
 parent_of_cwd = os.path.dirname(cwd)  # 예: /root
 
 class Common_ArmIK(IK_Solver):
-    def __init__(self, urdf_path=None, urdf_package_dir=None, joints_to_lock=None, ee_definitions=None, gravity_compensate=0.0):
+    def __init__(self, urdf_path=None, urdf_package_dir=None, joints_to_lock=None,
+                 ee_definitions=None, gravity_compensate=0.0,
+                 position_cost=1.0, orientation_cost=1.0):
 
         base = Path(parent_of_cwd)
 
@@ -44,7 +46,7 @@ class Common_ArmIK(IK_Solver):
 
         self.gravity_compensate = gravity_compensate
 
-        print(f'[IK_Solver] Initialized with urdf_path={urdf_path}, package_dir={package_dir}, joints_to_lock={joints_to_lock}, ee_definitions={ee_definitions}, gravity_compensate={gravity_compensate}')
+        print(f'[IK_Solver] Initialized with urdf_path={urdf_path}, package_dir={package_dir}, joints_to_lock={joints_to_lock}, ee_definitions={ee_definitions}, gravity_compensate={gravity_compensate}, position_cost={position_cost}, orientation_cost={orientation_cost}')
 
         # 4. 부모 클래스 생성자 호출
         super().__init__(
@@ -54,7 +56,9 @@ class Common_ArmIK(IK_Solver):
             ee_definitions=ee_definitions,
             cost_weights=cost_weights,
             use_scaling=False,
-            Visualization=False
+            Visualization=False,
+            position_cost=position_cost,
+            orientation_cost=orientation_cost,
         )
 
     def solve_ik(self, target_poses: dict, **kwargs):

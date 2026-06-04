@@ -26,18 +26,20 @@ export const DEFAULT_KEYBOARD_AXIS_MAP = {
   v: { side: 'left', axis: 'tool', sign: -1, scale: 1 },
 
   // ── Right arm (dual arm assembly에서만 노출) ──
-  '.': { side: 'right', axis: 'x', sign: +1, scale: 1 },
-  '[': { side: 'right', axis: 'x', sign: -1, scale: 1 },
-  p: { side: 'right', axis: 'y', sign: +1, scale: 1 },
-  ';': { side: 'right', axis: 'y', sign: -1, scale: 1 },
-  l: { side: 'right', axis: 'z', sign: +1, scale: 1 },
-  "'": { side: 'right', axis: 'z', sign: -1, scale: 1 },
-  'shift+.': { side: 'right', axis: 'ax', sign: +1, scale: 20 },
-  'shift+[': { side: 'right', axis: 'ax', sign: -1, scale: 20 },
-  'shift+p': { side: 'right', axis: 'ay', sign: +1, scale: 20 },
-  'shift+;': { side: 'right', axis: 'ay', sign: -1, scale: 20 },
-  'shift+l': { side: 'right', axis: 'az', sign: +1, scale: 20 },
-  "shift+'": { side: 'right', axis: 'az', sign: -1, scale: 20 },
+  // 좌측(wasdez)과 위치가 1:1 대응: w↔p, a↔l, s↔;, d↔', e↔[, z↔.
+  //   x = p/; (= w/s),  y = l/' (= a/d),  z = [/. (= e/z)
+  p: { side: 'right', axis: 'x', sign: +1, scale: 1 },
+  ';': { side: 'right', axis: 'x', sign: -1, scale: 1 },
+  l: { side: 'right', axis: 'y', sign: +1, scale: 1 },
+  "'": { side: 'right', axis: 'y', sign: -1, scale: 1 },
+  '[': { side: 'right', axis: 'z', sign: +1, scale: 1 },
+  '.': { side: 'right', axis: 'z', sign: -1, scale: 1 },
+  'shift+p': { side: 'right', axis: 'ax', sign: +1, scale: 20 },
+  'shift+;': { side: 'right', axis: 'ax', sign: -1, scale: 20 },
+  'shift+l': { side: 'right', axis: 'ay', sign: +1, scale: 20 },
+  "shift+'": { side: 'right', axis: 'ay', sign: -1, scale: 20 },
+  'shift+[': { side: 'right', axis: 'az', sign: +1, scale: 20 },
+  'shift+.': { side: 'right', axis: 'az', sign: -1, scale: 20 },
   m: { side: 'right', axis: 'tool', sign: +1, scale: 1 },
   n: { side: 'right', axis: 'tool', sign: -1, scale: 1 },
 }

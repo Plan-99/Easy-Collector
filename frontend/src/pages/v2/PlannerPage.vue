@@ -60,8 +60,7 @@
         </div>
         <div class="col row q-mb-md" v-else>
             <!-- First Column: Workspace Selection -->
-            <div class="col-2 bg-secondary q-mr-sm border-rounded q-pa-sm">
-                <div class="text-h6 text-white q-mb-md">{{ $t('plannerWorkspacesTitle') }}</div>
+            <div class="col-2 bg-secondary q-mr-md border-rounded q-pa-sm">
                 <TutorialHint step="1" class="q-mb-sm" :text="$t('tutorialPlannerWorkspaces')" />
                 <q-btn
                     outline
@@ -81,7 +80,7 @@
                         >
                             <template v-slot:header>
                                 <q-item-section>
-                                    <q-item-label>{{ workspace.name }}</q-item-label>
+                                    <q-item-label lines="1">{{ workspace.name }}</q-item-label>
                                 </q-item-section>
                                 <q-item-section side>
                                     <q-btn icon="close" size="sm" flat round @click.stop="removeWorkspace(workspace.id)" />
@@ -94,7 +93,7 @@
                                         class="q-pa-sm q-px-md q-my-xs border-rounded row items-center"
                                         :class="sensor.status === 'on' ? 'bg-green-10' : 'bg-grey-8'"
                                     >
-                                        <div>{{ sensor.name }}</div>
+                                        <div class="ellipsis">{{ sensor.name }}</div>
                                         <q-space />
                                         <q-toggle
                                             :model-value="sensor.status === 'on'"
@@ -107,7 +106,10 @@
                                             <div class="text-caption text-grey" v-if="sensor.status === 'off'">{{ $t('topicOff') }}</div>
                                             <div class="text-caption text-positive" v-else-if="sensor.status === 'on'">{{ $t('topicOn') }}</div>
                                         </div>
-                                        <q-inner-loading :showing="sensor.status === 'loading'"></q-inner-loading>
+                                        <q-inner-loading
+                                            :showing="sensor.status === 'loading'"
+                                            style="pointer-events: none; background: rgba(0, 0, 0, 0.4)"
+                                        ></q-inner-loading>
                                     </div>
                                     <div class="text-subtitle2 q-mt-md q-mb-sm">{{ $t('plannerRobotsTitle') }}</div>
                                     <div v-if="!workspace.assembly" class="text-caption text-grey q-mb-sm">{{ $t('plannerNoAssembly') }}</div>
@@ -115,7 +117,7 @@
                                         class="q-pa-sm q-px-md q-my-xs border-rounded row items-center"
                                         :class="robot.status === 'on' ? 'bg-green-10' : (robot.status === 'error' ? 'bg-red-10' : 'bg-grey-8')"
                                     >
-                                        <div>{{ robot.name }}</div>
+                                        <div class="ellipsis">{{ robot.name }}</div>
                                         <q-space />
                                         <q-toggle
                                             :model-value="robot.status === 'on'"
@@ -129,7 +131,10 @@
                                             <div class="text-caption text-positive" v-else-if="robot.status === 'on'">{{ $t('topicOn') }}</div>
                                             <div class="text-caption text-negative" v-else-if="robot.status === 'error'">{{ $t('plannerErrorBadge') }}</div>
                                         </div>
-                                        <q-inner-loading :showing="robot.status === 'loading'"></q-inner-loading>
+                                        <q-inner-loading
+                                            :showing="robot.status === 'loading'"
+                                            style="pointer-events: none; background: rgba(0, 0, 0, 0.4)"
+                                        ></q-inner-loading>
                                     </div>
                                 </q-card-section>
                             </q-card>
@@ -140,9 +145,8 @@
             <!-- Right side: Plans (top, horizontal timelines) + Monitoring (bottom) -->
             <div class="col column">
                 <!-- Plans area: 모든 그룹이 통째로 보이도록 자연 높이로 둠 -->
-                <div class="bg-secondary border-rounded q-pa-sm q-mb-sm">
+                <div class="bg-secondary border-rounded q-pa-sm q-mb-md">
                     <div class="row items-center q-mb-sm">
-                        <div class="text-h6 text-white q-mr-md">{{ $t('plannerPlansTitle') }}</div>
                         <TutorialHint step="2" :text="$t('tutorialPlannerBlocks')" class="q-mr-sm" />
                         <TutorialHint step="3" :text="$t('tutorialPlannerRun')" class="q-mr-sm" />
                         <q-space />
@@ -300,14 +304,15 @@
                     </div>
                 </div>
 
-                <!-- Monitoring (bottom): 좌측 사이드바 높이에 맞춰 늘어나도록 flex-grow -->
-                <div class="col" style="min-height: 600px;">
+                <!-- Monitoring: 내용만큼 자연 높이로 두고 하단 마진을 맞춘다. -->
+                <div class="q-mb-md">
                     <monitoring-window
-                        class="full-height"
+                        class="full-width"
                         :workspace="monitorWorkspace"
                         :workspaces="selectedWorkspaces"
                         :robots="allSelectedRobots"
                         :sensors="allSelectedSensors"
+                        :loading="detailsLoading"
                         v-model:focused="focused"
                         v-model:selected-dataset-id="monitorDatasetId"
                         v-model:selected-checkpoint-id="monitorCheckpointId"
@@ -800,18 +805,18 @@
                             map-options
                             emit-value
                         ></q-select>
-                        <q-select
-                            v-if="blockForm.workspace_id"
-                            dense outlined dark bg-color="dark"
-                            v-model="blockForm.checkpoint_id"
-                            :options="filteredCheckpoints"
-                            :label="$t('plannerCheckpointLabel')"
-                            class="q-mb-md"
-                            map-options
-                            emit-value
-                            option-label="name"
-                            option-value="id"
-                        ></q-select>
+                        <div v-if="blockForm.workspace_id" class="q-mb-md">
+                            <div class="text-caption text-grey-5 q-mb-xs">{{ $t('plannerCheckpointLabel') }}</div>
+                            <q-btn
+                                outline
+                                no-caps
+                                color="primary"
+                                class="full-width"
+                                icon="account_tree"
+                                :label="blockForm.checkpoint_id ? `#${blockForm.checkpoint_id}` : $t('plannerSelectCheckpoint')"
+                                @click="showCheckpointPicker = true"
+                            />
+                        </div>
                         <q-toggle
                             v-model="blockForm.move_homepose"
                             :label="$t('plannerMoveHomepose')"
@@ -1177,6 +1182,26 @@
             </q-card>
         </q-dialog>
 
+        <!-- 체크포인트 선택 — git-graph 다이얼로그에서 노드 클릭으로 선택 -->
+        <q-dialog v-model="showCheckpointPicker">
+            <q-card class="bg-secondary border-rounded border-white" dark style="width: 920px; max-width: 95vw;">
+                <q-card-section class="bg-dark text-white row items-center">
+                    <div class="text-h6">{{ $t('plannerCheckpointLabel') }}</div>
+                    <q-space />
+                    <q-btn dense round flat icon="close" v-close-popup />
+                </q-card-section>
+                <q-separator />
+                <q-card-section class="bg-secondary">
+                    <CheckpointGraph
+                        :checkpoints="filteredCheckpoints"
+                        :selected-id="blockForm.checkpoint_id"
+                        height="440px"
+                        @node-click="onPickerNodeClick"
+                    />
+                </q-card-section>
+            </q-card>
+        </q-dialog>
+
     </q-page>
 </template>
 
@@ -1187,6 +1212,7 @@ import { api } from 'src/boot/axios';
 import FormDialog from 'src/components/v2/FormDialog.vue';
 import MonitoringWindow from 'src/components/v2/MonitoringWindow.vue';
 import PlannerBlockCard from 'src/components/v2/PlannerBlockCard.vue';
+import CheckpointGraph from 'src/components/v2/CheckpointGraph.vue';
 import RobotPendant from 'src/components/v2/RobotPendant.vue';
 import TutorialHint from 'src/components/v2/TutorialHint.vue';
 import WebRtcVideo from 'src/components/v2/WebRtcVideo.vue';
@@ -1313,23 +1339,35 @@ async function ensureWorkspaceDetails(ids) {
         return w && !w.sensors;
     });
     if (!need.length) return;
-    const results = await Promise.all(
-        need.map(id => api.get(`/tasks/${id}`).then(r => r.data?.task).catch(() => null))
-    );
+    detailsLoading.value = true;
+    let results;
+    try {
+        results = await Promise.all(
+            need.map(id => api.get(`/tasks/${id}`).then(r => r.data?.task).catch(() => null))
+        );
+    } finally {
+        detailsLoading.value = false;
+    }
     results.forEach((detail) => {
         if (!detail) return;
         const i = availableWorkspaces.value.findIndex(w => w.id === detail.id);
         if (i < 0) return;
-        const merged = { ...availableWorkspaces.value[i], ...detail };
-        (merged.sensors || []).forEach(sensor => {
+        // 먼저 reactive 배열에 넣어 proxy 로 만든 뒤, 그 proxy 객체에 핸들러를
+        // 붙인다. useSensor/useRobot 은 전달된 객체의 status 를 직접 갱신하는데,
+        // raw 객체(배열에 넣기 전)에 붙이면 그 mutation 을 Vue 반응성이 추적하지
+        // 못해(템플릿은 proxy 를 읽음) 재생 버튼을 눌러도 로딩/이미지 등 UI 가
+        // 바뀌지 않는다. (Workspace 는 selectedWorkspace.value.sensors=proxy 에
+        // 직접 useSensor 를 호출해 문제가 없었다.)
+        availableWorkspaces.value[i] = { ...availableWorkspaces.value[i], ...detail };
+        const ws = availableWorkspaces.value[i];
+        (ws.sensors || []).forEach(sensor => {
             sensor.handler = useSensor(sensor);
             if (sensor.type === 'custom') sensor.handler.checkSensorTopic();
         });
-        (merged.assembly?.robots || []).forEach(robot => {
+        (ws.assembly?.robots || []).forEach(robot => {
             robot.handler = useRobot(robot);
             if (robot.type === 'custom') robot.handler.checkRobotTopic();
         });
-        availableWorkspaces.value[i] = merged;
     });
 }
 
@@ -1363,6 +1401,9 @@ function removeWorkspace(workspaceId) {
 
 // --- Monitoring Window ---
 const focused = ref({});
+// 워크스페이스 detail(센서/로봇) 을 fetch 하는 동안 true — MonitoringWindow 가
+// 빈 상태 메시지 대신 스피너를 표시하도록.
+const detailsLoading = ref(false);
 const monitorDatasetId = ref(null);
 const monitorCheckpointId = ref(null);
 const monitorEpisode = ref({});
@@ -1457,6 +1498,9 @@ function toggleSensor(sensor) {
     sensor.process_id = `sensor_${sensor.id}`;
     if (sensor.status === 'on') {
         sensor.handler.stopSensor();
+    } else if (sensor.status === 'loading') {
+        // 로딩 중 토글 = 진행 중인 시작 취소.
+        sensor.handler.stopSensor();
     } else {
         sensor.handler.startSensor();
     }
@@ -1466,6 +1510,9 @@ function toggleRobot(robot) {
     robot.process_id = `robot_${robot.id}`;
     const startFlow = () => robot.handler.startRobot();
     if (robot.status === 'on') {
+        robot.handler.stopRobot();
+    } else if (robot.status === 'loading') {
+        // 로딩 중 토글 = 진행 중인 시작 취소.
         robot.handler.stopRobot();
     } else if (robot.status === 'error') {
         robot.handler.stopRobot().finally(() => startFlow());
@@ -1726,6 +1773,13 @@ function listCheckpoints() {
     }).catch((error) => {
         console.error('Error fetching checkpoints:', error);
     });
+}
+
+// 체크포인트 선택 다이얼로그(그래프). 노드 클릭 시 해당 체크포인트를 블록에 지정하고 닫는다.
+const showCheckpointPicker = ref(false);
+function onPickerNodeClick(checkpoint) {
+    blockForm.value.checkpoint_id = checkpoint.id;
+    showCheckpointPicker.value = false;
 }
 
 const filteredCheckpoints = computed(() => {

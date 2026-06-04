@@ -112,8 +112,8 @@
                                         :key="sensor.id"
                                         :class="sensor.status === 'on' ? 'bg-green-10' : 'bg-grey-8'"
                                     >
-                                        <div class="row items-center">
-                                            <div>{{ sensor.name }}</div>
+                                        <div class="row items-center no-wrap">
+                                            <div class="ellipsis">{{ sensor.name }}</div>
                                             <q-space />
                                             <q-toggle
                                                 :model-value="sensor.status === 'on'"
@@ -151,6 +151,10 @@
                                                 <q-tooltip>{{ $t('workspaceAddView') }}</q-tooltip>
                                             </q-btn>
                                         </div>
+                                        <q-inner-loading
+                                            :showing="sensor.status === 'loading'"
+                                            style="pointer-events: none; background: rgba(0, 0, 0, 0.4)"
+                                        ></q-inner-loading>
                                     </div>
                                     <q-btn outline
                                         class="full-width"
@@ -204,7 +208,7 @@
                                     :key="robot.id"
                                     :class="robot.status === 'on' ? 'bg-green-10' : (robot.status === 'error' ? 'bg-red-10' : 'bg-grey-8')"
                                 >
-                                    <div>{{ robot.name }}</div>
+                                    <div class="ellipsis">{{ robot.name }}</div>
                                     <q-space />
                                     <q-toggle
                                         :model-value="robot.status === 'on'"
@@ -218,7 +222,10 @@
                                         <div class="text-caption text-positive" v-else-if="robot.status === 'on'">{{ $t('topicOn') }}</div>
                                         <div class="text-caption text-negative" v-else-if="robot.status === 'error'">{{ $t('statusError') }}</div>
                                     </div>
-                                    <q-inner-loading :showing="robot.status === 'loading'"></q-inner-loading>
+                                    <q-inner-loading
+                                        :showing="robot.status === 'loading'"
+                                        style="pointer-events: none; background: rgba(0, 0, 0, 0.4)"
+                                    ></q-inner-loading>
                                 </div>
                             </q-card-section>
                             </q-card>
@@ -246,14 +253,14 @@
                         </q-expansion-item>
                     </q-list>
                     <div v-if="focused.id" class="q-mt-md text-white h6">
-                        <div>{{ $t(`${focused.device_type} Config`) }} <span class="text-primary">{{ focused.name }}</span></div>
+                        <div class="ellipsis">{{ $t(`${focused.device_type} Config`) }} <span class="text-primary">{{ focused.name }}</span></div>
                         <TutorialHint class="q-mt-sm" :text="$t('tutorialWorkspaceSensorConfig')" v-if="focused.device_type === 'sensor'" />
                         <TutorialHint class="q-mt-sm" :text="$t('tutorialWorkspaceRobotConfig')" v-else-if="focused.device_type === 'robot'" />
                         <div
                             class="q-pa-sm q-px-md q-mt-sm border-rounded row border-white"
                             v-if="focused.device_type === 'sensor'"
                         >
-                            <div class="text-caption col-12">
+                            <div class="text-caption col-12 q-mb-sm">
                                 {{ $t('workspaceCropHint') }}
                                 <q-btn size="xs" outline color="pink-3" icon="sync" @click="resetCroppedArea()" class="q-ml-sm" />
                                 <!-- <q-btn size="xs" outline color="primary" icon="save" @click="saveCroppedArea" class="q-ml-sm" /> -->
@@ -581,7 +588,7 @@
                                         :class="{ 'bg-primary': selectedEpisode.name === episode.name && selectedDataset && selectedDataset.id === dataset.id }"
                                     >
                                         <q-item-section>
-                                            <q-item-label class="q-ml-xl">{{ episode.name }}</q-item-label>
+                                            <q-item-label class="q-ml-xl" lines="1">{{ episode.name }}</q-item-label>
                                         </q-item-section>
                                         <q-item-section side>
                                             <q-btn
@@ -598,68 +605,47 @@
                         </q-list>
                     </q-scroll-area>
                 </div>
-                <div v-else-if="selectedTab === 'inference'" style="height: 90%" class="q-pt-md q-px-sm text-white">
+                <div v-else-if="selectedTab === 'inference'" style="height: 90%" class="q-pt-md q-px-sm text-white column">
                     <TutorialHint class="q-mb-sm" :text="$t('tutorialWorkspaceInference')" />
-                    <q-scroll-area class="full-height">
-                        <div class="row q-col-gutter-md">
-                        <div class="col-6" v-for="checkpoint in checkpoints" :key="checkpoint.id">
-                            <q-card
-                                class="q-pa-md bg-dark border-rounded border-white text-white"
-                                :class="selectedCheckpointId === checkpoint.id ? 'border-primary' : ''"
-                                @click="selectedCheckpointId = checkpoint.id"
-                            >
-                                <q-menu context-menu>
-                                    <q-list bordered separator>
-                                        <q-item
-                                            clickable
-                                            v-ripple
-                                            v-close-popup
-                                            @click="openCheckpointInfoDialog(checkpoint)"
-                                        >
-                                            <q-item-section>{{ $t('workspaceCheckpointShow') }}</q-item-section>
-                                            <q-item-section side>
-                                                <q-icon name="add" size="xs" />
-                                            </q-item-section>
-                                        </q-item>
-                                        <q-item clickable v-ripple v-close-popup @click="openCheckpointForm(checkpoint)">
-                                            <q-item-section>{{ $t('workspaceCheckpointEdit') }}</q-item-section>
-                                            <q-item-section side>
-                                                <q-icon name="edit" size="xs" />
-                                            </q-item-section>
-                                        </q-item>
-                                        <q-item clickable v-ripple v-close-popup @click="exportCheckpoint(checkpoint)">
-                                            <q-item-section>{{ $t('workspaceCheckpointExport') }}</q-item-section>
-                                            <q-item-section side>
-                                                <q-icon name="download" size="xs" />
-                                            </q-item-section>
-                                        </q-item>
-                                        <q-item clickable v-ripple class="text-negative" @click="deleteCheckpoint(checkpoint)">
-                                            <q-item-section>{{ $t('workspaceCheckpointDelete') }}</q-item-section>
-                                            <q-item-section side>
-                                                <q-icon color="negative" name="delete" size="xs" />
-                                            </q-item-section>
-                                        </q-item>
-                                    </q-list>
-                                </q-menu>
-                                <q-card-section class="q-pa-none q-mt-sm text-center">
-                                    <q-img
-                                        src="images/brain-icon.png"
-                                        class="cursor-pointer"
-                                        fit="contain"
-                                        width="80px"
-                                    >
-                                    </q-img>
-                                    <div class="text-bold q-mt-md">{{ checkpoint.name }} ({{ checkpoint.id }})</div>
-                                </q-card-section>
-                            </q-card>
-                        </div>
-                    </div>
-                    </q-scroll-area>
+                    <CheckpointGraph
+                        class="col"
+                        :checkpoints="graphCheckpoints"
+                        :selected-id="selectedCheckpointId"
+                        height="100%"
+                        @node-click="onGraphNodeClick"
+                    >
+                        <template #menu="{ checkpoint }">
+                            <q-item clickable v-ripple v-close-popup @click="openCheckpointInfoDialog(checkpoint)">
+                                <q-item-section>{{ $t('workspaceCheckpointShow') }}</q-item-section>
+                                <q-item-section side>
+                                    <q-icon name="info" size="xs" />
+                                </q-item-section>
+                            </q-item>
+                            <q-item clickable v-ripple v-close-popup @click="openCheckpointForm(checkpoint)">
+                                <q-item-section>{{ $t('workspaceCheckpointEdit') }}</q-item-section>
+                                <q-item-section side>
+                                    <q-icon name="edit" size="xs" />
+                                </q-item-section>
+                            </q-item>
+                            <q-item clickable v-ripple v-close-popup @click="exportCheckpoint(checkpoint)">
+                                <q-item-section>{{ $t('workspaceCheckpointExport') }}</q-item-section>
+                                <q-item-section side>
+                                    <q-icon name="download" size="xs" />
+                                </q-item-section>
+                            </q-item>
+                            <q-item clickable v-ripple v-close-popup class="text-negative" @click="deleteCheckpoint(checkpoint)">
+                                <q-item-section>{{ $t('workspaceCheckpointDelete') }}</q-item-section>
+                                <q-item-section side>
+                                    <q-icon color="negative" name="delete" size="xs" />
+                                </q-item-section>
+                            </q-item>
+                        </template>
+                    </CheckpointGraph>
                 </div>
             </div>
             <div class="col column">
                 <monitoring-window
-                    class="col"
+                    class="full-width"
                     :workspace="selectedWorkspace"
                     :robots="robots"
                     :sensors="selectedSensors"
@@ -790,14 +776,25 @@
                 </q-card-section>
 
                 <q-separator />
-                <q-card-section class="bg-secondary q-px-xl q-py-lg">
+                <q-card-section class="bg-secondary q-px-xl q-py-lg" v-if="infoCheckpoint">
                     <checkpoint-info
-                        :checkpoint="selectedCheckpoint"
+                        :checkpoint="infoCheckpoint"
                         :height="400"
                     />
                 </q-card-section>
-                <q-card-section class="bg-secondary q-px-xl q-pt-none" align="right">
-                    <div>{{ $t('checkpointLossEpoch', { loss: selectedCheckpoint.loss?.toFixed(4) ?? '-', epoch: selectedCheckpoint.best_epoch ?? '-' }) }}</div>
+                <q-card-section class="bg-secondary q-px-xl q-pt-none row items-center" v-if="infoCheckpoint">
+                    <q-btn
+                        v-if="infoCheckpoint.status === 'finished'"
+                        color="primary"
+                        unelevated
+                        no-caps
+                        icon="play_arrow"
+                        :label="$t('checkpointUseForInference')"
+                        :outline="selectedCheckpointId !== infoCheckpoint.id"
+                        @click="selectedCheckpointId = infoCheckpoint.id"
+                    />
+                    <q-space />
+                    <div>{{ $t('checkpointLossEpoch', { loss: infoCheckpoint.loss?.toFixed(4) ?? '-', epoch: infoCheckpoint.best_epoch ?? '-' }) }}</div>
                 </q-card-section>
             </q-card>
         </q-dialog>
@@ -818,6 +815,7 @@ import { useProcessStore } from 'src/stores/processStore';
 import { useModulesStore } from 'src/stores/modulesStore';
 import MonitoringWindow from 'src/components/v2/MonitoringWindow.vue';
 import CheckpointInfo from 'src/components/v2/CheckpointInfo.vue';
+import CheckpointGraph from 'src/components/v2/CheckpointGraph.vue';
 import WebRtcVideo from 'src/components/v2/WebRtcVideo.vue';
 import TutorialHint from 'src/components/v2/TutorialHint.vue';
 import { enumerateViews, viewKey as makeViewKey } from 'src/utils/sensorView';
@@ -894,11 +892,15 @@ function listWorkspaces() {
 // 같은 nested 필드를 안전하게 접근하기 위한 guard — light payload 만 들어있는
 // 사이에 컴포넌트가 렌더되어 ``.sensors.filter`` 같은 호출이 throw 하는 걸 방지.
 const workspaceDetailReady = ref(false);
-async function ensureWorkspaceDetail(id) {
+// force=true 면 이미 detail 이 merge 돼 있어도 GET /tasks/{id} 로 다시 가져온다.
+// (센서 추가/삭제 등 구조 변경 후 — listWorkspaces 의 merge 는 이전 sensors 를
+//  보존하므로 새 센서의 full 객체(read_topic 등)가 안 들어와 새로고침 전까지
+//  무한 로딩되던 버그 방지)
+async function ensureWorkspaceDetail(id, force = false) {
     if (id === 'new' || id == null) return;
     const i = workspaces.value.findIndex(w => w.id === id);
     if (i < 0) return;
-    if (workspaces.value[i].assembly !== undefined) {
+    if (!force && workspaces.value[i].assembly !== undefined) {
         workspaceDetailReady.value = true;   // 이미 detail
         return;
     }
@@ -1007,6 +1009,9 @@ function toggleSensor(sensor) {
     sensor.process_id = `sensor_${sensor.id}`;
     if (sensor.status === 'on') {
         sensor.handler.stopSensor()
+    } else if (sensor.status === 'loading') {
+        // 로딩 중 토글 = 진행 중인 시작 취소.
+        sensor.handler.stopSensor()
     } else {
         sensor.handler.startSensor()
     }
@@ -1103,10 +1108,21 @@ function addView(sensorId) {
 
     sids.push(sidInt);
     ws.sensor_ids = sids;
-    ws.sensor_cropped_area = { ...(ws.sensor_cropped_area || {}), [newViewKey]: newCrop };
-    ws.sensor_img_size = { ...(ws.sensor_img_size || {}), [newViewKey]: newSize };
-    ws.sensor_rotate = { ...(ws.sensor_rotate || {}), [newViewKey]: newRot || 0 };
-    ws.sensor_sam3 = { ...(ws.sensor_sam3 || {}), [newViewKey]: newSam3 };
+    // 복사할 소스 설정이 없으면(null) 해당 키를 만들지 않는다 — MonitoringWindow 가
+    // sensor.id 기본값으로 폴백해 전체 프레임을 정상 표시한다. (null 을 저장하면
+    // viewport 헬퍼가 null 을 반환하고 WebRtcVideo 가 무한 로딩되던 버그 방지)
+    const cropDict = { ...(ws.sensor_cropped_area || {}) };
+    const sizeDict = { ...(ws.sensor_img_size || {}) };
+    const rotDict = { ...(ws.sensor_rotate || {}) };
+    const sam3Dict = { ...(ws.sensor_sam3 || {}) };
+    if (newCrop != null) cropDict[newViewKey] = newCrop;
+    if (newSize != null) sizeDict[newViewKey] = newSize;
+    rotDict[newViewKey] = newRot || 0;
+    if (newSam3 != null) sam3Dict[newViewKey] = newSam3;
+    ws.sensor_cropped_area = cropDict;
+    ws.sensor_img_size = sizeDict;
+    ws.sensor_rotate = rotDict;
+    ws.sensor_sam3 = sam3Dict;
 
     return updateWorkspace({
         sensor_ids: sids,
@@ -1176,8 +1192,11 @@ function removeView(viewKey) {
 
 function updateWorkspace(form) {
     console.log('Updating workspace with form:', form);
-    return api.put(`/task/${selectedWorkspace.value.id}`, form).then(() => {
-        listWorkspaces();
+    const id = selectedWorkspace.value.id;
+    return api.put(`/task/${id}`, form).then(() => {
+        // listWorkspaces 의 merge 는 선택된 워크스페이스의 이전 detail(sensors 등)을
+        // 보존하므로, 센서/뷰 구조 변경이 반영되도록 detail 을 강제 재조회한다.
+        return listWorkspaces().then(() => ensureWorkspaceDetail(id, true));
     });
 }
 
@@ -1227,6 +1246,9 @@ function toggleRobot(robot) {
     robot.process_id = `robot_${robot.id}`;
     const startFlow = () => robot.handler.startRobot();
     if (robot.status === 'on') {
+        robot.handler.stopRobot();
+    } else if (robot.status === 'loading') {
+        // 로딩 중 토글 = 진행 중인 시작 취소.
         robot.handler.stopRobot();
     } else if (robot.status === 'error') {
         robot.handler.stopRobot().finally(() => startFlow());
@@ -1575,20 +1597,29 @@ const selectedDatasetId = ref(null);
 const selectedDataset = computed(() => {
     return datasets.value.find(d => d.id === selectedDatasetId.value) || null;
 });
+// 추론 대상으로 선택된 체크포인트 id — finished 만 지정됨(MonitoringWindow 구동).
 const selectedCheckpointId = ref(null);
-const selectedCheckpoint = computed(() => {
-    return checkpoints.value.find(c => c.id === selectedCheckpointId.value) || null;
-});
-const checkpoints = ref([]);
+// 그래프용 — 전체 상태(running/queued/failed 포함) 체크포인트. load_model_id 계보로 그래프 구성.
+const graphCheckpoints = ref([]);
+// MonitoringWindow/추론용으로는 finished 만 노출(기존 계약 유지).
+const checkpoints = computed(() => graphCheckpoints.value.filter(c => c.status === 'finished'));
 function listCheckpoints() {
     return api.get('/checkpoints', {
         params: {
-            where: `task_id,=,${selectedWorkspaceId.value}|status,=,finished`,
+            where: `task_id,=,${selectedWorkspaceId.value}`,
             order: 'created_at DESC'
         }
     }).then((res) => {
-        checkpoints.value = res.data.checkpoints || [];
+        graphCheckpoints.value = res.data.checkpoints || [];
     });
+}
+// 그래프 노드 클릭 — 상세 다이얼로그를 열고, finished 면 추론 대상으로도 선택.
+function onGraphNodeClick(checkpoint) {
+    infoCheckpoint.value = checkpoint;
+    showCheckpointInfo.value = true;
+    if (checkpoint.status === 'finished') {
+        selectedCheckpointId.value = checkpoint.id;
+    }
 }
 
 const showCheckpointForm = ref(false);
@@ -1708,10 +1739,12 @@ const isFailureDetected = ref(false);
 const uncertaintyScore = ref(0);
 
 const showCheckpointInfo = ref(false);
+// 상세 다이얼로그에 표시할 체크포인트(상태 무관). 추론 선택(selectedCheckpointId)과 분리.
+const infoCheckpoint = ref(null);
 const openCheckpointInfoDialog = (checkpoint) => {
-    selectedCheckpointId.value = checkpoint.id;
+    infoCheckpoint.value = checkpoint;
     showCheckpointInfo.value = true;
-}; 
+};
 
 
 const videoContainer = ref(null);
@@ -1982,6 +2015,11 @@ onMounted(async () => {
         selectedDataset.value?.episodes.push({
             name: data.name,
         });
+    });
+
+    // 학습 큐 변경 시 체크포인트 그래프를 갱신해 running/finished 상태를 라이브로 반영.
+    socket.on('train_queue_changed', () => {
+        if (selectedWorkspaceId.value) listCheckpoints();
     });
 
     socket.on('failure_detection_result', (data) => {

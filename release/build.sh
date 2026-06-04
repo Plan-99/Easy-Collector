@@ -190,6 +190,16 @@ for pat in "${RSYNC_EXCLUDES[@]}"; do
 done
 rsync -a "${RSYNC_EXCLUDE_ARGS[@]}" "$ROOT_DIR/" "$STAGE${PAYLOAD_DIR}/"
 
+# scripts/ 는 위에서 통째로 제외했지만 rebuild_images.sh 만은 런타임에서 필요하다
+# (base 이미지 부트스트랩 + 모듈 설치 후 derived 이미지 베이크).
+# release/ui/installer.py 와 release/ui/modules.py 가 project_root/scripts/rebuild_images.sh
+# 를 직접 호출하므로 deb 페이로드에 반드시 포함되어야 한다.
+if [ -f "$ROOT_DIR/scripts/rebuild_images.sh" ]; then
+  install -d "$STAGE${PAYLOAD_DIR}/scripts"
+  install -m 0755 "$ROOT_DIR/scripts/rebuild_images.sh" "$STAGE${PAYLOAD_DIR}/scripts/rebuild_images.sh"
+  echo "[deb] Included scripts/rebuild_images.sh (image bootstrap helper)"
+fi
+
 # ros2/ros2_ws/src는 위에서 통째로 제외했지만, 그 안에 들어있는 디렉터리는
 # 전부 "번들 ROS2 패키지"(모듈 아님 — 모듈은 modules/ 트리에 있고 런처가
 # 런타임에 설치한다)이므로, package.xml이 있는 디렉터리만 골라 다시 복사한다.

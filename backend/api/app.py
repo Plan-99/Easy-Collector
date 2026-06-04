@@ -26,6 +26,8 @@ from .routes.sim import sim_bp
 from .routes.robot_pose import robot_pose_bp
 from .routes.remote_train import remote_train_bp
 from .routes.tutorial import tutorial_bp
+from .routes.dual_arm_test import dual_arm_test_bp
+from .routes.dual_arm_assembly_test import dual_arm_assembly_test_bp
 from .routes.remote_train import run_training_job
 from .routes.planner import planner_bp
 from .routes.curriculum import curriculum_bp
@@ -102,6 +104,8 @@ app.register_blueprint(sim_bp, url_prefix='/api')
 app.register_blueprint(robot_pose_bp, url_prefix='/api')
 app.register_blueprint(remote_train_bp, url_prefix='/api')
 app.register_blueprint(tutorial_bp, url_prefix='/api')
+app.register_blueprint(dual_arm_test_bp, url_prefix='/api')
+app.register_blueprint(dual_arm_assembly_test_bp, url_prefix='/api')
 app.register_blueprint(planner_bp, url_prefix='/api')
 app.register_blueprint(curriculum_bp, url_prefix='/api')
 app.register_blueprint(module_bp, url_prefix='/api')
@@ -328,6 +332,17 @@ def main():
         _ensure_tutorial_rows()
     except Exception as e:
         print(f"[WARN] Tutorial seeding skipped: {e}")
+
+    # Dual-arm TEST workspaces are seeded eagerly too so they appear in the UI
+    # workspace list without first hitting :start.
+    try:
+        from .routes.sim_test_common import ensure_rows as _ensure_sim_test_rows
+        from ..configs.dual_arm_defaults import SPEC as _DUAL_ARM_SPEC
+        from ..configs.dual_arm_assembly_defaults import SPEC as _DUAL_ARM_ASM_SPEC
+        _ensure_sim_test_rows(_DUAL_ARM_SPEC)
+        _ensure_sim_test_rows(_DUAL_ARM_ASM_SPEC)
+    except Exception as e:
+        print(f"[WARN] Dual-arm test seeding skipped: {e}")
 
     app.node = node  # 호환성 유지 (None)
     app.bridge_client = bridge_client  # gRPC bridge 클라이언트

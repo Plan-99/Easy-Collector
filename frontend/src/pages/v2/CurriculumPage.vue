@@ -57,7 +57,7 @@
     <!-- Curriculum exists -->
     <div v-else class="col row q-mb-md no-wrap">
       <!-- Left panel: tabs (Planner blocks / Group policy) -->
-      <div class="col-3 bg-secondary q-mr-sm border-rounded text-white column">
+      <div class="col-3 bg-secondary q-mr-md border-rounded text-white column">
         <q-tabs v-model="leftTab" dense align="left" class="text-grey-4" active-color="primary" indicator-color="primary">
           <q-tab name="planner" :label="t('currTabPlanner')" />
           <q-tab name="device" :label="t('currTabDevice')" />
@@ -214,7 +214,7 @@
             <q-btn color="red" icon="stop" :label="t('currStop')" :disable="!isRunning" @click="stopRollout" />
           </div>
           <div class="col-auto">
-            <q-btn outline color="orange" icon="restart_alt" :label="t('currReset')" @click="resetCurriculum" />
+            <q-btn outline color="orange" icon="restart_alt" :label="t('currReset')" @click="showResetConfirm = true" />
           </div>
           <div class="col-auto">
             <!-- 강제 업그레이드 — mission target 미달이어도 현재 누적된
@@ -253,6 +253,13 @@
                 :label="t('currStage')"
                 outlined dense dark bg-color="grey-10" emit-value map-options
                 style="min-width: 120px"
+              />
+              <q-btn
+                outline dense color="orange" icon="restart_alt"
+                class="q-ml-sm"
+                :label="t('currStageReset')"
+                :disable="isRunning || !dashSelectedStage(dg)"
+                @click="askStageReset(dg)"
               />
             </div>
 
@@ -509,7 +516,7 @@
         <MonitoringWindow
           ref="monitorWindowRef"
           v-if="monitorWorkspaceForProp"
-          class="full-height"
+          class="full-width"
           :workspace="monitorWorkspaceForProp"
           :workspaces="monitorAllWorkspaces"
           :robots="monitorRobots"
@@ -624,6 +631,40 @@
           <q-space />
           <q-btn flat :label="t('currCorrectionNo')" color="grey-4" @click="dismissCorrection" />
           <q-btn unelevated color="amber" text-color="dark" :label="t('currCorrectionYes')" @click="startCorrection" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
+    <!-- 전체초기화 확인 — 커리큘럼 전체 데이터셋 삭제. -->
+    <q-dialog v-model="showResetConfirm">
+      <q-card dark class="bg-secondary text-white" style="min-width: 380px">
+        <q-card-section class="row items-center bg-dark">
+          <q-icon name="restart_alt" color="orange" class="q-mr-sm" />
+          <div class="text-h6">{{ t('currReset') }}</div>
+        </q-card-section>
+        <q-card-section class="text-body">
+          {{ t('currResetConfirmMsg') }}
+        </q-card-section>
+        <q-card-actions align="right" class="q-pa-md">
+          <q-btn flat :label="t('no')" color="grey-4" v-close-popup />
+          <q-btn unelevated color="orange" text-color="dark" :label="t('yes')" v-close-popup @click="resetCurriculum" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
+    <!-- 스테이지 초기화 확인 — 선택된 stage 의 데이터셋만 비움. -->
+    <q-dialog v-model="showStageResetConfirm">
+      <q-card dark class="bg-secondary text-white" style="min-width: 380px">
+        <q-card-section class="row items-center bg-dark">
+          <q-icon name="restart_alt" color="orange" class="q-mr-sm" />
+          <div class="text-h6">{{ t('currStageReset') }}</div>
+        </q-card-section>
+        <q-card-section class="text-body">
+          {{ t('currStageResetConfirmMsg') }}
+        </q-card-section>
+        <q-card-actions align="right" class="q-pa-md">
+          <q-btn flat :label="t('no')" color="grey-4" v-close-popup />
+          <q-btn unelevated color="orange" text-color="dark" :label="t('yes')" v-close-popup @click="resetStage" />
         </q-card-actions>
       </q-card>
     </q-dialog>
@@ -1390,10 +1431,30 @@ async function upgradeNow () {
     }
 }
 
+const showResetConfirm = ref(false)
+const showStageResetConfirm = ref(false)
+const stageResetTarget = ref(null)  // 초기화 대상 stage id
+
 async function resetCurriculum () {
   await api.post(`/curriculum/${curriculum.value.id}/:reset`)
   await loadCurriculum(curriculum.value.id)
   Notify.create({ type: 'positive', message: t('currResetDone') })
+}
+
+// 스테이지 초기화 — 대시보드에서 선택된 stage 만 초기화.
+function askStageReset (dg) {
+  const stage = dashSelectedStage(dg)
+  if (!stage) return
+  stageResetTarget.value = stage.id
+  showStageResetConfirm.value = true
+}
+
+async function resetStage () {
+  const stageId = stageResetTarget.value
+  if (!stageId) return
+  await api.post(`/stage/${stageId}/:reset`)
+  await loadCurriculum(curriculum.value.id)
+  Notify.create({ type: 'positive', message: t('currStageResetDone') })
 }
 
 // ── group policy 탭 ────────────────────────────────────────────────────────────

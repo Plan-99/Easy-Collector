@@ -3,11 +3,60 @@ from __future__ import annotations
 import os
 import sys
 
+# ── 깨진 GLX/EGL 환경 자동 fallback (예: NVIDIA 595 + 우리 PyInstaller Qt6 조합)
+# 자식 프로세스로 QOpenGLContext.create() 를 시도해서 실패하면
+# EASYCOLLECTOR_FORCE_EXTERNAL_BROWSER=1 을 셋팅한다. app_context.py 가 이걸
+# 읽고 QtWebEngine 자체를 import 안 하므로 GLX 진입을 우회 — 런처는 순수
+# QWidget 으로 그려지고 frontend 는 외부 브라우저로 열린다. 사용자가 직접
+# env var 를 셋팅했다면 (값 무관) 그 결정을 존중하고 probe 를 스킵한다.
+if os.environ.get("_EASYTRAINER_GL_PROBE_CHILD") == "1":
+    try:
+        from PySide6.QtGui import QOffscreenSurface, QOpenGLContext  # type: ignore
+        from PySide6.QtWidgets import QApplication  # type: ignore
+        _probe_app = QApplication.instance() or QApplication([])
+        _probe_ctx = QOpenGLContext()
+        if not _probe_ctx.create():
+            sys.exit(1)
+        _probe_surf = QOffscreenSurface()
+        _probe_surf.create()
+        if not _probe_ctx.makeCurrent(_probe_surf):
+            sys.exit(1)
+        sys.exit(0)
+    except Exception:
+        sys.exit(2)
+
+
+def _probe_opengl_and_maybe_force_external() -> None:
+    if "EASYCOLLECTOR_FORCE_EXTERNAL_BROWSER" in os.environ:
+        return
+    import subprocess
+    cmd = [sys.executable]
+    if not getattr(sys, "frozen", False):
+        cmd.append(sys.argv[0])
+    env = {**os.environ, "_EASYTRAINER_GL_PROBE_CHILD": "1"}
+    try:
+        result = subprocess.run(cmd, env=env, capture_output=True, timeout=10)
+        if result.returncode != 0:
+            os.environ["EASYCOLLECTOR_FORCE_EXTERNAL_BROWSER"] = "1"
+            sys.stderr.write(
+                f"[GL probe] OpenGL initialization failed (rc={result.returncode}); "
+                "falling back to external browser mode\n"
+            )
+    except Exception as exc:
+        os.environ["EASYCOLLECTOR_FORCE_EXTERNAL_BROWSER"] = "1"
+        sys.stderr.write(
+            f"[GL probe] probe failed ({exc!r}); falling back to external browser mode\n"
+        )
+
+
+_probe_opengl_and_maybe_force_external()
+
 from app_context import QApplication, QMessageBox, QTimer, _window_icon, load_config, resolve_project_root
 from installer import run_setup_wizard
 from launcher import MainWindow
 from service import RuntimeServiceMixin, docker_compose_available, ensure_signed_in, grant_local_x11_access
 from update import CONFIG_UPGRADE_KEY
+from i18n import t
 
 _APP_STYLE = """
     QMainWindow#LauncherWindow, QWidget#PillWrapper { background-color: transparent; }
@@ -146,10 +195,10 @@ def main() -> int:
     app = QApplication(sys.argv)
     _apply_app_style(app)
     if not _ensure_startup_permissions():
-        QMessageBox.critical(None, "권한 필요", "데이터/프로젝트 경로 권한을 획득하지 못해 종료합니다.")
+        QMessageBox.critical(None, t("main.permTitle"), t("main.permBody"))
         return 1
     if not ensure_signed_in():
-        QMessageBox.critical(None, "로그인 필요", "로그인을 완료하지 못해 프로그램을 종료합니다.")
+        QMessageBox.critical(None, t("main.signInTitle"), t("main.signInBody"))
         return 1
 
     # Warm the module catalog + entitlement caches in the background. The UI
@@ -162,7 +211,7 @@ def main() -> int:
         pass
 
     if not docker_compose_available():
-        QMessageBox.critical(None, "오류", "Docker가 설치되어 있지 않거나 PATH에 없습니다.")
+        QMessageBox.critical(None, t("main.errorTitle"), t("main.dockerMissingBody"))
         return 1
 
     # Docker 컨테이너 내부 root가 호스트 X 서버에 붙을 수 있도록 ACL 추가.
@@ -190,7 +239,7 @@ def main() -> int:
         def _auto_start():
             if not win.auto_launch_enabled():
                 return
-            win._show_preload_dialog("Easy Trainer 준비중...")
+            win._show_preload_dialog(t("main.preparing"))
             QTimer.singleShot(0, win.on_start)
         if win.auto_launch_enabled():
             win._update_manager.set_continue_handler(_auto_start)

@@ -42,6 +42,13 @@ Step 2에서는 어떤 **정책 (policy)**을 학습할지 결정합니다.
 
    ACT/Diffusion 등에서는 **pretrained_backbone_weights** 항목으로 ImageNet pretrained 가중치를 시작점으로 쓸지 결정할 수 있습니다.
 
+   **ACT의 vision_backbone** 셀렉트에서 다음 옵션을 고를 수 있습니다.
+
+   - **resnet18 / resnet34 / resnet50** — 기존 CNN 백본. 가볍고 빠릅니다.
+   - **dinov2-small / dinov2 / dinov3** — Meta의 자기지도 학습 비전 트랜스포머. 적은 데이터에서도 좋은 표현을 학습하지만 메모리·연산 비용이 더 큽니다.
+
+   DINOv2 / DINOv3 백본을 선택했을 때만 의미 있는 옵션도 있습니다 (예: **partial unfreeze** — 백본 마지막 몇 블록만 풀어 미세조정). ResNet 경로에서는 무시됩니다.
+
    <DocsImage
      src="/docs/training/policy-03-params.png"
      alt="정책 파라미터 폼 — 타입별 하이퍼파라미터 + pretrained_backbone_weights"

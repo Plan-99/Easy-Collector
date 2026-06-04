@@ -10,9 +10,10 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Asia/Seoul
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
-# Regional mirror
-RUN sed -i 's/archive.ubuntu.com/mirror.kakao.com/g' /etc/apt/sources.list && \
-    sed -i 's/security.ubuntu.com/mirror.kakao.com/g' /etc/apt/sources.list
+# 주의: 과거 mirror.kakao.com 으로 redirect 했었으나 main 과 security pocket 의
+# 동기화가 어긋나 libcap-dev / libcurl4-openssl-dev / libpng-dev 같은 -dev
+# 패키지가 strict-pin 한 libcap2 / libcurl4 / libpng16-16 버전이 security pocket
+# 의 신버전과 불일치 → "held broken packages" 가 났다. 공식 archive 그대로 사용.
 
 # ROS 2 packages (realsense는 모듈로 분리됨, 런타임에 설치)
 RUN apt-get update && apt-get install -y --no-install-recommends \

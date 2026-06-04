@@ -1,0 +1,74 @@
+---
+title: ROBOTIS OMX
+description: ROBOTIS OMX 5-DOF 팔과 그리퍼를 Dynamixel USB 시리얼로 연결해 등록.
+section: robots
+order: 4
+sourceRefs:
+  - frontend/src/pages/v2/RobotPage.vue
+  - modules/robots/omx/module.json
+related:
+  - /docs/teleoperation/leader-robot
+lastVerifiedVersion: 5.0.0
+---
+
+ROBOTIS OMX는 **5-DOF 팔 + 1-DOF 그리퍼** 구성의 협동 로봇으로, Dynamixel 시리얼 버스를 USB로 끌어와 PC에 직접 연결합니다. Easy Trainer는 OMX 본체와 OMX 기반 리더 팔(leader) 두 경우를 모두 같은 모듈로 다룹니다.
+
+<Callout type="warning">
+**ROBOTIS OMX는 OpenManipulator-X와 다른 제품입니다.** OMX는 5-DOF(`omx_f` variant)이고 OpenManipulator-X는 4-DOF입니다. 외형은 비슷해 보여도 조인트 수와 URDF가 다르므로 혼동하지 마세요. 이 페이지의 등록 절차는 OMX(5-DOF) 기준입니다.
+</Callout>
+
+## 사전 조건
+
+- [모듈 추가](/docs/modules)에서 **OMX** 모듈 설치
+- U2D2(또는 OpenRB) 인터페이스 보드를 PC와 OMX 사이에 USB로 연결
+- 모터 버스에 12 V 전원이 인가된 상태
+- 호스트에서 `/dev/ttyACM0` 또는 `/dev/ttyUSB0`이 보이는지 확인:
+
+  ```bash
+  ls /dev/ttyACM* /dev/ttyUSB*
+  ```
+
+  포트가 보이지 않으면 USB 케이블, 어댑터 드라이버, `dialout` 그룹 권한을 점검합니다.
+
+## 하드웨어 연결
+
+- 모터 데이지체인은 베이스(joint1) → joint5 → gripper 순으로 이어집니다.
+- 모터 ID와 baudrate가 출고값에서 바뀌어 있다면 R+ Manager 또는 Dynamixel Wizard로 확인하세요.
+- 그리퍼 모터는 출고 시 **Current-based Position(모드 5)** 으로 설정되어 있습니다. Easy Trainer가 자동으로 감지하므로 사용자가 모드를 바꿀 필요는 없습니다.
+
+<DocsImage
+  src="/docs/robots/omx-01-hardware.png"
+  alt="OMX 본체 + U2D2 인터페이스 보드 + 12V 어댑터 + 호스트 ttyACM0 확인"
+  status="missing"
+/>
+
+## 등록 입력값
+
+[공통 절차](/docs/robots#공통-절차) Step 2에서 다음 값을 입력합니다.
+
+- **Robot Type**: `omx_f`
+- **Serial Port**: `/dev/ttyACM0` (기본값. 포트가 다르면 `/dev/ttyUSB0` 등으로 변경)
+
+저장하면 내부적으로 다음과 같은 매니페스트가 적용됩니다.
+
+- **조인트 (총 6개)**: `joint1` ~ `joint5` + `gripper_joint_1`. 그리퍼는 `gripper_joint_2`가 `gripper_joint_1`을 자동으로 미러링하는 mimic 구조입니다.
+- **컨트롤러**: `JointGroupPositionController` 하나로 팔 + 그리퍼를 함께 구동 (`/joint_group_position_controller/commands` 토픽으로 publish)
+- **상태 토픽**: `sensor_msgs/JointState` (`/joint_states`)
+
+토글을 ON 한 뒤 RobotPendant 로 각 조인트를 한 칸씩 움직여 회전 방향이 올바른지 확인합니다.
+
+<DocsImage
+  src="/docs/robots/omx-02-online.png"
+  alt="OMX 카드 ONLINE + RobotPendant 조인트 슬라이더"
+  status="missing"
+/>
+
+## 리더(leader) 팔로 쓰기
+
+같은 OMX 하드웨어를 텔레오퍼레이션의 **리더 팔**로도 쓸 수 있습니다. 이 경우 리더는 별도의 로봇으로 등록할 필요가 없고 [Easy Controller 세팅](/docs/teleoperation/leader-robot)의 Stepper로 직접 매핑합니다. OMX 모터 모드 자동 감지, 그리퍼 스프링백, baudrate / Status Return Level 자동 정규화 등은 모두 리더 페이지를 참고하세요.
+
+## 트러블슈팅
+
+- **카드는 ONLINE인데 움직이지 않습니다.** `/joint_group_position_controller/commands` 토픽이 publish 되는지 `ros2 topic echo`로 확인하세요. ros2_control 컨트롤러가 spawn 되지 않은 상태일 수 있습니다.
+- **그리퍼만 반응이 다릅니다.** OMX 그리퍼는 Current-based Position 모드라 손잡이를 떼면 자동으로 Open 위치로 돌아갑니다. 정상 동작이며 [리더 팔 페이지의 스프링백 설명](/docs/teleoperation/leader-robot)을 참고하세요.
+- **모터가 검출되지 않습니다.** 12 V 전원, U2D2 LED, baudrate(4 Mbps 또는 1 Mbps 권장)를 차례로 점검합니다. udev 규칙이 적용되지 않은 경우 모듈 설치 시 동봉된 `install_udev_rules.sh`가 자동으로 실행되는데, 실패했다면 모듈을 재설치하세요.

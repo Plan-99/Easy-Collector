@@ -1,0 +1,45 @@
+# EasyTrainer combined controller for AI Worker FFW-BG2.
+# Stock ffw bringup spawns separate arm_l/arm_r/head/lift controllers; EasyTrainer
+# drives one robot from a single command topic, so we expose ONE
+# JointTrajectoryController over both arms (7 joints + gripper each = 16).
+# Joint order must match module.json joint_names (dual_arm split = first 8 left,
+# last 8 right).
+/**:
+  controller_manager:
+    ros__parameters:
+      use_sim_time: false
+      update_rate: 100  # Hz
+
+      joint_state_broadcaster:
+        type: joint_state_broadcaster/JointStateBroadcaster
+
+      easytrainer_arm_controller:
+        type: joint_trajectory_controller/JointTrajectoryController
+
+/**:
+  easytrainer_arm_controller:
+    ros__parameters:
+      joints:
+        - arm_l_joint1
+        - arm_l_joint2
+        - arm_l_joint3
+        - arm_l_joint4
+        - arm_l_joint5
+        - arm_l_joint6
+        - arm_l_joint7
+        - gripper_l_joint1
+        - arm_r_joint1
+        - arm_r_joint2
+        - arm_r_joint3
+        - arm_r_joint4
+        - arm_r_joint5
+        - arm_r_joint6
+        - arm_r_joint7
+        - gripper_r_joint1
+      command_interfaces:
+        - position
+      state_interfaces:
+        - position
+        - velocity
+      allow_nonzero_velocity_at_trajectory_end: true
+      allow_partial_joints_goal: true

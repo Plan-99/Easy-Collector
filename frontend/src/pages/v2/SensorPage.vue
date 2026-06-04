@@ -35,8 +35,8 @@
 
 
                     <q-card-section class="q-pa-none q-mt-sm">
-                        <div class="text-bold">{{ sensor.name }}</div>
-                        <div class="text-grey-6 text-caption">{{ sensor.type }}</div>
+                        <div class="text-bold ellipsis">{{ sensor.name }}</div>
+                        <div class="text-grey-6 text-caption ellipsis">{{ sensor.type }}</div>
                         <!-- <div class="text-grey-6 text-caption" v-if="sensor.ip_address">IP Address: {{ sensor.ip_address }}</div> -->
                         <!-- <div class="text-grey-6 text-caption" v-if="sensor.device_index">Device Index: {{ sensor.device_index }}</div> -->
                     </q-card-section>
@@ -65,7 +65,12 @@
                         class="q-mt-sm"
                         :text="$t('tutorialSensorCard')"
                     />
-                    <q-inner-loading :showing="sensor.status === 'loading'">
+                    <!-- pointer-events: none — 로딩 중에도 토글을 눌러 진행 중인 시작을
+                         취소할 수 있어야 한다. 스피너는 시각 표시 전용. -->
+                    <q-inner-loading
+                        :showing="sensor.status === 'loading'"
+                        style="pointer-events: none; background: rgba(0, 0, 0, 0.4)"
+                    >
                         <q-spinner-gears size="50px" color="primary" />
                     </q-inner-loading>
                 </q-card>
@@ -271,6 +276,9 @@ function toggleSensor(sensor) {
         sensor.handler.stopSensor().then(() => {
             watchingSensor.value = null; // Stop watching if sensor is stopped
         });
+    } else if (sensor.status === 'loading') {
+        // 로딩 중 토글 = 진행 중인 시작 취소.
+        sensor.handler.stopSensor();
     } else if (sensor.status === 'error') {
         // clean up lingering processes then retry start
         sensor.handler.stopSensor().finally(() => {

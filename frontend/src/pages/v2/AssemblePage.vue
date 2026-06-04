@@ -17,10 +17,10 @@
                     :class="{ 'border-primary': watchingAssembly && watchingAssembly.id === assembly.id }"
                 >
                     <q-card-section class="q-pa-none">
-                        <div class="text-bold text-h6">{{ assembly.name }}</div>
+                        <div class="text-bold text-h6 ellipsis">{{ assembly.name }}</div>
                     </q-card-section>
                     <q-card-section class="q-pa-none q-mt-md">
-                        <div v-for="part in ['left_arm', 'left_tool', 'right_arm', 'right_tool']" :key="part">{{ part }} <span class="text-primary">{{ robots.find(e => e.id === assembly[part + '_id'])?.name }}</span></div>
+                        <div class="ellipsis" v-for="part in ['left_arm', 'left_tool', 'right_arm', 'right_tool']" :key="part">{{ part }} <span class="text-primary">{{ robots.find(e => e.id === assembly[part + '_id'])?.name }}</span></div>
                     </q-card-section>
                     <q-inner-loading :showing="assembly.status === 'loading'">
                         <q-spinner-gears size="50px" color="primary" />

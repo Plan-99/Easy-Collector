@@ -123,36 +123,61 @@
             >
                 <div class="text-h6 q-mb-md">{{ $t('trainStep2Heading') }}</div>
                 <TutorialHint step="2" class="q-mb-md" :text="$t('tutorialTrainStep2')" />
-                <div class="row">
-                    <q-scroll-area class="col-12" style="height: 420px">                
-                        <div class="row q-col-gutter-md">
-                            <div class="col-6">
-                                <q-select
-                                    outlined
-                                    v-model="selectedCheckpoint"
-                                    :options="checkpointOptions"
-                                    :label="$t('trainPolicyLoadFromCheckpoint')"
-                                    emit-value
-                                    map-options
-                                    clearable
-                                    dark
-                                    dense
-                                    bg-color="dark"
-                                    @clear="handleCheckpointClear"
+                <div class="row q-col-gutter-md">
+                    <div class="col-12 col-md-5">
+                        <div class="row items-center q-mb-xs no-wrap">
+                            <div class="text-subtitle2 text-grey-4 ellipsis">{{ $t('trainPolicyLoadFromCheckpoint') }}</div>
+                            <q-space />
+                            <q-btn
+                                dense
+                                no-caps
+                                size="sm"
+                                icon="auto_awesome"
+                                :label="$t('checkpointGraphZeroBase')"
+                                :color="selectedCheckpoint ? 'grey-7' : 'primary'"
+                                :outline="!!selectedCheckpoint"
+                                @click="selectZeroBase"
+                            />
+                        </div>
+                        <CheckpointGraph
+                            :checkpoints="checkpoints"
+                            :selected-id="selectedCheckpoint"
+                            height="384px"
+                            :empty-text="$t('checkpointGraphEmpty')"
+                            @node-click="onGraphNodeClick"
+                        >
+                            <template #menu="{ checkpoint }">
+                                <q-item
+                                    v-if="checkpoint.status === 'finished'"
+                                    clickable
+                                    v-ripple
+                                    v-close-popup
+                                    @click="onGraphNodeClick(checkpoint)"
                                 >
-                                    <template v-slot:option="scope">
-                                        <q-item v-bind="scope.itemProps">
-                                            <q-item-section>
-                                                <q-item-label>{{ scope.opt.label }}</q-item-label>
-                                            </q-item-section>
-                                            <q-item-section side v-if="scope.opt.value">
-                                                <q-btn icon="delete" size="sm" flat round @click.stop="deleteCheckpoint(scope.opt.value)" />
-                                            </q-item-section>
-                                        </q-item>
-                                    </template>
-                                </q-select>
-                            </div>
-                            <div class="col-6">
+                                    <q-item-section>{{ $t('checkpointFinetuneFromHere') }}</q-item-section>
+                                    <q-item-section side><q-icon name="model_training" size="xs" /></q-item-section>
+                                </q-item>
+                                <q-item
+                                    v-if="checkpoint.status === 'running' || checkpoint.status === 'queued'"
+                                    clickable
+                                    v-ripple
+                                    v-close-popup
+                                    @click="watchCheckpoint(checkpoint)"
+                                >
+                                    <q-item-section>{{ $t('checkpointWatchTraining') }}</q-item-section>
+                                    <q-item-section side><q-icon name="visibility" size="xs" /></q-item-section>
+                                </q-item>
+                                <q-item clickable v-ripple v-close-popup class="text-negative" @click="deleteCheckpoint(checkpoint.id)">
+                                    <q-item-section>{{ $t('workspaceCheckpointDelete') }}</q-item-section>
+                                    <q-item-section side><q-icon color="negative" name="delete" size="xs" /></q-item-section>
+                                </q-item>
+                            </template>
+                        </CheckpointGraph>
+                    </div>
+                    <div class="col-12 col-md-7">
+                        <q-scroll-area style="height: 420px">
+                            <div class="row q-col-gutter-md">
+                                <div class="col-12">
                                 <q-select
                                     outlined
                                     v-model="selectedPolicy"
@@ -380,7 +405,8 @@
                                 </q-form>
                             </q-card-section>
                         </q-card>
-                    </q-scroll-area>
+                        </q-scroll-area>
+                    </div>
                 </div>
                 <q-stepper-navigation align="right" class="q-mt-md q-gutter-x-md">
                     <q-btn @click="step = 1" color="grey" outline :label="$t('back')"/>
@@ -562,6 +588,7 @@ import TrainingDialog from 'src/components/v2/TrainingDialog.vue';
 import TrainingQueuePanel from 'src/components/v2/TrainingQueuePanel.vue';
 import TutorialHint from 'src/components/v2/TutorialHint.vue';
 import HyperparamHelp from 'src/components/v2/HyperparamHelp.vue';
+import CheckpointGraph from 'src/components/v2/CheckpointGraph.vue';
 import { useSocket } from 'src/composables/useSocket';
 import { useI18n } from 'vue-i18n';
 
@@ -704,13 +731,20 @@ const wristSensorOptions = computed(() => {
     return (w?.sensors || []).map(s => ({ label: `${s.name} (id=${s.id})`, value: s.id }));
 });
 
-// --- Computed Properties for Step 2 ---
-const checkpointOptions = computed(() => {
-    return [
-        { label: t('trainPolicyStartWithoutCheckpoint'), value: null },
-        ...checkpoints.value.filter(c => c.task_id === selectedWorkspaceId.value).map(c => ({ label: c.name, value: c.id }))
-    ];
-});
+// --- Step 2: 베이스 체크포인트 그래프 ---
+// 그래프 노드 클릭: finished 면 파인튜닝 베이스로 선택(selectedCheckpoint watch가 정책 로드),
+// 그 외(running/queued/failed) 면 학습 진행 다이얼로그를 연다.
+function onGraphNodeClick(checkpoint) {
+    if (checkpoint.status === 'finished') {
+        selectedCheckpoint.value = checkpoint.id;
+    } else {
+        watchCheckpoint(checkpoint);
+    }
+}
+// "처음부터 학습 (새 브랜치)" — 베이스 없이 zero-base 로 시작.
+function selectZeroBase() {
+    handleCheckpointClear();
+}
 
 const policyOptions = computed(() => {
     const options = policies.value.map(p => ({ label: p.name, value: p.id }));
@@ -870,15 +904,17 @@ function listDatasets() {
 
 // --- Methods for Step 2 ---
 function listCheckpoints() {
+    // 그래프는 전체 상태(finished/running/queued/failed)를 계보로 보여준다.
+    // 파인튜닝 베이스 선택은 onGraphNodeClick에서 finished 만 허용.
     return api.get('/checkpoints', {
         params: {
-            where: `task_id,=,${selectedWorkspaceId.value}|status,=,finished`,
+            where: `task_id,=,${selectedWorkspaceId.value}`,
             order: 'created_at DESC'
         }
     }).then(response => {
         checkpoints.value = response.data.checkpoints.map(c => {
             const policy = policies.value.find(p => p.id === c.policy_id);
-            return {...c, policy: policy};
+            return {...c, policy: policy || c.policy};
         })
     });
 }

@@ -97,7 +97,7 @@ from i18n import (
     t,
 )
 import training_server_install as _ts
-from service import ComposeServiceMixin, HealthServiceMixin, RuntimeServiceMixin, docker_compose_available
+from service import ComposeServiceMixin, HealthServiceMixin, RuntimeServiceMixin, docker_compose_available, get_compose_cmd
 from tools import ToolingMixin
 from update import UpdateManager, CONFIG_UPGRADE_KEY
 
@@ -461,6 +461,17 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self.btn_exit.clicked.connect(self._on_exit_action)
         pill_layout.addWidget(self.btn_exit, 0, Qt.AlignHCenter)
 
+        # Dedicated, always-visible "완전 삭제" (full uninstall) button.
+        self.btn_uninstall = self._create_circle_button(
+            "🗑",
+            "완전 삭제",
+            None,
+        )
+        self.btn_uninstall.clicked.connect(self._on_uninstall_clicked)
+        pill_layout.addWidget(self.btn_uninstall, 0, Qt.AlignHCenter)
+        # The uninstall flow disables/re-enables this control via _uninstall_btn.
+        self._uninstall_btn = self.btn_uninstall
+
         self.state_label = QLabel("", self.pill)
         self.state_label.hide()
 
@@ -543,6 +554,11 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             self.pad_stack_exit,
             self._exit_action_buttons,
         ) = self._create_pad_exit_action_box(t("pad.exit"), self._exit_action, self._set_exit_action)
+        (
+            self.pad_box_uninstall,
+            self.pad_label_uninstall,
+            self.pad_stack_uninstall,
+        ) = self._create_pad_simple_box("완전 삭제 — EasyTrainer를 시스템에서 완전히 제거")
         self._pad_boxes = [
             self.pad_box_sync,
             self.pad_box_folder,
@@ -552,6 +568,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             self.pad_box_training,
             self.pad_box_lang,
             self.pad_box_exit,
+            self.pad_box_uninstall,
         ]
         self._pad_loading_panel = self._create_pad_loading_panel()
         self._pad_update_panel = self._create_pad_update_panel()
@@ -565,6 +582,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             self.pad_label_training,
             self.pad_label_lang,
             self.pad_label_exit,
+            self.pad_label_uninstall,
         ]
         self._pad_desc_stacks = [
             self.pad_stack_sync,
@@ -575,6 +593,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             self.pad_stack_training,
             self.pad_stack_lang,
             self.pad_stack_exit,
+            self.pad_stack_uninstall,
         ]
         self._update_pad_choice_labels()
         self._update_pad_choice_tooltips()
@@ -588,6 +607,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         pad_layout.addWidget(self.pad_box_training)
         pad_layout.addWidget(self.pad_box_lang)
         pad_layout.addWidget(self.pad_box_exit)
+        pad_layout.addWidget(self.pad_box_uninstall)
         try:
             self._right_pad.lower()  # keep the pad behind the pill so pill corners stay round
         except Exception:
@@ -872,6 +892,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                 getattr(self, "pad_box_training", None),
                 getattr(self, "pad_box_lang", None),
                 getattr(self, "pad_box_exit", None),
+                getattr(self, "pad_box_uninstall", None),
             ]
             for idx, box in enumerate(boxes):
                 if box is None or not box.isVisible():
@@ -1030,6 +1051,7 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
             getattr(self, "btn_training", None),
             getattr(self, "btn_lang", None),
             getattr(self, "btn_exit", None),
+            getattr(self, "btn_uninstall", None),
         ]
         for idx, btn in enumerate(buttons):
             if btn is None:
@@ -2266,6 +2288,245 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
         self._ros_domain_input = ros_input
         self._ros_domain_apply_btn = ros_apply
 
+    # ------------------------------------------------------------------
+    # Full uninstall ("완전 삭제")
+    # ------------------------------------------------------------------
+    def _marshal(self, fn):
+        """Run fn on the UI thread from a worker thread (reuses the update
+        manager's Qt-signal dispatcher); falls back to a direct call."""
+        mgr = getattr(self, "_update_manager", None)
+        if mgr is not None:
+            try:
+                mgr._ui_call(fn)
+                return
+            except Exception:
+                pass
+        try:
+            fn()
+        except Exception:
+            pass
+
+    def _collect_uninstall_targets(self) -> dict:
+        """Gather, on the UI thread, every path/name a complete uninstall must
+        remove. Returned dict is handed to the background worker."""
+        program, prefix = get_compose_cmd()
+        rm_paths = [str(APP_HOME)]
+        try:
+            log_dir = Path(SERVICE_LOG_DIR)
+            # /tmp/easytrainer/logs → also drop the /tmp/easytrainer parent
+            if str(log_dir).startswith("/tmp/"):
+                rm_paths.append(str(log_dir))
+                if log_dir.parent != Path("/tmp"):
+                    rm_paths.append(str(log_dir.parent))
+        except Exception:
+            pass
+        desktop_files: list[str] = []
+        for d in (Path.home() / ".local" / "share" / "applications",
+                  Path("/usr/share/applications")):
+            try:
+                if d.is_dir():
+                    for p in d.glob("*.desktop"):
+                        if "easy" in p.name.lower():
+                            desktop_files.append(str(p))
+            except Exception:
+                pass
+        return {
+            "compose_program": program,
+            "compose_prefix": prefix or [],
+            "project_root": str(getattr(self, "project_root", "") or ""),
+            "rm_paths": rm_paths,
+            "desktop_files": desktop_files,
+            "package": "easytrainer",
+        }
+
+    def _on_uninstall_clicked(self):
+        """Confirm (twice), then completely remove EasyTrainer: Docker
+        containers/images/volumes, all data under /opt/easytrainer, the desktop
+        entry, the launcher binary, and the installed deb package. Irreversible."""
+        if getattr(self, "_uninstall_in_progress", False):
+            return
+        data_root = str(APP_HOME)
+        warn = QMessageBox(self)
+        warn.setIcon(QMessageBox.Critical)
+        warn.setWindowTitle("EasyTrainer 완전 삭제")
+        warn.setText("정말로 EasyTrainer를 완전히 삭제할까요?")
+        warn.setInformativeText(
+            "다음 항목이 영구히 제거되며 되돌릴 수 없습니다:\n\n"
+            f"  • 모든 데이터 ({data_root}) — 데이터셋·학습된 모델·DB 포함\n"
+            "  • Docker 컨테이너 / 이미지 / 볼륨\n"
+            "  • 데스크톱 아이콘 및 런처 실행파일\n"
+            "  • 설치된 easytrainer 패키지\n\n"
+            "삭제가 끝나면 런처가 종료됩니다."
+        )
+        warn.setStandardButtons(QMessageBox.Cancel | QMessageBox.Yes)
+        warn.setDefaultButton(QMessageBox.Cancel)
+        try:
+            warn.button(QMessageBox.Yes).setText("삭제")
+            warn.button(QMessageBox.Cancel).setText("취소")
+        except Exception:
+            pass
+        if warn.exec() != QMessageBox.Yes:
+            return
+        # Second gate: require typing the confirmation word so it can't be a
+        # one-click mistake.
+        try:
+            from PySide6.QtWidgets import QInputDialog
+        except Exception:
+            from PyQt6.QtWidgets import QInputDialog
+        text, ok = QInputDialog.getText(
+            self, "최종 확인", "계속하려면 '삭제' 를 입력한 뒤 확인을 누르세요:")
+        if not ok or (text or "").strip() != "삭제":
+            QMessageBox.information(self, "취소됨", "입력이 일치하지 않아 삭제를 취소했습니다.")
+            return
+
+        self._uninstall_in_progress = True
+        try:
+            self._uninstall_btn.setEnabled(False)
+        except Exception:
+            pass
+        ctx = self._collect_uninstall_targets()
+        self._show_uninstall_dialog("EasyTrainer를 삭제하는 중입니다...")
+        import threading
+        threading.Thread(
+            target=self._uninstall_worker, args=(ctx,), daemon=True).start()
+
+    def _uninstall_docker_teardown(self, ctx: dict):
+        """Best-effort removal of containers/images/volumes (runs as the launcher
+        user, which already manages Docker). Failures are non-fatal — the data
+        and package removal below is what really matters."""
+        program = ctx.get("compose_program")
+        prefix = ctx.get("compose_prefix") or []
+        cwd = ctx.get("project_root") or None
+        if program:
+            try:
+                subprocess.run(
+                    [program, *prefix, "down", "--remove-orphans", "--volumes"],
+                    cwd=cwd if cwd else None,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    check=False, timeout=180,
+                )
+            except Exception:
+                pass
+        docker = shutil.which("docker")
+        if not docker:
+            return
+        def _d(args, timeout):
+            try:
+                subprocess.run([docker, *args], stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, check=False, timeout=timeout)
+            except Exception:
+                pass
+        for name in ("easytrainer_frontend", "easytrainer_backend", "easytrainer_ros2"):
+            _d(["rm", "-f", name], 60)
+        for img in ("easytrainer-backend", "easytrainer-backend-base",
+                    "easytrainer-ros2", "easytrainer-ros2-base", "easytrainer-frontend"):
+            _d(["rmi", "-f", img], 120)
+        _d(["volume", "rm", "easytrainer_ui_node_modules"], 30)
+
+    def _build_uninstall_script(self, ctx: dict) -> str:
+        """Build the single root shell script run via one pkexec prompt: purge the
+        deb package, then delete data dirs, desktop entries, and refresh caches.
+        Every step is best-effort (|| true) so one failure doesn't abort the rest."""
+        pkg = shlex.quote(ctx.get("package", "easytrainer"))
+        parts = ["export DEBIAN_FRONTEND=noninteractive"]
+        parts.append(
+            "(apt-get remove -y --purge %s || dpkg --purge %s || true) >/dev/null 2>&1"
+            % (pkg, pkg)
+        )
+        for p in ctx.get("rm_paths", []):
+            if p:
+                parts.append("rm -rf %s || true" % shlex.quote(p))
+        for p in ctx.get("desktop_files", []):
+            if p:
+                parts.append("rm -f %s || true" % shlex.quote(p))
+        parts.append(
+            "update-desktop-database /usr/share/applications >/dev/null 2>&1 || true")
+        return " ; ".join(parts)
+
+    def _uninstall_worker(self, ctx: dict):
+        ok = True
+        try:
+            self._marshal(lambda: self._set_uninstall_text(
+                "Docker 컨테이너·이미지·볼륨을 정리하는 중입니다..."))
+            self._uninstall_docker_teardown(ctx)
+            self._marshal(lambda: self._set_uninstall_text(
+                "시스템 파일과 패키지를 제거하는 중입니다...\n"
+                "(관리자 인증 창이 뜨면 승인해 주세요)"))
+            script = self._build_uninstall_script(ctx)
+            ok = self._run_pkexec_shell_cmd(script, timeout=300)
+        except Exception:
+            ok = False
+        self._marshal(lambda: self._finish_uninstall(ok))
+
+    def _finish_uninstall(self, ok: bool):
+        self._hide_uninstall_dialog()
+        self._uninstall_in_progress = False
+        if ok:
+            # The project dir is gone now — don't let closeEvent try to run
+            # `docker compose down` against a deleted compose file on the way out.
+            self._skip_shutdown_on_exit = True
+            QMessageBox.information(
+                self, "삭제 완료",
+                "EasyTrainer가 시스템에서 완전히 제거되었습니다. 런처를 종료합니다.")
+            try:
+                QApplication.quit()
+            except Exception:
+                pass
+        else:
+            try:
+                self._uninstall_btn.setEnabled(True)
+            except Exception:
+                pass
+            QMessageBox.warning(
+                self, "삭제 실패",
+                "삭제 중 문제가 발생했거나 관리자 인증이 취소되었습니다.\n"
+                "로그를 확인한 뒤 다시 시도해 주세요.")
+
+    def _show_uninstall_dialog(self, text: str):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("완전 삭제")
+        dlg.setModal(True)
+        try:
+            dlg.setWindowFlag(Qt.WindowCloseButtonHint, False)
+        except Exception:
+            pass
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(20, 20, 20, 20)
+        lay.setSpacing(12)
+        lbl = QLabel(text, dlg)
+        lbl.setWordWrap(True)
+        lbl.setStyleSheet("color: #e0e0e0; font-size: 12px;")
+        bar = QProgressBar(dlg)
+        bar.setRange(0, 0)  # indeterminate
+        bar.setTextVisible(False)
+        lay.addWidget(lbl)
+        lay.addWidget(bar)
+        try:
+            dlg.setFixedWidth(380)
+        except Exception:
+            pass
+        self._uninstall_dialog = dlg
+        self._uninstall_dialog_label = lbl
+        dlg.show()
+
+    def _set_uninstall_text(self, text: str):
+        lbl = getattr(self, "_uninstall_dialog_label", None)
+        if lbl is not None:
+            try:
+                lbl.setText(text)
+            except Exception:
+                pass
+
+    def _hide_uninstall_dialog(self):
+        dlg = getattr(self, "_uninstall_dialog", None)
+        if dlg is not None:
+            try:
+                dlg.close()
+            except Exception:
+                pass
+        self._uninstall_dialog = None
+        self._uninstall_dialog_label = None
+
     def _ensure_choice_indicator(self, btn: QPushButton):
         indicator = getattr(btn, "_choice_indicator", None)
         if indicator is not None:
@@ -3102,7 +3363,28 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                     pass
 
         self.show_update_progress_panel("Docker 이미지를 빌드하는 중입니다...")
-        self.run_compose(["build", "--no-cache"], on_finish=_after_build)
+        # rebuild_images.sh 가 있으면 base+modules 두 단계를 처리한다.
+        # (`docker compose build` 만으로는 base 이미지가 없는 신규 환경에서
+        # docker.io pull 실패함.)
+        rebuild_script = self.project_root / "scripts" / "rebuild_images.sh"
+        proc_idle = self.process is None or self.process.state() == QProcess.NotRunning
+        if rebuild_script.is_file() and proc_idle:
+            self.append_log(f"[UPGRADE] bash {rebuild_script} all ...")
+            self.process = QProcess(self)
+            self.process.setProgram("bash")
+            self.process.setArguments([str(rebuild_script), "all"])
+            self.process.setWorkingDirectory(str(self.project_root))
+            self.process.readyReadStandardOutput.connect(
+                lambda: self._read_stream(self.process, False)
+            )
+            self.process.readyReadStandardError.connect(
+                lambda: self._read_stream(self.process, True)
+            )
+            self.process.finished.connect(_after_build)
+            self.process.finished.connect(lambda *_: self.update_state_label())
+            self.process.start()
+        else:
+            self.run_compose(["build", "--no-cache"], on_finish=_after_build)
 
     def _show_upgrade_error(self, detail: str):
         self._upgrade_in_progress = False
@@ -4048,7 +4330,11 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                 row.setContentsMargins(0, 0, 0, 0)
                 row.setSpacing(6)
 
-                name_label = QLabel(mod.name)
+                name_key = f"catalog.{mod.id}.name"
+                name_text = t(name_key)
+                if name_text == name_key:
+                    name_text = mod.name
+                name_label = QLabel(name_text)
                 name_label.setStyleSheet("font-weight: 600; font-size: 12px;")
                 row.addWidget(name_label)
 
@@ -4127,7 +4413,11 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                 row_v.addLayout(row)
 
                 # Description row (only when present, dim and word-wrapped).
-                desc_text = (mod.description or "").strip()
+                desc_key = f"catalog.{mod.id}.desc"
+                desc_text = t(desc_key)
+                if desc_text == desc_key:
+                    desc_text = mod.description or ""
+                desc_text = desc_text.strip()
                 if desc_text:
                     desc_label = QLabel(desc_text)
                     desc_label.setStyleSheet("color: #8b9aab; font-size: 10px; font-weight: 400;")

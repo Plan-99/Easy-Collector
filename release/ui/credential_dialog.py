@@ -20,6 +20,7 @@ from app_context import (
 )
 
 from modules import save_credential
+from i18n import t
 
 
 class CredentialDialog(QDialog):
@@ -33,7 +34,7 @@ class CredentialDialog(QDialog):
         self._saved = False
         self._skipped = False
 
-        self.setWindowTitle(spec.get("title") or f"{module_id} 설정")
+        self.setWindowTitle(spec.get("title") or t("cred.windowTitle", module_id=module_id))
         self.setModal(True)
         self.setMinimumWidth(500)
 
@@ -43,11 +44,11 @@ class CredentialDialog(QDialog):
 
         # Module attribution line — small + dim, so the user knows which
         # module is asking for this.
-        attribution = QLabel(f"<span style='color:#9ca3af;'>모듈: <b>{module_id}</b></span>")
+        attribution = QLabel(t("cred.moduleAttribution", module_id=module_id))
         attribution.setTextFormat(Qt.TextFormat.RichText)
         root.addWidget(attribution)
 
-        title = QLabel(spec.get("title") or "추가 설정 필요")
+        title = QLabel(spec.get("title") or t("cred.titleFallback"))
         title_font = title.font()
         title_font.setPointSize(title_font.pointSize() + 2)
         title_font.setBold(True)
@@ -85,7 +86,7 @@ class CredentialDialog(QDialog):
 
         # Input field
         input_cfg = spec.get("input") or {}
-        input_label_text = input_cfg.get("label") or "값 입력"
+        input_label_text = input_cfg.get("label") or t("cred.inputLabelFallback")
         input_label = QLabel(input_label_text)
         root.addWidget(input_label)
 
@@ -107,10 +108,10 @@ class CredentialDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_row.addStretch(1)
         if spec.get("skippable", False):
-            skip_btn = QPushButton(spec.get("skip_label") or "나중에")
+            skip_btn = QPushButton(spec.get("skip_label") or t("cred.skipLater"))
             skip_btn.clicked.connect(self._on_skip)
             btn_row.addWidget(skip_btn)
-        save_btn = QPushButton(spec.get("save_label") or "저장")
+        save_btn = QPushButton(spec.get("save_label") or t("cred.save"))
         save_btn.setDefault(True)
         save_btn.clicked.connect(self._on_save)
         btn_row.addWidget(save_btn)
@@ -133,7 +134,7 @@ class CredentialDialog(QDialog):
     def _on_save(self) -> None:
         value = self._input.text().strip()
         if not value:
-            self._show_error("값을 입력하세요.")
+            self._show_error(t("cred.errEmpty"))
             return
         validate = (self._spec.get("input") or {}).get("validate")
         if validate:
@@ -141,14 +142,14 @@ class CredentialDialog(QDialog):
                 if not re.match(validate, value):
                     err = (self._spec.get("input") or {}).get(
                         "validate_message",
-                        "입력 형식이 올바르지 않습니다.",
+                        t("cred.errInvalidFormat"),
                     )
                     self._show_error(err)
                     return
             except re.error:
                 pass  # bad regex in spec — don't block the user
         if not save_credential(self._spec, value):
-            self._show_error("저장 중 오류가 발생했습니다. 권한을 확인하세요.")
+            self._show_error(t("cred.errSaveFailed"))
             return
         self._saved = True
         self.accept()
@@ -183,8 +184,8 @@ def prompt_credentials(parent, module_id: str, specs: list[dict]) -> dict:
             try:
                 QMessageBox.information(
                     parent,
-                    "저장 완료",
-                    f"{spec.get('title') or cred_id}이(가) 저장되었습니다.",
+                    t("cred.savedTitle"),
+                    t("cred.savedBody", name=spec.get("title") or cred_id),
                 )
             except Exception:
                 pass

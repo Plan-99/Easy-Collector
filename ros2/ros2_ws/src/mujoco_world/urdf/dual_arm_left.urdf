@@ -1,0 +1,105 @@
+<?xml version="1.0"?>
+<!--
+  EasyTrainer Dual-Arm Assembly — LEFT arm URDF (standalone single_arm).
+  Kinematic model for the left robot of dual_arm_assembly_test. Joints are the
+  same left_* names published on /da_asm_left; base offset (+y 0.15) baked into
+  left_joint1 so FK matches assets/dual_arm_scene.xml. Single EE 'ee'.
+  joints_to_lock: ['left_gripper','left_gripper_mirror'] -> 6-DOF reduced model.
+-->
+<robot name="dual_arm_left">
+
+  <link name="base_link">
+    <inertial><mass value="2.0"/><origin xyz="0 0 0.05" rpy="0 0 0"/>
+      <inertia ixx="0.005" iyy="0.005" izz="0.004" ixy="0" ixz="0" iyz="0"/></inertial>
+  </link>
+
+  <link name="left_link1">
+    <inertial><mass value="0.5"/><origin xyz="0 0 0.05" rpy="0 0 0"/>
+      <inertia ixx="0.002" iyy="0.002" izz="0.0005" ixy="0" ixz="0" iyz="0"/></inertial>
+  </link>
+  <joint name="left_joint1" type="revolute">
+    <origin xyz="0 0.15 0.10" rpy="0 0 0"/>
+    <parent link="base_link"/><child link="left_link1"/>
+    <axis xyz="0 0 1"/><limit lower="-3.14" upper="3.14" effort="100" velocity="5"/>
+  </joint>
+
+  <link name="left_link2">
+    <inertial><mass value="0.5"/><origin xyz="0.10 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.0005" iyy="0.005" izz="0.005" ixy="0" ixz="0" iyz="0"/></inertial>
+  </link>
+  <joint name="left_joint2" type="revolute">
+    <origin xyz="0 0 0.10" rpy="0 0 0"/>
+    <parent link="left_link1"/><child link="left_link2"/>
+    <axis xyz="0 -1 0"/><limit lower="-1.57" upper="1.57" effort="100" velocity="5"/>
+  </joint>
+
+  <link name="left_link3">
+    <inertial><mass value="0.5"/><origin xyz="0.09 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.0004" iyy="0.004" izz="0.004" ixy="0" ixz="0" iyz="0"/></inertial>
+  </link>
+  <joint name="left_joint3" type="revolute">
+    <origin xyz="0.20 0 0" rpy="0 0 0"/>
+    <parent link="left_link2"/><child link="left_link3"/>
+    <axis xyz="0 -1 0"/><limit lower="-2.40" upper="0.50" effort="100" velocity="5"/>
+  </joint>
+
+  <link name="left_link4">
+    <inertial><mass value="0.5"/><origin xyz="0.04 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.0003" iyy="0.001" izz="0.001" ixy="0" ixz="0" iyz="0"/></inertial>
+  </link>
+  <joint name="left_joint4" type="revolute">
+    <origin xyz="0.18 0 0" rpy="0 0 0"/>
+    <parent link="left_link3"/><child link="left_link4"/>
+    <axis xyz="1 0 0"/><limit lower="-3.14" upper="3.14" effort="100" velocity="5"/>
+  </joint>
+
+  <link name="left_link5">
+    <inertial><mass value="0.5"/><origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.0002" iyy="0.0008" izz="0.0008" ixy="0" ixz="0" iyz="0"/></inertial>
+  </link>
+  <joint name="left_joint5" type="revolute">
+    <origin xyz="0.08 0 0" rpy="0 0 0"/>
+    <parent link="left_link4"/><child link="left_link5"/>
+    <axis xyz="0 -1 0"/><limit lower="-1.40" upper="1.40" effort="100" velocity="5"/>
+  </joint>
+
+  <link name="left_link6">
+    <inertial><mass value="0.2"/><origin xyz="0.020 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.0001" iyy="0.0002" izz="0.0002" ixy="0" ixz="0" iyz="0"/></inertial>
+  </link>
+  <joint name="left_joint6" type="revolute">
+    <origin xyz="0.06 0 0" rpy="0 0 0"/>
+    <parent link="left_link5"/><child link="left_link6"/>
+    <axis xyz="1 0 0"/><limit lower="-3.14" upper="3.14" effort="100" velocity="5"/>
+  </joint>
+
+  <link name="left_gripper_base">
+    <inertial><mass value="0.1"/><origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.00005" iyy="0.00003" izz="0.00006" ixy="0" ixz="0" iyz="0"/></inertial>
+  </link>
+  <joint name="left_joint_gripper_base" type="fixed">
+    <origin xyz="0.045 0 0" rpy="0 0 0"/>
+    <parent link="left_link6"/><child link="left_gripper_base"/>
+  </joint>
+
+  <link name="left_finger_left">
+    <inertial><mass value="0.03"/><origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.00001" iyy="0.00001" izz="0.000005" ixy="0" ixz="0" iyz="0"/></inertial>
+  </link>
+  <joint name="left_gripper" type="prismatic">
+    <origin xyz="0.030 0.018 0" rpy="0 0 0"/>
+    <parent link="left_gripper_base"/><child link="left_finger_left"/>
+    <axis xyz="0 1 0"/><limit lower="0" upper="0.04" effort="50" velocity="0.5"/>
+  </joint>
+
+  <link name="left_finger_right">
+    <inertial><mass value="0.03"/><origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.00001" iyy="0.00001" izz="0.000005" ixy="0" ixz="0" iyz="0"/></inertial>
+  </link>
+  <joint name="left_gripper_mirror" type="prismatic">
+    <origin xyz="0.030 -0.018 0" rpy="0 0 0"/>
+    <parent link="left_gripper_base"/><child link="left_finger_right"/>
+    <axis xyz="0 -1 0"/><limit lower="0" upper="0.04" effort="50" velocity="0.5"/>
+  </joint>
+
+</robot>

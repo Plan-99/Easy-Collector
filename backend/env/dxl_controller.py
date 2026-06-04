@@ -4,6 +4,24 @@ import threading
 import time
 
 
+# Dynamixel X-Series control table addresses
+ADDR_OPERATING_MODE = 11        # EEPROM, 1 byte — torque off needed for write
+ADDR_CURRENT_LIMIT = 38         # EEPROM, 2 bytes — torque off needed for write
+ADDR_TORQUE_ENABLE = 64         # RAM, 1 byte
+ADDR_STATUS_RETURN_LEVEL = 68   # RAM, 1 byte
+ADDR_GOAL_CURRENT = 102         # RAM, 2 bytes signed
+ADDR_GOAL_POSITION = 116        # RAM, 4 bytes
+ADDR_PRESENT_POSITION = 132     # RAM, 4 bytes
+
+# Operating modes
+OP_MODE_CURRENT = 0
+OP_MODE_VELOCITY = 1
+OP_MODE_POSITION = 3
+OP_MODE_EXT_POSITION = 4
+OP_MODE_CURRENT_POSITION = 5
+OP_MODE_PWM = 16
+
+
 class DxlController:
     def __init__(self, serial_port, dxl_ids, gripper_dxl_ids=[], baudrate=4000000):
         print(f"Initializing DxlController on port {serial_port} with IDs {dxl_ids}")
@@ -21,13 +39,13 @@ class DxlController:
         if not self.portHandler.setBaudRate(baudrate):
             print("[ERROR] Failed to set baudrate")
             raise Exception("Failed to set baudrate")
-        
-        self.ADDR_PRESENT_POSITION = 132  # 예시: X-Series의 Present Position 주소
-        self.LEN_PRESENT_POSITION = 4     # 예시: X-Series의 Present Position 길이 (bytes)
-        
+
+        self.ADDR_PRESENT_POSITION = ADDR_PRESENT_POSITION
+        self.LEN_PRESENT_POSITION = 4
+
         self.syncRead = GroupSyncRead(self.portHandler, self.packetHandler,
                                       self.ADDR_PRESENT_POSITION, self.LEN_PRESENT_POSITION)
-        
+
         for dxl_id in self.dxl_ids:
             add_param_result = self.syncRead.addParam(dxl_id)
             if add_param_result != True:
@@ -35,6 +53,179 @@ class DxlController:
 
         self.closed = False
         self.controlled = False
+
+        # Status Return Level 강제 정규화. ROBOTIS lerobot OMX leader 같은 fast-sync
+        # 설정에서는 모터의 Status Return Level 을 0 으로 깔아둬서 WRITE 명령에
+        # status packet 이 안 오고 "There is no status packet" 으로 죽는다. RAM 영역이라
+        # 우리 측에서 매 세션 시작 시 2 (= 모든 명령에 응답) 로 끌어올린다.
+        self.ensure_status_return_level(target=2)
+
+        # 모터별 현재 Operating Mode 캐시 — 리더 텔레옵에서 Position/Current 분기에 사용.
+        # 시작 시점 한번 읽어두고, set_operating_mode 호출 시 캐시 업데이트.
+        self.operating_modes = {}
+        for dxl_id in self.dxl_ids:
+            try:
+                self.operating_modes[dxl_id] = self.read_operating_mode(dxl_id)
+            except Exception as e:
+                print(f"[WARN] could not read operating_mode for ID {dxl_id}: {e}", flush=True)
+                self.operating_modes[dxl_id] = OP_MODE_POSITION
+        print(f"[DxlController] operating_modes={self.operating_modes}", flush=True)
+
+    # ------------------------------------------------------------------
+    # Operating mode / current primitives (mode-aware leader teleop 용)
+    # ------------------------------------------------------------------
+
+    def read_operating_mode(self, dxl_id):
+        with self.port_lock:
+            value, result, err = self.packetHandler.read1ByteTxRx(
+                self.portHandler, dxl_id, ADDR_OPERATING_MODE
+            )
+        if result != COMM_SUCCESS:
+            raise Exception(f"read_operating_mode comm {result} for ID {dxl_id}")
+        if err != 0:
+            raise Exception(f"read_operating_mode err {err} for ID {dxl_id}")
+        return value
+
+    def read_status_return_level(self, dxl_id):
+        """Status Return Level (addr 68) 읽기. 0/1 인 모터는 READ 자체가 실패 →
+        그 경우 None 반환."""
+        try:
+            with self.port_lock:
+                value, result, err = self.packetHandler.read1ByteTxRx(
+                    self.portHandler, dxl_id, ADDR_STATUS_RETURN_LEVEL
+                )
+            if result != COMM_SUCCESS or err != 0:
+                return None
+            return value
+        except Exception:
+            return None
+
+    def ensure_status_return_level(self, target=2):
+        """모든 모터의 Status Return Level 을 target 이상으로 끌어올린다.
+
+        Status Return Level 의미:
+          0 = PING 만 응답 (READ/WRITE 응답 없음)
+          1 = PING + READ 응답 (WRITE 응답 없음)
+          2 = 모든 명령에 응답 (기본값)
+
+        ROBOTIS lerobot OMX leader 등 fast-sync write 셋업에서는 0 으로 깔아두는데,
+        그 상태로 우리 워크플로우(writeTxRx 사용) 가 들어오면 "There is no status packet"
+        으로 매번 죽는다. RAM 영역이라 매 세션 시작 시 2 로 끌어올리고, 전원
+        사이클 시 다시 기본값으로 돌아간다.
+
+        level=0 인 모터에는 write 응답이 안 오므로 write1ByteTxOnly 를 쓴다.
+        """
+        for dxl_id in self.dxl_ids:
+            current = self.read_status_return_level(dxl_id)
+            if current is not None and current >= target:
+                continue
+            try:
+                with self.port_lock:
+                    # write1ByteTxOnly: status packet 안 기다림 → level=0 모터에도 동작.
+                    self.packetHandler.write1ByteTxOnly(
+                        self.portHandler, dxl_id, ADDR_STATUS_RETURN_LEVEL, target
+                    )
+                time.sleep(0.02)
+                verify = self.read_status_return_level(dxl_id)
+                print(
+                    f"[status_return_level] ID {dxl_id}: {current} → {verify}",
+                    flush=True,
+                )
+            except Exception as e:
+                print(f"[WARN] failed to raise status_return_level for ID {dxl_id}: {e}", flush=True)
+
+    def _write_torque(self, dxl_id, value):
+        with self.port_lock:
+            result, err = self.packetHandler.write1ByteTxRx(
+                self.portHandler, dxl_id, ADDR_TORQUE_ENABLE, value
+            )
+        if result != COMM_SUCCESS:
+            raise Exception(f"torque write comm {result} for ID {dxl_id}")
+        if err != 0:
+            raise Exception(f"torque write err {err} for ID {dxl_id}")
+
+    def enable_torque_for_ids(self, ids):
+        for dxl_id in ids:
+            self._write_torque(dxl_id, 1)
+            time.sleep(0.005)
+
+    def disable_torque_for_ids(self, ids):
+        for dxl_id in ids:
+            self._write_torque(dxl_id, 0)
+            time.sleep(0.005)
+
+    def set_operating_mode(self, dxl_id, mode):
+        """Operating Mode 변경. EEPROM 영역이라 torque off 후 써야 한다.
+
+        호출 후에는 모터의 torque 가 OFF 상태로 남는다. 다시 켜고 싶으면 별도로
+        enable_torque_for_ids 를 호출할 것.
+        """
+        try:
+            self._write_torque(dxl_id, 0)
+        except Exception:
+            pass
+        time.sleep(0.005)
+        with self.port_lock:
+            result, err = self.packetHandler.write1ByteTxRx(
+                self.portHandler, dxl_id, ADDR_OPERATING_MODE, mode
+            )
+        if result != COMM_SUCCESS:
+            raise Exception(f"set_operating_mode comm {result} for ID {dxl_id}")
+        if err != 0:
+            raise Exception(f"set_operating_mode err {err} for ID {dxl_id}")
+        self.operating_modes[dxl_id] = mode
+
+    def write_goal_current(self, dxl_id, current):
+        """2-byte signed Goal_Current."""
+        if current < 0:
+            current = current + 65536  # 2's complement
+        with self.port_lock:
+            result, err = self.packetHandler.write2ByteTxRx(
+                self.portHandler, dxl_id, ADDR_GOAL_CURRENT, current
+            )
+        if result != COMM_SUCCESS:
+            raise Exception(f"goal_current comm {result} for ID {dxl_id}")
+        if err != 0:
+            raise Exception(f"goal_current err {err} for ID {dxl_id}")
+
+    def write_current_limit(self, dxl_id, limit):
+        """2-byte unsigned Current_Limit. EEPROM — torque off 필요."""
+        try:
+            self._write_torque(dxl_id, 0)
+        except Exception:
+            pass
+        time.sleep(0.005)
+        with self.port_lock:
+            result, err = self.packetHandler.write2ByteTxRx(
+                self.portHandler, dxl_id, ADDR_CURRENT_LIMIT, limit
+            )
+        if result != COMM_SUCCESS:
+            raise Exception(f"current_limit comm {result} for ID {dxl_id}")
+        if err != 0:
+            raise Exception(f"current_limit err {err} for ID {dxl_id}")
+
+    def write_goal_position(self, dxl_id, position):
+        with self.port_lock:
+            result, err = self.packetHandler.write4ByteTxRx(
+                self.portHandler, dxl_id, ADDR_GOAL_POSITION, position
+            )
+        if result != COMM_SUCCESS:
+            raise Exception(f"goal_position comm {result} for ID {dxl_id}")
+        if err != 0:
+            raise Exception(f"goal_position err {err} for ID {dxl_id}")
+
+    def is_current_mode(self, dxl_id):
+        return self.operating_modes.get(dxl_id) == OP_MODE_CURRENT
+
+    def is_position_mode(self, dxl_id):
+        return self.operating_modes.get(dxl_id) in (OP_MODE_POSITION, OP_MODE_EXT_POSITION)
+
+    def is_current_position_mode(self, dxl_id):
+        return self.operating_modes.get(dxl_id) == OP_MODE_CURRENT_POSITION
+
+    # ------------------------------------------------------------------
+    # Legacy bulk torque helpers (기존 호출처 호환 — 모든 ID 일괄 처리)
+    # ------------------------------------------------------------------
 
     def enable_torque(self):
         torque_enable_address = 64  # MX, X 시리즈 기준
@@ -62,6 +253,12 @@ class DxlController:
         print(f"[remove_torque] called on dxl_ids={self.dxl_ids}", flush=True)
         traceback.print_stack()
         for index, dxl_id in enumerate(self.dxl_ids):
+            # current-based 모드(0=Current, 5=Current-based Position)인 그리퍼는
+            # 스프링백을 유지해야 하므로 torque off 하지 않는다.
+            if dxl_id in self.gripper_dxl_ids and self.operating_modes.get(dxl_id) in (
+                OP_MODE_CURRENT, OP_MODE_CURRENT_POSITION
+            ):
+                continue
             with self.port_lock:
                 dxl_comm_result, dxl_error = self.packetHandler.write1ByteTxRx(self.portHandler, dxl_id, torque_enable_address, 0)
             if dxl_comm_result != dxl.COMM_SUCCESS:

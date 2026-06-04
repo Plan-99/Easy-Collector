@@ -130,6 +130,10 @@ export function useRobot(robot, robotOnCallback = () => {}) {
       })
       .catch((error) => {
         clearStartWatchdog();
+        // 사용자가 시작 중 토글로 취소한 경우, stopRobot 이 이미 status 를
+        // 'loading' → 'off' 로 옮긴 뒤 backend 가 start 를 거부/에러 반환할 수
+        // 있다. 이미 'loading' 이 아닌 상태에선 error 로 덮어쓰지 않는다.
+        if (robot.status !== 'loading') return;
         const msg = formatError(error);
         console.error('Error starting robot:', msg);
         robot.lastError = msg;

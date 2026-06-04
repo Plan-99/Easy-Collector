@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@quasar/extras": "^1.16.4",
+    "@vue-flow/core": "^1.42.0",
     "axios": "^1.2.1",
     "chart.js": "^4.5.0",
     "pinia": "^2.0.11",

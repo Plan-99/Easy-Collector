@@ -1,0 +1,131 @@
+---
+title: 비전 맵 (Vision Map)
+description: ACT 정책이 어디를 보고 있는지 카메라 영상 위에 히트맵으로 시각화. 에피소드 재생과 실시간 추론 두 곳에서 모두 동작.
+section: inference
+order: 4
+sourceRefs:
+  - frontend/src/components/v2/EpisodeViewer.vue
+  - frontend/src/components/v2/MonitoringWindow.vue
+  - frontend/src/components/v2/WebRtcVideo.vue
+  - backend/api/process/vision_map.py
+  - backend/api/process/checkpoint_test.py
+  - backend/api/routes/checkpoint.py
+related:
+  - /docs/inference/run
+  - /docs/datasets/episode-edit
+lastVerifiedVersion: 5.0.0
+---
+
+Vision Map은 학습된 **ACT 정책**이 각 카메라 영상의 어느 영역에 주목해 액션을 만들고 있는지를 컬러 히트맵으로 영상 위에 겹쳐 보여주는 기능입니다. 데이터셋이 부족한 영역, 정책이 잘못된 단서에 끌리는 경우 등을 눈으로 바로 확인할 수 있어 디버깅에 유용합니다.
+
+<Callout type="info">
+**현재 Vision Map은 ACT 정책만 지원합니다.** Diffusion / PI0 / VLAsEn 등 다른 정책 타입은 체크포인트 선택 셀렉트에 표시되지 않습니다.
+</Callout>
+
+## 두 가지 사용 위치
+
+| 위치 | 무엇을 보여주나 |
+|---|---|
+| **에피소드 재생** (데이터셋 탭의 EpisodePanel) | 수집된 에피소드의 매 프레임에 대해 미리 계산해 둔 히트맵을 슬라이더와 동기화해 재생 |
+| **실시간 추론** (워크스페이스의 MonitoringWindow) | 추론이 도는 동안 매 forward에서 추출한 히트맵을 카메라 영상 위에 즉시 오버레이 |
+
+두 경우 모두 같은 ACT 체크포인트의 가중치를 사용합니다.
+
+## 두 가지 시각화 방식 (Method)
+
+| 방식 | 어떤 정보 | 언제 쓰면 좋은가 |
+|---|---|---|
+| **Attention** | ACT의 cross-attention 분포 — transformer가 어떤 이미지 패치 쿼리에 가중치를 많이 주는지 | 정책이 영상의 어느 위치를 "참조"하고 있는지 보고 싶을 때 |
+| **Grad-CAM** | 액션 출력 손실에 대한 마지막 conv feature의 그래디언트 매그니튜드 | 정책이 영상의 어디로부터 액션의 "변화"를 끌어내는지 보고 싶을 때 |
+
+처음 사용한다면 **Attention** 부터 켜 보세요. cross-attention 가중치는 forward에 hook을 걸어 추출하므로 추가 비용이 거의 없습니다.
+
+## 에피소드 재생에서 켜기
+
+데이터셋 탭에서 에피소드 행을 클릭해 [EpisodePanel](/docs/datasets/episode-edit)을 열어두고 진행합니다.
+
+<Steps>
+1. **재생 슬라이더 아래의 Vision Map 체크박스 옆 ⚙️ 버튼을 누릅니다.**
+
+   **Vision Map 설정** 다이얼로그가 열립니다.
+
+   <DocsImage
+     src="/docs/inference/vision-map-01-settings.png"
+     alt="Vision Map 설정 다이얼로그 — Checkpoint select + Method select(Attention / Grad-CAM)"
+     status="missing"
+   />
+
+2. **Checkpoint를 고릅니다.**
+
+   현재 워크스페이스(=task)에 묶인 **학습 완료된 ACT 체크포인트**만 후보로 보입니다. 없으면 *No finished ACT checkpoints for this workspace* 가 표시됩니다.
+
+3. **Method를 Attention / Grad-CAM 중에서 선택하고 다이얼로그를 닫습니다.**
+
+4. **Vision Map 체크박스를 켭니다.**
+
+   백엔드가 에피소드 전체 프레임에 대해 히트맵을 미리 계산합니다 (precompute). 계산이 끝날 때까지 영상 위에 **비전 맵 준비 중...** 스피너와 진행 표시(`done / total`)가 표시되고 재생이 일시정지됩니다.
+
+   <DocsImage
+     src="/docs/inference/vision-map-02-precompute.png"
+     alt="비전 맵 준비 중 — 카메라 영상 위 스피너 + 진행 표시"
+     status="missing"
+   />
+
+5. **준비가 끝나면 자동으로 재생이 재개되고 슬라이더와 함께 히트맵이 흐릅니다.**
+
+   슬라이더로 임의 프레임으로 이동해도 캐시에서 즉시 히트맵이 표시됩니다.
+
+   <DocsImage
+     src="/docs/inference/vision-map-03-overlay.png"
+     alt="카메라 영상 위에 컬러 히트맵 오버레이가 적용된 모습"
+     status="missing"
+   />
+</Steps>
+
+<Callout type="info">
+Checkpoint나 Method를 바꾸면 이전 precompute는 즉시 취소되고 새로운 계산이 시작됩니다. 한 번에 하나의 에피소드만 계산하기 때문입니다.
+</Callout>
+
+## 실시간 추론에서 켜기
+
+[추론 실행](/docs/inference/run) 중에 MonitoringWindow 상단의 **Vision Map** 드롭다운으로 즉시 토글할 수 있습니다.
+
+<Steps>
+1. **추론을 시작합니다.**
+
+   현재 체크포인트가 ACT일 때만 우측 상단에 **Vision Map** 드롭다운이 보입니다. (ACT가 아니면 버튼이 숨겨집니다.)
+
+2. **Vision Map 드롭다운을 펼칩니다.**
+
+   세 가지 옵션이 있습니다.
+
+   - **끔** — 오버레이를 끕니다 (기본값)
+   - **Attention** — cross-attention 히트맵
+   - **Grad-CAM** — Grad-CAM 히트맵
+
+   <DocsImage
+     src="/docs/inference/vision-map-04-inference-dropdown.png"
+     alt="추론 중 MonitoringWindow — Vision Map 드롭다운 펼친 모습"
+     status="missing"
+   />
+
+3. **원하는 Method를 누르면 즉시 카메라 영상 위에 히트맵이 오버레이됩니다.**
+
+   추론은 멈추지 않고 계속 돌면서, 매 forward의 attention/grad-cam이 실시간으로 영상에 표시됩니다. 다시 **끔**을 누르면 오버레이만 사라지고 추론은 그대로 유지됩니다.
+
+   <DocsImage
+     src="/docs/inference/vision-map-05-inference-overlay.png"
+     alt="추론 중 카메라 영상 위에 Attention 히트맵이 실시간 오버레이된 모습"
+     status="missing"
+   />
+</Steps>
+
+<Callout type="tip">
+Attention은 forward에 등록한 hook이라 추론 속도에 거의 영향을 주지 않습니다. Grad-CAM은 추가 backward를 계산하므로 Hz가 약간 떨어질 수 있어요. 추론 동작 자체를 변화시키지는 않으며 오버레이는 픽셀 단위로 영상과 정렬되도록 동일한 root 안에서 렌더링됩니다.
+</Callout>
+
+## 트러블슈팅
+
+- **Vision Map 체크박스가 회색이고 켜지지 않습니다.** Checkpoint가 아직 선택되지 않은 상태입니다. ⚙️ 버튼으로 다이얼로그를 열어 워크스페이스의 ACT 체크포인트를 먼저 고르세요.
+- **추론 중에 Vision Map 드롭다운이 보이지 않습니다.** 현재 추론 중인 정책이 ACT가 아닙니다. Diffusion / PI0 등은 아직 지원하지 않습니다.
+- **빈 화면(검은색)만 오버레이됩니다.** 카메라 frame 해상도와 학습 시 입력 해상도가 다른 경우 일시적으로 mismatch가 발생할 수 있습니다. 추론을 한 번 멈췄다가 다시 시작하면 백엔드가 입력 shape 기준으로 히트맵 해상도를 다시 맞춥니다.

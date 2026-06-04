@@ -26,6 +26,8 @@ EasyTrainer의 **단일 정보원(Single Source of Truth)**. Slack·메모리에
 | 2026-04-28 | [Launcher 인증 & 모듈 Entitlement](design-docs/2026-04-28_launcher-auth.md) | 시리얼 키 → Google OAuth Device Flow + Bearer 토큰 |
 | 2026-05-08 | [정적 / 동적 카메라 구분](design-docs/2026-05-08_camera-static-vs-dynamic.md) | crop은 정적 카메라 전용, segmentation은 둘 다 OK |
 | 2026-05-29 | [Curriculum 자가 학습](design-docs/2026-05-29_curriculum-self-training.md) | Planner 위 Curriculum 계층 — 자가 롤아웃·수집·재학습 루프 |
+| 2026-06-02 | [원격(SSH) 로봇 드라이버](design-docs/2026-06-02_remote-ssh-robot-driver.md) | 온보드 PC 로봇을 SSH provisioning+launch 로 구동, 토픽만 DDS 로 소비 (OMY) |
+| 2026-06-04 | [모듈 설치→로봇 추가→실행 플로우](design-docs/2026-06-04_robot-add-flow.md) | manifest→폼→settings→start 전 경로 + custom field 동기화 체크리스트 |
 
 ## 그 외 문서
 

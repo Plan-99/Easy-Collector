@@ -36,7 +36,12 @@ services:
     privileged: true
     runtime: nvidia
     environment:
-      - PYTHONPATH=/root:/root/backend/lerobot/src
+      # /root/backend 가 PYTHONPATH 에 포함되어야 한다 — deploy.yml 의 PyArmor
+      # obfuscation 결과로 생성되는 pyarmor_runtime_000000 폴더가 backend/ 안에
+      # 들어있어서, backend/__init__.py 의 `from pyarmor_runtime_000000 import
+      # __pyarmor__` 가 top-level import 로 해석된다. 빠지면 fresh 설치 deb 의
+      # 마이그레이션 단계에서 ModuleNotFoundError 발생.
+      - PYTHONPATH=/root:/root/backend:/root/backend/lerobot/src
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
       # 호스트 드라이버 우선 사용 (compat 레이어 우회)

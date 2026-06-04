@@ -1,9 +1,9 @@
 <template>
-    <div class="row q-col-gutter-md teleop-console">
+    <div class="row q-col-gutter-md q-pb-md">
         <div class="col-auto column q-gutter-y-sm" style="min-width: 260px;">
             <!-- Robot ON buttons (per-robot) -->
             <TutorialHint step="2" :text="$t('tutorialTeleopRobotOn')" />
-            <div class="row no-wrap robot-buttons-row">
+            <div class="row no-wrap q-gutter-x-sm">
                 <q-btn
                     v-for="robot in assemblyRobots"
                     :key="robot.id"
@@ -84,7 +84,8 @@ import { ref, computed, defineProps, onUnmounted, onMounted, nextTick, watch } f
 import { useI18n } from 'vue-i18n'
 import { useLeaderTeleoperation } from 'src/composables/useLeaderTeleoperation'
 import { useProcessStore } from 'src/stores/processStore'
-import { DEFAULT_KEYBOARD_SETTINGS, AXIS_TO_EE_INDEX, normalizeEventKey, displayKey } from 'src/configs/teleopDefaults'
+import { DEFAULT_KEYBOARD_SETTINGS, displayKey } from 'src/configs/teleopDefaults'
+import { useKeyboardTeleop } from 'src/composables/useKeyboardTeleop'
 import TutorialHint from 'src/components/v2/TutorialHint.vue'
 
 const props = defineProps({
@@ -140,7 +141,10 @@ function toggleRobot(robot) {
     if (!robot.handler) return
     if (robot.status === 'on') {
         if (robot.handler.stopRobot) robot.handler.stopRobot()
-    } else if (robot.status !== 'loading') {
+    } else if (robot.status === 'loading') {
+        // 로딩 중 토글 = 진행 중인 시작 취소.
+        if (robot.handler.stopRobot) robot.handler.stopRobot()
+    } else {
         if (robot.handler.startRobot) robot.handler.startRobot()
     }
 }
@@ -221,101 +225,28 @@ const keyboardSetting = computed(() => {
 const keyboardActive = ref(false)
 const activeArms = computed(() => [leftArm.value, rightArm.value].filter(Boolean))
 
-function keyboardHandler(event) {
-    const tag = (event.target?.tagName || '').toLowerCase()
-    if (tag === 'input' || tag === 'textarea') return
-
-    const map = keyboardSetting.value.axis_map || {}
-    const stepSize = Number(keyboardSetting.value.step_size) || 0.003
-
-    if (event.key === ' ' || event.key === 'Space') {
-        activeArms.value.forEach((robot) => {
-            const len = robot.tool_inner ? 7 : 6
-            sendDelta(robot, Array(len).fill(0))
-        })
-        pushLog(t('teleopLogStopAllArms'))
-        event.preventDefault()
-        return
-    }
-
-    const normKey = normalizeEventKey(event)
-    const entry = map[normKey]
-    if (!entry) return
-
-    const side = entry.side || 'left'
-    const robot = robotForSide(side)
-
-    const idx = AXIS_TO_EE_INDEX[entry.axis]
-    if (idx === undefined) return
-
-    // tool 축: arm 내장 그리퍼면 EE delta[6] 으로 packing, 별도 gripper agent 가
-    // 있으면 그 agent 의 joint delta 로 라우팅. 둘 다 없으면 무시.
-    if (entry.axis === 'tool') {
-        const delta = stepSize * (Number(entry.scale) || 1) * (Number(entry.sign) || 1)
-        if (robot && robot.tool_inner) {
-            const eeDelta = Array(7).fill(0)
-            eeDelta[idx] = delta
-            sendDelta(robot, eeDelta)
-            pushLog(t('teleopLogKeyDelta', {
-                side, name: robot.name,
-                key: displayKey(normKey), axis: entry.axis,
-                sign: entry.sign > 0 ? '+' : '-',
-                delta: eeDelta[idx].toFixed(5),
-            }))
-            event.preventDefault()
-            return
-        }
-        const tool = toolForSide(side)
-        if (!tool || !tool.handler || !tool.handler.moveRobotJointDelta) return
-        const len = Array.isArray(tool.joint_names) && tool.joint_names.length > 0
-            ? tool.joint_names.length : 1
-        const jointDelta = Array(len).fill(0)
-        jointDelta[0] = delta  // 단일 knuckle / 단일 finger joint 가정
-        try {
-            tool.handler.moveRobotJointDelta(jointDelta)
-        } catch (e) {
-            pushLog(t('teleopLogSendError', { name: tool.name, error: e.message }), 'error')
-            return
-        }
+// 키보드 텔레옵 — 공용 composable 로 위임. 로그(키 입력/정지/에러)만 옵션 주입.
+const _kbTeleop = useKeyboardTeleop({
+    getAxisMap: () => keyboardSetting.value.axis_map,
+    getStepSize: () => Number(keyboardSetting.value.step_size) || 0.003,
+    robotForSide,
+    toolForSide,
+    shouldCapture: (event) => {
+        const tag = (event.target?.tagName || '').toLowerCase()
+        return !(tag === 'input' || tag === 'textarea')
+    },
+    onKeyDownLog: (entry, normKey) => {
+        const robot = robotForSide(entry.side || 'left')
+        const d = (Number(keyboardSetting.value.step_size) || 0.003) * (Number(entry.scale) || 1) * (Number(entry.sign) || 1)
         pushLog(t('teleopLogKeyDelta', {
-            side, name: tool.name,
+            side: entry.side || 'left', name: robot?.name || '',
             key: displayKey(normKey), axis: entry.axis,
-            sign: entry.sign > 0 ? '+' : '-',
-            delta: delta.toFixed(5),
+            sign: entry.sign > 0 ? '+' : '-', delta: d.toFixed(5),
         }))
-        event.preventDefault()
-        return
-    }
-
-    // 비-tool 축: 기존 EE delta 경로
-    if (!robot) return
-    const len = robot.tool_inner ? 7 : 6
-    if (idx >= len) return
-    const eeDelta = Array(len).fill(0)
-    eeDelta[idx] = stepSize * (Number(entry.scale) || 1) * (Number(entry.sign) || 1)
-    sendDelta(robot, eeDelta)
-    pushLog(t('teleopLogKeyDelta', {
-        side,
-        name: robot.name,
-        key: displayKey(normKey),
-        axis: entry.axis,
-        sign: entry.sign > 0 ? '+' : '-',
-        delta: eeDelta[idx].toFixed(5),
-    }))
-    event.preventDefault()
-}
-
-function sendDelta(robot, eeDelta) {
-    if (!robot.handler || !robot.handler.moveRobotEEDelta) {
-        pushLog(t('teleopLogHandlerMissing', { name: robot.name }), 'error')
-        return
-    }
-    try {
-        robot.handler.moveRobotEEDelta({ ee: eeDelta })
-    } catch (e) {
-        pushLog(t('teleopLogSendError', { name: robot.name, error: e.message }), 'error')
-    }
-}
+    },
+    onStop: () => pushLog(t('teleopLogStopAllArms')),
+    onError: (name, err) => pushLog(t('teleopLogSendError', { name, error: err.message }), 'error'),
+})
 
 function startKeyboardTeleop() {
     if (keyboardActive.value) return
@@ -325,13 +256,13 @@ function startKeyboardTeleop() {
     }
     keyboardActive.value = true
     pushLog(t('teleopLogKeyboardStarted', { arms: activeArms.value.map((r) => r.name).join(' + ') }))
-    window.addEventListener('keydown', keyboardHandler)
+    _kbTeleop.start()
 }
 
 function stopKeyboardTeleop() {
     if (!keyboardActive.value) return
     keyboardActive.value = false
-    window.removeEventListener('keydown', keyboardHandler)
+    _kbTeleop.stop()
     pushLog(t('teleopLogKeyboardStopped'))
 }
 
@@ -362,12 +293,3 @@ onUnmounted(() => {
     stopKeyboardTeleop()
 })
 </script>
-
-<style scoped>
-.teleop-console {
-    padding-bottom: 16px;
-}
-.robot-buttons-row {
-    gap: 8px;
-}
-</style>

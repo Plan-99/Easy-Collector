@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 from app_context import load_config, save_config
+from i18n import t
 
 # ---------------------------------------------------------------------------
 # Module metadata
@@ -52,6 +53,9 @@ _FALLBACK_REGISTRY: list[ModuleInfo] = [
     ModuleInfo(id="robot_rbpodo", name="RBPodo", category="robot", description="Rainbow Robotics RBPodo", asset_name="module-robot_rbpodo-{version}.tar.gz"),
     ModuleInfo(id="robot_kinova", name="Kinova Kortex", category="robot", description="Kinova Kortex 로봇", asset_name="module-robot_kinova-{version}.tar.gz"),
     ModuleInfo(id="robot_techman", name="Techman TM", category="robot", description="Techman TM 로봇", asset_name="module-robot_techman-{version}.tar.gz"),
+    ModuleInfo(id="robot_omx", name="OMX", category="robot", description="ROBOTIS OMX (5-DOF arm + 1-DOF gripper, Dynamixel)", asset_name="module-robot_omx-{version}.tar.gz"),
+    ModuleInfo(id="robot_omy", name="OMY", category="robot", description="ROBOTIS OMY (6-DOF arm, DYNAMIXEL-Y; OMY-3M / OMY-F3M + RH-P12-RN gripper)", asset_name="module-robot_omy-{version}.tar.gz"),
+    ModuleInfo(id="robot_ai_worker", name="AI Worker", category="robot", description="ROBOTIS AI Worker (FFW-BG2/SG2 듀얼 7-DOF 암, 온보드 Orin, 원격 SSH)", asset_name="module-robot_ai_worker-{version}.tar.gz"),
     ModuleInfo(id="gripper_generic", name="Generic Gripper", category="robot", description="범용 그리퍼 인터페이스", asset_name="module-gripper_generic-{version}.tar.gz"),
     ModuleInfo(id="gripper_robotiq", name="Robotiq Gripper", category="robot", description="Robotiq 그리퍼", asset_name="module-gripper_robotiq-{version}.tar.gz"),
     ModuleInfo(id="gripper_onrobot", name="OnRobot Gripper", category="robot", description="OnRobot 그리퍼", asset_name="module-gripper_onrobot-{version}.tar.gz"),
@@ -125,7 +129,7 @@ def modules_by_category() -> dict[str, list[ModuleInfo]]:
             cat = meta.get("category") or "robot"
             info = ModuleInfo(
                 id=mid,
-                name=(meta.get("name") or mid) + " (로컬)",
+                name=(meta.get("name") or mid) + t("mod.localSuffix"),
                 category=cat,
                 description=meta.get("description") or "",
                 asset_name="",
@@ -752,6 +756,13 @@ def download_module(
                     downloaded += len(chunk)
                     if on_progress:
                         on_progress(downloaded, total)
+        # Guard against a dropped connection: a short file vs the advertised
+        # size means a truncated download — fail with a clear error here rather
+        # than a confusing "tar 압축 해제 실패" later (and never install a partial).
+        if total and downloaded < total:
+            raise RuntimeError(
+                t("mod.downloadTruncated", downloaded=downloaded, total=total)
+            )
 
         # Extract and install
         # module.json에서 메타정보 추출

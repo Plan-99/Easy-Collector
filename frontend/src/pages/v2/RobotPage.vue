@@ -34,8 +34,8 @@
                     </q-img>
 
                     <q-card-section class="q-pa-none q-mt-sm">
-                        <div class="text-bold">{{ robot.name }}</div>
-                        <div class="text-grey-6 text-caption">{{ robot.type }}</div>
+                        <div class="text-bold ellipsis">{{ robot.name }}</div>
+                        <div class="text-grey-6 text-caption ellipsis">{{ robot.type }}</div>
                     </q-card-section>
                     <q-card-section class="q-pa-none q-mt-sm row" v-if="robot.type !== 'custom'">
                         <div class="text-primary text-caption" v-if="robot.status === 'on'">{{ $t('statusOnline') }}</div>
@@ -62,7 +62,12 @@
                         class="q-mt-sm"
                         :text="$t('tutorialRobotCard')"
                     />
-                    <q-inner-loading :showing="robot.status === 'loading'">
+                    <!-- pointer-events: none — 로딩 중에도 토글을 눌러 진행 중인 시작을
+                         취소할 수 있어야 한다. 스피너는 시각 표시 전용. -->
+                    <q-inner-loading
+                        :showing="robot.status === 'loading'"
+                        style="pointer-events: none; background: rgba(0, 0, 0, 0.4)"
+                    >
                         <q-spinner-gears size="50px" color="primary" />
                     </q-inner-loading>
                 </q-card>
@@ -277,6 +282,11 @@ const robotForm = ref([
     { label: t('robotFieldPort'), key: 'port', type: 'number', value: 502, default: 502, show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('port') },
     { label: t('robotFieldChangerAddress'), key: 'changer_address', type: 'number', value: 5, default: 5, show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('changer_address') },
     { label: t('robotFieldSerialPort'), key: 'serial_port', type: 'text', value: '/dev/ttyUSB0', default: '/dev/ttyUSB0', show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('serial_port') },
+    { label: t('robotFieldGripperPort'), key: 'gripper_port', type: 'text', value: '/dev/ttyAMA4', default: '/dev/ttyAMA4', show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('gripper_port') },
+    { label: t('robotFieldSshHost'), key: 'ssh_host', type: 'text', value: '', default: '', show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('ssh_host') },
+    { label: t('robotFieldSshUser'), key: 'ssh_user', type: 'text', value: 'root', default: 'root', show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('ssh_user') },
+    { label: t('robotFieldSshPort'), key: 'ssh_port', type: 'number', value: 22, default: 22, show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('ssh_port') },
+    { label: t('robotFieldSshPassword'), key: 'ssh_password', type: 'password', value: '', default: '', placeholder: t('robotFieldSshPasswordHint'), reveal: false, show: (form) => getFormRobotInfo(form) && getFormRobotInfo(form).custom_fields && getFormRobotInfo(form).custom_fields.includes('ssh_password') },
     // { label: 'tool_inner', key: 'tool_inner', type: 'custom', value: computed(() => robotForm.value.find((e) => e.key === 'tool_index').length > 0), default: false, show: () => false },
     // Fields for custom robot
     { label: t('robotFieldRole'), key: 'role', type: 'select', value: 'single_arm', default: 'dual_arm',
@@ -359,8 +369,15 @@ function openAddSensorForm() {
 
 function openEditRobotForm(robot) {
     ikJsonError.value = ''
+    // 커스텀 필드(ssh_host/ssh_user/ssh_port/ssh_password/gripper_port 등)는
+    // robot 최상위가 아니라 robot.settings 에 들어있다 (모델에 @property 가 없는 키).
+    // 최상위 → settings → default 순으로 값을 채운다.
+    const settings = robot.settings || {}
     robotForm.value.forEach(field => {
-        field.value = robot[field.key] || field.default;
+        let v = robot[field.key]
+        if (v === undefined || v === null) v = settings[field.key]
+        if (v === undefined || v === null) v = field.default
+        field.value = v
     });
     robotForm.value.find((e) => e.key === 'id').value = robot.id;
     // Load existing IK settings as JSON string for custom robots
@@ -440,6 +457,10 @@ function toggleRobot(robot) {
         robot.handler.stopRobot().then(() => {
             // Keep watching to preserve logs/pendant view
         });
+    } else if (robot.status === 'loading') {
+        // 로딩 중 토글 = 진행 중인 시작 취소. backend StopRobotDriver 는
+        // 이미 떠 있는 드라이버를 정리하고, 아직 안 뜬 경우엔 no-op 라 안전.
+        robot.handler.stopRobot();
     } else if (robot.status === 'error') {
         // clean up lingering processes then retry start
         robot.handler.stopRobot().finally(() => {
