@@ -49,6 +49,86 @@ def is_extension_installed() -> bool:
     return _load_runner() is not None
 
 
+# ---------------------------------------------------------------------------
+# Explicit GPU load / unload (for the GPU manager UI). The model lives in this
+# process's runner globals (_IMAGE_PROCESSOR / _VIDEO_PREDICTOR); these helpers
+# preload it so the first detection is instant, or free it to reclaim VRAM.
+# Detection paths still lazily auto-load via runner._ensure_image_model(), so a
+# process that uses SAM3 keeps working even if nothing pre-loaded it.
+# ---------------------------------------------------------------------------
+def _model_module():
+    """The submodule that actually holds the model globals/loaders. The package
+    __init__ only re-exports a few names; `_ensure_image_model`, `_IMAGE_PROCESSOR`
+    etc. live in `backend.extensions.sam3.runner`."""
+    pkg = _load_runner()
+    if pkg is None:
+        return None
+    rm = getattr(pkg, 'runner', None)
+    if rm is not None:
+        return rm
+    try:
+        return importlib.import_module(pkg.__name__ + '.runner')
+    except Exception:
+        return pkg  # last resort: maybe the globals are on the package itself
+
+
+def is_model_loaded() -> bool:
+    """True if the SAM3 model is resident in this process's GPU memory."""
+    r = _model_module()
+    if r is None:
+        return False
+    return getattr(r, '_IMAGE_PROCESSOR', None) is not None \
+        or getattr(r, '_VIDEO_PREDICTOR', None) is not None
+
+
+def model_load_error() -> Optional[str]:
+    r = _model_module()
+    return getattr(r, '_LOAD_ERROR', None) if r is not None else None
+
+
+def preload_model() -> Dict[str, Any]:
+    """Eagerly build + load the SAM3 image model into GPU. Blocks until ready.
+    Returns {'loaded': bool, 'error': str|None}."""
+    r = _model_module()
+    if r is None:
+        return {'loaded': False, 'error': 'SAM3 extension not installed'}
+    ensure = getattr(r, '_ensure_image_model', None)
+    if ensure is None:
+        return {'loaded': False, 'error': 'SAM3 runner missing _ensure_image_model'}
+    try:
+        ensure()
+    except Exception as e:  # pragma: no cover - surfaced to the UI
+        return {'loaded': False, 'error': str(e)}
+    if is_model_loaded():
+        return {'loaded': True, 'error': None}
+    return {'loaded': False, 'error': model_load_error() or 'model load failed'}
+
+
+def unload_model() -> Dict[str, Any]:
+    """Free the SAM3 model (image + video) from GPU memory and drop trackers."""
+    import contextlib
+    import gc
+    r = _model_module()
+    if r is None:
+        return {'loaded': False, 'error': None}
+    lock = getattr(r, '_MODEL_LOCK', None)
+    with (lock if lock is not None else contextlib.nullcontext()):
+        r._IMAGE_PROCESSOR = None
+        r._VIDEO_PREDICTOR = None
+        r._LOAD_ERROR = None
+    with _LOCK:
+        _TRACKERS.clear()
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+    except Exception:
+        pass
+    return {'loaded': is_model_loaded(), 'error': None}
+
+
 def _is_active(cfg: Optional[dict]) -> bool:
     if not cfg or not isinstance(cfg, dict):
         return False

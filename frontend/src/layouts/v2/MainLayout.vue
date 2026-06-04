@@ -27,6 +27,19 @@
           {{ $t('tutorialModeLabel') }}
         </q-chip>
 
+        <q-btn
+          flat
+          dense
+          round
+          icon="memory"
+          color="white"
+          class="q-mr-xs"
+          :aria-label="$t('gpuManagerTitle')"
+          @click="showGpu = true"
+        >
+          <q-tooltip>{{ $t('gpuManagerTitle') }}</q-tooltip>
+        </q-btn>
+
         <q-btn-dropdown
           flat
           dense
@@ -124,6 +137,7 @@
     </q-page-container>
 
     <PipelineGuideDialog v-model="showPipelineGuide" />
+    <GpuManagerDialog v-model="showGpu" />
   </q-layout>
 </template>
 
@@ -133,6 +147,7 @@ import { Notify } from 'quasar'
 import { useI18n } from 'vue-i18n'
 import EssentialLink from 'components/v2/EssentialLink.vue'
 import PipelineGuideDialog from 'components/v2/PipelineGuideDialog.vue'
+import GpuManagerDialog from 'components/v2/GpuManagerDialog.vue'
 import { useTutorialStore } from 'src/stores/tutorialStore.js'
 import { setLocale } from 'src/boot/i18n'
 
@@ -210,6 +225,7 @@ const linksList = computed(() => [
 
 const leftDrawerOpen = ref(false)
 const showPipelineGuide = ref(false)
+const showGpu = ref(false)
 const tutorial = useTutorialStore()
 
 function toggleLeftDrawer () {

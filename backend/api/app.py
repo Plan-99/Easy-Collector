@@ -30,6 +30,7 @@ from .routes.remote_train import run_training_job
 from .routes.planner import planner_bp
 from .routes.curriculum import curriculum_bp
 from .routes.module import module_bp
+from .routes.gpu import gpu_bp
 
 from ..bridge.client import get_bridge_client
 from ..bridge.remote_agent import RemoteAgent
@@ -104,6 +105,7 @@ app.register_blueprint(tutorial_bp, url_prefix='/api')
 app.register_blueprint(planner_bp, url_prefix='/api')
 app.register_blueprint(curriculum_bp, url_prefix='/api')
 app.register_blueprint(module_bp, url_prefix='/api')
+app.register_blueprint(gpu_bp, url_prefix='/api')
 
 socketio.on_namespace(SensorNamespace('/sensor', pm))
 socketio.on_namespace(RobotNamespace('/robot', pm))
