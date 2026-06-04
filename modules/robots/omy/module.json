@@ -1,7 +1,7 @@
 {
   "id": "robot_omy",
   "name": "OMY",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "category": "robot",
   "description": "ROBOTIS OMY: 6-DOF arm built on DYNAMIXEL-Y actuators. OMY-3M (arm only) and OMY-F3M (+ RH-P12-RN 2-finger gripper + RealSense D405). Driven via ros2_control as a single JointGroupPositionController over /joint_group_position_controller/commands. Arm bus defaults to /dev/ttyAMA2, gripper bus to /dev/ttyAMA4 (the OMY robot PC's onboard UARTs).",
   "install": {
@@ -96,6 +96,12 @@
           "write_topic": "/arm_controller/joint_trajectory",
           "write_topic_msg": "trajectory_msgs/JointTrajectory",
           "provision": [
+            {
+              "name": "clone",
+              "check": "test -d /data/docker/open_manipulator/.git",
+              "run": "mkdir -p /data/docker && git clone -b jazzy https://github.com/ROBOTIS-GIT/open_manipulator.git /data/docker/open_manipulator",
+              "timeout": 900
+            },
             {
               "name": "checkout_jazzy",
               "check": "cd /data/docker/open_manipulator && [ \"$(git rev-parse --abbrev-ref HEAD)\" = jazzy ]",
@@ -209,6 +215,12 @@
           "write_topic": "/leader/joint_trajectory",
           "write_topic_msg": "trajectory_msgs/JointTrajectory",
           "provision": [
+            {
+              "name": "clone",
+              "check": "test -d /data/docker/open_manipulator/.git",
+              "run": "mkdir -p /data/docker && git clone -b jazzy https://github.com/ROBOTIS-GIT/open_manipulator.git /data/docker/open_manipulator",
+              "timeout": 900
+            },
             {
               "name": "checkout_jazzy",
               "check": "cd /data/docker/open_manipulator && [ \"$(git rev-parse --abbrev-ref HEAD)\" = jazzy ]",
