@@ -18,11 +18,23 @@ from flask import Blueprint
 
 gpu_bp = Blueprint('gpu', __name__)
 
-# Registry of large models the UI can manage. Each entry maps to helpers that
-# report installed/loaded and perform load/unload. Currently SAM3 only.
+# Registry of large models the UI can manage. Each entry maps to a backend helper
+# module exposing is_extension_installed / is_model_loaded / preload_model /
+# unload_model. Add a model here and it appears in the GPU manager automatically.
 _MODELS = [
     {'id': 'sam3', 'name': 'SAM 3 Segmentation'},
+    {'id': 'yoloe', 'name': 'YOLOE Visual-Prompt Detection'},
 ]
+
+
+def _helper(model_id):
+    if model_id == 'sam3':
+        from ...utils import sam3_helper
+        return sam3_helper
+    if model_id == 'yoloe':
+        from ...utils import yoloe_helper
+        return yoloe_helper
+    return None
 
 
 def _smi(query, fields):
@@ -60,16 +72,14 @@ def _int(v, default=0):
         return default
 
 
-def _sam3_helper():
-    from ...utils import sam3_helper
-    return sam3_helper
-
-
 def _model_state(model_id):
-    h = _sam3_helper()
-    if model_id == 'sam3':
-        return {'installed': h.is_extension_installed(), 'loaded': h.is_model_loaded()}
-    return {'installed': False, 'loaded': False}
+    h = _helper(model_id)
+    if h is None:
+        return {'installed': False, 'loaded': False}
+    try:
+        return {'installed': bool(h.is_extension_installed()), 'loaded': bool(h.is_model_loaded())}
+    except Exception:
+        return {'installed': False, 'loaded': False}
 
 
 @gpu_bp.route('/gpu/status', methods=['GET'])
@@ -112,11 +122,11 @@ def gpu_status():
 
 @gpu_bp.route('/gpu/models/<model_id>:load', methods=['POST'])
 def load_model(model_id):
-    h = _sam3_helper()
-    if model_id != 'sam3':
+    h = _helper(model_id)
+    if h is None:
         return {'status': 'error', 'message': f'unknown model: {model_id}'}, 404
     if not h.is_extension_installed():
-        return {'status': 'error', 'message': 'SAM3 extension is not installed'}, 409
+        return {'status': 'error', 'message': f'{model_id} extension is not installed'}, 409
     res = h.preload_model()
     if not res.get('loaded'):
         return {'status': 'error', 'message': res.get('error') or 'load failed',
@@ -126,8 +136,8 @@ def load_model(model_id):
 
 @gpu_bp.route('/gpu/models/<model_id>:unload', methods=['POST'])
 def unload_model(model_id):
-    h = _sam3_helper()
-    if model_id != 'sam3':
+    h = _helper(model_id)
+    if h is None:
         return {'status': 'error', 'message': f'unknown model: {model_id}'}, 404
     res = h.unload_model()
     return {'status': 'success', 'loaded': res.get('loaded', False)}, 200

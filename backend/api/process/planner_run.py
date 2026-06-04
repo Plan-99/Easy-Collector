@@ -966,9 +966,387 @@ def _run_sync(block, ctx, task_control, group_id):
     print(f"[PLANNER] [{group_id}] sync '{sync_id}' passed")
 
 
+def _visual_reach_decode_rgb(jpeg_b64):
+    """Decode a base64 JPEG to an RGB ndarray (H,W,3). Tries cv2 then PIL."""
+    import base64
+    import numpy as np
+    raw = base64.b64decode(jpeg_b64)
+    try:
+        import cv2
+        arr = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR)  # BGR
+        return arr[..., ::-1].copy()  # -> RGB
+    except Exception:
+        import io
+        from PIL import Image
+        return np.asarray(Image.open(io.BytesIO(raw)).convert("RGB"))
+
+
+# color word → representative RGB (for the no-SAM3 color fallback)
+_VR_COLORS = {
+    'white': (235, 235, 235), 'red': (200, 40, 40), 'blue': (40, 80, 210),
+    'green': (40, 200, 80), 'yellow': (220, 210, 40), 'black': (25, 25, 25),
+    'gray': (140, 140, 140), 'grey': (140, 140, 140), 'orange': (230, 120, 30),
+    'purple': (150, 40, 180),
+}
+# geometric primitives tried (prefixed by the prompt's color word) when SAM3
+# misses the literal prompt — synthetic/abstract objects often read as a shape
+# (e.g. the tutorial's flat white plate reads as a "circle" to SAM3).
+_VR_SHAPES = ['circle', 'disc', 'object', 'disk', 'ring', 'box', 'square', 'plate', 'ball']
+
+
+def _vr_sam3_mask(runner, rgb, text_list, boxes, H, W):
+    import numpy as np
+    m = runner.detect_one(rgb[..., ::-1].copy(),
+                          {'text': list(text_list), 'boxes': [list(b) for b in boxes]})
+    m = np.asarray(m).astype(bool)
+    return m if (m.shape == (H, W) and m.any()) else None
+
+
+def _visual_reach_mask(rgb, text_prompts, boxes, block):
+    """Return a bool mask (H,W) of the target. Priority: visual exemplar (a box
+    cached as a DINOv2 vector — view-independent), then SAM3 (text/box) with a
+    color+shape prompt-expansion fallback, then bounding boxes, then a
+    color-word-aware threshold. `rgb` is HxWx3 uint8 RGB."""
+    import numpy as np
+    H, W = rgb.shape[:2]
+    joined = ' '.join(text_prompts).lower() if text_prompts else ''
+    colors_in = [c for c in _VR_COLORS if c in joined]
+
+    # 0) Visual exemplar (box dragged on a reference view → YOLOE cross-view match).
+    #    The box defines the target on `exemplar_image`; YOLOE re-finds that object
+    #    in the current view even when the camera pose changed and the box no longer
+    #    aligns. Authoritative when set — no color fallback (a miss = "not found").
+    #    Requires the YOLOE extension; raises a clear error if it isn't installed.
+    refer_b64 = block.get('exemplar_image')
+    refer_box = block.get('exemplar_box')
+    if refer_b64 and refer_box:
+        from ...utils import yoloe_helper
+        if not yoloe_helper.is_extension_installed():
+            raise RuntimeError(
+                "Wrist View Reach box-exemplar 검출에는 YOLOE 확장이 필요합니다. "
+                "모듈 관리에서 'YOLOE Visual-Prompt Detection'을 설치하세요.")
+        refer_rgb = _visual_reach_decode_rgb(refer_b64)
+        return yoloe_helper.detect_exemplar(rgb, refer_rgb, refer_box)
+
+    # 1) SAM3 (open-vocab text / box) when available
+    if text_prompts or boxes:
+        try:
+            from backend.utils import sam3_helper
+            if sam3_helper.is_extension_installed():
+                runner = sam3_helper._load_runner()
+                # (a) literal prompt
+                m = _vr_sam3_mask(runner, rgb, list(text_prompts), boxes, H, W)
+                if m is not None:
+                    return m
+                # (b) on miss, retry with color+shape primitives derived from the prompt
+                if text_prompts:
+                    variants = []
+                    for c in colors_in:
+                        variants += [f'{c} {sh}' for sh in _VR_SHAPES]
+                    variants += ['circle', 'disc', 'object']  # colorless last resort
+                    for v in variants:
+                        mm = _vr_sam3_mask(runner, rgb, [v], [], H, W)
+                        if mm is not None:
+                            print(f"[visual_reach] SAM3 '{joined}' empty; matched fallback prompt '{v}'", flush=True)
+                            return mm
+                    print(f"[visual_reach] SAM3 found nothing for '{joined}' or fallbacks", flush=True)
+        except Exception as e:
+            print(f"[visual_reach] SAM3 path unavailable, falling back: {e}", flush=True)
+    # 2) bounding boxes union (no model needed)
+    if boxes:
+        mask = np.zeros((H, W), bool)
+        for b in boxes:
+            x1, y1, x2, y2 = [int(round(v)) for v in b[:4]]
+            mask[max(0, min(y1, y2)):max(0, max(y1, y2)),
+                 max(0, min(x1, x2)):max(0, max(x1, x2))] = True
+        if mask.any():
+            return mask
+    # 3) color threshold fallback — use the prompt's color word if present, else red
+    r, g, bl = rgb[..., 0].astype(int), rgb[..., 1].astype(int), rgb[..., 2].astype(int)
+    col = block.get('target_color')
+    if not col and colors_in:
+        col = list(_VR_COLORS[colors_in[0]])
+    if col and len(col) == 3:
+        cr, cg, cb = col
+        return (np.abs(r - cr) + np.abs(g - cg) + np.abs(bl - cb)) < 90
+    return (r > 110) & (r - g > 50) & (r - bl > 50)
+
+
+def _resolve_rgbd_service(block):
+    """Resolve the wrist RGB-D Trigger service for a visual_reach block:
+      1) explicit block.rgbd_service (sim/custom), else
+      2) the selected sensor's settings.rgbd_service (e.g. tutorial_wrist_cam →
+         /tutorial/wrist_rgbd), else
+      3) a real use_depth RealSense → /ec_sensor_<id>/wrist_rgbd, else
+      4) the sim default."""
+    svc = (block.get('rgbd_service') or '').strip()
+    if svc:
+        return svc
+    sid = block.get('sensor_id')
+    if sid in (None, ''):
+        return '/tutorial/wrist_rgbd'
+    try:
+        from ...database.models.sensor_model import Sensor
+        s = Sensor.find(int(sid))
+        if s is not None:
+            sset = s._settings or {}
+            if sset.get('rgbd_service'):
+                return sset['rgbd_service']
+            if s.use_depth:
+                return f'/ec_sensor_{sid}/wrist_rgbd'
+    except Exception:
+        pass
+    return f'/ec_sensor_{sid}/wrist_rgbd'
+
+
+def _mask_overlay_b64(mask):
+    """Build a TRANSPARENT overlay PNG showing only the segmentation mask (no RGB) —
+    a semi-transparent green fill where the mask is, plus a centroid marker, and full
+    alpha=0 everywhere else. Composited over the live stream it shows just the mask,
+    not a second copy of the image. Returns (base64_png, centroid|None)."""
+    import base64
+    import numpy as np
+    m = np.asarray(mask).astype(bool)
+    H, W = m.shape
+    centroid = None
+    bgra = np.zeros((H, W, 4), np.uint8)          # transparent background
+    bgra[m] = (40, 220, 40, 140)                   # BGRA: green, semi-transparent
+    if m.any():
+        ys, xs = np.where(m)
+        centroid = [int(xs.mean()), int(ys.mean())]
+    try:
+        import cv2
+        if centroid is not None:
+            cv2.circle(bgra, (centroid[0], centroid[1]), 9, (60, 60, 255, 255), -1)  # opaque red dot
+        ok, buf = cv2.imencode('.png', bgra)       # cv2 PNG keeps the alpha channel
+        img_b64 = base64.b64encode(buf.tobytes()).decode('ascii') if ok else None
+    except Exception:
+        import io
+        from PIL import Image as _PILImage
+        rgba = bgra[..., [2, 1, 0, 3]]              # BGRA -> RGBA for PIL
+        b = io.BytesIO(); _PILImage.fromarray(rgba, 'RGBA').save(b, 'PNG')
+        img_b64 = base64.b64encode(b.getvalue()).decode('ascii')
+    return img_b64, centroid
+
+
+def _emit_visual_reach_mask(socketio, sensor_id, mask):
+    """Emit the detected target mask (transparent, mask-only) so the live monitoring
+    view overlays it on the selected wrist sensor's stream (socket 'planner_wrist_mask',
+    payload {sensor_id, image:data-url}). Best-effort; never blocks the reach."""
+    if socketio is None or sensor_id in (None, ''):
+        return
+    img_b64, _ = _mask_overlay_b64(mask)
+    if img_b64:
+        _emit(socketio, 'planner_wrist_mask', {
+            'sensor_id': int(sensor_id),
+            'image': f'data:image/png;base64,{img_b64}',
+        })
+
+
+def _visual_reach_backproject(payload, mask, block, ee_pose=None):
+    """Shared pixel→world back-projection for Wrist View Reach. Used by both the
+    block handler AND the dialog's "test detect" so they can NEVER diverge — the
+    same geometry that drives the robot is what the calibration readout shows.
+
+    payload : the RGBD service payload (height/width/depth_f32_b64/intrinsics[/cam pose]).
+    mask    : HxW bool target mask (already computed from the RGB).
+    block   : block dict (cam_pose_mode, cam_offset, cam_pitch/yaw/roll, cam_convention).
+    ee_pose : live EE pose [x,y,z,ax,ay,az] (rotvec, robot base frame) for 'manual_ee'.
+              Required for manual mode; ignored for 'service' mode.
+
+    Returns dict {target_xyz, centroid:[u,v], depth, cam_pos, ee_pos, convention,
+    cam_mode}, or None if the target has < 8 pixels with valid depth.
+    """
+    import base64
+    import numpy as np
+    H, W = int(payload['height']), int(payload['width'])
+    depth = np.frombuffer(base64.b64decode(payload['depth_f32_b64']), np.float32).reshape(H, W)
+    m = np.asarray(mask).astype(bool)
+    valid = m & np.isfinite(depth) & (depth > 1e-3)
+    ys, xs = np.where(valid)
+    if len(xs) < 8:
+        return None
+    u, v = float(xs.mean()), float(ys.mean())
+    z = float(np.median(depth[valid]))
+    if payload.get('fx'):
+        fx = float(payload['fx']); fy = float(payload.get('fy') or fx)
+        cx = float(payload.get('cx') if payload.get('cx') is not None else (W - 1) / 2.0)
+        cy = float(payload.get('cy') if payload.get('cy') is not None else (H - 1) / 2.0)
+    else:
+        fovy = float(payload['fovy'])
+        fx = fy = 0.5 * H / np.tan(np.deg2rad(fovy) * 0.5)
+        cx, cy = (W - 1) / 2.0, (H - 1) / 2.0
+    conv = block.get('cam_convention') or ('optical' if payload.get('fx') else 'opengl')
+    if conv == 'optical':
+        p_cam = np.array([(u - cx) / fx * z, (v - cy) / fy * z, z])
+    else:
+        p_cam = np.array([(u - cx) / fx * z, -(v - cy) / fy * z, -z])
+
+    cam_mode = block.get('cam_pose_mode') or (
+        'manual_ee' if block.get('cam_offset') is not None else 'service')
+    ee_pos_out = None
+    if cam_mode == 'manual_ee':
+        from scipy.spatial.transform import Rotation as _Rot
+        if not ee_pose:
+            raise RuntimeError("visual_reach manual pose: empty EE pose (IK not configured?)")
+        ee = [float(v) for v in ee_pose]
+        ee_pos = np.array(ee[:3], dtype=float)
+        R_ee = _Rot.from_rotvec(ee[3:6]).as_matrix() if len(ee) >= 6 else np.eye(3)
+        offset = np.array(([float(o) for o in (block.get('cam_offset') or [])] + [0, 0, 0])[:3])
+        pitch = float(block.get('cam_pitch') or 0.0)
+        yaw = float(block.get('cam_yaw') or 0.0)
+        roll = float(block.get('cam_roll') or 0.0)
+        R_ee_cam = _Rot.from_euler('xyz', [pitch, yaw, roll], degrees=True).as_matrix()
+        cam_pos = ee_pos + R_ee @ offset
+        R = R_ee @ R_ee_cam
+        target_xyz = cam_pos + R @ p_cam
+        ee_pos_out = ee_pos.round(4).tolist()
+    else:
+        cam_pos = np.array(payload['cam_pos'], dtype=float)
+        R = np.array(payload['cam_mat'], dtype=float).reshape(3, 3)
+        target_xyz = cam_pos + R @ p_cam
+    return {
+        'target_xyz': target_xyz.round(4).tolist(),
+        'centroid': [u, v],
+        'depth': z,
+        'cam_pos': cam_pos.round(4).tolist(),
+        'ee_pos': ee_pos_out,
+        'convention': conv,
+        'cam_mode': cam_mode,
+    }
+
+
+def _run_visual_reach(block, ctx, task_control):
+    """`visual_reach` block: move to an observe pose, read the wrist RGB-D, locate the
+    target (SAM3 text/box if installed, else box/color), back-project its centroid via
+    depth to world XYZ, and move the end-effector to hover above it.
+
+    block keys: workspace_id, sensor_id, rgbd_service (default '/tutorial/wrist_rgbd'),
+      text_prompts[], boxes[], target_color[], observe_positions{robot_id:[joints]},
+      hover (m, default 0.06), duration (s), settle_sec, name.
+    Sim-first (M1-proven geometry). Real cameras: a matching RGBD service/topic is needed.
+    """
+    import json
+    import numpy as np
+    from ...bridge.client import get_bridge_client
+    from ...bridge.generated import robot_bridge_pb2 as pb
+
+    workspace = ctx['workspaces_by_id'].get(block.get('workspace_id'))
+    if workspace is None:
+        raise RuntimeError(f"workspace_id={block.get('workspace_id')} not found")
+    robots = (workspace.get('assembly') or {}).get('robots') or []
+
+    robot = agent = None
+    for rb in robots:
+        ag = ctx['agents'].get(int(rb['id']))
+        if ag is None:
+            raise RuntimeError(f"robot '{rb.get('name')}' (id={rb['id']}) is not running — turn it on first")
+        if not _is_tool_agent(ag):
+            robot, agent = rb, ag
+            break
+    if agent is None:
+        raise RuntimeError("visual_reach needs an arm (IK) agent in the workspace")
+
+    duration = float(block.get('duration') or 4.0)
+
+    # 1) observe pose (R1) — optional preset joint positions
+    observe = block.get('observe_positions') or {}
+    obs_pos = observe.get(str(robot['id'])) or observe.get(robot['id'])
+    if obs_pos:
+        agent.move_to([float(v) for v in obs_pos], duration=duration)
+        _visual_reach_wait([agent], task_control, duration)
+    time.sleep(float(block.get('settle_sec') or 0.5))
+    if task_control.get('stop'):
+        return
+
+    # 2) fetch wrist RGB-D via a ROS2 Trigger (gRPC ROSProxy). Source priority:
+    #    explicit rgbd_service (sim/custom) → a real use_depth sensor's bridge
+    #    service /ec_sensor_<id>/wrist_rgbd → the sim default.
+    service_name = _resolve_rgbd_service(block)
+    client = get_bridge_client()
+    resp = client.ros_proxy.CallService(pb.ROSServiceRequest(
+        service_type='std_srvs/srv/Trigger', service_name=service_name, request_json=''))
+    if not resp.success:
+        raise RuntimeError(f"wrist RGBD service '{service_name}' transport failure: {resp.response_json}")
+    outer = json.loads(resp.response_json)
+    payload = json.loads(outer.get('message') or '{}')
+    if not payload.get('ok'):
+        raise RuntimeError(f"wrist RGBD unavailable: {payload.get('error')}")
+
+    rgb = _visual_reach_decode_rgb(payload['rgb_jpeg_b64'])
+
+    # 3) target mask → centroid → robust depth → world XYZ (shared back-projection,
+    #    identical to the dialog's calibration readout — see _visual_reach_backproject).
+    mask = _visual_reach_mask(rgb, block.get('text_prompts') or [], block.get('boxes') or [], block)
+    # Show what SAM3 detected on the live wrist stream (overlay on the selected sensor).
+    try:
+        _emit_visual_reach_mask(ctx.get('socketio'), block.get('sensor_id'), mask)
+    except Exception as _e:
+        print(f"[visual_reach] mask overlay emit skipped: {_e}", flush=True)
+    ee_pose = None
+    cam_mode = block.get('cam_pose_mode') or (
+        'manual_ee' if block.get('cam_offset') is not None else 'service')
+    if cam_mode == 'manual_ee':
+        ee_poses = agent.get_ee_position() or {}
+        if not ee_poses:
+            raise RuntimeError("visual_reach manual pose: empty EE pose (IK not configured?)")
+        ee_pose = [float(v) for v in next(iter(ee_poses.values()))]
+    bp = _visual_reach_backproject(payload, mask, block, ee_pose=ee_pose)
+    if bp is None:
+        raise RuntimeError("visual_reach: target not found in wrist view (no matching pixels with valid depth)")
+    target_xyz = np.array(bp['target_xyz'], dtype=float)
+    u, v = bp['centroid']
+    z = bp['depth']
+    print(f"[visual_reach] mode={bp['cam_mode']} conv={bp['convention']} ee_pos={bp['ee_pos']} "
+          f"cam_pos={bp['cam_pos']} centroid=({u:.1f},{v:.1f}) depth={z:.3f} "
+          f"target_xyz={bp['target_xyz']}", flush=True)
+
+    # 4) move EE to hover above target (keep current/observe orientation)
+    hover = float(block.get('hover') or 0.06)
+    current_ee = agent.get_ee_position()
+    if not current_ee:
+        raise RuntimeError("visual_reach: empty EE pose — IK not configured?")
+    target_ee = {}
+    for ee_name, cur in current_ee.items():
+        new_pose = [float(x) for x in cur]
+        new_pose[0], new_pose[1] = float(target_xyz[0]), float(target_xyz[1])
+        if len(new_pose) > 2:
+            new_pose[2] = float(target_xyz[2] + hover)
+        target_ee[ee_name] = new_pose
+    _emit(ctx.get('socketio'), 'planner_visual_reach', {
+        'block': block.get('name'), 'target': target_xyz.tolist(),
+        'centroid': [u, v], 'depth': z, 'hover': hover,
+    })
+    agent.move_ee_to(target_ee, duration=duration)
+    _visual_reach_wait([agent], task_control, duration)
+
+
+def _visual_reach_wait(agents, task_control, duration):
+    """Block until agents stop moving (or stop signal / timeout). Mirrors the
+    move_relative_ee wait+cancel pattern."""
+    timeout_at = time.time() + max(30.0, duration + 5.0)
+    while time.time() < timeout_at:
+        if task_control.get('stop'):
+            for a in agents:
+                try:
+                    a.cancel_move_to()
+                except Exception:
+                    pass
+            return
+        if not any(a.is_moving for a in agents):
+            return
+        time.sleep(0.1)
+    for a in agents:
+        try:
+            a.cancel_move_to()
+        except Exception:
+            pass
+
+
 _HANDLERS = {
     'joint_position': _run_joint_position,
     'move_relative_ee': _run_move_relative_ee,
+    'visual_reach': _run_visual_reach,
     'replay_episode': _run_replay_episode,
     'checkpoint': _run_checkpoint,
     'timesleep': _run_timesleep,

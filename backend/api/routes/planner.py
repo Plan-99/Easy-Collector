@@ -64,6 +64,22 @@ BLOCK_CONFIGS = {
         'color': 'indigo',
         'keys': ['workspace_id', 'service_name', 'pose_type', 'duration', 'name'],
     },
+    'visual_reach': {
+        # Wrist depth-camera로 타겟을 보고 EE를 타겟 위(살짝 높게)로 이동.
+        # 타겟 지정: text_prompts(SAM3) 또는 boxes(바운딩박스), 없으면 색상 fallback.
+        # observe_positions: 관찰 자세(joint preset). rgbd_service: wrist RGB-D 소스.
+        'label': 'Wrist View Reach',
+        'icon': 'my_location',
+        'color': 'pink',
+        # cam_pose_mode: 'service'(센서가 카메라 월드 pose 제공) | 'manual_ee'(캘리브레이션
+        # 없이 EE 기준 대략적 카메라 마운트를 사람이 입력). manual_ee 시 cam_offset[x,y,z]
+        # (EE 프레임, m) + cam_pitch/cam_yaw/cam_roll(deg)로 카메라 pose를 EE FK와 합성.
+        'keys': ['workspace_id', 'sensor_id', 'rgbd_service', 'text_prompts', 'boxes',
+                 'exemplar_image', 'exemplar_box',
+                 'target_color', 'observe_positions', 'hover', 'duration', 'settle_sec',
+                 'cam_pose_mode', 'cam_offset', 'cam_pitch', 'cam_yaw', 'cam_roll',
+                 'cam_convention', 'name'],
+    },
 }
 
 
@@ -72,6 +88,177 @@ def get_block_configs():
     return {
         'status': 'success',
         'block_configs': BLOCK_CONFIGS,
+    }, 200
+
+
+@planner_bp.route('/planner/:test_wrist_reach', methods=['POST'])
+def test_wrist_reach():
+    """Run the Wrist View Reach target mask on the LIVE wrist RGB and return an
+    overlay image so the user can see exactly what was detected — isolates a
+    detection problem (wrong/empty mask) from a camera-pose problem (mask right
+    but the EE goes elsewhere → tune cam_offset/pitch). Uses the same RGB-D
+    source + mask logic as the block handler."""
+    import base64
+    import json
+    import numpy as np
+    from ..process.planner_run import (_visual_reach_decode_rgb, _visual_reach_mask,
+                                        _resolve_rgbd_service, _mask_overlay_b64,
+                                        _visual_reach_backproject, _is_tool_agent)
+    from ...bridge.client import get_bridge_client
+    from ...bridge.generated import robot_bridge_pb2 as pb
+
+    body = request.json or {}
+    sid = body.get('sensor_id')
+    service_name = _resolve_rgbd_service({'rgbd_service': body.get('rgbd_service'), 'sensor_id': sid})
+    text_prompts = body.get('text_prompts') or []
+    boxes = body.get('boxes') or []
+    # Carry the camera-pose params so the readout uses the SAME geometry as a real run.
+    block = {
+        'target_color': body.get('target_color'),
+        'exemplar_image': body.get('exemplar_image'),  # box-defined visual exemplar (refer frame)
+        'exemplar_box': body.get('exemplar_box'),
+        'cam_pose_mode': body.get('cam_pose_mode'),
+        'cam_offset': body.get('cam_offset'),
+        'cam_pitch': body.get('cam_pitch'),
+        'cam_yaw': body.get('cam_yaw'),
+        'cam_roll': body.get('cam_roll'),
+        'cam_convention': body.get('cam_convention'),
+    }
+
+    try:
+        client = get_bridge_client()
+        resp = client.ros_proxy.CallService(pb.ROSServiceRequest(
+            service_type='std_srvs/srv/Trigger', service_name=service_name, request_json=''))
+    except Exception as e:
+        return {'status': 'error', 'message': f'RGBD service call failed: {e}', 'service': service_name}, 500
+    if not resp.success:
+        return {'status': 'error', 'message': f"wrist RGBD '{service_name}' unavailable: {resp.response_json}",
+                'service': service_name}, 400
+    try:
+        outer = json.loads(resp.response_json)
+        payload = json.loads(outer.get('message') or '{}')
+    except Exception as e:
+        return {'status': 'error', 'message': f'bad RGBD payload: {e}', 'service': service_name}, 500
+    if not payload.get('ok'):
+        return {'status': 'error', 'message': f"wrist RGBD: {payload.get('error')}", 'service': service_name}, 400
+
+    rgb = _visual_reach_decode_rgb(payload['rgb_jpeg_b64'])  # HxWx3 RGB
+    mask = _visual_reach_mask(rgb, text_prompts, boxes, block)
+    mask = np.asarray(mask).astype(bool) if mask is not None else np.zeros(rgb.shape[:2], bool)
+    ys, xs = np.where(mask)
+    detected = len(xs) >= 8
+    centroid = [float(xs.mean()), float(ys.mean())] if detected else None
+
+    # Transparent, mask-ONLY overlay (not a copy of the RGB) so it composites
+    # cleanly over the live wrist stream.
+    img_b64, _ = _mask_overlay_b64(mask)
+
+    # Calibration readout: if the workspace's arm is running, back-project the
+    # detection to world XYZ with the EXACT geometry a real run uses, so the user
+    # can tune cam_offset/pitch/yaw/roll until target_xyz lands on the object —
+    # without running the whole plan. Best-effort: skipped if no robot/EE pose.
+    target_xyz = None
+    target_note = None
+    if detected:
+        try:
+            ws_id = body.get('workspace_id')
+            agents = getattr(current_app, 'agents', {}) or {}
+            ee_pose = None
+            if ws_id is not None:
+                ws = TaskModel.find(ws_id)
+                robots = ((ws.to_dict().get('assembly') or {}).get('robots') or []) if ws else []
+                for rb in robots:
+                    ag = agents.get(int(rb['id']))
+                    if ag is not None and not _is_tool_agent(ag):
+                        poses = ag.get_ee_position() or {}
+                        if poses:
+                            ee_pose = [float(v) for v in next(iter(poses.values()))]
+                        break
+            cam_mode = block.get('cam_pose_mode') or ('manual_ee' if block.get('cam_offset') is not None else 'service')
+            if cam_mode == 'manual_ee' and ee_pose is None:
+                target_note = 'robot_off'   # need a running arm for the EE pose
+            else:
+                bp = _visual_reach_backproject(payload, mask, block, ee_pose=ee_pose)
+                if bp:
+                    target_xyz = bp['target_xyz']
+        except Exception as e:
+            target_note = f'target calc skipped: {e}'
+
+    return {
+        'status': 'success',
+        'detected': detected,
+        'centroid': centroid,
+        'mask_pixels': int(mask.sum()),
+        'service': service_name,
+        'image': f'data:image/png;base64,{img_b64}' if img_b64 else None,
+        'target_xyz': target_xyz,
+        'target_note': target_note,
+    }, 200
+
+
+@planner_bp.route('/planner/:define_wrist_exemplar', methods=['POST'])
+def define_wrist_exemplar():
+    """Define a Wrist View Reach target by a DRAGGED box on the live wrist view.
+    Stores the reference frame + box; YOLOE re-finds that object in later views even
+    when the camera pose changed (cross-view). `box_norm` is [xn1,yn1,xn2,yn2] in
+    [0,1] (drag fractions) so the UI display size is decoupled from the RGB-D
+    resolution. Returns the stored exemplar (image + pixel box) + a preview overlay."""
+    import json as _json
+    import numpy as np
+    from ..process.planner_run import (_visual_reach_decode_rgb, _resolve_rgbd_service,
+                                        _mask_overlay_b64)
+    from ...utils import yoloe_helper
+    from ...bridge.client import get_bridge_client
+    from ...bridge.generated import robot_bridge_pb2 as pb
+
+    body = request.json or {}
+    sid = body.get('sensor_id')
+    bn = body.get('box_norm')
+    if not (isinstance(bn, (list, tuple)) and len(bn) == 4):
+        return {'status': 'error', 'message': 'box_norm [xn1,yn1,xn2,yn2] (0-1) is required'}, 400
+    if not yoloe_helper.is_extension_installed():
+        return {'status': 'error',
+                'message': "YOLOE 확장이 설치되지 않았습니다. 모듈 관리에서 'YOLOE Visual-Prompt Detection'을 설치하세요.",
+                'need_install': 'yoloe'}, 409
+    service_name = _resolve_rgbd_service({'rgbd_service': body.get('rgbd_service'), 'sensor_id': sid})
+    try:
+        client = get_bridge_client()
+        resp = client.ros_proxy.CallService(pb.ROSServiceRequest(
+            service_type='std_srvs/srv/Trigger', service_name=service_name, request_json=''))
+    except Exception as e:
+        return {'status': 'error', 'message': f'RGBD service call failed: {e}', 'service': service_name}, 500
+    if not resp.success:
+        return {'status': 'error', 'message': f"wrist RGBD '{service_name}' unavailable: {resp.response_json}"}, 400
+    try:
+        payload = _json.loads(_json.loads(resp.response_json).get('message') or '{}')
+    except Exception as e:
+        return {'status': 'error', 'message': f'bad RGBD payload: {e}'}, 500
+    if not payload.get('ok'):
+        return {'status': 'error', 'message': f"wrist RGBD: {payload.get('error')}"}, 400
+
+    H, W = int(payload['height']), int(payload['width'])
+    xs = sorted((float(bn[0]), float(bn[2])))
+    ys = sorted((float(bn[1]), float(bn[3])))
+    box = [round(xs[0] * W, 1), round(ys[0] * H, 1), round(xs[1] * W, 1), round(ys[1] * H, 1)]
+    if (box[2] - box[0]) < 4 or (box[3] - box[1]) < 4:
+        return {'status': 'error', 'message': '박스가 너무 작습니다. 객체를 충분히 감싸도록 드래그하세요.'}, 422
+
+    refer_b64 = payload['rgb_jpeg_b64']
+    rgb = _visual_reach_decode_rgb(refer_b64)
+    # validate + preview: detect on the SAME frame (refer == target)
+    try:
+        mask = yoloe_helper.detect_exemplar(rgb, rgb, box)
+    except Exception as e:
+        return {'status': 'error', 'message': f'YOLOE detect failed: {e}'}, 500
+    detected = bool(np.asarray(mask).any())
+    img_b64, _ = _mask_overlay_b64(mask if detected else np.zeros((H, W), bool))
+    return {
+        'status': 'success',
+        'detected': detected,
+        'exemplar_image': refer_b64,   # store on the block
+        'exemplar_box': box,
+        'mask_pixels': int(np.asarray(mask).sum()),
+        'image': f'data:image/png;base64,{img_b64}' if img_b64 else None,
     }, 200
 
 
@@ -517,6 +704,30 @@ def _validate_plan_blocks(blocks, workspaces_by_id, agents, prefix_offset=0):
             for robot in (ws.get('assembly') or {}).get('robots') or []:
                 if int(robot['id']) not in agents:
                     errors.append(f"{prefix}: robot '{robot.get('name')}' is not running")
+            try:
+                if float(block.get('duration') or 0) <= 0:
+                    errors.append(f"{prefix}: duration must be > 0")
+            except (TypeError, ValueError):
+                errors.append(f"{prefix}: duration is invalid")
+
+        elif btype == 'visual_reach':
+            ws = workspaces_by_id.get(block.get('workspace_id'))
+            if ws is None:
+                errors.append(f"{prefix}: workspace not found")
+                continue
+            # needs an arm agent (IK) running in the workspace
+            arm_running = False
+            for robot in (ws.get('assembly') or {}).get('robots') or []:
+                if int(robot['id']) not in agents:
+                    errors.append(f"{prefix}: robot '{robot.get('name')}' is not running")
+                else:
+                    arm_running = True
+            if not arm_running:
+                errors.append(f"{prefix}: needs a running arm to move the end-effector")
+            # RGB-D source: an explicit rgbd_service (sim/custom) OR a selected
+            # sensor (real use_depth → handler derives /ec_sensor_<id>/wrist_rgbd).
+            if not (block.get('rgbd_service') or '').strip() and block.get('sensor_id') in (None, ''):
+                errors.append(f"{prefix}: rgbd_service or a depth sensor is required")
             try:
                 if float(block.get('duration') or 0) <= 0:
                     errors.append(f"{prefix}: duration must be > 0")

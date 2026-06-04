@@ -415,6 +415,15 @@
                         <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerServiceNameLabel') }}:</span> {{ detailBlock.service_name }}</div>
                         <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerBlockDetailsDuration') }}:</span> {{ detailBlock.duration }}s</div>
                     </template>
+                    <template v-if="detailBlock.type === 'visual_reach'">
+                        <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerBlockDetailsWorkspace') }}:</span> {{ getWorkspaceName(detailBlock.workspace_id) }}</div>
+                        <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerVisualReachCamera') }}:</span> {{ getSensorName(detailBlock.sensor_id) }}</div>
+                        <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerVisualReachPrompt') }}:</span>
+                            {{ (detailBlock.text_prompts && detailBlock.text_prompts[0]) || (detailBlock.boxes && detailBlock.boxes.length ? 'box' : $t('plannerVisualReachColorTarget')) }}
+                        </div>
+                        <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerVisualReachHover') }}:</span> {{ detailBlock.hover }} m</div>
+                        <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerBlockDetailsDuration') }}:</span> {{ detailBlock.duration }}s</div>
+                    </template>
                 </q-card-section>
                 <q-card-actions align="right">
                     <q-btn flat :label="$t('close')" color="grey" v-close-popup />
@@ -597,6 +606,18 @@
                                 <div v-else class="text-caption text-grey q-mb-sm">
                                     {{ $t('plannerPendantOffHint') }}
                                 </div>
+                                <!-- Always-visible "apply current pose" — move the robot with the
+                                     pendant above, then click to capture the current joints (works
+                                     even before any pose has been saved; the saved-pose card uses
+                                     the same button once a pose exists). -->
+                                <q-btn
+                                    v-if="robot.status === 'on'"
+                                    class="q-mt-sm"
+                                    size="sm" outline color="amber"
+                                    icon="my_location"
+                                    :label="$t('plannerApplyCurrentPos')"
+                                    @click="applyCurrentPos(robot)"
+                                />
                             </div>
                         </div>
                     </template>
@@ -1010,6 +1031,143 @@
                             </div>
                         </div>
                     </template>
+
+                    <template v-if="blockForm.type === 'visual_reach'">
+                        <TutorialHint class="q-mb-md" :text="$t('tutorialPlannerBlockVisualReach')" />
+                        <q-select
+                            v-if="formWorkspaceOptions.length > 1"
+                            dense outlined dark bg-color="dark"
+                            v-model="blockForm.workspace_id"
+                            :options="formWorkspaceOptions"
+                            :label="$t('plannerWorkspaceLabel')"
+                            class="q-mb-md"
+                            map-options
+                            emit-value
+                        ></q-select>
+                        <q-select
+                            dense outlined dark bg-color="dark"
+                            v-model="blockForm.sensor_id"
+                            :options="visualReachSensorOptions"
+                            :label="$t('plannerVisualReachCamera')"
+                            :hint="$t('plannerVisualReachCameraHint')"
+                            class="q-mb-md"
+                            map-options
+                            emit-value
+                        ></q-select>
+                        <div v-if="visualReachStreamTopic" class="q-mb-xs">
+                            <div class="vr-stream-wrap border-rounded overflow-hidden" ref="vrWrapEl"
+                                @mousedown.prevent="onVrDown" @mousemove="onVrMove"
+                                @mouseup="onVrUp" @mouseleave="onVrUp">
+                                <WebRtcVideo :topic="visualReachStreamTopic" :sensor-id="blockForm.sensor_id || 0"
+                                    :overlay-src="visualReachMaskOverlay" />
+                                <div v-if="vrDrag" class="vr-drag-rect" :style="vrDragStyle"></div>
+                            </div>
+                            <div class="row items-center q-mt-xs">
+                                <span class="text-caption text-grey-5">
+                                    <q-icon name="crop_free" size="14px" /> {{ $t('plannerVisualReachDragHint') }}
+                                </span>
+                                <q-space />
+                                <span v-if="blockForm.exemplar_box" class="text-caption text-green q-mr-sm">
+                                    ● {{ $t('plannerVisualReachTargetSet') }}
+                                </span>
+                                <q-btn v-if="blockForm.exemplar_box" dense flat size="sm" color="grey-5"
+                                    icon="clear" :label="$t('plannerVisualReachTargetClear')" @click="clearExemplar" />
+                            </div>
+                        </div>
+                        <div v-if="visualReachStreamTopic" class="q-mb-md row items-center q-gutter-sm">
+                            <q-btn dense :outline="!visualReachTracking"
+                                :color="visualReachTracking ? 'red' : 'primary'"
+                                :icon="visualReachTracking ? 'stop' : 'center_focus_strong'"
+                                :loading="visualReachDetecting && !visualReachTracking"
+                                :label="visualReachTracking ? $t('plannerVisualReachTrackStop') : $t('plannerVisualReachTestDetect')"
+                                @click="toggleWristTrack" />
+                            <q-spinner v-if="visualReachTracking && visualReachDetecting" color="primary" size="18px" />
+                            <span v-if="visualReachDetectInfo" class="text-caption"
+                                :class="visualReachDetectInfo.detected ? 'text-green' : 'text-orange'">
+                                {{ (visualReachDetectInfo.detected && visualReachDetectInfo.centroid)
+                                    ? $t('plannerVisualReachDetected', { px: visualReachDetectInfo.mask_pixels, u: Math.round(visualReachDetectInfo.centroid[0]), v: Math.round(visualReachDetectInfo.centroid[1]) })
+                                    : (visualReachDetectInfo.detected ? $t('plannerVisualReachTargetSet') : $t('plannerVisualReachNotDetected')) }}
+                            </span>
+                        </div>
+                        <!-- Calibration readout: world XYZ the EE will reach. Tune
+                             cam_offset/pitch/yaw/roll until this matches the object. -->
+                        <div v-if="visualReachDetectInfo && visualReachDetectInfo.target_xyz"
+                            class="text-caption text-cyan q-mt-xs">
+                            {{ $t('plannerVisualReachTargetXyz', {
+                                x: visualReachDetectInfo.target_xyz[0].toFixed(3),
+                                y: visualReachDetectInfo.target_xyz[1].toFixed(3),
+                                z: visualReachDetectInfo.target_xyz[2].toFixed(3) }) }}
+                        </div>
+                        <div v-else-if="visualReachDetectInfo && visualReachDetectInfo.target_note === 'robot_off'"
+                            class="text-caption text-grey q-mt-xs">
+                            {{ $t('plannerVisualReachTargetNeedsRobot') }}
+                        </div>
+                        <q-expansion-item dense dark class="q-mb-md" icon="text_fields"
+                            :label="$t('plannerVisualReachPromptOptional')">
+                            <q-input
+                                dense outlined dark bg-color="dark"
+                                v-model="blockForm.text_prompt"
+                                :label="$t('plannerVisualReachPrompt')"
+                                :hint="$t('plannerVisualReachPromptHint')"
+                                class="q-mt-sm"
+                            ></q-input>
+                        </q-expansion-item>
+                        <q-input
+                            dense outlined dark bg-color="dark"
+                            v-model.number="blockForm.hover"
+                            :label="$t('plannerVisualReachHover')"
+                            :hint="$t('plannerVisualReachHoverHint')"
+                            type="number" min="0" step="0.01"
+                            class="q-mb-md"
+                        ></q-input>
+                        <q-input
+                            dense outlined dark bg-color="dark"
+                            v-model.number="blockForm.duration"
+                            :label="$t('plannerDurationSeconds')"
+                            type="number" min="0.1" step="0.1"
+                            class="q-mb-md"
+                        ></q-input>
+                        <q-input
+                            dense outlined dark bg-color="dark"
+                            v-model.number="blockForm.settle_sec"
+                            :label="$t('plannerVisualReachSettle')"
+                            type="number" min="0" step="0.1"
+                            class="q-mb-md"
+                        ></q-input>
+                        <q-select
+                            dense outlined dark bg-color="dark"
+                            v-model="blockForm.cam_pose_mode"
+                            :options="[
+                                { label: $t('plannerVisualReachPoseModeManual'), value: 'manual_ee' },
+                                { label: $t('plannerVisualReachPoseModeService'), value: 'service' },
+                            ]"
+                            :label="$t('plannerVisualReachPoseMode')"
+                            class="q-mb-md"
+                            map-options
+                            emit-value
+                        ></q-select>
+                        <template v-if="blockForm.cam_pose_mode === 'manual_ee'">
+                            <div class="text-caption text-grey-5 q-mb-xs">{{ $t('plannerVisualReachOffset') }}</div>
+                            <div class="text-caption text-grey-6 q-mb-xs">{{ $t('plannerVisualReachOffsetHint') }}</div>
+                            <div class="row q-col-gutter-sm q-mb-md">
+                                <div class="col-4"><q-input dense outlined dark bg-color="dark" type="number" step="0.005" v-model.number="blockForm.cam_off_x" label="x (m)" /></div>
+                                <div class="col-4"><q-input dense outlined dark bg-color="dark" type="number" step="0.005" v-model.number="blockForm.cam_off_y" label="y (m)" /></div>
+                                <div class="col-4"><q-input dense outlined dark bg-color="dark" type="number" step="0.005" v-model.number="blockForm.cam_off_z" label="z (m)" /></div>
+                            </div>
+                            <q-input
+                                dense outlined dark bg-color="dark"
+                                v-model.number="blockForm.cam_pitch"
+                                :label="$t('plannerVisualReachPitch')"
+                                :hint="$t('plannerVisualReachPitchHint')"
+                                type="number" step="1"
+                                class="q-mb-md"
+                            ></q-input>
+                            <div class="row q-col-gutter-sm q-mb-md">
+                                <div class="col-6"><q-input dense outlined dark bg-color="dark" type="number" step="1" v-model.number="blockForm.cam_yaw" :label="$t('plannerVisualReachYaw')" /></div>
+                                <div class="col-6"><q-input dense outlined dark bg-color="dark" type="number" step="1" v-model.number="blockForm.cam_roll" :label="$t('plannerVisualReachRoll')" /></div>
+                            </div>
+                        </template>
+                    </template>
                 </q-card-section>
 
                 <q-card-actions align="right">
@@ -1031,6 +1189,7 @@ import MonitoringWindow from 'src/components/v2/MonitoringWindow.vue';
 import PlannerBlockCard from 'src/components/v2/PlannerBlockCard.vue';
 import RobotPendant from 'src/components/v2/RobotPendant.vue';
 import TutorialHint from 'src/components/v2/TutorialHint.vue';
+import WebRtcVideo from 'src/components/v2/WebRtcVideo.vue';
 import { Notify, Loading } from 'quasar';
 import { useSensor } from '../../composables/useSensor';
 import { useRobot } from 'src/composables/useRobot';
@@ -1333,11 +1492,18 @@ function loadBlockConfigs() {
     });
 }
 
+// Wrist View Reach needs a depth-capable (use_depth) wrist camera. Gate the
+// block type on the planner's workspaces having at least one such sensor.
+const plannerHasDepthSensor = computed(() =>
+    selectedWorkspaces.value.some(w => (w.sensors || []).some(_sensorUsesDepth)));
+
 const blockTypeOptions = computed(() => {
-    return Object.entries(blockConfigs.value).map(([key, config]) => ({
-        label: config.label,
-        value: key,
-    }));
+    return Object.entries(blockConfigs.value)
+        .filter(([key]) => key !== 'visual_reach' || plannerHasDepthSensor.value)
+        .map(([key, config]) => ({
+            label: config.label,
+            value: key,
+        }));
 });
 
 const poseTypeOptions = computed(() => ([
@@ -1530,6 +1696,14 @@ function getWorkspaceName(workspaceId) {
     return ws ? ws.name : t('plannerUnknown');
 }
 
+function getSensorName(sensorId) {
+    for (const w of availableWorkspaces.value) {
+        const s = (w.sensors || []).find(x => x.id === sensorId);
+        if (s) return s.name;
+    }
+    return t('plannerUnknown');
+}
+
 function getWorkspaceRobots(workspaceId) {
     const ws = availableWorkspaces.value.find(w => w.id === workspaceId);
     return ws?.assembly?.robots || [];
@@ -1646,6 +1820,14 @@ const blockForm = ref({
     fallback_block_id: null,
     // checkpoint 실패 조건: done 신호 없이 이 step 수에 도달하면 fail → fallback.
     max_steps: null,
+    // visual_reach: wrist depth-cam 으로 타겟 보고 EE 를 타겟 위로 이동.
+    sensor_id: null,
+    rgbd_service: '',
+    hover: 0.06,
+    text_prompt: '',           // UI 단일 입력 → 저장 시 text_prompts:[…] 로 변환
+    box_x1: null, box_y1: null, box_x2: null, box_y2: null,
+    exemplar_image: null, exemplar_box: null,   // 드래그 박스 exemplar (YOLOE cross-view)
+    text_prompts: [], boxes: [], target_color: null, observe_positions: {},
 });
 
 const formGroup = computed(() => plans.value.find(g => g.id === formGroupId.value) || null);
@@ -1684,6 +1866,247 @@ const formWorkspaceOptions = computed(() => {
         .map(w => ({ label: w.name, value: w.id }));
 });
 
+// --- visual_reach helpers (camera select + live wrist stream) ---
+function _sensorSettings(sensor) {
+    if (!sensor) return {};
+    let s = sensor.settings;
+    if (typeof s === 'string') { try { s = JSON.parse(s); } catch { s = {}; } }
+    return s || {};
+}
+// Depth-capable = a real RealSense with use_depth on, OR a sim/tutorial sensor that
+// exposes depth via has_depth / an rgbd_service (e.g. tutorial_wrist_cam → /tutorial/wrist_rgbd).
+function _sensorUsesDepth(sensor) {
+    if (!sensor) return false;
+    const st = _sensorSettings(sensor);
+    return !!(sensor.use_depth || st.use_depth || st.has_depth || st.rgbd_service);
+}
+const visualReachWorkspace = computed(() =>
+    availableWorkspaces.value.find(w => w.id === blockForm.value.workspace_id) || null);
+// Wrist-camera options: the workspace's depth-capable sensors, deduped by PHYSICAL
+// sensor id (a sensor used in multiple views appears once — selection is per-sensor,
+// not per-view). Only the chosen sensor streams (see visualReachStreamTopic).
+const visualReachSensorOptions = computed(() => {
+    const seen = new Set();
+    const out = [];
+    for (const s of (visualReachWorkspace.value?.sensors || [])) {
+        if (!_sensorUsesDepth(s) || seen.has(s.id)) continue;
+        seen.add(s.id);
+        out.push({ label: s.name, value: s.id });
+    }
+    return out;
+});
+const visualReachSelectedSensor = computed(() =>
+    (visualReachWorkspace.value?.sensors || []).find(s => s.id === blockForm.value.sensor_id) || null);
+// Built-in sensors expose read_topic at top level (computed from type info);
+// custom sensors keep it in settings. Prefer the top-level one so the wrist
+// stream + "Test detect" button show for RealSense (realsense_d405_color) too.
+const visualReachStreamTopic = computed(() => {
+    const s = visualReachSelectedSensor.value;
+    return (s && s.read_topic) || _sensorSettings(s).read_topic || '';
+});
+
+// "Test detect": run the target mask on the live wrist RGB and overlay it on the
+// stream — lets the user confirm SAM3/color detection before blaming the pose.
+const visualReachMaskOverlay = ref(null);
+const visualReachDetecting = ref(false);
+const visualReachTracking = ref(false);
+const visualReachDetectInfo = ref(null);
+// --- drag-to-draw box exemplar (YOLOE cross-view) ---
+const vrWrapEl = ref(null);
+const vrDrag = ref(false);
+const vrDragRect = ref({ x: 0, y: 0, w: 0, h: 0 });
+let _vrStart = null;
+const vrDragStyle = computed(() => ({
+    left: vrDragRect.value.x + 'px', top: vrDragRect.value.y + 'px',
+    width: vrDragRect.value.w + 'px', height: vrDragRect.value.h + 'px',
+}));
+function _vrXY(e) {
+    const r = vrWrapEl.value.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top, W: r.width, H: r.height };
+}
+function onVrDown(e) {
+    if (blockForm.value.sensor_id == null) return;
+    stopWristTrack();
+    const p = _vrXY(e); _vrStart = p; vrDrag.value = true;
+    vrDragRect.value = { x: p.x, y: p.y, w: 0, h: 0 };
+}
+function onVrMove(e) {
+    if (!vrDrag.value || !_vrStart) return;
+    const p = _vrXY(e);
+    vrDragRect.value = {
+        x: Math.min(_vrStart.x, p.x), y: Math.min(_vrStart.y, p.y),
+        w: Math.abs(p.x - _vrStart.x), h: Math.abs(p.y - _vrStart.y),
+    };
+}
+function onVrUp() {
+    if (!vrDrag.value) return;
+    vrDrag.value = false;
+    const r = vrDragRect.value;
+    const wrap = vrWrapEl.value.getBoundingClientRect();
+    _vrStart = null;
+    if (r.w < 8 || r.h < 8 || !wrap.width || !wrap.height) return;
+    // normalized box (decouples display size from RGB-D resolution)
+    defineExemplar([r.x / wrap.width, r.y / wrap.height,
+                    (r.x + r.w) / wrap.width, (r.y + r.h) / wrap.height]);
+}
+function clearExemplar() {
+    blockForm.value.exemplar_image = null;
+    blockForm.value.exemplar_box = null;
+    visualReachMaskOverlay.value = null;
+    visualReachDetectInfo.value = null;
+}
+// DEFINE: drag box → backend captures the refer frame + box (YOLOE validates) →
+// store on the block so the target is re-found in later (changed) views.
+async function defineExemplar(boxNorm) {
+    if (blockForm.value.sensor_id == null) return;
+    visualReachDetecting.value = true;
+    try {
+        const res = await api.post('/planner/:define_wrist_exemplar', {
+            sensor_id: blockForm.value.sensor_id,
+            rgbd_service: blockForm.value.rgbd_service,
+            box_norm: boxNorm,
+        });
+        blockForm.value.exemplar_image = res.data.exemplar_image;
+        blockForm.value.exemplar_box = res.data.exemplar_box;
+        visualReachMaskOverlay.value = res.data.image || null;
+        // feedback via the green "타겟 지정됨" chip + toast (the detect-info span needs a centroid)
+        visualReachDetectInfo.value = null;
+        Notify.create({
+            color: res.data.detected ? 'positive' : 'warning',
+            message: res.data.detected ? t('plannerVisualReachTargetSet') : t('plannerVisualReachNotDetected'),
+        });
+    } catch (err) {
+        const d = err?.response?.data;
+        Notify.create({
+            color: 'negative', timeout: d?.need_install ? 6000 : 3000,
+            message: d?.need_install === 'yoloe' ? t('plannerVisualReachYoloeNeeded') : (d?.message || err.message),
+        });
+    } finally {
+        visualReachDetecting.value = false;
+    }
+}
+let _vrTrackTimer = null;
+let _vrTrackErrs = 0;       // consecutive failed polls → auto-stop a dead camera
+let _vrTrackStart = 0;      // wall-clock start → hard duration cap
+// Safety caps: continuous detection re-runs SAM3/color + depth decode each poll, so an
+// open dialog left tracking is sustained load on the bridge/backend. Cap hard so a
+// forgotten toggle can't hammer the backend (it has OOM-killed it under memory pressure).
+const VR_TRACK_INTERVAL_MS = 1500;   // gentler than 0.9s
+const VR_TRACK_MAX_MS = 90000;       // auto-stop after 90s
+const VR_TRACK_MAX_ERRS = 5;         // auto-stop after 5 consecutive failures (dead source)
+// Stop tracking + clear the overlay whenever the block dialog closes or the
+// wrist camera changes (a stale mask must not linger on a different stream).
+watch(() => [showBlockForm.value, blockForm.value.sensor_id], () => {
+    stopWristTrack();
+    visualReachMaskOverlay.value = null;
+    visualReachDetectInfo.value = null;
+});
+// One detection pass → updates the (transparent, mask-only) overlay. `silent`
+// suppresses the error toast for background tracking polls. Resolves to true on
+// success, false on failure (so the tracker can count consecutive errors).
+function _doWristDetect(silent) {
+    if (blockForm.value.sensor_id == null) return Promise.resolve(false);
+    const tp = (blockForm.value.text_prompt || '').trim();
+    const bx = [blockForm.value.box_x1, blockForm.value.box_y1, blockForm.value.box_x2, blockForm.value.box_y2];
+    const boxes = bx.every(v => typeof v === 'number' && !Number.isNaN(v)) ? [bx] : [];
+    visualReachDetecting.value = true;
+    // Send the camera-pose params + workspace so the backend returns target_xyz
+    // computed with the SAME geometry as a real run → in-dialog calibration.
+    const camOffset = [Number(blockForm.value.cam_off_x) || 0, Number(blockForm.value.cam_off_y) || 0, Number(blockForm.value.cam_off_z) || 0];
+    return api.post('/planner/:test_wrist_reach', {
+        sensor_id: blockForm.value.sensor_id,
+        rgbd_service: blockForm.value.rgbd_service,
+        text_prompts: tp ? [tp] : [],
+        boxes,
+        exemplar_image: blockForm.value.exemplar_image,
+        exemplar_box: blockForm.value.exemplar_box,
+        target_color: blockForm.value.target_color,
+        workspace_id: blockForm.value.workspace_id,
+        cam_pose_mode: blockForm.value.cam_pose_mode,
+        cam_offset: blockForm.value.cam_pose_mode === 'manual_ee' ? camOffset : null,
+        cam_pitch: blockForm.value.cam_pitch,
+        cam_yaw: blockForm.value.cam_yaw,
+        cam_roll: blockForm.value.cam_roll,
+        cam_convention: blockForm.value.cam_convention,
+    }).then((res) => {
+        visualReachMaskOverlay.value = res.data.image || null;
+        visualReachDetectInfo.value = res.data;
+        return true;
+    }).catch((err) => {
+        if (!silent) Notify.create({ color: 'negative', message: err?.response?.data?.message || err.message });
+        visualReachDetectInfo.value = { detected: false };
+        return false;
+    }).finally(() => { visualReachDetecting.value = false; });
+}
+
+function stopWristTrack() {
+    if (_vrTrackTimer) { clearInterval(_vrTrackTimer); _vrTrackTimer = null; }
+    visualReachTracking.value = false;
+}
+
+// Toggle continuous tracking: re-detect every ~1.5s so the mask follows the object as
+// the wrist camera/scene moves. Hard-capped (duration + consecutive errors + tab
+// visibility) so it can never run away and overload the backend.
+function toggleWristTrack() {
+    if (visualReachTracking.value) { stopWristTrack(); return; }
+    visualReachTracking.value = true;
+    visualReachDetectInfo.value = null;
+    _vrTrackErrs = 0;
+    _vrTrackStart = Date.now();
+    _doWristDetect(false).then((ok) => { if (!ok) _vrTrackErrs += 1; });
+    _vrTrackTimer = setInterval(() => {
+        // bail if the dialog/block changed, the tab is hidden (don't poll in background),
+        // or we hit the duration / error caps.
+        if (!showBlockForm.value || blockForm.value.type !== 'visual_reach') { stopWristTrack(); return; }
+        if (typeof document !== 'undefined' && document.hidden) return;  // pause, don't stop
+        if (Date.now() - _vrTrackStart > VR_TRACK_MAX_MS) { stopWristTrack(); return; }
+        if (_vrTrackErrs >= VR_TRACK_MAX_ERRS) {
+            stopWristTrack();
+            Notify.create({ color: 'warning', message: t('plannerVisualReachTrackStopped') });
+            return;
+        }
+        if (visualReachDetecting.value) return;  // skip if a poll is still in flight
+        _doWristDetect(true).then((ok) => { _vrTrackErrs = ok ? 0 : _vrTrackErrs + 1; });
+    }, VR_TRACK_INTERVAL_MS);
+}
+
+// No auto-pick: the user explicitly chooses the wrist camera from the sensor list
+// (see visualReachSensorOptions). The live stream + "Test detect" only appear once a
+// sensor is selected — we don't start streaming a camera the user didn't choose.
+// Changing workspace clears a now-invalid selection.
+watch(() => blockForm.value.workspace_id, () => {
+    if (blockForm.value.type !== 'visual_reach') return;
+    const ids = new Set(visualReachSensorOptions.value.map(o => o.value));
+    if (blockForm.value.sensor_id != null && !ids.has(blockForm.value.sensor_id)) {
+        blockForm.value.sensor_id = null;
+    }
+});
+// Selected camera → carry its RGB-D source. Explicit settings.rgbd_service wins
+// (sim / custom); otherwise a real use_depth RealSense exposes the bridge-provided
+// /ec_sensor_<id>/wrist_rgbd Trigger (color + aligned depth + intrinsics).
+watch(() => blockForm.value.sensor_id, () => {
+    if (blockForm.value.type !== 'visual_reach') return;
+    const sensor = visualReachSelectedSensor.value;
+    const svc = _sensorSettings(sensor).rgbd_service
+        || (sensor && _sensorUsesDepth(sensor) ? `/ec_sensor_${sensor.id}/wrist_rgbd` : '');
+    if (svc) blockForm.value.rgbd_service = svc;
+    // Auto-fill the manual camera-mount preset for a NEW block only (editing keeps the
+    // saved pose). A sim/tutorial RGB-D source (fovy, OpenGL: +y up / -z forward) uses
+    // the verified sim preset; a real RealSense (fx intrinsics, optical: +y down / +z
+    // forward) uses the Piper wrist D405 mount — bracket ~7cm up (+Y), tilted 30° down,
+    // optical +y flipped to image-down via roll 180. Tune cam_offset/pitch/roll against
+    // the run's emitted target_xyz for the exact mount.
+    if (editingBlockIndex.value == null && svc) {
+        const isSim = /tutorial/i.test(svc);
+        const preset = isSim
+            ? { x: -0.075, y: 0, z: 0.045, pitch: 60, yaw: 0, roll: -90 }
+            : { x: 0, y: 0.07, z: -0.03, pitch: -30, yaw: 0, roll: 180 };
+        blockForm.value.cam_pose_mode = 'manual_ee';
+        blockForm.value.cam_off_x = preset.x; blockForm.value.cam_off_y = preset.y; blockForm.value.cam_off_z = preset.z;
+        blockForm.value.cam_pitch = preset.pitch; blockForm.value.cam_yaw = preset.yaw; blockForm.value.cam_roll = preset.roll;
+    }
+});
+
 function openBlockForm(group) {
     editingBlockIndex.value = null;
     formGroupId.value = group ? group.id : null;
@@ -1716,6 +2139,19 @@ function openBlockForm(group) {
         settle_sec: 0,
         fallback_block_id: null,
         max_steps: null,
+        sensor_id: null,
+        rgbd_service: '',
+        hover: 0.06,
+        text_prompt: '',
+        box_x1: null, box_y1: null, box_x2: null, box_y2: null,
+        exemplar_image: null, exemplar_box: null,
+        text_prompts: [], boxes: [], target_color: null, observe_positions: {},
+        // wrist-view-reach camera pose (no-calibration manual mount).
+        // Defaults = tutorial MuJoCo wrist_cam mount (verified manual≡FK in sim);
+        // tune offset/pitch/yaw/roll for a real wrist camera.
+        cam_pose_mode: 'manual_ee',
+        cam_off_x: -0.075, cam_off_y: 0, cam_off_z: 0.045,
+        cam_pitch: 60, cam_yaw: 0, cam_roll: -90,
     };
     showBlockForm.value = true;
 }
@@ -1752,6 +2188,28 @@ function openEditBlockForm(group, block, index) {
         settle_sec: typeof block.settle_sec === 'number' ? block.settle_sec : 0,
         fallback_block_id: block.fallback_block_id ?? null,
         max_steps: typeof block.max_steps === 'number' ? block.max_steps : null,
+        sensor_id: block.sensor_id ?? null,
+        rgbd_service: block.rgbd_service || '',
+        hover: typeof block.hover === 'number' ? block.hover : 0.06,
+        text_prompt: (block.text_prompts && block.text_prompts[0]) || '',
+        box_x1: block.boxes?.[0]?.[0] ?? null,
+        box_y1: block.boxes?.[0]?.[1] ?? null,
+        box_x2: block.boxes?.[0]?.[2] ?? null,
+        box_y2: block.boxes?.[0]?.[3] ?? null,
+        text_prompts: block.text_prompts ? [...block.text_prompts] : [],
+        boxes: block.boxes ? JSON.parse(JSON.stringify(block.boxes)) : [],
+        exemplar_image: block.exemplar_image ?? null,
+        exemplar_box: block.exemplar_box ? [...block.exemplar_box] : null,
+        target_color: block.target_color ?? null,
+        observe_positions: block.observe_positions ? JSON.parse(JSON.stringify(block.observe_positions)) : {},
+        // wrist-view-reach camera pose — unfold cam_offset[] back into x/y/z inputs
+        cam_pose_mode: block.cam_pose_mode || (block.cam_offset != null ? 'manual_ee' : 'service'),
+        cam_off_x: block.cam_offset?.[0] ?? 0,
+        cam_off_y: block.cam_offset?.[1] ?? 0,
+        cam_off_z: block.cam_offset?.[2] ?? 0,
+        cam_pitch: typeof block.cam_pitch === 'number' ? block.cam_pitch : 0,
+        cam_yaw: typeof block.cam_yaw === 'number' ? block.cam_yaw : 0,
+        cam_roll: typeof block.cam_roll === 'number' ? block.cam_roll : 0,
     };
     showBlockForm.value = true;
 }
@@ -1912,6 +2370,29 @@ function saveBlock() {
     const config = blockConfigs.value[blockForm.value.type];
     if (!config) return;
 
+    // visual_reach: fold the simple UI fields into the API shape (text_prompts[], boxes[]).
+    if (blockForm.value.type === 'visual_reach') {
+        const tp = (blockForm.value.text_prompt || '').trim();
+        blockForm.value.text_prompts = tp ? [tp] : [];
+        const bx = [blockForm.value.box_x1, blockForm.value.box_y1, blockForm.value.box_x2, blockForm.value.box_y2];
+        blockForm.value.boxes = bx.every(v => typeof v === 'number' && !Number.isNaN(v)) ? [bx] : [];
+        if (!blockForm.value.observe_positions) blockForm.value.observe_positions = {};
+        // manual_ee camera pose: fold offset x/y/z into cam_offset[]. In 'service' mode
+        // we drop the manual fields so the backend uses the sensor-provided pose.
+        if (blockForm.value.cam_pose_mode === 'manual_ee') {
+            blockForm.value.cam_offset = [
+                Number(blockForm.value.cam_off_x) || 0,
+                Number(blockForm.value.cam_off_y) || 0,
+                Number(blockForm.value.cam_off_z) || 0,
+            ];
+            blockForm.value.cam_pitch = Number(blockForm.value.cam_pitch) || 0;
+            blockForm.value.cam_yaw = Number(blockForm.value.cam_yaw) || 0;
+            blockForm.value.cam_roll = Number(blockForm.value.cam_roll) || 0;
+        } else {
+            blockForm.value.cam_offset = null;
+        }
+    }
+
     const isEditing = editingBlockIndex.value !== null;
     const block = {
         id: isEditing ? grp.blocks[editingBlockIndex.value].id : nextBlockId(),
@@ -1950,6 +2431,10 @@ function saveBlock() {
             block.name = t('plannerNameAutoSync', { sync_id: block.sync_id });
         } else if (block.type === 'query_pose') {
             block.name = t('plannerNameAutoQueryPose', { service: block.service_name });
+        } else if (block.type === 'visual_reach') {
+            const tgt = (block.text_prompts && block.text_prompts[0])
+                || (block.boxes && block.boxes.length ? 'box' : t('plannerVisualReachColorTarget'));
+            block.name = t('plannerNameAutoVisualReach', { target: tgt });
         }
     }
 
@@ -2321,3 +2806,18 @@ onMounted(async () => {
     pageLoading.value = false;
 });
 </script>
+
+<style scoped>
+.vr-stream-wrap {
+  position: relative;
+  cursor: crosshair;
+  user-select: none;
+}
+.vr-drag-rect {
+  position: absolute;
+  border: 2px solid #4caf50;
+  background: rgba(76, 175, 80, 0.18);
+  pointer-events: none;
+  z-index: 5;
+}
+</style>
