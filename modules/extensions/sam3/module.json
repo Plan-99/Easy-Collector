@@ -1,7 +1,7 @@
 {
   "id": "sam3",
   "name": "SAM 3 Segmentation",
-  "version": "0.1.1",
+  "version": "0.1.4",
   "category": "extension",
   "description": "SAM 3 (Segment Anything Model 3) 기반 객체 세그멘테이션. 텍스트/박스 프롬프트로 센서 이미지에서 특정 객체를 분리하고 첫 프레임 detect + tracker propagate 모드로 동영상 마스킹을 수행합니다.",
   "install": {
@@ -11,7 +11,8 @@
     "apt": [],
     "pip": [
       "huggingface_hub>=0.24.0",
-      "git+https://github.com/facebookresearch/sam3.git@main#egg=sam3"
+      "pycocotools",
+      "https://github.com/facebookresearch/sam3/archive/refs/heads/main.tar.gz"
     ]
   },
   "check": {
@@ -24,8 +25,14 @@
         "title": "HuggingFace 액세스 토큰",
         "description": "SAM 3 가중치는 facebook/sam3 gated repo에 있어 본인 HuggingFace 토큰이 필요합니다. 라이선스에 동의한 뒤 read 권한 토큰을 발급해 입력해 주세요.",
         "instructions": [
-          { "label": "1. 라이선스 동의 페이지 열기", "url": "https://huggingface.co/facebook/sam3" },
-          { "label": "2. read 토큰 발급",          "url": "https://huggingface.co/settings/tokens" }
+          {
+            "label": "1. 라이선스 동의 페이지 열기",
+            "url": "https://huggingface.co/facebook/sam3"
+          },
+          {
+            "label": "2. read 토큰 발급",
+            "url": "https://huggingface.co/settings/tokens"
+          }
         ],
         "input": {
           "label": "HuggingFace 토큰",
