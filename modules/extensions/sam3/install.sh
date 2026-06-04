@@ -15,7 +15,13 @@ fi
 pip_deps=$(python3 -c "import json; deps=json.load(open('$SCRIPT_DIR/module.json')).get('dependencies',{}).get('pip',[]); print(' '.join(deps))" 2>/dev/null)
 if [ -n "$pip_deps" ]; then
     echo "[sam3] Installing pip packages: $pip_deps"
-    python3 -m pip install --quiet $pip_deps || true
+    # --break-system-packages: the runtime python is PEP668 externally-managed
+    #   (Debian); without this flag pip refuses and the `|| true` silently swallows
+    #   it, leaving sam3 NOT installed (root cause of "No module named 'sam3'").
+    # NOTE: the sam3 source dist installs without git (PyPI-style tarball); the
+    #   git+ URL needs `git` which the backend image lacks.
+    python3 -m pip install --break-system-packages $pip_deps || \
+        python3 -m pip install $pip_deps || true
 fi
 
 # HuggingFace token storage — capture itself is handled by the launcher via

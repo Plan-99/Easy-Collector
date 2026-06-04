@@ -152,18 +152,26 @@ def detect_one(image: np.ndarray, prompts: dict) -> np.ndarray:
         return np.zeros(image.shape[:2], dtype=bool)
     proc = _ensure_image_model()
     pil = _to_pil(image)
-    state = proc.set_image(pil)
+    # SAM3 weights are mixed-precision (bf16 backbone + f32 heads); run inference
+    # under autocast so torch casts each op's operands consistently and avoids
+    # "mat1 and mat2 must have the same dtype" (BFloat16 vs Float).
+    import torch
+    _dev = 'cuda' if torch.cuda.is_available() else 'cpu'
+    _ctx = torch.autocast(device_type=_dev, dtype=torch.bfloat16) if _dev == 'cuda' \
+        else torch.autocast(device_type='cpu', dtype=torch.bfloat16)
     masks = []
-    for text in p['text']:
-        out = proc.set_text_prompt(state=state, prompt=text)
-        m = out.get('masks')
-        if m is not None:
-            masks.append(_extract_mask_array(m, image.shape[:2]))
-    for box in p['boxes']:
-        out = proc.set_box_prompt(state=state, box=list(box))
-        m = out.get('masks')
-        if m is not None:
-            masks.append(_extract_mask_array(m, image.shape[:2]))
+    with torch.inference_mode(), _ctx:
+        state = proc.set_image(pil)
+        for text in p['text']:
+            out = proc.set_text_prompt(state=state, prompt=text)
+            m = out.get('masks')
+            if m is not None:
+                masks.append(_extract_mask_array(m, image.shape[:2]))
+        for box in p['boxes']:
+            out = proc.set_box_prompt(state=state, box=list(box))
+            m = out.get('masks')
+            if m is not None:
+                masks.append(_extract_mask_array(m, image.shape[:2]))
     if not masks:
         return np.zeros(image.shape[:2], dtype=bool)
     union = np.zeros(image.shape[:2], dtype=bool)
