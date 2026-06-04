@@ -1,7 +1,7 @@
 {
   "id": "yoloe",
   "name": "YOLOE Visual-Prompt Detection",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "category": "extension",
   "description": "YOLOE 기반 비주얼-프롬프트 객체 검출. 한 뷰에서 바운딩 박스로 타겟을 지정하면 그 객체가 캐싱되어, 카메라 뷰가 바뀌어 박스 좌표가 어긋나도 같은 객체를 다시 검출합니다 (cross-view one-shot). Wrist View Reach 블록의 박스 exemplar 검출 엔진입니다.",
   "install": {
@@ -10,7 +10,8 @@
   "dependencies": {
     "apt": [],
     "pip": [
-      "ultralytics>=8.4.0"
+      "ultralytics>=8.4.0",
+      "git+https://github.com/ultralytics/CLIP.git"
     ]
   },
   "check": {

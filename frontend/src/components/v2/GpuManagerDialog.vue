@@ -140,7 +140,7 @@ async function refresh () {
   try {
     const { data } = await api.get('/gpu/status')
     status.value = data
-  } catch (e) {
+  } catch {
     // keep last snapshot; surface only the first failure quietly
   } finally {
     loading.value = false

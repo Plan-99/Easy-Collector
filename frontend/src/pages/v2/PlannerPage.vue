@@ -1059,34 +1059,54 @@
                             map-options
                             emit-value
                         ></q-select>
-                        <div v-if="visualReachStreamTopic" class="q-mb-xs">
+                        <div v-if="visualReachStreamTopic" class="q-mb-sm">
                             <div class="vr-stream-wrap border-rounded overflow-hidden" ref="vrWrapEl"
+                                :class="{ 'vr-drag-on': blockForm.target_mode === 'box' }"
                                 @mousedown.prevent="onVrDown" @mousemove="onVrMove"
                                 @mouseup="onVrUp" @mouseleave="onVrUp">
                                 <WebRtcVideo :topic="visualReachStreamTopic" :sensor-id="blockForm.sensor_id || 0"
                                     :overlay-src="visualReachMaskOverlay" />
                                 <div v-if="vrDrag" class="vr-drag-rect" :style="vrDragStyle"></div>
                             </div>
-                            <div class="row items-center q-mt-xs">
-                                <span class="text-caption text-grey-5">
-                                    <q-icon name="crop_free" size="14px" /> {{ $t('plannerVisualReachDragHint') }}
-                                </span>
+                        </div>
+                        <!-- Target object: box exemplar (drag) OR text prompt — both via YOLOE -->
+                        <q-select v-if="visualReachStreamTopic"
+                            dense outlined dark bg-color="dark" class="q-mb-sm"
+                            v-model="blockForm.target_mode"
+                            :options="visualReachTargetModeOptions"
+                            :label="$t('plannerVisualReachTargetMode')"
+                            map-options emit-value
+                        ></q-select>
+                        <!-- 1) box mode: drag on the stream -->
+                        <div v-if="visualReachStreamTopic && blockForm.target_mode === 'box'" class="q-mb-md">
+                            <div class="text-caption text-grey-5 row items-center">
+                                <q-icon name="crop_free" size="16px" class="q-mr-xs" />
+                                {{ $t('plannerVisualReachBoxGuide') }}
                                 <q-space />
-                                <span v-if="blockForm.exemplar_box" class="text-caption text-green q-mr-sm">
+                                <span v-if="blockForm.exemplar_box" class="text-green q-mr-sm">
                                     ● {{ $t('plannerVisualReachTargetSet') }}
                                 </span>
                                 <q-btn v-if="blockForm.exemplar_box" dense flat size="sm" color="grey-5"
                                     icon="clear" :label="$t('plannerVisualReachTargetClear')" @click="clearExemplar" />
+                                <q-spinner v-if="visualReachDetecting" color="primary" size="16px" class="q-ml-sm" />
                             </div>
                         </div>
-                        <div v-if="visualReachStreamTopic" class="q-mb-md row items-center q-gutter-sm">
-                            <q-btn dense :outline="!visualReachTracking"
-                                :color="visualReachTracking ? 'red' : 'primary'"
-                                :icon="visualReachTracking ? 'stop' : 'center_focus_strong'"
-                                :loading="visualReachDetecting && !visualReachTracking"
-                                :label="visualReachTracking ? $t('plannerVisualReachTrackStop') : $t('plannerVisualReachTestDetect')"
-                                @click="toggleWristTrack" />
-                            <q-spinner v-if="visualReachTracking && visualReachDetecting" color="primary" size="18px" />
+                        <!-- 2) text mode: prompt input + detect button -->
+                        <div v-if="visualReachStreamTopic && blockForm.target_mode === 'text'" class="q-mb-md">
+                            <div class="row items-center q-gutter-sm">
+                                <q-input class="col" dense outlined dark bg-color="dark"
+                                    v-model="blockForm.text_prompt"
+                                    :label="$t('plannerVisualReachPrompt')"
+                                    :hint="$t('plannerVisualReachPromptHint')"
+                                    @keyup.enter="toggleWristTrack"
+                                ></q-input>
+                                <q-btn dense :outline="!visualReachTracking"
+                                    :color="visualReachTracking ? 'red' : 'primary'"
+                                    :icon="visualReachTracking ? 'stop' : 'center_focus_strong'"
+                                    :loading="visualReachDetecting && !visualReachTracking"
+                                    :label="visualReachTracking ? $t('plannerVisualReachTrackStop') : $t('plannerVisualReachTestDetect')"
+                                    @click="toggleWristTrack" />
+                            </div>
                             <span v-if="visualReachDetectInfo" class="text-caption"
                                 :class="visualReachDetectInfo.detected ? 'text-green' : 'text-orange'">
                                 {{ (visualReachDetectInfo.detected && visualReachDetectInfo.centroid)
@@ -1094,29 +1114,14 @@
                                     : (visualReachDetectInfo.detected ? $t('plannerVisualReachTargetSet') : $t('plannerVisualReachNotDetected')) }}
                             </span>
                         </div>
-                        <!-- Calibration readout: world XYZ the EE will reach. Tune
-                             cam_offset/pitch/yaw/roll until this matches the object. -->
+                        <!-- Calibration readout: world XYZ the EE will reach -->
                         <div v-if="visualReachDetectInfo && visualReachDetectInfo.target_xyz"
-                            class="text-caption text-cyan q-mt-xs">
+                            class="text-caption text-cyan q-mb-sm">
                             {{ $t('plannerVisualReachTargetXyz', {
                                 x: visualReachDetectInfo.target_xyz[0].toFixed(3),
                                 y: visualReachDetectInfo.target_xyz[1].toFixed(3),
                                 z: visualReachDetectInfo.target_xyz[2].toFixed(3) }) }}
                         </div>
-                        <div v-else-if="visualReachDetectInfo && visualReachDetectInfo.target_note === 'robot_off'"
-                            class="text-caption text-grey q-mt-xs">
-                            {{ $t('plannerVisualReachTargetNeedsRobot') }}
-                        </div>
-                        <q-expansion-item dense dark class="q-mb-md" icon="text_fields"
-                            :label="$t('plannerVisualReachPromptOptional')">
-                            <q-input
-                                dense outlined dark bg-color="dark"
-                                v-model="blockForm.text_prompt"
-                                :label="$t('plannerVisualReachPrompt')"
-                                :hint="$t('plannerVisualReachPromptHint')"
-                                class="q-mt-sm"
-                            ></q-input>
-                        </q-expansion-item>
                         <q-input
                             dense outlined dark bg-color="dark"
                             v-model.number="blockForm.hover"
@@ -1880,6 +1885,7 @@ const blockForm = ref({
     hover: 0.06,
     text_prompt: '',           // UI 단일 입력 → 저장 시 text_prompts:[…] 로 변환
     box_x1: null, box_y1: null, box_x2: null, box_y2: null,
+    target_mode: 'box',                          // 'box'(드래그 exemplar) | 'text'(텍스트 프롬프트) — 둘 다 YOLOE
     exemplar_image: null, exemplar_box: null,   // 드래그 박스 exemplar (YOLOE cross-view)
     text_prompts: [], boxes: [], target_color: null, observe_positions: {},
 });
@@ -1934,6 +1940,11 @@ function _sensorUsesDepth(sensor) {
     const st = _sensorSettings(sensor);
     return !!(sensor.use_depth || st.use_depth || st.has_depth || st.rgbd_service);
 }
+// Target-object spec: box exemplar (drag) or text prompt — both detected by YOLOE.
+const visualReachTargetModeOptions = computed(() => [
+    { label: t('plannerVisualReachTargetModeBox'), value: 'box' },
+    { label: t('plannerVisualReachTargetModeText'), value: 'text' },
+]);
 const visualReachWorkspace = computed(() =>
     availableWorkspaces.value.find(w => w.id === blockForm.value.workspace_id) || null);
 // Wrist-camera options: the workspace's depth-capable sensors, deduped by PHYSICAL
@@ -1979,6 +1990,8 @@ function _vrXY(e) {
     return { x: e.clientX - r.left, y: e.clientY - r.top, W: r.width, H: r.height };
 }
 function onVrDown(e) {
+    // dragging only defines a target in box mode (text mode uses the prompt).
+    if (blockForm.value.target_mode !== 'box') return;
     if (blockForm.value.sensor_id == null) return;
     stopWristTrack();
     const p = _vrXY(e); _vrStart = p; vrDrag.value = true;
@@ -2009,6 +2022,15 @@ function clearExemplar() {
     visualReachMaskOverlay.value = null;
     visualReachDetectInfo.value = null;
 }
+// Switching target mode clears the other mode's leftovers + the overlay so a
+// stale box/text result never bleeds across modes.
+watch(() => blockForm.value.target_mode, () => {
+    stopWristTrack();
+    blockForm.value.exemplar_image = null;
+    blockForm.value.exemplar_box = null;
+    visualReachMaskOverlay.value = null;
+    visualReachDetectInfo.value = null;
+});
 // DEFINE: drag box → backend captures the refer frame + box (YOLOE validates) →
 // store on the block so the target is re-found in later (changed) views.
 async function defineExemplar(boxNorm) {
@@ -2060,20 +2082,21 @@ watch(() => [showBlockForm.value, blockForm.value.sensor_id], () => {
 // success, false on failure (so the tracker can count consecutive errors).
 function _doWristDetect(silent) {
     if (blockForm.value.sensor_id == null) return Promise.resolve(false);
+    const isText = blockForm.value.target_mode === 'text';
     const tp = (blockForm.value.text_prompt || '').trim();
-    const bx = [blockForm.value.box_x1, blockForm.value.box_y1, blockForm.value.box_x2, blockForm.value.box_y2];
-    const boxes = bx.every(v => typeof v === 'number' && !Number.isNaN(v)) ? [bx] : [];
     visualReachDetecting.value = true;
     // Send the camera-pose params + workspace so the backend returns target_xyz
     // computed with the SAME geometry as a real run → in-dialog calibration.
+    // Only the active mode's target is sent (text prompt vs box exemplar) so the
+    // backend detects with exactly what the user picked.
     const camOffset = [Number(blockForm.value.cam_off_x) || 0, Number(blockForm.value.cam_off_y) || 0, Number(blockForm.value.cam_off_z) || 0];
     return api.post('/planner/:test_wrist_reach', {
         sensor_id: blockForm.value.sensor_id,
         rgbd_service: blockForm.value.rgbd_service,
-        text_prompts: tp ? [tp] : [],
-        boxes,
-        exemplar_image: blockForm.value.exemplar_image,
-        exemplar_box: blockForm.value.exemplar_box,
+        text_prompts: isText && tp ? [tp] : [],
+        boxes: [],
+        exemplar_image: isText ? null : blockForm.value.exemplar_image,
+        exemplar_box: isText ? null : blockForm.value.exemplar_box,
         target_color: blockForm.value.target_color,
         workspace_id: blockForm.value.workspace_id,
         cam_pose_mode: blockForm.value.cam_pose_mode,
@@ -2198,6 +2221,7 @@ function openBlockForm(group) {
         hover: 0.06,
         text_prompt: '',
         box_x1: null, box_y1: null, box_x2: null, box_y2: null,
+        target_mode: 'box',
         exemplar_image: null, exemplar_box: null,
         text_prompts: [], boxes: [], target_color: null, observe_positions: {},
         // wrist-view-reach camera pose (no-calibration manual mount).
@@ -2252,6 +2276,7 @@ function openEditBlockForm(group, block, index) {
         box_y2: block.boxes?.[0]?.[3] ?? null,
         text_prompts: block.text_prompts ? [...block.text_prompts] : [],
         boxes: block.boxes ? JSON.parse(JSON.stringify(block.boxes)) : [],
+        target_mode: block.target_mode || (block.exemplar_box ? 'box' : (block.text_prompts && block.text_prompts[0] ? 'text' : 'box')),
         exemplar_image: block.exemplar_image ?? null,
         exemplar_box: block.exemplar_box ? [...block.exemplar_box] : null,
         target_color: block.target_color ?? null,
@@ -2864,8 +2889,10 @@ onMounted(async () => {
 <style scoped>
 .vr-stream-wrap {
   position: relative;
-  cursor: crosshair;
   user-select: none;
+}
+.vr-stream-wrap.vr-drag-on {
+  cursor: crosshair;
 }
 .vr-drag-rect {
   position: absolute;

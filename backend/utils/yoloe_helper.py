@@ -92,3 +92,11 @@ def detect_exemplar(target_rgb: np.ndarray, refer_rgb: np.ndarray, box,
     if r is None or not is_extension_installed():
         raise RuntimeError('YOLOE extension is not installed')
     return r.detect_exemplar(target_rgb, refer_rgb, box, conf=conf)
+
+
+def detect_text(target_rgb: np.ndarray, texts, conf: float = 0.15) -> np.ndarray:
+    """Open-vocabulary text-prompt detect via YOLOE. Raises if not installed."""
+    r = _load_runner()
+    if r is None or not is_extension_installed():
+        raise RuntimeError('YOLOE extension is not installed')
+    return r.detect_text(target_rgb, texts, conf=conf)

@@ -74,7 +74,7 @@ BLOCK_CONFIGS = {
         # cam_pose_mode: 'service'(센서가 카메라 월드 pose 제공) | 'manual_ee'(캘리브레이션
         # 없이 EE 기준 대략적 카메라 마운트를 사람이 입력). manual_ee 시 cam_offset[x,y,z]
         # (EE 프레임, m) + cam_pitch/cam_yaw/cam_roll(deg)로 카메라 pose를 EE FK와 합성.
-        'keys': ['workspace_id', 'sensor_id', 'rgbd_service', 'text_prompts', 'boxes',
+        'keys': ['workspace_id', 'sensor_id', 'rgbd_service', 'target_mode', 'text_prompts', 'boxes',
                  'exemplar_image', 'exemplar_box',
                  'target_color', 'observe_positions', 'hover', 'duration', 'settle_sec',
                  'cam_pose_mode', 'cam_offset', 'cam_pitch', 'cam_yaw', 'cam_roll',

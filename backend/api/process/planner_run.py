@@ -1003,56 +1003,30 @@ def _vr_sam3_mask(runner, rgb, text_list, boxes, H, W):
 
 
 def _visual_reach_mask(rgb, text_prompts, boxes, block):
-    """Return a bool mask (H,W) of the target. Priority: visual exemplar (a box
-    cached as a DINOv2 vector — view-independent), then SAM3 (text/box) with a
-    color+shape prompt-expansion fallback, then bounding boxes, then a
-    color-word-aware threshold. `rgb` is HxWx3 uint8 RGB."""
+    """Return a bool mask (H,W) of the target. Wrist View Reach uses YOLOE only
+    (SAM3 is not used here): a dragged box exemplar (view-independent cross-view
+    match) or an open-vocabulary text prompt. Falls back to a color threshold
+    only when YOLOE isn't installed. `rgb` is HxWx3 uint8 RGB."""
     import numpy as np
     H, W = rgb.shape[:2]
     joined = ' '.join(text_prompts).lower() if text_prompts else ''
     colors_in = [c for c in _VR_COLORS if c in joined]
 
-    # 0) Visual exemplar (box dragged on a reference view → YOLOE cross-view match).
-    #    The box defines the target on `exemplar_image`; YOLOE re-finds that object
-    #    in the current view even when the camera pose changed and the box no longer
-    #    aligns. Authoritative when set — no color fallback (a miss = "not found").
-    #    Requires the YOLOE extension; raises a clear error if it isn't installed.
     refer_b64 = block.get('exemplar_image')
     refer_box = block.get('exemplar_box')
-    if refer_b64 and refer_box:
+    if (refer_b64 and refer_box) or text_prompts:
         from ...utils import yoloe_helper
         if not yoloe_helper.is_extension_installed():
             raise RuntimeError(
-                "Wrist View Reach box-exemplar 검출에는 YOLOE 확장이 필요합니다. "
+                "Wrist View Reach 검출에는 YOLOE 확장이 필요합니다. "
                 "모듈 관리에서 'YOLOE Visual-Prompt Detection'을 설치하세요.")
-        refer_rgb = _visual_reach_decode_rgb(refer_b64)
-        return yoloe_helper.detect_exemplar(rgb, refer_rgb, refer_box)
+        # box exemplar takes precedence (it pins a specific instance); else text.
+        if refer_b64 and refer_box:
+            refer_rgb = _visual_reach_decode_rgb(refer_b64)
+            return yoloe_helper.detect_exemplar(rgb, refer_rgb, refer_box)
+        return yoloe_helper.detect_text(rgb, text_prompts)
 
-    # 1) SAM3 (open-vocab text / box) when available
-    if text_prompts or boxes:
-        try:
-            from backend.utils import sam3_helper
-            if sam3_helper.is_extension_installed():
-                runner = sam3_helper._load_runner()
-                # (a) literal prompt
-                m = _vr_sam3_mask(runner, rgb, list(text_prompts), boxes, H, W)
-                if m is not None:
-                    return m
-                # (b) on miss, retry with color+shape primitives derived from the prompt
-                if text_prompts:
-                    variants = []
-                    for c in colors_in:
-                        variants += [f'{c} {sh}' for sh in _VR_SHAPES]
-                    variants += ['circle', 'disc', 'object']  # colorless last resort
-                    for v in variants:
-                        mm = _vr_sam3_mask(runner, rgb, [v], [], H, W)
-                        if mm is not None:
-                            print(f"[visual_reach] SAM3 '{joined}' empty; matched fallback prompt '{v}'", flush=True)
-                            return mm
-                    print(f"[visual_reach] SAM3 found nothing for '{joined}' or fallbacks", flush=True)
-        except Exception as e:
-            print(f"[visual_reach] SAM3 path unavailable, falling back: {e}", flush=True)
-    # 2) bounding boxes union (no model needed)
+    # No YOLOE prompt set → manual box union, else color threshold (legacy fallback).
     if boxes:
         mask = np.zeros((H, W), bool)
         for b in boxes:
@@ -1061,7 +1035,6 @@ def _visual_reach_mask(rgb, text_prompts, boxes, block):
                  max(0, min(x1, x2)):max(0, max(x1, x2))] = True
         if mask.any():
             return mask
-    # 3) color threshold fallback — use the prompt's color word if present, else red
     r, g, bl = rgb[..., 0].astype(int), rgb[..., 1].astype(int), rgb[..., 2].astype(int)
     col = block.get('target_color')
     if not col and colors_in:
