@@ -86,10 +86,31 @@ def load_error() -> Optional[str]:
     return _LOAD_ERROR
 
 
+def _result_to_mask(r0, H: int, W: int) -> np.ndarray:
+    """Highest-confidence detection in an Ultralytics result → bool mask (H,W).
+    Prefers the segmentation mask; falls back to the detected box rectangle."""
+    if r0.boxes is None or len(r0.boxes) == 0:
+        return np.zeros((H, W), bool)
+    confs = r0.boxes.conf.cpu().numpy()
+    bi = int(confs.argmax())
+    masks = getattr(r0, 'masks', None)
+    if masks is not None and masks.data is not None and len(masks.data) > bi:
+        m = masks.data[bi].cpu().numpy() > 0.5
+        if m.shape != (H, W):
+            import cv2
+            m = cv2.resize(m.astype(np.uint8), (W, H), interpolation=cv2.INTER_NEAREST) > 0
+        return m
+    b = r0.boxes.xyxy.cpu().numpy()[bi]
+    m = np.zeros((H, W), bool)
+    x1, y1, x2, y2 = [int(round(v)) for v in b]
+    m[max(0, y1):max(0, y2), max(0, x1):max(0, x2)] = True
+    return m
+
+
 def detect_exemplar(target_rgb: np.ndarray, refer_rgb: np.ndarray, box,
                     conf: float = 0.25) -> np.ndarray:
-    """Find the object boxed in `refer_rgb` inside `target_rgb`. Returns the best
-    detection as a bool mask (H,W); all-False if nothing matched."""
+    """Box exemplar: find the object boxed in `refer_rgb` inside `target_rgb`
+    (cross-view visual prompt). Returns the best detection as a bool mask (H,W)."""
     H, W = target_rgb.shape[:2]
     model = load_model()
     if model is None:
@@ -102,22 +123,23 @@ def detect_exemplar(target_rgb: np.ndarray, refer_rgb: np.ndarray, box,
         visual_prompts=vp, predictor=YOLOEVPSegPredictor,
         conf=conf, verbose=False, device=_device(),
     )
-    r0 = res[0]
-    if r0.boxes is None or len(r0.boxes) == 0:
+    return _result_to_mask(res[0], H, W)
+
+
+def detect_text(target_rgb: np.ndarray, texts, conf: float = 0.15) -> np.ndarray:
+    """Open-vocabulary text prompt: detect the named object(s) in `target_rgb`
+    using YOLOE's text-prompt mode (CLIP text embeddings). Returns the best
+    detection as a bool mask (H,W)."""
+    H, W = target_rgb.shape[:2]
+    names = [str(x).strip() for x in (texts or []) if str(x).strip()]
+    if not names:
         return np.zeros((H, W), bool)
-    confs = r0.boxes.conf.cpu().numpy()
-    bi = int(confs.argmax())
-    masks = getattr(r0, 'masks', None)
-    if masks is not None and masks.data is not None and len(masks.data) > bi:
-        md = masks.data[bi].cpu().numpy()
-        m = md > 0.5
-        if m.shape != (H, W):
-            import cv2
-            m = cv2.resize(m.astype(np.uint8), (W, H), interpolation=cv2.INTER_NEAREST) > 0
-        return m
-    # no seg mask → fill the detected box
-    b = r0.boxes.xyxy.cpu().numpy()[bi]
-    m = np.zeros((H, W), bool)
-    x1, y1, x2, y2 = [int(round(v)) for v in b]
-    m[max(0, y1):max(0, y2), max(0, x1):max(0, x2)] = True
-    return m
+    model = load_model()
+    if model is None:
+        raise RuntimeError(_LOAD_ERROR or 'YOLOE not available')
+    model.set_classes(names, model.get_text_pe(names))
+    res = model.predict(
+        np.ascontiguousarray(target_rgb[:, :, ::-1]),
+        conf=conf, verbose=False, device=_device(),
+    )
+    return _result_to_mask(res[0], H, W)
