@@ -144,13 +144,16 @@
                                     :class="{ 'text-primary': selectedDatasetForBatch && selectedDatasetForBatch.id === dataset.id }">
                                     <div class="row items-center q-gutter-x-sm">
                                         <span class="ellipsis">{{ dataset.name }} ({{ dataset.id }})</span>
-                                        <!-- origin='curriculum' 인 데이터셋은 커리큘럼 소유 — 편집/병합/삭제 차단. -->
+                                    </div>
+                                    <!-- origin='curriculum' 인 데이터셋은 커리큘럼 소유 — 편집/일괄변경은 허용,
+                                         데이터셋 자체 삭제만 차단(아래 컨텍스트 메뉴). 뱃지는 이름 한 줄 아래에
+                                         "스테이지 N {성공/실패/교정}데이터" 로 표시. -->
+                                    <div v-if="dataset.origin === 'curriculum'">
                                         <q-chip
-                                            v-if="dataset.origin === 'curriculum'"
                                             size="sm" dense square
                                             color="amber-9" text-color="white"
                                             icon="auto_awesome"
-                                            :label="$t('curriculumDatasetChip')"
+                                            :label="curriculumBadgeLabel(dataset)"
                                         />
                                     </div>
                                     <div class="text-caption text-grey-5">
@@ -159,7 +162,7 @@
                                 </div>
                                 <q-menu context-menu>
                                     <q-list bordered separator dark class="bg-dark text-white">
-                                        <q-item v-if="dataset.origin !== 'curriculum'" clickable v-ripple v-close-popup @click="openEditDatasetForm(dataset)">
+                                        <q-item clickable v-ripple v-close-popup @click="openEditDatasetForm(dataset)">
                                             <q-item-section>{{ $t('workspaceDatasetEdit') }}</q-item-section>
                                             <q-item-section side><q-icon name="edit" size="xs" color="grey-5" /></q-item-section>
                                         </q-item>
@@ -167,7 +170,7 @@
                                             <q-item-section>{{ $t('datasetBatchEdit') || $t('workspaceDatasetAugment') }}</q-item-section>
                                             <q-item-section side><q-icon name="auto_fix_high" size="xs" color="grey-5" /></q-item-section>
                                         </q-item>
-                                        <q-item v-if="dataset.origin !== 'curriculum'" clickable v-ripple v-close-popup @click="openMergeDatasetForm(dataset)">
+                                        <q-item clickable v-ripple v-close-popup @click="openMergeDatasetForm(dataset)">
                                             <q-item-section>{{ $t('workspaceDatasetMerge') }}</q-item-section>
                                             <q-item-section side><q-icon name="merge_type" size="xs" color="grey-5" /></q-item-section>
                                         </q-item>
@@ -499,6 +502,19 @@ function selectedTransfers() {
 const currentEpisode = ref(null);
 const currentDatasetIdForViewer = ref(null);
 const selectedDatasetForBatch = ref(null);
+
+// 커리큘럼 소유 데이터셋 뱃지 라벨: "스테이지 N {성공/실패/교정}데이터".
+// stage_index 는 백엔드 dataset dict 에서 내려옴(rename 에도 견고). role 은 dataset.role.
+function curriculumBadgeLabel(dataset) {
+    const roleMap = {
+        success: t('datasetRoleSuccess'),
+        failure: t('datasetRoleFailure'),
+        dagger: t('datasetRoleDagger'),
+    };
+    const role = roleMap[dataset.role] || dataset.role || '';
+    const n = dataset.stage_index != null ? dataset.stage_index : '?';
+    return t('curriculumStageDataBadge', { n, role });
+}
 
 function selectDatasetForBatch(dataset) {
     if (!dataset || !(dataset.episodes || []).length) {

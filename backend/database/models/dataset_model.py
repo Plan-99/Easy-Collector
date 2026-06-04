@@ -22,6 +22,7 @@ class Dataset(SoftDeleteModel):
         'episode_len',
         'episodes',
         'dataset_metadata',
+        'stage_index',
     ]
 
     name = CharField(null=True)
@@ -34,6 +35,10 @@ class Dataset(SoftDeleteModel):
     stage_id = IntegerField(null=True)
     checkpoint_group_id = IntegerField(null=True)
     checkpoint_id = IntegerField(null=True)
+    # 커리큘럼 기록의 1차 키 — 같은 checkpoint_id 가 플랜의 여러 체크포인트 블록으로
+    # 등장할 수 있어, 데이터셋/성공·실패/판정조건을 블록 단위로 분리한다. checkpoint_id
+    # 는 라벨·학습(그룹/cp 단위) 용으로 계속 보유(dual-key). 플래너 블록 id(문자열).
+    block_id = CharField(null=True)
     role = CharField(null=True)  # 'success' | 'failure' | 'dagger'
     created_at = DateTimeField(default=datetime.datetime.now)
     updated_at = DateTimeField(default=datetime.datetime.now)
@@ -47,6 +52,18 @@ class Dataset(SoftDeleteModel):
     def task(self):
         from .task_model import Task
         return Task.find(self.task_id) if self.task_id else None
+
+    @property
+    def stage_index(self):
+        """커리큘럼 stage 종속 데이터셋의 stage 번호(index). 없으면 None.
+
+        뱃지("스테이지 N ...") 표시에 사용 — 데이터셋 이름이 바뀌어도 정확하다.
+        """
+        if self.stage_id is None:
+            return None
+        from .stage_model import Stage
+        st = Stage.find(self.stage_id)
+        return st.index if st else None
 
     @property
     def robot_ids(self):

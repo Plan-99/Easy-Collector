@@ -199,7 +199,8 @@ def _run_checkpoint_recorded(block, ctx, task_control, group_id):
             raise RuntimeError(f"robot '{robot.get('name')}' is not running — turn it on first")
         agents.append(agent)
 
-    crit = (ctx['criteria_by_cp'] or {}).get(cp_id) or (ctx['criteria_by_cp'] or {}).get(str(cp_id)) or {}
+    # 판정조건(success_criteria)은 **블록 단위** — 같은 cp 가 여러 블록이어도 따로.
+    crit = (ctx.get('criteria_by_block') or {}).get(block.get('id')) or {}
     try:
         max_steps = int(crit.get('max_steps') or DEFAULT_MAX_STEPS)
     except (TypeError, ValueError):
@@ -238,6 +239,9 @@ def _run_checkpoint_recorded(block, ctx, task_control, group_id):
                 re_inference_steps=block.get('re_inference_steps', 1),
                 temporal_ensemble_coeff=block.get('temporal_ensemble_coeff', 0.01),
                 action_type=block.get('action_type'),
+                # 커리큘럼은 success_criteria(블록 단위)에서 우선 읽고, 없으면 plan
+                # block 값, 그래도 없으면 기본 3.
+                succeed_done_frames=int(crit.get('succeed_done_frames') or block.get('succeed_done_frames') or 3),
                 preloaded=preloaded,
                 record=record,
             )
@@ -297,9 +301,10 @@ def _run_checkpoint_recorded(block, ctx, task_control, group_id):
         stage_id = stage.id if stage is not None else None
         dagger_ds_id = None
         if stage_id is not None:
+            # dagger 데이터셋도 **블록 단위** 로 찾는다.
             for d in DatasetModel.all_active().where(
                 (DatasetModel.stage_id == stage_id)
-                & (DatasetModel.checkpoint_id == cp_id)
+                & (DatasetModel.block_id == block_id)
                 & (DatasetModel.role == 'dagger')
             ):
                 dagger_ds_id = d.id
@@ -321,14 +326,23 @@ def _run_checkpoint_recorded(block, ctx, task_control, group_id):
     timesteps = record.get('timesteps') or []
     succeed_flags = record.get('succeed_flags') or []
     action_key = _checkpoint_action_key(checkpoint, policy)
+    # 성공 데이터 다운샘플(블록 단위) — enabled 면 stride rate, 아니면 1(무다운샘플).
+    _sd_rate = 1
+    if crit.get('success_downsample'):
+        try:
+            _sd_rate = max(1, int(crit.get('success_downsample_rate') or 1))
+        except (TypeError, ValueError):
+            _sd_rate = 1
 
     with ctx['lock']:
         ctx['cp_records'].setdefault(group_id, []).append({
             'checkpoint_id': cp_id,
+            'block_id': block_id,
             'success': success,
             'steps': steps,
             'timesteps': timesteps,
             'succeed_flags': succeed_flags,
+            'success_downsample_rate': _sd_rate,
             'agents': agents,
             'sensors': sensors,
             'task': workspace,
@@ -391,6 +405,12 @@ def _dispatch_block(block, ctx, task_control, group_id, record_checkpoints=True)
         _run_sync(block, ctx, task_control, group_id)
         return
     if btype == 'checkpoint':
+        # 직전 블록 실행/교정 도중에 들어온 stale ``stop_current_block`` 신호가
+        # 이 블록을 0스텝에서 즉시 중단시키는 것을 방지 — 블록 시작 시점에 플래그를
+        # 비운다. 이 블록이 시작된 이후(추론 중)에 눌린 stop 만 set 되어 살아남는다.
+        # (예: 교정 중 Space 연타로 포커스된 'stop' 버튼이 우발적으로 눌려 신호가
+        #  남아도, 다음 체크포인트가 그걸 물려받아 곧바로 실패하던 문제 차단.)
+        task_control['stop_current_block'] = False
         cp_id = block.get('checkpoint_id')
         target_cps = ctx['target_cp_by_group'].get(group_id, set())
         if record_checkpoints and cp_id in target_cps:
@@ -501,23 +521,27 @@ def _run_single_rollout(groups, ctx, task_control):
 # ── 판정 / 저장 ────────────────────────────────────────────────────────────
 
 def _datasets_for_stage(stage_id):
-    """{(checkpoint_id, role): Dataset} 매핑."""
+    """{(block_id, role): Dataset} 매핑 — 기록은 체크포인트 블록 단위."""
     from ...database.models.dataset_model import Dataset as DatasetModel
     out = {}
     for ds in DatasetModel.all_active().where(DatasetModel.stage_id == stage_id):
-        out[(ds.checkpoint_id, ds.role)] = ds
+        out[(ds.block_id, ds.role)] = ds
     return out
 
 
 SUCCESS_TAIL_PAD = 10  # 성공 에피소드 저장 시 종료 프레임을 몇 개 복제해 뒤에 이어붙일지
 
 
-def _save_episode(dataset, rec, mark_success=False):
+def _save_episode(dataset, rec, mark_success=False, downsample_rate=1):
     """녹화된 timesteps 를 dataset 폴더에 lerobot 에피소드로 append.
 
     mark_success=True (성공 에피소드)이면 종료 프레임의 succeed 라벨을 1 로 두고,
     종료 프레임을 SUCCESS_TAIL_PAD(10)개 복제해 마지막에 이어붙인 뒤 저장한다
     (succeed token 학습용 — 종료 상태를 강조).
+
+    downsample_rate > 1 이면 timesteps 를 stride(rate) 로 솎아서 저장한다(성공 데이터
+    다운샘플). 종료 프레임 보존을 위해 마지막 프레임은 항상 포함하고, succeed tail
+    패딩은 다운샘플 이후에 적용한다.
     """
     if dataset is None or not rec.get('timesteps'):
         return None
@@ -529,6 +553,19 @@ def _save_episode(dataset, rec, mark_success=False):
     # 길이 정합(혹시 succeed_flags 가 짧으면 0 으로 패딩).
     while len(succeed_flags) < len(timesteps):
         succeed_flags.append(0.0)
+
+    # 다운샘플(stride). rate 프레임마다 1프레임만 유지하되, 마지막(종료) 프레임은
+    # 반드시 포함해 종료 상태가 빠지지 않게 한다.
+    try:
+        rate = max(1, int(downsample_rate or 1))
+    except (TypeError, ValueError):
+        rate = 1
+    if rate > 1 and len(timesteps) > 1:
+        idx = list(range(0, len(timesteps), rate))
+        if idx[-1] != len(timesteps) - 1:
+            idx.append(len(timesteps) - 1)
+        timesteps = [timesteps[i] for i in idx]
+        succeed_flags = [succeed_flags[i] for i in idx]
 
     if mark_success and timesteps:
         # 종료 프레임 succeed=1.
@@ -583,9 +620,19 @@ def _judge_and_store(rollout, ctx, save_probabilities):
         saved_episodes = []
         prob = float(save_probabilities.get(group_id, 1.0))
         # 카운트는 **그룹 rollout 단위** — 1 파이프라인 한 바퀴 당 한 쪽만 +1.
-        # group_success = 이 rollout 의 모든 cp 가 성공했는지. 한 cp 라도 실패면
-        # rollout 전체가 실패. 사용자 멘탈모델 "1 trial = 1 파이프라인 한 번".
-        group_success = bool(recs) and all(r['success'] for r in recs)
+        # group_success = 이 그룹의 **모든 타겟 체크포인트 블록**이 이번 rollout 에서
+        # 성공 기록을 남겼는지. 단순히 ``all(recs 가 성공)`` 으로 보면, 사용자가 중간에
+        # 중단해서 뒤쪽 블록이 아예 실행/기록되지 않은 경우 recs 에 성공한 앞 블록만
+        # 남아 잘못 성공 처리된다. → 기대 타겟 블록 집합이 성공 블록 집합에 모두
+        # 포함되어야 성공 (하나라도 실패하거나 미실행이면 실패). 사용자 멘탈모델
+        # "1 trial = 파이프라인 전체 1회, 전부 성공해야 성공".
+        expected_blocks = (ctx.get('target_block_by_group') or {}).get(group_id) or set()
+        succeeded_blocks = {r.get('block_id') for r in recs if r['success']}
+        if expected_blocks:
+            group_success = expected_blocks.issubset(succeeded_blocks)
+        else:
+            # 타겟 블록 정보가 없으면(구버전 ctx 등) 기존 동작으로 폴백.
+            group_success = bool(recs) and all(r['success'] for r in recs)
         # 데이터셋 저장은 **cp 별** — 각 cp 가 자기 자신의 성공/실패 여부에 따라
         # 해당 cp 의 success / failure 데이터셋으로 저장. 그룹이 실패해도 그
         # rollout 안에서 성공한 cp 가 있으면 그 cp 의 success 데이터로 수집.
@@ -604,27 +651,30 @@ def _judge_and_store(rollout, ctx, save_probabilities):
                 'frames': frames,
             })
         for r in recs:
+            # 데이터셋 lookup 은 **블록 단위**(block_id). checkpoint_id 는 라벨·학습용 보존.
+            bid = r.get('block_id')
             if r['success']:
-                ds = ds_map.get((r['checkpoint_id'], 'success')) or ds_map.get((str(r['checkpoint_id']), 'success'))
+                ds = ds_map.get((bid, 'success'))
                 # 성공 에피소드: 종료 프레임 succeed=1 + 종료 프레임 10개 후미 패딩.
                 if ds is not None:
                     _emit_saving(True, role='success', dataset_id=ds.id,
                                  checkpoint_id=r['checkpoint_id'],
                                  frames=len(r.get('timesteps') or []))
-                if _save_episode(ds, r, mark_success=True):
-                    saved_episodes.append({'checkpoint_id': r['checkpoint_id'], 'dataset_id': ds.id, 'role': 'success', 'steps': r['steps']})
+                # 성공 데이터만 블록 설정의 rate 로 다운샘플(설정 시).
+                if _save_episode(ds, r, mark_success=True, downsample_rate=int(r.get('success_downsample_rate') or 1)):
+                    saved_episodes.append({'checkpoint_id': r['checkpoint_id'], 'block_id': bid, 'dataset_id': ds.id, 'role': 'success', 'steps': r['steps']})
                 if ds is not None:
                     _emit_saving(False)
             else:
                 # 실패 cp — 저장 확률 당첨 시에만 failure 데이터셋에 저장.
                 if random.random() <= prob:
-                    ds = ds_map.get((r['checkpoint_id'], 'failure')) or ds_map.get((str(r['checkpoint_id']), 'failure'))
+                    ds = ds_map.get((bid, 'failure'))
                     if ds is not None:
                         _emit_saving(True, role='failure', dataset_id=ds.id,
                                      checkpoint_id=r['checkpoint_id'],
                                      frames=len(r.get('timesteps') or []))
                     if _save_episode(ds, r):
-                        saved_episodes.append({'checkpoint_id': r['checkpoint_id'], 'dataset_id': ds.id, 'role': 'failure', 'steps': r['steps']})
+                        saved_episodes.append({'checkpoint_id': r['checkpoint_id'], 'block_id': bid, 'dataset_id': ds.id, 'role': 'failure', 'steps': r['steps']})
                     if ds is not None:
                         _emit_saving(False)
 
@@ -663,12 +713,14 @@ def _build_targeting(target_group_ids, plans):
     """
     from ...database.models.checkpoint_group_model import CheckpointGroup as CheckpointGroupModel
 
-    criteria_by_cp = {}
+    criteria_by_block = {}
     block_specs = {}
     stage_by_plan_group = {}
     save_prob_by_plan_group = {}
     ckpt_group_id_by_plan_group = {}
     target_cp_by_plan_group = {}
+    target_block_by_plan_group = {}  # pg_id → set(block_id) — 이 그룹이 성공하려면
+                                     # 반드시 성공 기록이 있어야 하는 타겟 체크포인트 블록들.
 
     for gid in target_group_ids:
         group = CheckpointGroupModel.find(gid)
@@ -678,12 +730,10 @@ def _build_targeting(target_group_ids, plans):
         if stage is None or stage.status != stage.STATUS_ACTIVE:
             continue
         cps = group._get_json_field('checkpoint_ids') or []
+        # success_criteria 는 이제 **블록 단위**(키=block_id) — 그대로 머지.
         criteria = stage._get_json_field('success_criteria') or {}
-        for cp_id, crit in (criteria.items() if isinstance(criteria, dict) else []):
-            try:
-                criteria_by_cp[int(cp_id)] = crit
-            except (TypeError, ValueError):
-                criteria_by_cp[cp_id] = crit
+        if isinstance(criteria, dict):
+            criteria_by_block.update(criteria)
         succ = stage.success_count or 0
         fail = stage.failure_count or 0
         sr = succ / (succ + fail) if (succ + fail) > 0 else 0.0
@@ -696,21 +746,28 @@ def _build_targeting(target_group_ids, plans):
         for plan_group in plans:
             blocks = plan_group.get('blocks') or []
             plan_cps = {b.get('checkpoint_id') for b in blocks if b.get('type') == 'checkpoint'}
-            if plan_cps & set(cps):
+            matched_cps = set(cps) & plan_cps
+            if matched_cps:
                 pg_id = plan_group['id']
                 stage_by_plan_group[pg_id] = stage
                 save_prob_by_plan_group[pg_id] = save_prob
                 ckpt_group_id_by_plan_group[pg_id] = group.id
-                target_cp_by_plan_group.setdefault(pg_id, set()).update(set(cps) & plan_cps)
+                target_cp_by_plan_group.setdefault(pg_id, set()).update(matched_cps)
+                target_block_by_plan_group.setdefault(pg_id, set()).update(
+                    b.get('id') for b in blocks
+                    if b.get('type') == 'checkpoint'
+                    and b.get('checkpoint_id') in matched_cps and b.get('id')
+                )
 
     run_plan_groups = [g for g in plans if g['id'] in stage_by_plan_group and g.get('blocks')]
     return {
-        'criteria_by_cp': criteria_by_cp,
+        'criteria_by_block': criteria_by_block,
         'block_specs': block_specs,
         'stage_by_plan_group': stage_by_plan_group,
         'save_prob_by_plan_group': save_prob_by_plan_group,
         'ckpt_group_id_by_plan_group': ckpt_group_id_by_plan_group,
         'target_cp_by_plan_group': target_cp_by_plan_group,
+        'target_block_by_plan_group': target_block_by_plan_group,
         'run_plan_groups': run_plan_groups,
     }
 
@@ -819,9 +876,10 @@ def curriculum_rollout(curriculum_id, target_group_ids, repeat_count, app,
             })
 
             # ctx 를 이번 iteration 의 타겟팅으로 갱신.
-            ctx['criteria_by_cp'] = tg['criteria_by_cp']
+            ctx['criteria_by_block'] = tg['criteria_by_block']
             ctx['stage_by_group'] = tg['stage_by_plan_group']
             ctx['target_cp_by_group'] = tg['target_cp_by_plan_group']
+            ctx['target_block_by_group'] = tg['target_block_by_plan_group']
             ctx['ckpt_group_id_by_plan_group'] = tg['ckpt_group_id_by_plan_group']
 
             noised_groups = _apply_noise_to_plan(run_plan_groups, tg['block_specs'])

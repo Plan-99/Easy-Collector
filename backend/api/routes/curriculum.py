@@ -65,34 +65,64 @@ def _planner_checkpoint_ids(planner):
 
 # ── 내부 헬퍼 ──────────────────────────────────────────────────────────────
 
-def _create_stage_datasets_for(stage, group, checkpoint_ids):
-    """주어진 체크포인트들에 대해 success/failure/dagger 데이터셋 3개씩 생성.
+def _group_checkpoint_blocks(curriculum, group):
+    """그룹 멤버 cp 를 참조하는 플랜의 **체크포인트 블록들**.
 
-    task_id 는 체크포인트의 워크스페이스로 설정(워크스페이스 종속) + stage_id 로 Stage 종속.
-    origin='curriculum' 으로 표식하여 워크스페이스 UI 편집/병합/삭제를 차단한다.
+    반환: ``[{block_id, checkpoint_id, name, task_id}]`` (plan 등장 순서, 블록 단위).
+    같은 checkpoint_id 가 여러 블록으로 등장하면 각각 별도 항목이 된다. 그룹 멤버십은
+    기존대로 ``checkpoint_ids`` 기준 — 그 cp 를 쓰는 블록만 이 그룹의 행이 된다.
+    커리큘럼 기록(데이터셋/판정조건/대시보드)의 블록 단위 키 source-of-truth.
     """
-    for cp_id in checkpoint_ids:
-        checkpoint = CheckpointModel.find(cp_id)
-        task_id = checkpoint.task_id if checkpoint else None
+    from ..routes.planner import _ensure_plans_loaded
+    member_cps = set(group._get_json_field('checkpoint_ids') or [])
+    planner = curriculum.planner if curriculum else None
+    plans = (_ensure_plans_loaded(planner) or []) if planner else []
+    out, seen = [], set()
+    for grp in plans:
+        for blk in grp.get('blocks') or []:
+            if blk.get('type') != 'checkpoint':
+                continue
+            cid, bid = blk.get('checkpoint_id'), blk.get('id')
+            if cid is None or bid is None or bid in seen or cid not in member_cps:
+                continue
+            seen.add(bid)
+            ckpt = CheckpointModel.find(cid)
+            out.append({
+                'block_id': bid,
+                'checkpoint_id': cid,
+                'name': blk.get('name') or (ckpt.name if ckpt else f'CP #{cid}'),
+                'task_id': blk.get('workspace_id') or (ckpt.task_id if ckpt else None),
+            })
+    return out
+
+
+def _create_stage_datasets_for(stage, group, blocks):
+    """주어진 체크포인트 **블록들**에 대해 success/failure/dagger 데이터셋 3개씩 생성.
+
+    task_id 는 블록의 워크스페이스로 설정 + stage_id 로 Stage 종속. block_id 로 블록 단위
+    분리, checkpoint_id 도 보존(라벨·학습용). origin='curriculum' 으로 표식하여
+    워크스페이스 UI 편집/병합/삭제를 차단한다.
+    """
+    for blk in blocks:
         for role in DATASET_ROLES:
             ds = DatasetModel.create(
-                name=f'cp{cp_id}_stage{stage.index}_{role}',
-                task_id=task_id,
+                name=f"blk{blk['block_id']}_stage{stage.index}_{role}",
+                task_id=blk.get('task_id'),
                 origin='curriculum',
                 stage_id=stage.id,
                 checkpoint_group_id=group.id,
-                checkpoint_id=cp_id,
+                checkpoint_id=blk.get('checkpoint_id'),
+                block_id=blk['block_id'],
                 role=role,
             )
             os.makedirs(os.path.join(DATASET_DIR, str(ds.id)), exist_ok=True)
 
 
 def _create_stage_datasets(stage, group):
-    """Stage 생성 시 그룹 내 전 체크포인트에 대해 데이터셋 생성."""
-    checkpoint_ids = group._get_json_field('checkpoint_ids') or []
-    if not isinstance(checkpoint_ids, list):
-        checkpoint_ids = []
-    _create_stage_datasets_for(stage, group, checkpoint_ids)
+    """Stage 생성 시 그룹 내 전 체크포인트 블록에 대해 데이터셋 생성."""
+    curriculum = CurriculumModel.find(group.curriculum_id)
+    blocks = _group_checkpoint_blocks(curriculum, group) if curriculum else []
+    _create_stage_datasets_for(stage, group, blocks)
 
 
 def _delete_dataset_rows(datasets):
@@ -257,9 +287,11 @@ def set_checkpoint_settings(id):
         return {'status': 'error', 'message': 'Curriculum not found'}, 404
     data = request.json or {}
     cp_id = data.get('checkpoint_id')
+    block_id = data.get('block_id')
     group = _group_of_checkpoint(curriculum, cp_id)
     if group is None:
         return {'status': 'error', 'message': 'Checkpoint not in any group'}, 404
+    # checkpoint_settings 는 학습(그룹/cp 단위) config — cp 키 유지.
     settings = group._get_json_field('checkpoint_settings') or {}
     settings[str(cp_id)] = {
         'base_dataset_ids': data.get('base_dataset_ids', []),
@@ -267,18 +299,33 @@ def set_checkpoint_settings(id):
         'initial_max_steps': data.get('initial_max_steps', 600),
         'length_limit_rate': data.get('length_limit_rate', 1.5),
         'success_threshold': data.get('success_threshold', 0.5),
+        'succeed_done_frames': int(data.get('succeed_done_frames') or 3),
+        # 성공 데이터 다운샘플: enabled 면 성공 에피소드를 rate(=stride) 로 솎아서 기록.
+        'success_downsample': bool(data.get('success_downsample')),
+        'success_downsample_rate': max(1, int(data.get('success_downsample_rate') or 1)),
     }
     group.checkpoint_settings = settings
     group.save()
 
-    # 현재 stage 의 success_criteria 를 초기 길이 제한/임계값으로 시드.
+    # 현재 stage 의 success_criteria 를 **블록 단위**로 시드. block_id 미제공(구버전)
+    # 이면 그 cp 를 쓰는 모든 블록에 적용.
     stage = group.current_stage
     if stage is not None:
+        target_blocks = [block_id] if block_id else [
+            b['block_id'] for b in _group_checkpoint_blocks(curriculum, group)
+            if b['checkpoint_id'] == cp_id
+        ]
         crit = stage._get_json_field('success_criteria') or {}
-        crit[str(cp_id)] = {
-            'max_steps': data.get('initial_max_steps', 600),
-            'success_threshold': data.get('success_threshold', 0.5),
-        }
+        for bid in target_blocks:
+            entry = dict(crit.get(bid) or {})
+            entry['max_steps'] = data.get('initial_max_steps', 600)
+            entry['success_threshold'] = data.get('success_threshold', 0.5)
+            # succeed 토큰 done debounce 프레임 수 (블록 단위). 기본 3.
+            entry['succeed_done_frames'] = int(data.get('succeed_done_frames') or 3)
+            # 성공 데이터 다운샘플 (블록 단위) — 롤아웃 기록 시 적용.
+            entry['success_downsample'] = bool(data.get('success_downsample'))
+            entry['success_downsample_rate'] = max(1, int(data.get('success_downsample_rate') or 1))
+            crit[bid] = entry
         stage.success_criteria = crit
         stage.save()
     return {'status': 'success'}, 200
@@ -419,9 +466,10 @@ def _sync_group_stages(group):
     stage = group.current_stage
     if stage is None:
         return
-    existing_cp = {ds.checkpoint_id for ds in stage.datasets}
-    member_cp = set(group._get_json_field('checkpoint_ids') or [])
-    missing = member_cp - existing_cp
+    curriculum = CurriculumModel.find(group.curriculum_id)
+    blocks = _group_checkpoint_blocks(curriculum, group) if curriculum else []
+    existing_bids = {ds.block_id for ds in stage.datasets if ds.block_id}
+    missing = [b for b in blocks if b['block_id'] not in existing_bids]
     if missing:
         _create_stage_datasets_for(stage, group, missing)
 
@@ -509,6 +557,12 @@ def reset_stage(id):
         if os.path.isdir(folder):
             shutil.rmtree(folder, ignore_errors=True)
         os.makedirs(folder, exist_ok=True)
+    # 이 stage 의 RolloutResult 도 삭제. 대시보드의 평균길이/성공률 그래프는
+    # rollout_results 의 episodes(steps) 에서 계산되므로 안 지우면 초기화 후에도
+    # 평균길이가 남는다. 또한 _recompute_stage_counts(매 startup)가 rollout_results
+    # 로 success/failure_count 를 되살리므로 카운트 리셋도 무효가 된다.
+    for res in RolloutResultModel.all_active().where(RolloutResultModel.stage_id == stage.id):
+        res.delete_instance()
     stage.success_count = 0
     stage.failure_count = 0
     stage.save()
@@ -719,33 +773,45 @@ def curriculum_dashboard(id):
     out_groups = []
     for group in curriculum.checkpoint_groups:
         cp_ids = group._get_json_field('checkpoint_ids') or []
-        # 체크포인트 → "체크포인트 이름 (워크스페이스 이름)" 라벨.
+        # 기록의 행 단위 = 그룹 멤버 cp 를 쓰는 플랜의 체크포인트 블록들.
+        blocks = _group_checkpoint_blocks(curriculum, group)
+        block_ids = [b['block_id'] for b in blocks]
         from ...database.models.task_model import Task as TaskModel
+        # 체크포인트 → "체크포인트 이름 (워크스페이스 이름)" 라벨 (하위호환 유지).
         cp_labels = {}
         for cp in cp_ids:
             ckpt = CheckpointModel.find(cp)
             name = (ckpt.name if ckpt else None) or f'CP #{cp}'
             ws = TaskModel.find(ckpt.task_id) if (ckpt and ckpt.task_id) else None
             cp_labels[str(cp)] = f'{name} ({ws.name})' if (ws and ws.name) else name
+        # 블록 라벨: "<워크스페이스명> · #<cp id>". cp 이름(모델 체크포인트명)은
+        # 길고 불명확해서 워크스페이스명 + cp id 조합으로 표기한다.
+        block_labels = {}
+        for b in blocks:
+            ws = TaskModel.find(b['task_id']) if b['task_id'] else None
+            ws_name = (ws.name if ws else None) or (b['name'] or f"WS #{b['task_id']}")
+            block_labels[b['block_id']] = f"{ws_name} · #{b['checkpoint_id']}"
         stages_out = []
         for stage in group.stages:  # index asc
-            # 데이터셋 에피소드 수: (checkpoint_id, role) → count
+            # 데이터셋 에피소드 수: (block_id, role) → count
             ep_counts = {}
             for ds in stage.datasets:
-                ep_counts[(ds.checkpoint_id, ds.role)] = len(ds.episodes or [])
-            # 성공 에피소드 평균 길이: RolloutResult(stage) 의 success steps 평균(cp별)
-            steps_by_cp = {}
+                ep_counts[(ds.block_id, ds.role)] = len(ds.episodes or [])
+            # 성공 에피소드 평균 길이: RolloutResult(stage) 의 success steps 평균(block별)
+            steps_by_block = {}
             for res in RolloutResultModel.all_active().where(RolloutResultModel.stage_id == stage.id):
                 for ep in (res._get_json_field('episodes') or []):
                     if ep.get('role') == 'success' and ep.get('steps'):
-                        steps_by_cp.setdefault(ep.get('checkpoint_id'), []).append(int(ep['steps']))
+                        steps_by_block.setdefault(ep.get('block_id'), []).append(int(ep['steps']))
             checkpoints = {}
-            for cp in cp_ids:
-                lens = steps_by_cp.get(cp) or steps_by_cp.get(str(cp)) or []
-                checkpoints[str(cp)] = {
-                    'success_eps': ep_counts.get((cp, 'success'), 0),
-                    'failure_eps': ep_counts.get((cp, 'failure'), 0),
-                    'dagger_eps': ep_counts.get((cp, 'dagger'), 0),
+            for b in blocks:
+                bid = b['block_id']
+                lens = steps_by_block.get(bid) or []
+                checkpoints[bid] = {
+                    'checkpoint_id': b['checkpoint_id'],
+                    'success_eps': ep_counts.get((bid, 'success'), 0),
+                    'failure_eps': ep_counts.get((bid, 'failure'), 0),
+                    'dagger_eps': ep_counts.get((bid, 'dagger'), 0),
                     'avg_success_len': round(sum(lens) / len(lens), 1) if lens else 0,
                 }
             succ = stage.success_count or 0
@@ -763,16 +829,19 @@ def curriculum_dashboard(id):
                 'failure_count': fail,
                 'correction_count': corr,
                 'success_rate': round(succ / denom, 4) if denom > 0 else 0,
-                'success_criteria': stage._get_json_field('success_criteria') or {},
-                'checkpoints': checkpoints,
+                'success_criteria': stage._get_json_field('success_criteria') or {},  # block 키
+                'checkpoints': checkpoints,  # block 키
             })
         out_groups.append({
             'checkpoint_group_id': group.id,
             'name': group.name,
             'color': group.color,
             'status': group.status or 'collecting',  # collecting | training
-            'checkpoint_ids': cp_ids,
-            'cp_labels': cp_labels,
+            'checkpoint_ids': cp_ids,        # 하위호환
+            'cp_labels': cp_labels,          # 하위호환
+            'cp_blocks': blocks,             # [{block_id, checkpoint_id, name, task_id}]
+            'block_ids': block_ids,
+            'block_labels': block_labels,
             'stages': stages_out,
             # 모션 블록별 노이즈 spec (rate/offset) — 프론트 상세 패널에서
             # stage 의 성공률을 곱해 효과적인 ± 범위를 표시.

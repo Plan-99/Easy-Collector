@@ -208,7 +208,7 @@
             <q-input v-model.number="repeatCount" type="number" :label="t('currRepeat')" outlined dense dark bg-color="dark" />
           </div>
           <div class="col-auto">
-            <q-btn color="green" icon="play_arrow" :label="t('currStart')" :disable="isRunning || !targetGroupIds.length" @click="startRollout" />
+            <q-btn color="green" icon="play_arrow" :label="t('currStart')" :disable="isRunning || !targetGroupIds.length || !allDevicesOn" @click="startRollout" />
           </div>
           <div class="col-auto">
             <q-btn color="red" icon="stop" :label="t('currStop')" :disable="!isRunning" @click="stopRollout" />
@@ -227,6 +227,12 @@
               :loading="upgradeBusy"
               @click="upgradeNow"
             />
+          </div>
+          <!-- 로봇/센서가 모두 켜지지 않으면 시작 불가 — 비활성 버튼은 tooltip 이
+               안 뜨므로 사유를 별도 줄로 안내. -->
+          <div v-if="!isRunning && !allDevicesOn" class="col-12 row items-center q-gutter-x-xs text-warning text-caption">
+            <q-icon name="warning" size="xs" />
+            <span>{{ t('currStartNeedsDevices') }}</span>
           </div>
         </div>
         <q-separator dark class="q-mb-md" />
@@ -289,12 +295,12 @@
                       </tr>
                     </thead>
                     <tbody>
-                      <tr v-for="cp in dg.checkpoint_ids" :key="cp">
-                        <td class="text-left">{{ (dg.cp_labels && dg.cp_labels[cp]) || checkpointLabel(cp) }}</td>
-                        <td>{{ dashSelectedStage(dg).checkpoints[cp]?.success_eps ?? 0 }}</td>
-                        <td>{{ dashSelectedStage(dg).checkpoints[cp]?.failure_eps ?? 0 }}</td>
-                        <td>{{ dashSelectedStage(dg).checkpoints[cp]?.dagger_eps ?? 0 }}</td>
-                        <td>{{ dashSelectedStage(dg).checkpoints[cp]?.avg_success_len ?? 0 }}</td>
+                      <tr v-for="b in (dg.cp_blocks || [])" :key="b.block_id">
+                        <td class="text-left">{{ (dg.block_labels && dg.block_labels[b.block_id]) || b.name }}</td>
+                        <td>{{ dashSelectedStage(dg).checkpoints[b.block_id]?.success_eps ?? 0 }}</td>
+                        <td>{{ dashSelectedStage(dg).checkpoints[b.block_id]?.failure_eps ?? 0 }}</td>
+                        <td>{{ dashSelectedStage(dg).checkpoints[b.block_id]?.dagger_eps ?? 0 }}</td>
+                        <td>{{ dashSelectedStage(dg).checkpoints[b.block_id]?.avg_success_len ?? 0 }}</td>
                       </tr>
                     </tbody>
                   </q-markup-table>
@@ -322,10 +328,10 @@
                       </tr>
                     </thead>
                     <tbody>
-                      <tr v-for="cp in dg.checkpoint_ids" :key="`crit-${cp}`">
-                        <td class="text-left">{{ (dg.cp_labels && dg.cp_labels[cp]) || checkpointLabel(cp) }}</td>
-                        <td>{{ criteriaFor(dg, cp).max_steps ?? '—' }}</td>
-                        <td>{{ criteriaFor(dg, cp).success_threshold ?? '—' }}</td>
+                      <tr v-for="b in (dg.cp_blocks || [])" :key="`crit-${b.block_id}`">
+                        <td class="text-left">{{ (dg.block_labels && dg.block_labels[b.block_id]) || b.name }}</td>
+                        <td>{{ criteriaFor(dg, b.block_id).max_steps ?? '—' }}</td>
+                        <td>{{ criteriaFor(dg, b.block_id).success_threshold ?? '—' }}</td>
                       </tr>
                     </tbody>
                   </q-markup-table>
@@ -408,6 +414,24 @@
               <div class="col-4"><q-input v-model.number="blockForm.initial_max_steps" type="number" :label="t('currInitialMaxSteps')" outlined dense dark bg-color="dark" /></div>
               <div class="col-4"><q-input v-model.number="blockForm.length_limit_rate" type="number" step="0.1" :label="t('currLengthLimitRate')" outlined dense dark bg-color="dark" /></div>
               <div class="col-4"><q-input v-model.number="blockForm.success_threshold" type="number" step="0.05" :label="t('currThreshold')" outlined dense dark bg-color="dark" /></div>
+              <div class="col-4"><q-input v-model.number="blockForm.succeed_done_frames" type="number" min="1" :label="t('succeedDoneFrames')" :hint="t('succeedDoneFramesHint')" outlined dense dark bg-color="dark" /></div>
+            </div>
+
+            <!-- 성공 데이터 다운샘플 — 켜면 성공 에피소드를 rate(stride) 로 솎아서 기록. -->
+            <div class="row items-center q-col-gutter-sm q-mt-sm">
+              <div class="col-auto">
+                <q-toggle v-model="blockForm.success_downsample" color="primary" :label="t('currSuccessDownsample')" />
+              </div>
+              <div class="col">
+                <q-input
+                  v-model.number="blockForm.success_downsample_rate"
+                  type="number" min="1"
+                  :disable="!blockForm.success_downsample"
+                  :label="t('currSuccessDownsampleRate')"
+                  :hint="t('currSuccessDownsampleRateHint')"
+                  outlined dense dark bg-color="dark"
+                />
+              </div>
             </div>
             <q-btn class="q-mt-md" color="primary" icon="save" :label="t('currSave')" @click="saveCheckpointBlock" />
           </template>
@@ -797,6 +821,26 @@ function onPlannerBlockEnd (payload) {
 
 // ── Monitor dialog (실행 중 우측 하단 FAB → 풀스크린 다이얼로그) ───────────
 const showMonitor = ref(false)
+
+// 모니터/교정이 열려 있는 동안엔 Space/Enter 가 "포커스된 버튼" 을 우발적으로
+// 클릭(activate)하지 못하게 막는다. 키보드 텔레옵으로 Space 를 연타하다가, 직전
+// 클릭으로 포커스가 남아 있던 '현재 블록 중단' 버튼이 Space 로 눌려
+// ``:stop_current_block`` 이 잘못 발사되던 문제 방지 (그 stale 신호가 다음
+// 체크포인트를 0스텝에 죽였음 — 백엔드에서도 블록 시작 시 플래그를 비워 이중 방어).
+// capture 단계에서 가로채 버튼의 기본 동작 자체를 취소하고 포커스를 떨군다.
+function _guardMonitorKeys (e) {
+  if (e.key !== ' ' && e.key !== 'Spacebar' && e.key !== 'Enter') return
+  const ae = document.activeElement
+  if (ae && ae.tagName === 'BUTTON') {
+    e.preventDefault()
+    ae.blur()
+  }
+}
+watch(showMonitor, (open) => {
+  if (open) window.addEventListener('keydown', _guardMonitorKeys, true)
+  else window.removeEventListener('keydown', _guardMonitorKeys, true)
+})
+
 const monitorFocused = ref({})
 const monitorDatasetId = ref(null)
 const monitorCheckpointId = ref(null)
@@ -1145,6 +1189,8 @@ const blockForm = reactive({
   targetGroupId: null, splitName: '',
   base_dataset_ids: [], serverUrl: '', trainingForm: {},
   initial_max_steps: 600, length_limit_rate: 1.5, success_threshold: 0.5,
+  succeed_done_frames: 3,
+  success_downsample: false, success_downsample_rate: 2,
   groupId: null, rate: emptyAxes(), offset: emptyAxes(),
 })
 // 현재 다이얼로그 체크포인트가 속한 워크스페이스의 데이터셋만(에피소드 개수 라벨 포함)
@@ -1180,6 +1226,13 @@ const deviceSensors = computed(() => {
   })
   return out
 })
+// 롤아웃 시작 가드 — 플래너에 속한 모든 로봇/센서가 'on' 이어야 한다. 하나라도
+// off/error/loading 이면 시작 불가(custom 디바이스도 토픽이 살아 있으면 'on').
+// 디바이스가 아예 없으면 켤 게 없으므로 통과.
+const allDevicesOn = computed(() =>
+  deviceRobots.value.every((r) => r.status === 'on') &&
+  deviceSensors.value.every((s) => s.status === 'on'),
+)
 const groupOptions = computed(() =>
   groups.value.map((g) => ({ label: g.name || 'Group #' + g.id, value: g.id })),
 )
@@ -1218,21 +1271,6 @@ function currentStage (group) {
 function checkpointName (cpId) {
   const cp = checkpoints.value.find((c) => c.id === cpId)
   return cp ? cp.name : 'CP #' + cpId
-}
-
-// 체크포인트 → 워크스페이스(task) 이름 매핑(플래너 워크스페이스 기준).
-const workspaceNameById = computed(() => {
-  const m = {}
-  deviceWorkspaces.value.forEach((w) => { m[w.id] = w.name })
-  return m
-})
-
-// 대시보드 CP 테이블 인덱스: "체크포인트 이름 (워크스페이스 이름)".
-function checkpointLabel (cpId) {
-  const cp = checkpoints.value.find((c) => c.id === cpId)
-  const name = cp ? cp.name : 'CP #' + cpId
-  const ws = cp ? workspaceNameById.value[cp.task_id] : null
-  return ws ? `${name} (${ws})` : name
 }
 
 function blockPolicyTypeFor (cpId) {
@@ -1332,8 +1370,13 @@ async function loadDeviceWorkspaces () {
     taskIds.map((id) => api.get(`/tasks/${id}`).then((r) => r.data?.task).catch(() => null))
   )
   const tasks = results.filter(Boolean)
-  // PlannerPage 와 동일하게 sensor/robot 에 핸들러를 붙여 on/off 제어.
-  tasks.forEach((ws) => {
+  // 먼저 reactive 배열에 넣어 proxy 로 만든 뒤, 그 proxy 객체에 핸들러를 붙인다.
+  // useSensor/useRobot 은 전달된 객체의 status 를 직접 갱신하는데, raw 객체(배열에
+  // 넣기 전)에 붙이면 그 mutation 을 Vue 반응성이 추적하지 못해(템플릿은 proxy 를
+  // 읽음) 토글을 눌러 디바이스가 실제로 켜져도 활성화 UI 가 안 바뀐다.
+  // (PlannerPage 의 loadWorkspaceDetails 와 동일 패턴.)
+  deviceWorkspaces.value = tasks
+  deviceWorkspaces.value.forEach((ws) => {
     ;(ws.sensors || []).forEach((s) => {
       s.handler = useSensor(s)
       if (s.type === 'custom') s.handler.checkSensorTopic && s.handler.checkSensorTopic()
@@ -1343,7 +1386,6 @@ async function loadDeviceWorkspaces () {
       if (r.type === 'custom') r.handler.checkRobotTopic && r.handler.checkRobotTopic()
     })
   })
-  deviceWorkspaces.value = tasks
 }
 
 function toggleSensor (sensor) {
@@ -1496,6 +1538,9 @@ function openBlockDialog (blk) {
     blockForm.initial_max_steps = conf.initial_max_steps != null ? conf.initial_max_steps : 600
     blockForm.length_limit_rate = conf.length_limit_rate != null ? conf.length_limit_rate : 1.5
     blockForm.success_threshold = conf.success_threshold != null ? conf.success_threshold : 0.5
+    blockForm.succeed_done_frames = conf.succeed_done_frames != null ? conf.succeed_done_frames : 3
+    blockForm.success_downsample = !!conf.success_downsample
+    blockForm.success_downsample_rate = conf.success_downsample_rate != null ? conf.success_downsample_rate : 2
   } else {
     const g = groupOfMotionBlock(blk.id)
     blockForm.groupId = g ? g.id : null
@@ -1534,11 +1579,16 @@ async function saveCheckpointBlock () {
   // 백엔드가 checkpoint_settings 에 저장하고 현재 stage 의 success_criteria 를 시드한다.
   await api.post(`/curriculum/${curriculum.value.id}/:set_checkpoint_settings`, {
     checkpoint_id: blockForm.checkpoint_id,
+    // 판정조건(success_criteria)은 블록 단위로 시드되므로 block_id 동봉.
+    block_id: blockForm.block_id,
     base_dataset_ids: blockForm.base_dataset_ids,
     train_settings,
     initial_max_steps: blockForm.initial_max_steps,
     length_limit_rate: blockForm.length_limit_rate,
     success_threshold: blockForm.success_threshold,
+    succeed_done_frames: blockForm.succeed_done_frames,
+    success_downsample: blockForm.success_downsample,
+    success_downsample_rate: blockForm.success_downsample_rate,
   })
   blockDialog.value = false
   await loadCurriculum(curriculum.value.id)
@@ -1601,11 +1651,11 @@ function rateDenom (stage) {
   return (Number(stage.success_count) || 0)
        + (Number(stage.failure_count) || 0)
 }
-// 선택된 stage 의 체크포인트별 판정 조건 (success_criteria 의 entry).
-function criteriaFor (dg, cpId) {
+// 선택된 stage 의 **블록별** 판정 조건 (success_criteria 의 entry, 키=block_id).
+function criteriaFor (dg, blockId) {
   const st = dashSelectedStage(dg)
   const crit = (st && st.success_criteria) || {}
-  return crit[cpId] || crit[String(cpId)] || {}
+  return crit[blockId] || {}
 }
 
 // 이 그룹의 모션 블록 + 그 블록의 노이즈 spec 묶음. 사용자가 등록한 노이즈만
@@ -1643,6 +1693,12 @@ async function discardFailureByGroup (groupId) {
 
 // ── rollout controls ───────────────────────────────────────────────────────────
 async function startRollout () {
+  // 가드 — 로봇/센서가 모두 켜져 있지 않으면 시작하지 않는다(버튼 disable 과
+  // 동일 조건이지만, 토글로 상태가 바뀌는 사이의 경합 방지용 이중 방어).
+  if (!allDevicesOn.value) {
+    Notify.create({ type: 'warning', message: t('currStartNeedsDevices') })
+    return
+  }
   await api.post(`/curriculum/${curriculum.value.id}/:start_rollout`, {
     target_group_ids: targetGroupIds.value,
     repeat_count: repeatCount.value,
@@ -1729,6 +1785,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (statusTimer) clearInterval(statusTimer)
+  window.removeEventListener('keydown', _guardMonitorKeys, true)
   socket.off('planner_block_start', onPlannerBlockStart)
   socket.off('planner_block_progress', onPlannerBlockProgress)
   socket.off('planner_block_end', onPlannerBlockEnd)

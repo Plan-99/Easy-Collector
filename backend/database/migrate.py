@@ -134,6 +134,97 @@ def _recompute_stage_counts():
         print(f"  Warning: stage count recompute: {e}")
 
 
+def _migrate_curriculum_block_keying():
+    """커리큘럼 기록을 checkpoint_id 단위 → 체크포인트 블록(block_id) 단위로 backfill.
+
+    같은 checkpoint_id 가 플랜의 여러 체크포인트 블록으로 등장할 수 있어, 기록(데이터셋/
+    성공·실패/판정조건)을 블록 단위로 분리한다. 현재 모든 플래너는 cp:블록 = 1:1 이라
+    backfill 이 안전하다. idempotent — 이미 block_id 가 있거나 키가 이미 block_id 면 skip.
+      1) datasets.block_id 채우기 (cp_id → 그 cp 를 쓰는 블록 id)
+      2) stages.success_criteria 를 {cp_id: crit} → {block_id: crit} 로 re-key
+      3) rollout_results.episodes 각 항목에 block_id 추가
+    """
+    try:
+        from backend.database.models.curriculum_model import Curriculum
+        from backend.database.models.rollout_result_model import RolloutResult as RR
+    except Exception as e:
+        print(f"  Warning: block-keying migration import: {e}")
+        return
+
+    def _cp_to_block_map(planner):
+        """cp_id -> block_id. 한 cp 가 여러 블록이면 첫 블록 유지(로그)."""
+        if planner is None:
+            return {}
+        plans = planner._get_json_field('plans') or []
+        if not plans:
+            blocks = planner._get_json_field('blocks') or []
+            plans = [{'blocks': blocks}] if blocks else []
+        m = {}
+        for g in plans:
+            for b in (g.get('blocks') or []):
+                if b.get('type') != 'checkpoint':
+                    continue
+                cid, bid = b.get('checkpoint_id'), b.get('id')
+                if cid is None or bid is None:
+                    continue
+                if cid in m and m[cid] != bid:
+                    print(f"    note: cp {cid} maps to multiple blocks; keeping {m[cid]}")
+                    continue
+                m.setdefault(cid, bid)
+        return m
+
+    try:
+        for cur in Curriculum.all_active():
+            planner = Planner.find(cur.planner_id) if cur.planner_id else None
+            cp2b = _cp_to_block_map(planner)
+            if not cp2b:
+                continue
+            for group in cur.checkpoint_groups:
+                for stage in group.stages:
+                    # 1) datasets backfill
+                    for ds in stage.datasets:
+                        if ds.block_id:
+                            continue
+                        bid = cp2b.get(ds.checkpoint_id)
+                        if bid:
+                            ds.block_id = bid
+                            ds.save()
+                    # 2) success_criteria re-key (cp_id → block_id)
+                    crit = stage._get_json_field('success_criteria') or {}
+                    new_crit, changed = {}, False
+                    for k, v in crit.items():
+                        try:
+                            cp = int(k)
+                        except (TypeError, ValueError):
+                            new_crit[k] = v  # 이미 block_id
+                            continue
+                        bid = cp2b.get(cp)
+                        if bid:
+                            new_crit[bid] = v
+                            changed = True
+                        else:
+                            new_crit[k] = v
+                    if changed:
+                        stage.success_criteria = new_crit
+                        stage.save()
+                    # 3) rollout_results.episodes 에 block_id 추가
+                    for res in RR.all_active().where(RR.stage_id == stage.id):
+                        eps = res._get_json_field('episodes') or []
+                        ep_changed = False
+                        for ep in eps:
+                            if ep.get('block_id'):
+                                continue
+                            bid = cp2b.get(ep.get('checkpoint_id'))
+                            if bid:
+                                ep['block_id'] = bid
+                                ep_changed = True
+                        if ep_changed:
+                            res.episodes = eps
+                            res.save()
+    except Exception as e:
+        print(f"  Warning: curriculum block-keying migration: {e}")
+
+
 def migrate():
     """Create tables that don't already exist, then ensure all columns are present."""
     db.connect(reuse_if_open=True)
@@ -141,6 +232,7 @@ def migrate():
     _ensure_columns()
     _migrate_checkpoint_status()
     _recompute_stage_counts()
+    _migrate_curriculum_block_keying()
     print(f"Migration complete. Ensured {len(ALL_MODELS)} tables exist with all columns.")
 
 

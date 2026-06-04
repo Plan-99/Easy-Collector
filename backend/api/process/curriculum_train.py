@@ -100,40 +100,43 @@ def _avg_success_episode_len(datasets):
     return total_eps
 
 
-def _avg_steps_from_results(stage_id, checkpoint_id):
-    """이 stage 에서 success 로 저장된 해당 체크포인트 에피소드의 평균 step 수."""
+def _avg_steps_from_results(stage_id, block_id):
+    """이 stage 에서 success 로 저장된 해당 **블록** 에피소드의 평균 step 수."""
     from ...database.models.rollout_result_model import RolloutResult as RolloutResultModel
     steps = []
     for res in RolloutResultModel.all_active().where(RolloutResultModel.stage_id == stage_id):
         for ep in (res._get_json_field('episodes') or []):
-            if str(ep.get('checkpoint_id')) == str(checkpoint_id) and ep.get('role') == 'success':
+            if ep.get('block_id') == block_id and ep.get('role') == 'success':
                 if ep.get('steps'):
                     steps.append(int(ep['steps']))
     return (sum(steps) / len(steps)) if steps else 0.0
 
 
 def _escalate_criteria(group, stage):
-    """다음 Stage 의 체크포인트별 길이 제한(max_steps)을 계산.
+    """다음 Stage 의 **체크포인트 블록별** 길이 제한(max_steps)을 계산.
 
-    노이즈는 더 이상 stage 별로 escalate 하지 않는다(엔진에서 success_rate × rate + offset
-    으로 실시간 계산). 판정 조건만 체크포인트별로 승급:
-      next_max_steps = 성공 에피소드 평균 step × (체크포인트별 length_limit_rate)
+    success_criteria 는 블록 단위(키=block_id). 노이즈는 stage 별 escalate 하지 않는다
+    (엔진에서 success_rate × rate + offset 실시간 계산). 판정 조건만 블록별로 승급:
+      next_max_steps = 성공 에피소드 평균 step × (블록의 cp 의 length_limit_rate)
 
-    rate 가 ``0`` 이거나 ``None`` 이면 **현재 max_steps 를 그대로 유지** (= 다음
-    stage 에서도 길이 제한을 좁히지 않음 — 사용자가 "이 cp 는 길이 제한 escalation
-    을 하지 마라" 라고 의도한 경우). 평균이 0 (성공 에피소드 없음) 인 경우도 동일.
-    success_threshold 는 체크포인트 설정값 유지.
+    rate/threshold 는 학습 config(checkpoint_settings, cp 단위)에서 읽는다 — 같은 cp 의
+    여러 블록은 같은 rate 를 쓰되 max_steps 는 블록별 평균으로 따로 계산된다.
+    rate 가 ``0``/``None`` 이거나 평균이 0 이면 현재 max_steps 유지(escalation off).
     """
+    from ..routes.curriculum import _group_checkpoint_blocks
+    from ...database.models.curriculum_model import Curriculum as CurriculumModel
     cp_settings = group._get_json_field('checkpoint_settings') or {}
     current = stage._get_json_field('success_criteria') or {}
     out = dict(current) if isinstance(current, dict) else {}
-    for cp_id in (group._get_json_field('checkpoint_ids') or []):
+    curriculum = CurriculumModel.find(group.curriculum_id)
+    blocks = _group_checkpoint_blocks(curriculum, group) if curriculum else []
+    for b in blocks:
+        bid, cp_id = b['block_id'], b['checkpoint_id']
         conf = cp_settings.get(str(cp_id)) or cp_settings.get(cp_id) or {}
         rate = conf.get('length_limit_rate')
         threshold = conf.get('success_threshold')
-        cur = dict(out.get(str(cp_id)) or out.get(cp_id) or {})
-        avg_steps = _avg_steps_from_results(stage.id, cp_id)
-        # rate 가 None/0/음수 → max_steps 그대로 유지 (escalation off).
+        cur = dict(out.get(bid) or {})
+        avg_steps = _avg_steps_from_results(stage.id, bid)
         try:
             rate_f = float(rate) if rate is not None else 0.0
         except (TypeError, ValueError):
@@ -142,7 +145,7 @@ def _escalate_criteria(group, stage):
             cur['max_steps'] = int(avg_steps * rate_f)
         if threshold is not None:
             cur['success_threshold'] = threshold
-        out[str(cp_id)] = cur
+        out[bid] = cur
     return out
 
 
@@ -172,8 +175,19 @@ def _enqueue_training(curriculum, group, stage, socketio_instance, app=None):
         except Exception:
             scheduler = None
 
+    # 학습할 체크포인트는 **그룹의 cp 블록**(plan 에 실제 존재하는 체크포인트 블록)에서
+    # 불러온다. checkpoint_ids 에 plan 블록이 없는 잔재 cp 가 있어도 제외되고, 같은 cp 가
+    # 여러 블록이면 한 번만 학습한다(데이터는 _training_datasets_for_checkpoint 가
+    # 그 cp 의 모든 블록·stage 데이터를 ancestor 체인으로 모은다).
+    from ..routes.curriculum import _group_checkpoint_blocks
+    blocks = _group_checkpoint_blocks(curriculum, group)
     mapping = {}
-    for cp_id in (group._get_json_field('checkpoint_ids') or []):
+    seen_cp = set()
+    for b in blocks:
+        cp_id = b['checkpoint_id']
+        if cp_id in seen_cp:
+            continue
+        seen_cp.add(cp_id)
         old = CheckpointModel.find(cp_id)
         if not old:
             continue
@@ -263,18 +277,24 @@ def check_and_promote(curriculum_id, ctx=None, socketio_instance=None):
         target = int(mission.get('target_success_count') or 0)
         if target <= 0:
             continue
-        cp_ids = group._get_json_field('checkpoint_ids') or []
-        if not cp_ids:
+        # 승급 판정은 **plan 에 실제 존재하는 체크포인트 블록** 기준으로 한다.
+        # checkpoint_ids 에는 plan 블록이 없는 잔재 cp(과거 승급 흔적 등)가 남아있을
+        # 수 있는데, 그런 cp 는 블록이 없어 데이터를 수집할 수 없으므로 (success+dagger)
+        # 가 영원히 0 → all_met 이 절대 True 가 되지 않아 학습이 시작되지 않던 버그 방지.
+        from ..routes.curriculum import _group_checkpoint_blocks
+        blocks = _group_checkpoint_blocks(curriculum, group)
+        if not blocks:
             continue
-        # 데이터셋 episode 수 집계: (cp_id, role) → count
+        # 데이터셋 episode 수 집계: (block_id, role) → count
         ep_counts = {}
         for ds in stage.datasets:
-            ep_counts[(ds.checkpoint_id, ds.role)] = len(ds.episodes or [])
-        # 모든 cp 가 (success + dagger) >= target 인지.
+            ep_counts[(ds.block_id, ds.role)] = len(ds.episodes or [])
+        # 모든 체크포인트 블록이 (success + dagger) >= target 인지.
         all_met = True
-        for cp in cp_ids:
-            s = ep_counts.get((cp, 'success'), 0) or ep_counts.get((str(cp), 'success'), 0)
-            d = ep_counts.get((cp, 'dagger'), 0) or ep_counts.get((str(cp), 'dagger'), 0)
+        for b in blocks:
+            bid = b['block_id']
+            s = ep_counts.get((bid, 'success'), 0)
+            d = ep_counts.get((bid, 'dagger'), 0)
             if (s + d) < target:
                 all_met = False
                 break
