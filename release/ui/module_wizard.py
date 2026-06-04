@@ -28,6 +28,7 @@ from app_context import (
     QInputDialog, QLabel, QLineEdit, QListWidget, QMessageBox,
     QPlainTextEdit, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
+from i18n import t
 # app_context에 노출되지 않은 심볼은 동일한 PySide6 → PyQt6 폴백 패턴.
 try:
     from PySide6.QtCore import QThread, Signal as _Signal
@@ -56,64 +57,64 @@ def validate_module_meta(meta: dict) -> list[str]:
     errs: list[str] = []
     mid = meta.get("id", "")
     if not _ID_RE.match(mid):
-        errs.append("id는 소문자/숫자/언더스코어만 가능 (예: robot_myarm)")
+        errs.append(t("wizard.errIdFormat"))
 
     if not meta.get("name"):
-        errs.append("name 비어 있음")
+        errs.append(t("wizard.errNameEmpty"))
     if not meta.get("version"):
-        errs.append("version 비어 있음")
+        errs.append(t("wizard.errVersionEmpty"))
 
     cat = meta.get("category", "")
     if cat not in ("robot", "sensor"):
-        errs.append(f"category는 robot 또는 sensor여야 함 (현재: {cat})")
+        errs.append(t("wizard.errCategory", cat=cat))
 
     install = meta.get("install", {})
     if not isinstance(install, dict) or not install:
-        errs.append("install 섹션 비어 있음")
+        errs.append(t("wizard.errInstallEmpty"))
 
     if cat == "robot":
         robots = meta.get("robots", [])
         if not robots:
-            errs.append("robot 모듈은 robots[] 항목이 최소 1개 필요")
+            errs.append(t("wizard.errNoRobots"))
         seen_types: set[str] = set()
         for i, r in enumerate(robots):
             rtype = r.get("type", "")
             if not rtype:
-                errs.append(f"robots[{i}].type 비어 있음")
+                errs.append(t("wizard.errRobotTypeEmpty", i=i))
             elif rtype == "custom":
                 # frontend가 'custom' type을 외부 ROS 토픽 직접입력 로봇으로 분기하기 때문에
                 # 사용자 모듈 type으로는 사용할 수 없다.
-                errs.append(f"robots[{i}].type 으로 'custom'은 예약어라 사용할 수 없습니다")
+                errs.append(t("wizard.errRobotTypeReserved", i=i))
             elif rtype in seen_types:
-                errs.append(f"robots[{i}].type 중복: {rtype}")
+                errs.append(t("wizard.errRobotTypeDup", i=i, rtype=rtype))
             seen_types.add(rtype)
 
             role = r.get("spec", {}).get("role", "")
             if role not in ("single_arm", "tool", "dual_arm"):
-                errs.append(f"robots[{i}].spec.role 은 single_arm/tool/dual_arm 중 하나여야 함 (현재: {role})")
+                errs.append(t("wizard.errRole", i=i, role=role))
             ee_defs = r.get("ik", {}).get("ee_definitions", [])
             if role == "dual_arm":
                 names = {e.get("name") for e in ee_defs}
                 if not {"L_ee", "R_ee"}.issubset(names):
-                    errs.append(f"robots[{i}].ik.ee_definitions 에 L_ee 와 R_ee 가 모두 정의돼야 함 (dual_arm)")
+                    errs.append(t("wizard.errDualEeDefs", i=i))
 
             spec = r.get("spec", {})
             jdim = spec.get("joint_dim")
             jnames = spec.get("joint_names", [])
             if not isinstance(jdim, int) or jdim <= 0:
-                errs.append(f"robots[{i}].spec.joint_dim 필요 (양의 정수)")
+                errs.append(t("wizard.errJointDim", i=i))
             if len(jnames) != jdim:
-                errs.append(f"robots[{i}].spec.joint_names 개수({len(jnames)})와 joint_dim({jdim}) 불일치")
+                errs.append(t("wizard.errJointNamesCount", i=i, count=len(jnames), jdim=jdim))
             lb = spec.get("joint_lower_bounds", [])
             ub = spec.get("joint_upper_bounds", [])
             if len(lb) != jdim or len(ub) != jdim:
-                errs.append(f"robots[{i}] joint_lower_bounds/upper_bounds 개수 불일치")
+                errs.append(t("wizard.errBoundsCount", i=i))
             driver = r.get("driver", {})
             kind = driver.get("kind")
             if kind not in ("topic", "service", "sdk"):
-                errs.append(f"robots[{i}].driver.kind는 topic/service/sdk 중 하나")
+                errs.append(t("wizard.errDriverKind", i=i))
             if kind == "sdk" and not driver.get("sdk_type"):
-                errs.append(f"robots[{i}].driver.sdk_type 필요")
+                errs.append(t("wizard.errSdkType", i=i))
     return errs
 
 
@@ -302,9 +303,9 @@ def parse_urdf_joints(urdf_path: Path) -> list[tuple[str, float, float]]:
     try:
         tree = ET.parse(str(urdf_path))
     except ET.ParseError as e:
-        raise RuntimeError(f"URDF XML 파싱 실패: {e}")
+        raise RuntimeError(t("wizard.errUrdfXmlParse", err=e))
     except OSError as e:
-        raise RuntimeError(f"URDF 파일 열기 실패: {e}")
+        raise RuntimeError(t("wizard.errUrdfOpen", err=e))
 
     root = tree.getroot()
     out: list[tuple[str, float, float]] = []
@@ -382,7 +383,7 @@ class _PreLaunchScriptRow(QWidget):
         layout.setSpacing(6)
 
         self.path_edit = QLineEdit(path)
-        self.path_edit.setPlaceholderText("스크립트 path (예: can_activate_main.sh)")
+        self.path_edit.setPlaceholderText(t("wizard.phScriptPath"))
         self.root_combo = QComboBox()
         self.root_combo.addItems(["ros2", "sdk"])
         self.root_combo.setCurrentText(root if root in ("ros2", "sdk") else "ros2")
@@ -434,9 +435,9 @@ class _PostLaunchServiceRow(QWidget):
         row1 = QHBoxLayout()
         row1.setSpacing(6)
         self.service_edit = QLineEdit(service)
-        self.service_edit.setPlaceholderText("service (예: /jaka_driver/servo_move_enable)")
+        self.service_edit.setPlaceholderText(t("wizard.phService"))
         self.service_type_edit = QLineEdit(service_type)
-        self.service_type_edit.setPlaceholderText("service_type (예: jaka_msgs/srv/ServoMoveEnable)")
+        self.service_type_edit.setPlaceholderText(t("wizard.phServiceType"))
         self.btn_del = QPushButton("✕")
         self.btn_del.setMaximumWidth(28)
         self.btn_del.clicked.connect(lambda: self._on_delete(self))
@@ -449,7 +450,7 @@ class _PostLaunchServiceRow(QWidget):
         row2 = QHBoxLayout()
         row2.setSpacing(6)
         self.request_edit = QLineEdit(json.dumps(request or {}, ensure_ascii=False))
-        self.request_edit.setPlaceholderText('request (JSON, 예: {"enable": true})')
+        self.request_edit.setPlaceholderText(t("wizard.phRequest"))
         self.wait_before_edit = QLineEdit(str(wait_before))
         self.wait_before_edit.setMaximumWidth(80)
         self.wait_before_edit.setPlaceholderText("wait_before")
@@ -508,12 +509,12 @@ class _LaunchArgRow(QWidget):
         layout.setSpacing(6)
 
         self.key_edit = QLineEdit(key)
-        self.key_edit.setPlaceholderText("key (예: robot_ip)")
+        self.key_edit.setPlaceholderText(t("wizard.phLaunchArgKey"))
         self.value_edit = QLineEdit(value)
-        self.value_edit.setPlaceholderText("value (placeholder 가능: {ip_address}, {robot_id}, {namespace})")
+        self.value_edit.setPlaceholderText(t("wizard.phLaunchArgValue"))
         self.btn_del = QPushButton("✕")
         self.btn_del.setMaximumWidth(28)
-        self.btn_del.setToolTip("이 launch arg 삭제")
+        self.btn_del.setToolTip(t("wizard.ttDeleteLaunchArg"))
         self.btn_del.clicked.connect(lambda: self._on_delete(self))
 
         layout.addWidget(self.key_edit, 1)
@@ -552,11 +553,11 @@ class _JointRow(QWidget):
 
         self.is_tool_chk = QCheckBox("is_tool")
         self.is_tool_chk.setChecked(is_tool)
-        self.is_tool_chk.setToolTip("이 joint가 그리퍼/툴이면 체크 (tool_index에 포함)")
+        self.is_tool_chk.setToolTip(t("wizard.ttIsTool"))
 
         self.btn_del = QPushButton("✕")
         self.btn_del.setMaximumWidth(28)
-        self.btn_del.setToolTip("이 joint 삭제")
+        self.btn_del.setToolTip(t("wizard.ttDeleteJoint"))
         self.btn_del.clicked.connect(lambda: self._on_delete(self))
 
         layout.addWidget(self.name_edit, 2)
@@ -600,7 +601,7 @@ class _VariantWidget(QWidget):
         # Variant type
         head = QFormLayout()
         self.type_edit = QLineEdit(default_type)
-        self.type_edit.setPlaceholderText("예: tm_12, tm_12_robotiq")
+        self.type_edit.setPlaceholderText(t("wizard.phVariantType"))
         self.type_edit.textChanged.connect(self._on_type_changed)
         head.addRow(_req("type"), self.type_edit)
         layout.addLayout(head)
@@ -617,10 +618,10 @@ class _VariantWidget(QWidget):
         self.role_combo.setCurrentText("single_arm")
         self.role_combo.currentTextChanged.connect(self._on_role_changed)
         self.company_edit = QLineEdit()
-        self.ik_chk = QCheckBox("IK 사용")
+        self.ik_chk = QCheckBox(t("wizard.useIk"))
         self.ik_chk.setChecked(True)
         self.custom_fields_edit = QLineEdit()
-        self.custom_fields_edit.setPlaceholderText("예: ip_address, can_port")
+        self.custom_fields_edit.setPlaceholderText(t("wizard.phCustomFields"))
         spec_form.addRow("role", self.role_combo)
         spec_form.addRow("company", self.company_edit)
         spec_form.addRow(self.ik_chk)
@@ -633,39 +634,32 @@ class _VariantWidget(QWidget):
         ik_box = self.ik_box
         ik_layout = QVBoxLayout(ik_box)
 
-        ik_hint = QLabel(
-            "ROS 모드: 'description 패키지'(URDF 가 들어있는 sub-package)를 선택한 뒤\n"
-            "'📂 URDF 선택' 으로 .urdf 파일을 고릅니다. urdf_path 는 그 패키지 기준 상대.\n"
-            "SDK 모드: 위에서 'description 폴더'를 선택해두고 그 안에서 URDF 를 고릅니다."
-        )
+        ik_hint = QLabel(t("wizard.ikHint"))
         ik_hint.setStyleSheet("color: #666; font-size: 11px;")
         ik_hint.setWordWrap(True)
         ik_layout.addWidget(ik_hint)
 
         # URDF 패키지 (ROS 모드 전용) — workspace 안의 어느 sub-package 가 URDF 를 들고 있는지
         self.urdf_pkg_row = QHBoxLayout()
-        self.urdf_pkg_row.addWidget(QLabel("description 패키지"))
+        self.urdf_pkg_row.addWidget(QLabel(t("wizard.descPackage")))
         self.urdf_pkg_combo = QComboBox()
         self.urdf_pkg_combo.setMinimumWidth(200)
-        self.urdf_pkg_combo.setToolTip(
-            "ROS 패키지 폴더 안에서 URDF 가 들어있는 sub-package 를 고르세요.\n"
-            "(워크스페이스 형태일 때 어느 패키지인지 명시하기 위해 필요)"
-        )
+        self.urdf_pkg_combo.setToolTip(t("wizard.ttUrdfPkgCombo"))
         # 콤보 선택 즉시 _urdf_pkg_name 갱신 → 설치 시 manifest 의 urdf_package_dir 반영
         self.urdf_pkg_combo.currentTextChanged.connect(self._on_urdf_pkg_changed)
         btn_refresh_urdf_pkg = QPushButton("🔄")
         btn_refresh_urdf_pkg.setMaximumWidth(34)
-        btn_refresh_urdf_pkg.setToolTip("위에서 고른 ROS 패키지 폴더를 다시 스캔")
+        btn_refresh_urdf_pkg.setToolTip(t("wizard.ttRescanRosPkg"))
         btn_refresh_urdf_pkg.clicked.connect(self.refresh_urdf_pkg_combo)
         self.urdf_pkg_row.addWidget(self.urdf_pkg_combo, 1)
         self.urdf_pkg_row.addWidget(btn_refresh_urdf_pkg)
         ik_layout.addLayout(self.urdf_pkg_row)
 
         urdf_row = QHBoxLayout()
-        self.btn_pick_urdf = QPushButton("📂 URDF 선택")
-        self.btn_pick_urdf.setToolTip("선택된 description 패키지 안의 .urdf 파일을 골라 상대 경로를 자동 입력합니다.")
+        self.btn_pick_urdf = QPushButton(t("wizard.pickUrdf"))
+        self.btn_pick_urdf.setToolTip(t("wizard.ttPickUrdf"))
         self.btn_pick_urdf.clicked.connect(self._on_pick_urdf)
-        self.btn_clear_urdf = QPushButton("지우기")
+        self.btn_clear_urdf = QPushButton(t("wizard.clear"))
         self.btn_clear_urdf.setMaximumWidth(60)
         self.btn_clear_urdf.clicked.connect(self._on_clear_urdf)
         urdf_row.addWidget(self.btn_pick_urdf)
@@ -675,7 +669,7 @@ class _VariantWidget(QWidget):
 
         ik_form = QFormLayout()
         self.urdf_path_edit = QLineEdit()
-        self.urdf_path_edit.setPlaceholderText("(URDF 선택 후 자동 입력 — 패키지 기준 상대 경로)")
+        self.urdf_path_edit.setPlaceholderText(t("wizard.phUrdfPath"))
         self.urdf_path_edit.setReadOnly(True)
         self.urdf_path_edit.setStyleSheet("background: #f5f5f5; color: #444;")
         self.joints_lock_edit = QLineEdit()
@@ -686,9 +680,9 @@ class _VariantWidget(QWidget):
         # ee 입력 — single_arm/tool 용 (한 행)
         self.ee_form = QFormLayout()
         self.ee_parent_edit = QLineEdit()
-        self.ee_parent_edit.setPlaceholderText("예: joint_6")
+        self.ee_parent_edit.setPlaceholderText(t("wizard.phEeParent"))
         self.ee_offset_edit = QLineEdit()
-        self.ee_offset_edit.setPlaceholderText("예: 0.0, 0.0, 0.15  (없으면 비워둠)")
+        self.ee_offset_edit.setPlaceholderText(t("wizard.phEeOffset"))
         self.ee_form.addRow("ee parent joint", self.ee_parent_edit)
         self.ee_form.addRow("ee offset (xyz)", self.ee_offset_edit)
         # 컨테이너 위젯으로 감싸야 setVisible로 토글 가능
@@ -700,13 +694,13 @@ class _VariantWidget(QWidget):
         self.ee_dual_box = QWidget()
         ee_dual_form = QFormLayout(self.ee_dual_box)
         self.l_ee_parent_edit = QLineEdit()
-        self.l_ee_parent_edit.setPlaceholderText("왼쪽 팔의 마지막 joint 이름")
+        self.l_ee_parent_edit.setPlaceholderText(t("wizard.phLeftEeParent"))
         self.l_ee_offset_edit = QLineEdit()
-        self.l_ee_offset_edit.setPlaceholderText("예: 0.0, 0.0, 0.15  (없으면 비워둠)")
+        self.l_ee_offset_edit.setPlaceholderText(t("wizard.phEeOffset"))
         self.r_ee_parent_edit = QLineEdit()
-        self.r_ee_parent_edit.setPlaceholderText("오른쪽 팔의 마지막 joint 이름")
+        self.r_ee_parent_edit.setPlaceholderText(t("wizard.phRightEeParent"))
         self.r_ee_offset_edit = QLineEdit()
-        self.r_ee_offset_edit.setPlaceholderText("예: 0.0, 0.0, 0.15  (없으면 비워둠)")
+        self.r_ee_offset_edit.setPlaceholderText(t("wizard.phEeOffset"))
         ee_dual_form.addRow("L_ee parent joint", self.l_ee_parent_edit)
         ee_dual_form.addRow("L_ee offset (xyz)", self.l_ee_offset_edit)
         ee_dual_form.addRow("R_ee parent joint", self.r_ee_parent_edit)
@@ -716,7 +710,7 @@ class _VariantWidget(QWidget):
         layout.addWidget(ik_box)
 
         # joints — IK(URDF 선택) 다음에 와야 URDF 추출 결과로 자동 채워지는 흐름이 자연스러움
-        joints_box = QGroupBox("joints (joint_dim 은 행 개수에서 자동 산출 — URDF 선택 시 자동 입력)")
+        joints_box = QGroupBox(t("wizard.jointsBox"))
         joints_outer = QVBoxLayout(joints_box)
         self._joints: list[_JointRow] = []
         self._joints_layout = QVBoxLayout()
@@ -726,7 +720,7 @@ class _VariantWidget(QWidget):
         joints_container.setLayout(self._joints_layout)
         joints_outer.addWidget(joints_container)
 
-        add_joint_btn = QPushButton("+ joint 추가")
+        add_joint_btn = QPushButton(t("wizard.addJoint"))
         add_joint_btn.clicked.connect(lambda: self._add_joint())
         add_joint_row = QHBoxLayout()
         add_joint_row.addWidget(add_joint_btn)
@@ -740,7 +734,7 @@ class _VariantWidget(QWidget):
         layout.addWidget(joints_box)
 
         # ROS driver
-        self.ros_box = QGroupBox("ROS 드라이버")
+        self.ros_box = QGroupBox(t("wizard.rosDriver"))
         ros_outer = QVBoxLayout(self.ros_box)
 
         ros_form = QFormLayout()
@@ -770,18 +764,18 @@ class _VariantWidget(QWidget):
         ros_outer.addLayout(ros_form)
 
         # ros2 launch 명령 (이 변형의 ROS 드라이버 노드를 띄울 때 사용)
-        ros_outer.addWidget(QLabel("ros2 launch 명령 (이 변형의 ROS 드라이버 노드 기동에 사용)"))
+        ros_outer.addWidget(QLabel(t("wizard.ros2LaunchCmd")))
         launch_form = QFormLayout()
         self.launch_pkg_edit = QLineEdit()
-        self.launch_pkg_edit.setPlaceholderText("예: ur_bringup, tm_driver, jaka_driver")
+        self.launch_pkg_edit.setPlaceholderText(t("wizard.phLaunchPkg"))
         self.launch_file_edit = QLineEdit()
-        self.launch_file_edit.setPlaceholderText("예: ur_control.launch.py, robot.launch.py")
+        self.launch_file_edit.setPlaceholderText(t("wizard.phLaunchFile"))
         launch_form.addRow(_req("launch package"), self.launch_pkg_edit)
         launch_form.addRow(_req("launch file"), self.launch_file_edit)
         ros_outer.addLayout(launch_form)
 
         # launch args — 동적 key:=value 행
-        ros_outer.addWidget(QLabel("launch args (key:=value, 값에 {ip_address}/{robot_id}/{namespace} 등 placeholder 사용 가능)"))
+        ros_outer.addWidget(QLabel(t("wizard.launchArgsLabel")))
         self._launch_args: list[_LaunchArgRow] = []
         self._launch_args_layout = QVBoxLayout()
         self._launch_args_layout.setContentsMargins(0, 0, 0, 0)
@@ -790,7 +784,7 @@ class _VariantWidget(QWidget):
         launch_args_holder.setLayout(self._launch_args_layout)
         ros_outer.addWidget(launch_args_holder)
 
-        add_arg_btn = QPushButton("+ launch arg 추가")
+        add_arg_btn = QPushButton(t("wizard.addLaunchArg"))
         add_arg_btn.clicked.connect(lambda: self._add_launch_arg())
         arg_btn_row = QHBoxLayout()
         arg_btn_row.addWidget(add_arg_btn)
@@ -803,10 +797,10 @@ class _VariantWidget(QWidget):
         layout.addWidget(self.ros_box)
 
         # SDK driver
-        self.sdk_box = QGroupBox("SDK 드라이버")
+        self.sdk_box = QGroupBox(t("wizard.sdkDriver"))
         sdk_form = QFormLayout(self.sdk_box)
         self.sdk_type_edit = QLineEdit()
-        self.sdk_type_edit.setPlaceholderText("vendor 식별자 (예: myarm). 비우면 module id 사용")
+        self.sdk_type_edit.setPlaceholderText(t("wizard.phSdkType"))
         sdk_form.addRow("sdk_type", self.sdk_type_edit)
         # interpolation publish rate (Hz). 0 또는 빈 값이면 interpolation_node default(200Hz).
         # Modbus 그리퍼 등 통신 대역이 좁은 SDK 는 5~30Hz 정도가 적당.
@@ -818,13 +812,9 @@ class _VariantWidget(QWidget):
         layout.addWidget(self.sdk_box)
 
         # Pre/post launch hooks (선택)
-        hooks_box = QGroupBox("driver 훅 (선택) — driver 시작 전후 자동 실행")
+        hooks_box = QGroupBox(t("wizard.hooksBox"))
         hooks_v = QVBoxLayout(hooks_box)
-        hooks_hint = QLabel(
-            "pre_launch: driver 시작 직전 bash 스크립트 실행 (예: piper CAN bring-up).\n"
-            "    path 는 모듈 루트 기준 상대 (root=ros2: /root/ros2_ws/src/<id>/<path>, root=sdk: /root/robot_sdk/<id>/<path>)\n"
-            "post_launch: driver 시작 직후 ROS 서비스 호출 (예: JAKA servo_move_enable)."
-        )
+        hooks_hint = QLabel(t("wizard.hooksHint"))
         hooks_hint.setStyleSheet("color: #666; font-size: 11px;")
         hooks_hint.setWordWrap(True)
         hooks_v.addWidget(hooks_hint)
@@ -838,7 +828,7 @@ class _VariantWidget(QWidget):
         pre_holder = QWidget()
         pre_holder.setLayout(self._pre_hooks_layout)
         hooks_v.addWidget(pre_holder)
-        btn_add_pre = QPushButton("+ pre_launch script 추가")
+        btn_add_pre = QPushButton(t("wizard.addPreLaunch"))
         btn_add_pre.clicked.connect(lambda: self._add_pre_hook())
         pre_btn_row = QHBoxLayout()
         pre_btn_row.addWidget(btn_add_pre)
@@ -854,7 +844,7 @@ class _VariantWidget(QWidget):
         post_holder = QWidget()
         post_holder.setLayout(self._post_hooks_layout)
         hooks_v.addWidget(post_holder)
-        btn_add_post = QPushButton("+ post_launch service 추가")
+        btn_add_post = QPushButton(t("wizard.addPostLaunch"))
         btn_add_post.clicked.connect(lambda: self._add_post_hook())
         post_btn_row = QHBoxLayout()
         post_btn_row.addWidget(btn_add_post)
@@ -893,7 +883,7 @@ class _VariantWidget(QWidget):
 
     def _remove_joint(self, row: _JointRow) -> None:
         if len(self._joints) <= 1:
-            QMessageBox.information(self, "삭제 불가", "최소 1개의 joint는 필요합니다.")
+            QMessageBox.information(self, t("wizard.cannotDelete"), t("wizard.needOneJoint"))
             return
         try:
             self._joints.remove(row)
@@ -988,38 +978,37 @@ class _VariantWidget(QWidget):
             sdk = self._wizard._sdk_src
             desc = self._wizard._desc_src
             if sdk is None and desc is None:
-                QMessageBox.warning(self, "폴더 미선택",
-                                    "먼저 위에서 'SDK 폴더' 또는 'description 폴더'를 선택하세요.")
+                QMessageBox.warning(self, t("wizard.noFolderTitle"),
+                                    t("wizard.noFolderSdkDesc"))
                 return
             open_at = desc or sdk
             label = open_at.name if open_at else ""
         else:
             ros_pkg = self._wizard._ros_pkg_src
             if ros_pkg is None:
-                QMessageBox.warning(self, "ROS 패키지 미선택",
-                                    "먼저 위에서 'ROS 패키지 폴더'를 선택하세요.")
+                QMessageBox.warning(self, t("wizard.noRosPkgTitle"),
+                                    t("wizard.noRosPkgBody"))
                 return
             # description 패키지 콤보가 비어있으면 자동 갱신 시도
             if self.urdf_pkg_combo.count() == 0:
                 self.refresh_urdf_pkg_combo()
             picked_pkg_name = self.urdf_pkg_combo.currentText().strip()
             if not picked_pkg_name:
-                QMessageBox.warning(self, "description 패키지 미선택",
-                                    "IK 섹션의 'description 패키지' 콤보에서 URDF 가 들어있는 sub-package 를\n"
-                                    "먼저 선택하세요. (보이지 않으면 🔄 새로고침)")
+                QMessageBox.warning(self, t("wizard.noDescPkgTitle"),
+                                    t("wizard.noDescPkgBody"))
                 return
             # detect_ros_packages 결과에서 일치하는 패키지 dir 찾기
             pkgs = detect_ros_packages(ros_pkg)
             target_pkg = next((p for p in pkgs if p.name == picked_pkg_name), None)
             if target_pkg is None:
-                QMessageBox.warning(self, "패키지 없음",
-                                    f"'{picked_pkg_name}' 를 찾지 못했습니다. 🔄 로 갱신.")
+                QMessageBox.warning(self, t("wizard.pkgNotFoundTitle"),
+                                    t("wizard.pkgNotFoundBody", pkg=picked_pkg_name))
                 return
             open_at = target_pkg
             label = picked_pkg_name
 
         path_str, _ = QFileDialog.getOpenFileName(
-            self, f"URDF 선택 — {label}", str(open_at),
+            self, t("wizard.pickUrdfDialog", label=label), str(open_at),
             "URDF Files (*.urdf *.xacro);;All Files (*)"
         )
         if not path_str:
@@ -1050,8 +1039,8 @@ class _VariantWidget(QWidget):
                 rel_str = None
 
         if rel_str is None:
-            QMessageBox.warning(self, "범위 밖 파일",
-                                f"선택한 파일이 '{label}' 안에 있지 않습니다.")
+            QMessageBox.warning(self, t("wizard.outOfScopeTitle"),
+                                t("wizard.outOfScopeBody", label=label))
             return
         self.urdf_path_edit.setText(rel_str)
 
@@ -1059,22 +1048,19 @@ class _VariantWidget(QWidget):
         try:
             joints = parse_urdf_joints(picked)
         except RuntimeError as e:
-            self._wizard._log(f"[WARN] URDF 파싱 실패: {e}")
+            self._wizard._log("[WARN] " + t("wizard.logUrdfParseFail", err=e))
             return
 
         if not joints:
-            self._wizard._log("[INFO] URDF 에서 controlled joint 를 찾지 못했습니다 (수동 입력 필요).")
+            self._wizard._log("[INFO] " + t("wizard.logNoControlledJoints"))
             return
 
         names_preview = ", ".join(j[0] for j in joints[:8])
         if len(joints) > 8:
             names_preview += f", ... (+{len(joints) - 8})"
         ans = QMessageBox.question(
-            self, "Joints 자동 입력?",
-            f"URDF 에서 controlled joint {len(joints)}개를 발견했습니다.\n"
-            f"이름·하한·상한이 자동 입력되도록 현재 joints 입력을 교체할까요?\n\n"
-            f"발견된 joints: {names_preview}\n\n"
-            "(is_tool 체크박스는 사용자가 직접 표시해야 합니다.)",
+            self, t("wizard.autoJointsTitle"),
+            t("wizard.autoJointsBody", count=len(joints), names=names_preview),
             QMessageBox.Yes | QMessageBox.No
         )
         if ans != QMessageBox.Yes:
@@ -1087,7 +1073,7 @@ class _VariantWidget(QWidget):
         self._joints.clear()
         for jname, lb, ub in joints:
             self._add_joint(name=jname, lb=lb, ub=ub)
-        self._wizard._log(f"[OK] URDF 에서 joints {len(joints)}개 자동 입력")
+        self._wizard._log("[OK] " + t("wizard.logJointsFilled", count=len(joints)))
 
     def _on_clear_urdf(self) -> None:
         self.urdf_path_edit.clear()
@@ -1229,23 +1215,23 @@ class _InstallWorker(QThread):
 
     def run(self):
         try:
-            self._emit(f"[1/3] 패킹 중: {self.workdir}")
+            self._emit(t("wizard.logPacking", path=self.workdir))
             tar_path = self._pack()
             self._emit(f"  → {tar_path}")
 
-            self._emit("[2/3] 프로젝트 트리에 설치")
+            self._emit(t("wizard.logInstallTree"))
             self._extract_to_project(tar_path)
 
             if self.ros_pkg_names:
                 self._emit(f"[3/3] colcon build (--packages-select {' '.join(self.ros_pkg_names)})")
                 rc = self._colcon_build()
                 if rc != 0:
-                    self.done.emit(False, f"colcon build 실패 (rc={rc})")
+                    self.done.emit(False, t("wizard.colconFail", rc=rc))
                     return
             else:
-                self._emit("[3/3] colcon 대상 없음 (스킵)")
+                self._emit(t("wizard.logNoColcon"))
 
-            self.done.emit(True, "설치 완료")
+            self.done.emit(True, t("wizard.installDone"))
         except Exception:
             self.done.emit(False, traceback.format_exc())
 
@@ -1288,7 +1274,7 @@ class _InstallWorker(QThread):
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         except FileNotFoundError:
-            self._emit("docker 명령을 찾을 수 없음 — 컨테이너에서 직접 colcon build 하세요.")
+            self._emit(t("wizard.logDockerNotFound"))
             return -1
         assert proc.stdout is not None
         for line in proc.stdout:
@@ -1308,7 +1294,7 @@ class ModuleWizard(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("로컬 모듈 만들기")
+        self.setWindowTitle(t("wizard.title"))
         self.resize(900, 800)
         # 사용자가 고른 원본 폴더들 (아직 복사 안 됨; 설치 시 복사)
         self._ros_pkg_src: Optional[Path] = None
@@ -1333,11 +1319,11 @@ class ModuleWizard(QDialog):
 
         # 0) 작업 액션 — 기존 모듈 불러와 편집 / 삭제
         action_row = QHBoxLayout()
-        btn_load = QPushButton("📂 기존 모듈 불러오기")
-        btn_load.setToolTip("이전에 위자드로 만든 모듈을 폼에 풀어 편집을 시작합니다.")
+        btn_load = QPushButton(t("wizard.loadExisting"))
+        btn_load.setToolTip(t("wizard.ttLoadExisting"))
         btn_load.clicked.connect(self._on_load_existing)
-        btn_delete = QPushButton("🗑 모듈 삭제")
-        btn_delete.setToolTip("위자드로 만든 로컬 모듈을 프로젝트 트리·manifest·작업 폴더에서 모두 제거합니다.")
+        btn_delete = QPushButton(t("wizard.deleteModule"))
+        btn_delete.setToolTip(t("wizard.ttDeleteModule"))
         btn_delete.clicked.connect(self._on_delete_local)
         action_row.addWidget(btn_load)
         action_row.addWidget(btn_delete)
@@ -1345,7 +1331,7 @@ class ModuleWizard(QDialog):
         layout.addLayout(action_row)
 
         # 1) 기본 정보
-        common_box = QGroupBox("기본 정보")
+        common_box = QGroupBox(t("wizard.basicInfo"))
         common_form = QFormLayout(common_box)
         self.id_edit = QLineEdit()
         self.id_edit.setPlaceholderText("robot_myarm")
@@ -1356,31 +1342,27 @@ class ModuleWizard(QDialog):
         self.category_combo = QComboBox()
         self.category_combo.addItems(["robot", "sensor"])
         self.category_combo.currentTextChanged.connect(self._update_visibility)
-        common_form.addRow(_req("ID"), self.id_edit)
-        common_form.addRow(_req("이름"), self.name_edit)
-        common_form.addRow("버전", self.version_edit)
-        common_form.addRow("설명", self.desc_edit)
-        common_form.addRow("카테고리", self.category_combo)
+        common_form.addRow(_req(t("wizard.fieldId")), self.id_edit)
+        common_form.addRow(_req(t("wizard.fieldName")), self.name_edit)
+        common_form.addRow(t("wizard.fieldVersion"), self.version_edit)
+        common_form.addRow(t("wizard.fieldDescription"), self.desc_edit)
+        common_form.addRow(t("wizard.fieldCategory"), self.category_combo)
         layout.addWidget(common_box)
 
         # 1-b) 의존성 (선택) — 모듈 install 시 누락된 apt/pip 패키지 자동 설치
-        deps_box = QGroupBox("의존성 (선택)")
+        deps_box = QGroupBox(t("wizard.depsBox"))
         deps_v = QVBoxLayout(deps_box)
-        deps_hint = QLabel(
-            "모듈이 필요로 하는 시스템 패키지(apt)와 Python 패키지(pip).\n"
-            "한 줄에 하나씩. 버전 명시 가능 (예: python-can>=4.3.1, piper_sdk).\n"
-            "설치 파이프라인이 누락된 패키지를 자동으로 설치합니다."
-        )
+        deps_hint = QLabel(t("wizard.depsHint"))
         deps_hint.setStyleSheet("color: #666; font-size: 11px;")
         deps_hint.setWordWrap(True)
         deps_v.addWidget(deps_hint)
 
         deps_form = QFormLayout()
         self.deps_apt_edit = QPlainTextEdit()
-        self.deps_apt_edit.setPlaceholderText("(예: ros-humble-moveit, can-utils)\n한 줄에 하나씩")
+        self.deps_apt_edit.setPlaceholderText(t("wizard.phDepsApt"))
         self.deps_apt_edit.setMaximumHeight(70)
         self.deps_pip_edit = QPlainTextEdit()
-        self.deps_pip_edit.setPlaceholderText("(예: piper_sdk, python-can>=4.3.1)\n한 줄에 하나씩")
+        self.deps_pip_edit.setPlaceholderText(t("wizard.phDepsPip"))
         self.deps_pip_edit.setMaximumHeight(70)
         deps_form.addRow("apt", self.deps_apt_edit)
         deps_form.addRow("pip", self.deps_pip_edit)
@@ -1388,7 +1370,7 @@ class ModuleWizard(QDialog):
         layout.addWidget(deps_box)
 
         # 2) 로봇 옵션
-        self.robot_box = QGroupBox("로봇 옵션")
+        self.robot_box = QGroupBox(t("wizard.robotOptions"))
         rl = QVBoxLayout(self.robot_box)
 
         # 2-1) 제어 방식
@@ -1397,77 +1379,68 @@ class ModuleWizard(QDialog):
         # 다시 켤 때는 addItems 에 "SDK (직접 제어)" 만 다시 추가하면 됨 — 내부 분기/검증
         # 코드는 모두 유지되어 있음.
         method_row = QHBoxLayout()
-        method_row.addWidget(QLabel("제어 방식:"))
+        method_row.addWidget(QLabel(t("wizard.controlMethod")))
         self.method_combo = QComboBox()
         self.method_combo.addItems(["ROS (topic/service)"])
         self.method_combo.currentTextChanged.connect(self._on_method_changed)
         method_row.addWidget(self.method_combo)
-        warning = QLabel(
-            "⚠ ROS는 200Hz로 read/write 토픽·서비스를 호출하므로,\n"
-            "    그 부하를 견딜 수 있는 ROS 패키지만 사용 가능합니다."
-        )
+        warning = QLabel(t("wizard.rosWarning"))
         warning.setStyleSheet("color: #c0392b; font-size: 11px;")
         warning.setWordWrap(True)
         method_row.addWidget(warning, 1)
         rl.addLayout(method_row)
 
         # 2-2) ROS 모드 — ROS 패키지 폴더 선택
-        self.ros_mode_box = QGroupBox("ROS 패키지")
+        self.ros_mode_box = QGroupBox(t("wizard.rosPkgBox"))
         rmode_v = QVBoxLayout(self.ros_mode_box)
-        rmode_hint = QLabel(
-            "이 모듈에 사용할 ROS 패키지 폴더를 골라 주세요.\n"
-            "(package.xml 이 폴더 루트에 있어야 합니다. URDF·메쉬 등도 이 폴더 안에 있어야 합니다.)"
-        )
+        rmode_hint = QLabel(t("wizard.rosPkgHint"))
         rmode_hint.setStyleSheet("color: #666; font-size: 11px;")
         rmode_hint.setWordWrap(True)
         rmode_v.addWidget(rmode_hint)
 
         rpick = QHBoxLayout()
-        rpick.addWidget(QLabel("패키지 폴더"))
+        rpick.addWidget(QLabel(t("wizard.pkgFolder")))
         self.ros_pkg_path_edit = QLineEdit()
         self.ros_pkg_path_edit.setReadOnly(True)
         self.ros_pkg_path_edit.setStyleSheet("background: #f5f5f5; color: #444;")
-        self.ros_pkg_path_edit.setPlaceholderText("(폴더 선택 후 자동 입력)")
+        self.ros_pkg_path_edit.setPlaceholderText(t("wizard.phFolderAuto"))
         rpick.addWidget(self.ros_pkg_path_edit, 1)
-        btn_pick_ros = QPushButton("📁 선택")
+        btn_pick_ros = QPushButton(t("wizard.pickFolder"))
         btn_pick_ros.clicked.connect(self._on_pick_ros_pkg)
         rpick.addWidget(btn_pick_ros)
         rmode_v.addLayout(rpick)
         rl.addWidget(self.ros_mode_box)
 
         # 2-3) SDK 모드 — SDK 폴더 + description 폴더 + install_cmd + controller.py 편집
-        self.sdk_mode_box = QGroupBox("SDK 설정")
+        self.sdk_mode_box = QGroupBox(t("wizard.sdkSettingsBox"))
         smode_v = QVBoxLayout(self.sdk_mode_box)
-        smode_hint = QLabel(
-            "vendor SDK 폴더(setup.py 가 폴더 루트에 있어야 함)와\n"
-            "URDF·메쉬가 든 description 폴더(선택)를 골라 주세요."
-        )
+        smode_hint = QLabel(t("wizard.sdkSettingsHint"))
         smode_hint.setStyleSheet("color: #666; font-size: 11px;")
         smode_hint.setWordWrap(True)
         smode_v.addWidget(smode_hint)
 
         spick = QHBoxLayout()
-        spick.addWidget(QLabel("SDK 폴더"))
+        spick.addWidget(QLabel(t("wizard.sdkFolder")))
         self.sdk_path_edit = QLineEdit()
         self.sdk_path_edit.setReadOnly(True)
         self.sdk_path_edit.setStyleSheet("background: #f5f5f5; color: #444;")
-        self.sdk_path_edit.setPlaceholderText("(폴더 선택 후 자동 입력)")
+        self.sdk_path_edit.setPlaceholderText(t("wizard.phFolderAuto"))
         spick.addWidget(self.sdk_path_edit, 1)
-        btn_pick_sdk = QPushButton("📁 선택")
+        btn_pick_sdk = QPushButton(t("wizard.pickFolder"))
         btn_pick_sdk.clicked.connect(self._on_pick_sdk)
         spick.addWidget(btn_pick_sdk)
         smode_v.addLayout(spick)
 
         dpick = QHBoxLayout()
-        dpick.addWidget(QLabel("description 폴더 (선택)"))
+        dpick.addWidget(QLabel(t("wizard.descFolder")))
         self.desc_path_edit = QLineEdit()
         self.desc_path_edit.setReadOnly(True)
         self.desc_path_edit.setStyleSheet("background: #f5f5f5; color: #444;")
-        self.desc_path_edit.setPlaceholderText("(URDF/메쉬가 든 폴더, 비워둬도 됨)")
+        self.desc_path_edit.setPlaceholderText(t("wizard.phDescFolder"))
         dpick.addWidget(self.desc_path_edit, 1)
-        btn_pick_desc = QPushButton("📁 선택")
+        btn_pick_desc = QPushButton(t("wizard.pickFolder"))
         btn_pick_desc.clicked.connect(self._on_pick_desc)
-        btn_clear_desc = QPushButton("지우기")
+        btn_clear_desc = QPushButton(t("wizard.clear"))
         btn_clear_desc.setMaximumWidth(60)
         btn_clear_desc.clicked.connect(self._on_clear_desc)
         dpick.addWidget(btn_pick_desc)
@@ -1480,11 +1453,8 @@ class ModuleWizard(QDialog):
         smode_v.addLayout(sform)
 
         ctrl_row = QHBoxLayout()
-        self.btn_edit_controller = QPushButton("📝 controller.py 작성/편집")
-        self.btn_edit_controller.setToolTip(
-            "BaseSDKController 를 상속한 컨트롤러 코드를 외부 에디터에서 작성합니다.\n"
-            "처음 누르면 템플릿이 자동 생성됩니다."
-        )
+        self.btn_edit_controller = QPushButton(t("wizard.editController"))
+        self.btn_edit_controller.setToolTip(t("wizard.ttEditController"))
         self.btn_edit_controller.clicked.connect(self._on_edit_controller)
         ctrl_row.addWidget(self.btn_edit_controller)
         ctrl_row.addStretch()
@@ -1493,11 +1463,11 @@ class ModuleWizard(QDialog):
         rl.addWidget(self.sdk_mode_box)
 
         # 2-4) 변형 탭
-        rl.addWidget(QLabel("로봇 변형 (여러 대를 한 모듈로 묶을 수 있습니다)"))
+        rl.addWidget(QLabel(t("wizard.variantsLabel")))
         self.variant_tabs = QTabWidget()
         self.variant_tabs.setTabsClosable(True)
         self.variant_tabs.tabCloseRequested.connect(self._remove_variant)
-        add_btn = QPushButton("+ 변형 추가")
+        add_btn = QPushButton(t("wizard.addVariant"))
         add_btn.clicked.connect(self._add_variant)
         self.variant_tabs.setCornerWidget(add_btn)
         rl.addWidget(self.variant_tabs)
@@ -1506,7 +1476,7 @@ class ModuleWizard(QDialog):
 
         # 3) 로그
         layout.addWidget(self._sep())
-        layout.addWidget(QLabel("로그"))
+        layout.addWidget(QLabel(t("wizard.logLabel")))
         self.log_view = QPlainTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setFont(QFont("monospace"))
@@ -1517,11 +1487,11 @@ class ModuleWizard(QDialog):
 
         # 4) 하단 버튼
         bottom = QHBoxLayout()
-        self.btn_validate = QPushButton("검증")
+        self.btn_validate = QPushButton(t("wizard.validate"))
         self.btn_validate.clicked.connect(self._on_validate)
-        self.btn_install = QPushButton("설치 (colcon build 포함)")
+        self.btn_install = QPushButton(t("wizard.installBtn"))
         self.btn_install.clicked.connect(self._on_install)
-        self.btn_close = QPushButton("닫기")
+        self.btn_close = QPushButton(t("common.close"))
         self.btn_close.clicked.connect(self.reject)
         bottom.addWidget(self.btn_validate)
         bottom.addWidget(self.btn_install)
@@ -1546,7 +1516,7 @@ class ModuleWizard(QDialog):
 
     def _remove_variant(self, idx: int) -> None:
         if self.variant_tabs.count() <= 1:
-            QMessageBox.information(self, "삭제 불가", "최소 1개의 변형은 필요합니다.")
+            QMessageBox.information(self, t("wizard.cannotDelete"), t("wizard.needOneVariant"))
             return
         w = self.variant_tabs.widget(idx)
         self.variant_tabs.removeTab(idx)
@@ -1586,43 +1556,39 @@ class ModuleWizard(QDialog):
         items = self._list_local_modules()
         if not items:
             QMessageBox.information(
-                self, "로컬 모듈 없음",
-                f"{LOCAL_MODULES_DIR}\n에 위자드로 만든 모듈이 없습니다."
+                self, t("wizard.noLocalModulesTitle"),
+                t("wizard.noLocalModulesBody", dir=LOCAL_MODULES_DIR)
             )
             return
         labels = [f"{mid}  —  {meta.get('name', '')} v{meta.get('version', '')}"
                   for mid, meta in items]
         choice, ok = QInputDialog.getItem(
-            self, "기존 모듈 불러오기", "수정할 모듈을 고르세요:",
+            self, t("wizard.loadExistingTitle"), t("wizard.loadExistingPrompt"),
             labels, 0, False,
         )
         if not ok or not choice:
             return
         mid, meta = items[labels.index(choice)]
         self._load_meta_into_form(meta, LOCAL_MODULES_DIR / mid)
-        self._log(f"[OK] 모듈 불러옴: {mid}")
+        self._log("[OK] " + t("wizard.logModuleLoaded", mid=mid))
 
     def _on_delete_local(self) -> None:
         items = self._list_local_modules()
         if not items:
-            QMessageBox.information(self, "삭제 가능 모듈 없음",
-                                    "위자드로 만든 로컬 모듈이 없습니다.")
+            QMessageBox.information(self, t("wizard.noDeletableTitle"),
+                                    t("wizard.noDeletableBody"))
             return
         labels = [f"{mid}  —  {meta.get('name', '')} v{meta.get('version', '')}"
                   for mid, meta in items]
         choice, ok = QInputDialog.getItem(
-            self, "모듈 삭제", "삭제할 모듈을 고르세요:", labels, 0, False,
+            self, t("wizard.deleteModuleTitle"), t("wizard.deleteModulePrompt"), labels, 0, False,
         )
         if not ok or not choice:
             return
         mid = items[labels.index(choice)][0]
         ans = QMessageBox.question(
-            self, "삭제 확인",
-            f"'{mid}' 모듈을 정말 삭제할까요?\n"
-            "다음을 모두 제거합니다:\n"
-            f"  · 프로젝트 트리 (ros2/ros2_ws/src/{mid}/, ros2/robot_sdk/{mid}/)\n"
-            f"  · manifest (project/modules/{mid}.json)\n"
-            f"  · 위자드 작업 폴더 ({LOCAL_MODULES_DIR / mid})",
+            self, t("wizard.deleteConfirmTitle"),
+            t("wizard.deleteConfirmBody", mid=mid, workdir=LOCAL_MODULES_DIR / mid),
             QMessageBox.Yes | QMessageBox.Cancel,
         )
         if ans != QMessageBox.Yes:
@@ -1632,19 +1598,19 @@ class ModuleWizard(QDialog):
             from modules import remove_module
             ok = remove_module(mid)
         except Exception as e:
-            self._log(f"[ERR] remove_module 실패: {e}")
+            self._log("[ERR] " + t("wizard.logRemoveModuleFail", err=e))
             return
         if not ok:
-            self._log(f"[ERR] 모듈 삭제 실패: {mid}")
+            self._log("[ERR] " + t("wizard.logModuleDeleteFail", mid=mid))
             return
         wd = LOCAL_MODULES_DIR / mid
         if wd.is_dir():
             try:
                 shutil.rmtree(wd)
             except Exception as e:
-                self._log(f"[WARN] 작업 폴더 삭제 실패: {e}")
-        self._log(f"[OK] 모듈 삭제 완료: {mid}")
-        QMessageBox.information(self, "삭제 완료", f"{mid} 가 삭제되었습니다.")
+                self._log("[WARN] " + t("wizard.logWorkdirDeleteFail", err=e))
+        self._log("[OK] " + t("wizard.logModuleDeleted", mid=mid))
+        QMessageBox.information(self, t("wizard.deleteDoneTitle"), t("wizard.deleteDoneBody", mid=mid))
 
     def _load_meta_into_form(self, meta: dict, workdir: Path) -> None:
         """module.json 을 폼에 풀어넣는다. workdir 의 트리를 *in-place* 소스로 둔다."""
@@ -1670,10 +1636,8 @@ class ModuleWizard(QDialog):
             # 편집 불가 — 직접 module.json 을 손대거나 launcher 외부에서 다시 패키징.
             QMessageBox.warning(
                 self,
-                "SDK 모드 모듈",
-                "이 모듈은 SDK 직접 제어 모드입니다.\n"
-                "위자드는 현재 SDK 편집을 지원하지 않습니다.\n"
-                "module.json 을 직접 수정하거나 새 ROS 모드 모듈로 다시 만들어 주세요.",
+                t("wizard.sdkModeModuleTitle"),
+                t("wizard.sdkModeModuleBody"),
             )
             return
         self.method_combo.setCurrentIndex(0)
@@ -1688,14 +1652,14 @@ class ModuleWizard(QDialog):
             sdk_dir = workdir / "sdk"
             if sdk_dir.is_dir():
                 self._sdk_src = sdk_dir
-                self.sdk_path_edit.setText(f"{sdk_dir}  (작업 폴더 안 — 재설치 시 그대로 사용)")
+                self.sdk_path_edit.setText(t("wizard.inplaceSdk", path=sdk_dir))
             else:
                 self._sdk_src = None
                 self.sdk_path_edit.clear()
             desc_dir = sdk_dir / "description"
             if desc_dir.is_dir():
                 self._desc_src = desc_dir
-                self.desc_path_edit.setText(f"{desc_dir}  (작업 폴더 안)")
+                self.desc_path_edit.setText(t("wizard.inplaceDesc", path=desc_dir))
             else:
                 self._desc_src = None
                 self.desc_path_edit.clear()
@@ -1707,7 +1671,7 @@ class ModuleWizard(QDialog):
                 self._ros_pkg_src = ros2_dir
                 pkgs = detect_ros_packages(ros2_dir)
                 self.ros_pkg_path_edit.setText(
-                    f"{ros2_dir}  (작업 폴더 안 — {len(pkgs)}개 패키지)"
+                    t("wizard.inplaceRos", path=ros2_dir, count=len(pkgs))
                 )
             else:
                 self._ros_pkg_src = None
@@ -1900,34 +1864,31 @@ class ModuleWizard(QDialog):
 
     # ---- source pickers ----
     def _on_pick_ros_pkg(self) -> None:
-        s = QFileDialog.getExistingDirectory(self, "ROS 패키지 폴더 선택", str(Path.home()))
+        s = QFileDialog.getExistingDirectory(self, t("wizard.pickRosPkgDialog"), str(Path.home()))
         if not s:
             return
         src = Path(s)
         pkgs = detect_ros_packages(src)
         if not pkgs:
-            QMessageBox.warning(self, "ROS 패키지 아님",
-                                f"{src} 안에 package.xml 을 찾지 못했습니다.\n"
-                                "다음 중 하나여야 합니다:\n"
-                                " · 단일 패키지: 폴더 루트에 package.xml\n"
-                                " · 워크스페이스: 폴더/src/<pkg>/package.xml (예: piper)\n"
-                                " · 평면 워크스페이스: 폴더/<pkg>/package.xml")
+            QMessageBox.warning(self, t("wizard.notRosPkgTitle"),
+                                t("wizard.notRosPkgBody", src=src))
             return
         self._ros_pkg_src = src
         names = [p.name for p in pkgs]
         if len(pkgs) == 1 and pkgs[0] == src:
-            display = f"{src}  (단일 패키지)"
+            display = t("wizard.dispSinglePkg", src=src)
         else:
-            display = f"{src}  (워크스페이스: {len(pkgs)}개 패키지 — {', '.join(names[:5])}{'...' if len(names) > 5 else ''})"
+            display = t("wizard.dispWorkspace", src=src, count=len(pkgs),
+                       names=', '.join(names[:5]) + ('...' if len(names) > 5 else ''))
         self.ros_pkg_path_edit.setText(display)
         for v in self._all_variants():
             v.urdf_path_edit.clear()
             v._urdf_pkg_name = None
             v.refresh_urdf_pkg_combo()
-        self._log(f"[OK] ROS 패키지 선택: {src} ({len(pkgs)}개 패키지)")
+        self._log("[OK] " + t("wizard.logRosPkgSelected", src=src, count=len(pkgs)))
 
     def _on_pick_sdk(self) -> None:
-        s = QFileDialog.getExistingDirectory(self, "vendor SDK 폴더 선택", str(Path.home()))
+        s = QFileDialog.getExistingDirectory(self, t("wizard.pickSdkDialog"), str(Path.home()))
         if not s:
             return
         src = Path(s)
@@ -1936,18 +1897,18 @@ class ModuleWizard(QDialog):
         for v in self._all_variants():
             v.urdf_path_edit.clear()
         if not (src / "setup.py").is_file():
-            self._log(f"[WARN] {src}/setup.py 가 없습니다 — install_cmd 가 동작하지 않을 수 있습니다.")
-        self._log(f"[OK] SDK 폴더 선택: {src}")
+            self._log("[WARN] " + t("wizard.logNoSetupPy", src=src))
+        self._log("[OK] " + t("wizard.logSdkSelected", src=src))
 
     def _on_pick_desc(self) -> None:
-        s = QFileDialog.getExistingDirectory(self, "description 폴더 선택", str(Path.home()))
+        s = QFileDialog.getExistingDirectory(self, t("wizard.pickDescDialog"), str(Path.home()))
         if not s:
             return
         self._desc_src = Path(s)
         self.desc_path_edit.setText(str(self._desc_src))
         for v in self._all_variants():
             v.urdf_path_edit.clear()
-        self._log(f"[OK] description 폴더 선택: {self._desc_src}")
+        self._log("[OK] " + t("wizard.logDescSelected", path=self._desc_src))
 
     def _on_clear_desc(self) -> None:
         self._desc_src = None
@@ -1960,8 +1921,8 @@ class ModuleWizard(QDialog):
         """ID 기반 workdir 을 만들고 반환. ID 가 유효하지 않으면 None."""
         mid = self.id_edit.text().strip()
         if not _ID_RE.match(mid):
-            QMessageBox.warning(self, "ID 형식",
-                                "ID 는 소문자/숫자/언더스코어만 가능합니다 (예: robot_myarm).")
+            QMessageBox.warning(self, t("wizard.idFormatTitle"),
+                                t("wizard.idFormatBody"))
             return None
         wd = LOCAL_MODULES_DIR / mid
         wd.mkdir(parents=True, exist_ok=True)
@@ -1979,17 +1940,17 @@ class ModuleWizard(QDialog):
             # 첫 변형의 sdk_type 추정
             sdk_type = mid
             if self._all_variants():
-                t = self._all_variants()[0].sdk_type_edit.text().strip()
-                if t:
-                    sdk_type = t
+                sdk_t = self._all_variants()[0].sdk_type_edit.text().strip()
+                if sdk_t:
+                    sdk_type = sdk_t
             ctrl.write_text(_CONTROLLER_TEMPLATE.format(
                 name=self.name_edit.text().strip() or mid,
                 sdk_type=sdk_type,
                 class_name=_to_class_name(mid),
             ))
-            self._log(f"[OK] controller.py 템플릿 생성: {ctrl}")
+            self._log("[OK] " + t("wizard.logCtrlTemplateCreated", ctrl=ctrl))
         open_in_external(ctrl)
-        self._log(f"외부 에디터로 열었습니다: {ctrl}")
+        self._log(t("wizard.logOpenedExternal", ctrl=ctrl))
 
     # ---- meta ----
     def _collect_meta(self) -> dict:
@@ -2068,18 +2029,18 @@ class ModuleWizard(QDialog):
                     for label, edit in [("lower bound", jrow.lb_edit), ("upper bound", jrow.ub_edit)]:
                         txt = edit.text().strip()
                         if not _is_float(txt):
-                            errs.append(f"{vt} '{jname}': {label} 이 숫자가 아닙니다 ('{txt}')")
+                            errs.append(t("wizard.errNotNumber", vt=vt, jname=jname, label=label, txt=txt))
                 # ee offset (CSV)
                 if v.role_combo.currentText() == "dual_arm":
                     for label, edit in [("L_ee offset", v.l_ee_offset_edit),
                                         ("R_ee offset", v.r_ee_offset_edit)]:
                         bad = _csv_non_floats(edit.text())
                         if bad:
-                            errs.append(f"{vt} {label} 에 숫자가 아닌 값: {bad}")
+                            errs.append(t("wizard.errNonNumberCsv", vt=vt, label=label, bad=bad))
                 else:
                     bad = _csv_non_floats(v.ee_offset_edit.text())
                     if bad:
-                        errs.append(f"{vt} ee offset 에 숫자가 아닌 값: {bad}")
+                        errs.append(t("wizard.errNonNumberCsv", vt=vt, label="ee offset", bad=bad))
 
         # 숫자 검증 통과해야 _collect_meta 가 안전. 실패면 여기서 멈춤.
         if errs:
@@ -2088,17 +2049,17 @@ class ModuleWizard(QDialog):
         try:
             meta = self._collect_meta()
         except Exception as e:
-            return [f"입력 파싱 실패: {e}"]
+            return [t("wizard.errParseFail", err=e)]
         errs.extend(validate_module_meta(meta))
 
         if meta["category"] == "robot":
             is_sdk = self.method_combo.currentIndex() == 1
             if is_sdk:
                 if self._sdk_src is None:
-                    errs.append("SDK 폴더가 선택되지 않았습니다.")
+                    errs.append(t("wizard.errNoSdkFolder"))
             else:
                 if self._ros_pkg_src is None:
-                    errs.append("ROS 패키지 폴더가 선택되지 않았습니다.")
+                    errs.append(t("wizard.errNoRosFolder"))
                 # ROS 드라이버: topic / msg / launch 형식 검증 (variant 단위)
                 for vi, v in enumerate(self._all_variants()):
                     vt = v.type_edit.text().strip() or f"variant_{vi + 1}"
@@ -2107,33 +2068,31 @@ class ModuleWizard(QDialog):
                     rm = v.read_msg_edit.currentText().strip()
                     wm = v.write_msg_edit.currentText().strip()
                     if not rt:
-                        errs.append(f"{vt}: read_topic 비어 있음")
+                        errs.append(t("wizard.errReadTopicEmpty", vt=vt))
                     elif not rt.startswith("/"):
-                        errs.append(f"{vt}: read_topic 은 '/' 로 시작해야 함 (현재 '{rt}')")
+                        errs.append(t("wizard.errReadTopicSlash", vt=vt, rt=rt))
                     if not wt:
-                        errs.append(f"{vt}: write_topic 비어 있음")
+                        errs.append(t("wizard.errWriteTopicEmpty", vt=vt))
                     elif not wt.startswith("/"):
-                        errs.append(f"{vt}: write_topic 은 '/' 로 시작해야 함 (현재 '{wt}')")
+                        errs.append(t("wizard.errWriteTopicSlash", vt=vt, wt=wt))
                     if not rm:
-                        errs.append(f"{vt}: read_topic_msg 비어 있음")
+                        errs.append(t("wizard.errReadMsgEmpty", vt=vt))
                     elif not _looks_like_msg_type(rm):
-                        errs.append(f"{vt}: read_topic_msg 형식 오류 ('{rm}'). "
-                                    "'<pkg>/<Name>' 또는 '<pkg>/msg/<Name>' / '<pkg>/srv/<Name>' 형식이어야 함")
+                        errs.append(t("wizard.errReadMsgFormat", vt=vt, rm=rm))
                     if not wm:
-                        errs.append(f"{vt}: write_topic_msg 비어 있음")
+                        errs.append(t("wizard.errWriteMsgEmpty", vt=vt))
                     elif not _looks_like_msg_type(wm):
-                        errs.append(f"{vt}: write_topic_msg 형식 오류 ('{wm}'). "
-                                    "'<pkg>/<Name>' 또는 '<pkg>/msg/<Name>' / '<pkg>/srv/<Name>' 형식이어야 함")
+                        errs.append(t("wizard.errWriteMsgFormat", vt=vt, wm=wm))
 
                     # launch package / file
                     lpkg = v.launch_pkg_edit.text().strip()
                     lfile = v.launch_file_edit.text().strip()
                     if not lpkg:
-                        errs.append(f"{vt}: launch package 비어 있음")
+                        errs.append(t("wizard.errLaunchPkgEmpty", vt=vt))
                     if not lfile:
-                        errs.append(f"{vt}: launch file 비어 있음")
+                        errs.append(t("wizard.errLaunchFileEmpty", vt=vt))
                     elif not (lfile.endswith(".py") or lfile.endswith(".xml") or lfile.endswith(".yaml")):
-                        errs.append(f"{vt}: launch file 확장자가 .py/.xml/.yaml 이 아닙니다 ('{lfile}')")
+                        errs.append(t("wizard.errLaunchFileExt", vt=vt, lfile=lfile))
                     # launch args 의 key 가 ros2 launch 가 받는 식별자 형태인지
                     seen_keys: set[str] = set()
                     for row in v._launch_args:
@@ -2141,15 +2100,15 @@ class ModuleWizard(QDialog):
                         if not k:
                             continue
                         if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", k):
-                            errs.append(f"{vt}: launch arg key '{k}' 형식이 잘못됨 (영문/숫자/언더스코어만)")
+                            errs.append(t("wizard.errLaunchArgKeyFormat", vt=vt, k=k))
                         elif k in seen_keys:
-                            errs.append(f"{vt}: launch arg key '{k}' 가 중복됩니다")
+                            errs.append(t("wizard.errLaunchArgKeyDup", vt=vt, k=k))
                         seen_keys.add(k)
 
             # variant 별 urdf_path 가 비어 있으면 경고 (필수는 아님)
             for i, r in enumerate(meta.get("robots", [])):
                 if not r["ik"].get("urdf_path"):
-                    errs.append(f"robots[{i}] ({r.get('type','?')}): URDF 가 선택되지 않았습니다.")
+                    errs.append(t("wizard.errNoUrdf", i=i, type=r.get('type', '?')))
 
         return errs
 
@@ -2160,7 +2119,7 @@ class ModuleWizard(QDialog):
             for e in errs:
                 self._log(f"[ERR] {e}")
             return
-        self._log("[OK] 모든 검증 통과 — 설치 가능 상태입니다.")
+        self._log("[OK] " + t("wizard.logAllValid"))
         # SDK 모드 + controller.py 작성 여부도 안내
         if self.method_combo.currentIndex() == 1:
             wd = LOCAL_MODULES_DIR / self.id_edit.text().strip()
@@ -2169,17 +2128,17 @@ class ModuleWizard(QDialog):
                 ok, info = self._verify_controller(ctrl)
                 self._log(("[OK] " if ok else "[ERR] ") + info)
             else:
-                self._log("[INFO] controller.py 가 아직 작성되지 않았습니다 — 설치 시 템플릿이 자동 생성됩니다.")
+                self._log("[INFO] " + t("wizard.logCtrlNotWritten"))
 
     def _verify_controller(self, ctrl_path: Path) -> tuple[bool, str]:
         rc = subprocess.run(["python3", "-m", "py_compile", str(ctrl_path)],
                             capture_output=True, text=True).returncode
         if rc != 0:
-            return False, f"controller.py 문법 오류 (python3 -m py_compile rc={rc})"
+            return False, t("wizard.ctrlSyntaxError", rc=rc)
         text = ctrl_path.read_text()
         if "BaseSDKController" not in text:
-            return False, "controller.py 에 BaseSDKController 상속 코드를 찾을 수 없음"
-        return True, "controller.py 문법 OK + BaseSDKController 상속 확인"
+            return False, t("wizard.ctrlNoBaseClass")
+        return True, t("wizard.ctrlOk")
 
     # ---- workdir staging (install 시 호출) ----
     def _stage_workdir(self) -> Path:
@@ -2234,14 +2193,14 @@ class ModuleWizard(QDialog):
         if not is_sdk and self._ros_pkg_src is not None and not ros_inplace:
             pkgs = detect_ros_packages(self._ros_pkg_src)
             if not pkgs:
-                raise RuntimeError(f"{self._ros_pkg_src} 안에서 ROS 패키지를 찾지 못했습니다.")
+                raise RuntimeError(t("wizard.errNoRosPkgInSrc", src=self._ros_pkg_src))
             (ros2_dir / "src").mkdir(parents=True, exist_ok=True)
             for pkg in pkgs:
                 dst = ros2_dir / "src" / pkg.name
                 shutil.copytree(pkg, dst, symlinks=True)
-            self._log(f"  복사: {len(pkgs)}개 ROS 패키지 → ros2/src/ ({', '.join(p.name for p in pkgs)})")
+            self._log(t("wizard.logCopiedRosPkgs", count=len(pkgs), names=', '.join(p.name for p in pkgs)))
         elif not is_sdk and ros_inplace:
-            self._log("  in-place: 작업 폴더의 ros2/ 트리 그대로 사용")
+            self._log(t("wizard.logInplaceRos"))
 
         # SDK 모드: 외부 SDK 소스
         if is_sdk and self._sdk_src is not None and not sdk_inplace:
@@ -2253,9 +2212,9 @@ class ModuleWizard(QDialog):
                     shutil.copytree(item, d, symlinks=True)
                 else:
                     shutil.copy2(item, d)
-            self._log(f"  복사: SDK 콘텐츠 → sdk/")
+            self._log(t("wizard.logCopiedSdk"))
         elif is_sdk and sdk_inplace:
-            self._log("  in-place: 작업 폴더의 sdk/ 트리 그대로 사용")
+            self._log(t("wizard.logInplaceSdk"))
 
         # description: 외부 소스일 때만 복사
         if is_sdk and self._desc_src is not None and not desc_inplace:
@@ -2263,7 +2222,7 @@ class ModuleWizard(QDialog):
             if desc_dst.exists():
                 shutil.rmtree(desc_dst)
             shutil.copytree(self._desc_src, desc_dst, symlinks=True)
-            self._log(f"  복사: description/ → sdk/description/")
+            self._log(t("wizard.logCopiedDesc"))
 
         # SDK 모드에서 controller.py 가 없으면 템플릿 생성
         if is_sdk:
@@ -2271,20 +2230,20 @@ class ModuleWizard(QDialog):
             if not ctrl.is_file():
                 sdk_type = mid
                 if self._all_variants():
-                    t = self._all_variants()[0].sdk_type_edit.text().strip()
-                    if t:
-                        sdk_type = t
+                    sdk_t = self._all_variants()[0].sdk_type_edit.text().strip()
+                    if sdk_t:
+                        sdk_type = sdk_t
                 ctrl.write_text(_CONTROLLER_TEMPLATE.format(
                     name=self.name_edit.text().strip() or mid,
                     sdk_type=sdk_type,
                     class_name=_to_class_name(mid),
                 ))
-                self._log(f"  생성: sdk/controller.py (템플릿)")
+                self._log(t("wizard.logCreatedCtrl"))
 
         # module.json 작성
         meta = self._collect_meta()
         (wd / "module.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False))
-        self._log(f"  생성: module.json")
+        self._log(t("wizard.logCreatedModuleJson"))
 
         self._workdir = wd
         return wd
@@ -2308,26 +2267,26 @@ class ModuleWizard(QDialog):
         self.log_view.clear()
         errs = self._validate_inputs()
         if errs:
-            QMessageBox.warning(self, "검증 실패", "\n".join(errs))
+            QMessageBox.warning(self, t("wizard.validateFailedTitle"), "\n".join(errs))
             return
 
         mid = self.id_edit.text().strip()
         existing = LOCAL_MODULES_DIR / mid
         if existing.exists() and any(existing.iterdir()):
             ans = QMessageBox.question(
-                self, "재설치?",
-                f"이미 같은 ID('{mid}')의 모듈 작업 폴더가 있습니다. 덮어쓰고 재설치할까요?",
+                self, t("wizard.reinstallTitle"),
+                t("wizard.reinstallBody", mid=mid),
                 QMessageBox.Yes | QMessageBox.Cancel,
             )
             if ans != QMessageBox.Yes:
                 return
 
-        self._log("[1/4] 모듈 폴더 준비")
+        self._log(t("wizard.logPrepFolder"))
         try:
             wd = self._stage_workdir()
         except Exception as e:
-            self._log(f"[ERR] 폴더 준비 실패: {e}")
-            QMessageBox.critical(self, "오류", str(e))
+            self._log("[ERR] " + t("wizard.logPrepFolderFail", err=e))
+            QMessageBox.critical(self, t("wizard.errorTitle"), str(e))
             return
 
         ros_pkgs = self._scan_ros_packages(wd / "ros2")
@@ -2353,8 +2312,8 @@ class ModuleWizard(QDialog):
             except Exception as _cred_err:
                 self._log(f"[WARN] credential prompt failed: {_cred_err}")
             QMessageBox.information(
-                self, "설치 완료",
-                "런처를 재시작하면 모듈이 인식됩니다.\n확인을 누르면 런처가 종료됩니다.",
+                self, t("wizard.installCompleteTitle"),
+                t("wizard.installCompleteBody"),
             )
             try:
                 self.close()

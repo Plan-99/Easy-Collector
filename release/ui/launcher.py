@@ -4330,7 +4330,11 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                 row.setContentsMargins(0, 0, 0, 0)
                 row.setSpacing(6)
 
-                name_label = QLabel(mod.name)
+                name_key = f"catalog.{mod.id}.name"
+                name_text = t(name_key)
+                if name_text == name_key:
+                    name_text = mod.name
+                name_label = QLabel(name_text)
                 name_label.setStyleSheet("font-weight: 600; font-size: 12px;")
                 row.addWidget(name_label)
 
@@ -4409,7 +4413,11 @@ class MainWindow(ToolingMixin, HealthServiceMixin, RuntimeServiceMixin, ComposeS
                 row_v.addLayout(row)
 
                 # Description row (only when present, dim and word-wrapped).
-                desc_text = (mod.description or "").strip()
+                desc_key = f"catalog.{mod.id}.desc"
+                desc_text = t(desc_key)
+                if desc_text == desc_key:
+                    desc_text = mod.description or ""
+                desc_text = desc_text.strip()
                 if desc_text:
                     desc_label = QLabel(desc_text)
                     desc_label.setStyleSheet("color: #8b9aab; font-size: 10px; font-weight: 400;")

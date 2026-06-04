@@ -1,0 +1,166 @@
+{
+  "id": "robot_ai_worker",
+  "name": "AI Worker",
+  "version": "1.0.0",
+  "category": "robot",
+  "description": "ROBOTIS AI Worker (FFW-BG2 / FFW-SG2): dual 7-DOF arm + gripper on an onboard NVIDIA Orin PC. Driven remotely over SSH — EasyTrainer connects to the robot PC's docker container 'ai_worker' (ROS 2 Jazzy), runs a single combined JointTrajectoryController over both arms (16 joints), and exchanges topics over DDS. Requires the SSH fields (host/user/password) to be set; SSH user defaults to 'robotis'.",
+  "install": {
+    "ros2": {
+      "target": "ros2/ros2_ws/src",
+      "build": "colcon"
+    }
+  },
+  "dependencies": {
+    "apt": [
+      "sshpass"
+    ],
+    "pip": []
+  },
+  "check": {
+    "type": "path"
+  },
+  "robots": [
+    {
+      "type": "ffw_bg2",
+      "spec": {
+        "company": "ROBOTIS",
+        "role": "dual_arm",
+        "joint_dim": 16,
+        "joint_names": [
+          "arm_l_joint1", "arm_l_joint2", "arm_l_joint3", "arm_l_joint4",
+          "arm_l_joint5", "arm_l_joint6", "arm_l_joint7", "gripper_l_joint1",
+          "arm_r_joint1", "arm_r_joint2", "arm_r_joint3", "arm_r_joint4",
+          "arm_r_joint5", "arm_r_joint6", "arm_r_joint7", "gripper_r_joint1"
+        ],
+        "joint_lower_bounds": [
+          -3.14, 0.0, -3.14, -2.9361, -3.14, -1.57, -1.8201, 0.0,
+          -3.14, -3.14, -3.14, -2.9361, -3.14, -1.57, -1.5804, 0.0
+        ],
+        "joint_upper_bounds": [
+          3.14, 3.14, 3.14, 1.0786, 3.14, 1.57, 1.5804, 1.1,
+          3.14, 0.0, 3.14, 1.0786, 3.14, 1.57, 1.8201, 1.1
+        ],
+        "tool_inner": true,
+        "tool_index": [7, 15],
+        "ik_available": false,
+        "custom_fields": [
+          "ssh_host", "ssh_user", "ssh_port", "ssh_password"
+        ]
+      },
+      "driver": {
+        "kind": "topic",
+        "interpolation": true,
+        "read_topic": "/joint_states",
+        "read_topic_msg": "sensor_msgs/JointState",
+        "write_topic": "/easytrainer_arm_controller/joint_trajectory",
+        "write_topic_msg": "trajectory_msgs/JointTrajectory",
+        "remote": {
+          "comment": "ssh robotis@ffw-SN….local (pw root). 온보드 Orin 의 docker 컨테이너 'ai_worker'(jazzy) 안에서 16관절 통합 컨트롤러를 띄운다. ~/ai_worker 는 컨테이너의 /root/ros2_ws/src/ai_worker 로 마운트되므로 easytrainer/ 에 떨군 launch 를 그 경로로 실행. ROS_DOMAIN_ID 는 강제하지 않음 — EasyTrainer ros2 스택과 같은 도메인이어야 토픽이 흐른다.",
+          "enabled_when": "ssh_host",
+          "host_field": "ssh_host",
+          "user_field": "ssh_user",
+          "port_field": "ssh_port",
+          "password_field": "ssh_password",
+          "default_user": "robotis",
+          "default_port": 22,
+          "provision": [
+            {
+              "name": "clone",
+              "check": "test -d ~/ai_worker/.git",
+              "run": "git clone -b jazzy https://github.com/ROBOTIS-GIT/ai_worker.git ~/ai_worker",
+              "timeout": 900
+            },
+            {
+              "name": "container_up",
+              "check": "docker ps --format '{{.Names}}' | grep -qx ai_worker",
+              "run": "cd ~/ai_worker && ./docker/container.sh start",
+              "timeout": 1800
+            }
+          ],
+          "payload": [
+            {
+              "src": "{ros2_root}/ai_worker_easytrainer/ffw_bg2_easytrainer.launch.py",
+              "dst": "ai_worker/easytrainer/ffw_bg2_easytrainer.launch.py"
+            },
+            {
+              "src": "{ros2_root}/ai_worker_easytrainer/ffw_bg2_easytrainer_controller.yaml",
+              "dst": "ai_worker/easytrainer/ffw_bg2_easytrainer_controller.yaml"
+            }
+          ],
+          "launch": "docker exec -t ai_worker bash -lc 'source /opt/ros/jazzy/setup.bash && source /root/ros2_ws/install/setup.bash 2>/dev/null; ros2 launch /root/ros2_ws/src/ai_worker/easytrainer/ffw_bg2_easytrainer.launch.py'"
+        }
+      }
+    },
+    {
+      "type": "ffw_sg2",
+      "spec": {
+        "company": "ROBOTIS",
+        "role": "dual_arm",
+        "joint_dim": 16,
+        "joint_names": [
+          "arm_l_joint1", "arm_l_joint2", "arm_l_joint3", "arm_l_joint4",
+          "arm_l_joint5", "arm_l_joint6", "arm_l_joint7", "gripper_l_joint1",
+          "arm_r_joint1", "arm_r_joint2", "arm_r_joint3", "arm_r_joint4",
+          "arm_r_joint5", "arm_r_joint6", "arm_r_joint7", "gripper_r_joint1"
+        ],
+        "joint_lower_bounds": [
+          -3.14, 0.0, -3.14, -2.9361, -3.14, -1.57, -1.8201, 0.0,
+          -3.14, -3.14, -3.14, -2.9361, -3.14, -1.57, -1.5804, 0.0
+        ],
+        "joint_upper_bounds": [
+          3.14, 3.14, 3.14, 1.0786, 3.14, 1.57, 1.5804, 1.1,
+          3.14, 0.0, 3.14, 1.0786, 3.14, 1.57, 1.8201, 1.1
+        ],
+        "tool_inner": true,
+        "tool_index": [7, 15],
+        "ik_available": false,
+        "custom_fields": [
+          "ssh_host", "ssh_user", "ssh_port", "ssh_password"
+        ]
+      },
+      "driver": {
+        "kind": "topic",
+        "interpolation": true,
+        "read_topic": "/joint_states",
+        "read_topic_msg": "sensor_msgs/JointState",
+        "write_topic": "/easytrainer_arm_controller/joint_trajectory",
+        "write_topic_msg": "trajectory_msgs/JointTrajectory",
+        "remote": {
+          "comment": "FFW-SG2 (배터리 2개). 동작은 ffw_bg2 와 동일 — 온보드 'ai_worker' 컨테이너에서 sg2 통합 컨트롤러 launch.",
+          "enabled_when": "ssh_host",
+          "host_field": "ssh_host",
+          "user_field": "ssh_user",
+          "port_field": "ssh_port",
+          "password_field": "ssh_password",
+          "default_user": "robotis",
+          "default_port": 22,
+          "provision": [
+            {
+              "name": "clone",
+              "check": "test -d ~/ai_worker/.git",
+              "run": "git clone -b jazzy https://github.com/ROBOTIS-GIT/ai_worker.git ~/ai_worker",
+              "timeout": 900
+            },
+            {
+              "name": "container_up",
+              "check": "docker ps --format '{{.Names}}' | grep -qx ai_worker",
+              "run": "cd ~/ai_worker && ./docker/container.sh start",
+              "timeout": 1800
+            }
+          ],
+          "payload": [
+            {
+              "src": "{ros2_root}/ai_worker_easytrainer/ffw_sg2_easytrainer.launch.py",
+              "dst": "ai_worker/easytrainer/ffw_sg2_easytrainer.launch.py"
+            },
+            {
+              "src": "{ros2_root}/ai_worker_easytrainer/ffw_sg2_easytrainer_controller.yaml",
+              "dst": "ai_worker/easytrainer/ffw_sg2_easytrainer_controller.yaml"
+            }
+          ],
+          "launch": "docker exec -t ai_worker bash -lc 'source /opt/ros/jazzy/setup.bash && source /root/ros2_ws/install/setup.bash 2>/dev/null; ros2 launch /root/ros2_ws/src/ai_worker/easytrainer/ffw_sg2_easytrainer.launch.py'"
+        }
+      }
+    }
+  ]
+}

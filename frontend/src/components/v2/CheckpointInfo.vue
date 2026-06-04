@@ -57,7 +57,7 @@
                                         {{ dataset.episode_num }}
                                     </div>
                                 </q-img>
-                                <div class="text-bold q-mt-md">{{ dataset.name }}</div>
+                                <div class="text-bold q-mt-md ellipsis">{{ dataset.name }}</div>
                             </q-card-section>
                         </q-card>
                     </div>

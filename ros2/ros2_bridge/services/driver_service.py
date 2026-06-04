@@ -272,14 +272,17 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
             if remote.get(key):
                 settings[key] = remote[key]
 
-        # 1) payload 파일 scp (멱등 — 매번 덮어써도 무방)
-        if not self._remote_copy_payload(remote, settings, log_name=process_id):
-            return pb.DriverStatus(success=False, message='Remote payload copy failed')
-
-        # 2) provision steps (check 성공 시 skip)
+        # 1) provision steps (check 성공 시 skip) — clone/container 등 환경 셋업 먼저.
+        #    payload 보다 앞: 커스텀 파일을 clone 된 디렉터리 안에 떨궈야 하는 경우가 있다
+        #    (예: ai_worker 는 payload dst 가 clone 으로 생기는 ~/ai_worker 하위).
         ok, msg = self._remote_provision(remote, settings, ctx, log_name=process_id)
         if not ok:
             return pb.DriverStatus(success=False, message=f'Remote provisioning failed: {msg}')
+
+        # 2) payload 파일 scp (멱등 — 매번 덮어써도 무방). provision 이후라 대상
+        #    디렉터리(clone 결과)가 이미 존재한다.
+        if not self._remote_copy_payload(remote, settings, log_name=process_id):
+            return pb.DriverStatus(success=False, message='Remote payload copy failed')
 
         # 3) launch — blocking, tracked subprocess (ssh -tt)
         launch_body = (remote.get('launch') or '').strip()

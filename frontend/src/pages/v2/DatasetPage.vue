@@ -143,7 +143,7 @@
                                     @click="selectDatasetForBatch(dataset)"
                                     :class="{ 'text-primary': selectedDatasetForBatch && selectedDatasetForBatch.id === dataset.id }">
                                     <div class="row items-center q-gutter-x-sm">
-                                        <span>{{ dataset.name }} ({{ dataset.id }})</span>
+                                        <span class="ellipsis">{{ dataset.name }} ({{ dataset.id }})</span>
                                         <!-- origin='curriculum' 인 데이터셋은 커리큘럼 소유 — 편집/병합/삭제 차단. -->
                                         <q-chip
                                             v-if="dataset.origin === 'curriculum'"
@@ -216,7 +216,7 @@
                                         />
                                     </q-item-section>
                                     <q-item-section>
-                                        <q-item-label>{{ episode.name }}</q-item-label>
+                                        <q-item-label lines="1">{{ episode.name }}</q-item-label>
                                         <q-item-label caption class="text-grey-5">
                                             {{ $t('datasetFrames', { count: episode.length || 0 }) }}
                                         </q-item-label>

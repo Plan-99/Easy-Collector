@@ -57,7 +57,7 @@
     <!-- Curriculum exists -->
     <div v-else class="col row q-mb-md no-wrap">
       <!-- Left panel: tabs (Planner blocks / Group policy) -->
-      <div class="col-3 bg-secondary q-mr-sm border-rounded text-white column">
+      <div class="col-3 bg-secondary q-mr-md border-rounded text-white column">
         <q-tabs v-model="leftTab" dense align="left" class="text-grey-4" active-color="primary" indicator-color="primary">
           <q-tab name="planner" :label="t('currTabPlanner')" />
           <q-tab name="device" :label="t('currTabDevice')" />
@@ -516,7 +516,7 @@
         <MonitoringWindow
           ref="monitorWindowRef"
           v-if="monitorWorkspaceForProp"
-          class="full-height"
+          class="full-width"
           :workspace="monitorWorkspaceForProp"
           :workspaces="monitorAllWorkspaces"
           :robots="monitorRobots"

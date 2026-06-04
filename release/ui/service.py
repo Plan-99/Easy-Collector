@@ -31,6 +31,8 @@ from app_context import (
 
 import device_auth
 
+from i18n import t
+
 
 def ensure_signed_in() -> bool:
     """Ensure the user has a valid Google-OAuth Bearer token saved locally.
@@ -106,7 +108,7 @@ class ComposeServiceMixin:
 
         program, prefix = get_compose_cmd()
         if not program:
-            QMessageBox.critical(self, "오류", self._compose_help_text())
+            QMessageBox.critical(self, t("service.errorTitle"), self._compose_help_text())
             return
         file_args: list[str] = []
         self.process = QProcess(self)
@@ -197,16 +199,7 @@ class ComposeServiceMixin:
         proc.start()
 
     def _compose_help_text(self) -> str:
-        return (
-            "[ERROR] Docker Compose(v2)를 찾을 수 없습니다.\n"
-            "설치 방법(권장):\n"
-            "  sudo apt-get update\n"
-            "  sudo apt-get install -y docker.io docker-compose-plugin\n"
-            "버전 확인: docker compose version\n"
-            "레거시(v1) 바이너리 사용 시: docker-compose 설치 또는 PATH 설정이 필요합니다.\n"
-            "사용자를 docker 그룹에 추가:\n"
-            "  sudo usermod -aG docker $USER && newgrp docker\n"
-        )
+        return t("service.composeHelp")
 
     def _read_stream(self, proc: QProcess, is_err: bool):
         try:
@@ -275,12 +268,18 @@ class HealthServiceMixin:
             on_ready = self.load_ui
         self._stop_ready_timer()
         self._stop_ready_timeout()
-        self._show_preload_dialog("Easy Trainer 준비중...", auto_open_new=auto_open_new)
+        self._show_preload_dialog(t("service.preparing"), auto_open_new=auto_open_new)
 
         def poll():
             backend_ok = self._check_backend_ready()
             frontend_ok = self._is_frontend_ready()
-            detail = f"프론트엔드: {'준비완료' if frontend_ok else '대기중'} | 백엔드: {'준비완료' if backend_ok else '대기중'}"
+            ready = t("service.statusReady")
+            waiting = t("service.statusWaiting")
+            detail = t(
+                "service.readinessDetail",
+                frontend=ready if frontend_ok else waiting,
+                backend=ready if backend_ok else waiting,
+            )
             self._set_preload_detail(detail)
             if backend_ok and frontend_ok:
                 self._stop_ready_timer()
@@ -488,7 +487,7 @@ class HealthServiceMixin:
         self.append_log("[ERROR] 서비스가 제시간에 준비되지 않아 중지합니다.")
         logs = self._collect_docker_logs("easytrainer_backend", tail=200)
         self._show_docker_logs_follow(
-            "서비스 시작 실패",
+            t("service.startFailedTitle"),
             container="easytrainer_backend",
             tail=200,
             initial_text=logs,
@@ -1019,19 +1018,19 @@ class RuntimeServiceMixin:
     # ------------------------ Actions ------------------------
     def on_start(self):
         if not self.is_installed():
-            QMessageBox.warning(self, "경고", "먼저 초기 설치를 진행하세요.")
+            QMessageBox.warning(self, t("service.warningTitle"), t("service.installFirst"))
             return
         if not self._is_valid_project_root(self.project_root):
-            QMessageBox.warning(self, "프로젝트 필요", "프로젝트가 아직 준비되지 않았습니다. 설치를 먼저 진행하세요.")
+            QMessageBox.warning(self, t("service.projectRequiredTitle"), t("service.projectNotReady"))
             return
         if not docker_compose_available():
-            QMessageBox.critical(self, "오류", self._compose_help_text())
+            QMessageBox.critical(self, t("service.errorTitle"), self._compose_help_text())
             return
         if not self._apply_compose_variant(self.install_variant):
-            QMessageBox.critical(self, "오류", "선택한 설치 옵션에 맞는 docker-compose 템플릿을 찾을 수 없습니다.")
+            QMessageBox.critical(self, t("service.errorTitle"), t("service.composeTemplateNotFound"))
             return
         self._clear_conflicting_containers()
-        self._show_preload_dialog("Easy Trainer 준비중...")
+        self._show_preload_dialog(t("service.preparing"))
         self._ensure_service_running("START", restart_if_running=False, on_finish=self._on_start_finished)
 
     def _on_start_finished(self, exit_code: int, *_):
@@ -1041,14 +1040,14 @@ class RuntimeServiceMixin:
             self._wait_for_services_ready(self.load_ui)
         else:
             self._hide_preload_dialog()
-            QMessageBox.critical(self, "오류", f"시작 실패 (code={exit_code})")
+            QMessageBox.critical(self, t("service.errorTitle"), t("service.startFailed", code=exit_code))
 
     def on_stop(self):
         if not self._is_valid_project_root(self.project_root):
-            QMessageBox.warning(self, "프로젝트 필요", "프로젝트가 아직 준비되지 않았습니다. 설치를 먼저 진행하세요.")
+            QMessageBox.warning(self, t("service.projectRequiredTitle"), t("service.projectNotReady"))
             return
         if not docker_compose_available():
-            QMessageBox.critical(self, "오류", self._compose_help_text())
+            QMessageBox.critical(self, t("service.errorTitle"), self._compose_help_text())
             return
         self._run_backend_kill()
         self.append_log("[STOP] docker compose stop ...")
@@ -1059,12 +1058,12 @@ class RuntimeServiceMixin:
             self.append_log("[STOP] 완료")
             self.update_state_label()
         else:
-            QMessageBox.critical(self, "오류", f"중지 실패 (code={exit_code})")
+            QMessageBox.critical(self, t("service.errorTitle"), t("service.stopFailed", code=exit_code))
 
     def _on_restart_button_clicked(self):
         if not docker_compose_available() or not self._is_valid_project_root(self.project_root):
             try:
-                QMessageBox.critical(self, "오류", self._compose_help_text())
+                QMessageBox.critical(self, t("service.errorTitle"), self._compose_help_text())
             except Exception:
                 pass
             return
@@ -1079,8 +1078,8 @@ class RuntimeServiceMixin:
         self._restart_service_container()
 
     def _restart_service_container(self):
-        self._show_preload_dialog("서비스 재시작 중...")
-        self._set_preload_detail("서비스 재시작 중...")
+        self._show_preload_dialog(t("service.restarting"))
+        self._set_preload_detail(t("service.restarting"))
         self._clear_conflicting_containers()
         self._restart_in_progress = True
         self._restart_phase = "stopping"

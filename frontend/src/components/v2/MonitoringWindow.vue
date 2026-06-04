@@ -1,8 +1,12 @@
 <template>
-    <div class="column full-height border-rounded" :style="{ maxHeight: monitorOnly ? null : '700px' }">
+    <!-- 레이아웃은 monitorOnly 와 무관하게 통일 — 세로 flex 분배(column/col)나
+         높이 고정 없이 카메라(고정 320px) → 로봇(관절 수만큼 자연 높이) →
+         (녹화 뷰면) 컨트롤 순으로 그대로 흐른다. 높이는 호출부가 준 박스/페이지가
+         처리한다. monitorOnly 는 이제 녹화 컨트롤 노출 여부에만 쓰인다. -->
+    <div class="border-rounded">
         <TutorialHint v-if="!monitorOnly" :text="$t(monitoringHintKey)" class="q-mb-sm" />
-        <div class="bg-secondary border-rounded column q-px-sm col">
-        <div :class="[monitorOnly ? 'col' : 'col-6', 'row flex felx-center q-col-gutter-x-sm']" v-if="sensorViewports.length > 0">
+        <div class="bg-secondary border-rounded column q-px-sm">
+        <div class="row flex felx-center q-col-gutter-x-sm" style="height: 320px" v-if="sensorViewports.length > 0">
             <!-- v-show 로 숨김 (v-if 아님) — 숨겨도 WebRtcVideo 가 unmount 되지
                  않아 PC/track 이 살아있다. v-if 면 매 토글마다 WebRTC 재협상이
                  일어나 streaming server 부하 + 짧은 black screen 발생. -->
@@ -27,15 +31,18 @@
                 <div class="full-height border-white bg-dark border-rounded flex flex-center" v-else>
                     <q-btn round flat icon="play_arrow" text-color="white" size="xl" @click="vp.sensor.handler.startSensor(vp.sensor)"></q-btn>
                 </div>
-                <q-chip color="blue-10" text-color="white" class="absolute-top-left" style="top: 20px; left: 15px; z-index: 2">
+                <q-chip color="blue-10" text-color="white" class="absolute-top-left ellipsis" style="top: 20px; left: 15px; z-index: 2; max-width: calc(100% - 30px)">
                     {{ vp.sensor.name }}<span v-if="vp.occurrence > 0"> · view {{ vp.occurrence + 1 }}</span> {{ $t('sensorSuffix') }}<span v-if="vp.workspaceName"> · {{ vp.workspaceName }}</span>
                 </q-chip>
             </div>
         </div>
-        <div v-else :class="[monitorOnly ? 'col' : 'col-6', 'q-py-sm']">
-            <div class="text-white border-rounded border-white bg-dark full-height flex flex-center">{{ $t('noSensorsMsg') }}</div>
+        <div v-else class="q-py-sm" style="height: 320px">
+            <div class="text-white border-rounded border-white bg-dark full-height flex flex-center">
+                <q-spinner-gears v-if="loading" size="40px" color="primary" />
+                <template v-else>{{ $t('noSensorsMsg') }}</template>
+            </div>
         </div>
-        <div :class="[monitorOnly ? 'col' : 'col-5', 'row q-gutter-x-sm']" v-if="robots.length > 0">
+        <div class="row q-gutter-x-sm" v-if="robots.length > 0">
             <div v-for="robot in robots" :key="robot.id" class="col column q-pa-md relative-position border-rounded border-white text-white cursor-pointer"
                     :class="{
                         'border-primary': focused.id === robot.id && focused.device_type === 'robot',
@@ -43,10 +50,14 @@
                     }"
                     @click="focusSensorRobot(robot, 'robot')"
                 >
-                <div v-for="(j, i) in robot.joint_names" :key="i" class="col flex flex-center q-gutter-x-md">
-                    <div class="border-rounded border-white q-px-md q-py-xs text-center">{{ j }} {{ robot.jointState ? robot.jointState[i]?.toFixed(4) : $t('unreadable') }}</div>
-                    <q-icon name="arrow_forward"></q-icon>
-                    <div class="border-rounded border-primary q-px-md q-py-xs text-center text-primary">{{ j }} {{ robot.jointAction ? robot.jointAction[i]?.toFixed(4) : $t('unreadable') }}</div>
+                <!-- 관절 행은 자연 높이로 렌더 — 세로 flex 분배(col)를 쓰지 않아
+                     관절 수(dual_arm=14)만큼 그대로 늘어난다. -->
+                <div class="column q-gutter-y-xs full-width">
+                    <div v-for="(j, i) in robot.joint_names" :key="i" class="row flex flex-center q-gutter-x-md no-wrap">
+                        <div class="border-rounded border-white q-px-md q-py-xs text-center">{{ j }} {{ robot.jointState ? robot.jointState[i]?.toFixed(4) : $t('unreadable') }}</div>
+                        <q-icon name="arrow_forward"></q-icon>
+                        <div class="border-rounded border-primary q-px-md q-py-xs text-center text-primary">{{ j }} {{ robot.jointAction ? robot.jointAction[i]?.toFixed(4) : $t('unreadable') }}</div>
+                    </div>
                 </div>
                 <q-btn
                     class="absolute-center q-mb-md q-mr-md"
@@ -58,11 +69,12 @@
                     @click="robot.handler.startRobot(robot)"
                     v-if="robot.status === 'off'"
                 ></q-btn>
-                <q-chip color="green-10" text-color="white" class="absolute-top-left" style="top: 20px; left: 15px">{{ robot.name }} {{ $t('robotSuffix') }}</q-chip>
+                <q-chip color="green-10" text-color="white" class="absolute-top-left ellipsis" style="top: 20px; left: 15px; max-width: calc(100% - 30px)">{{ robot.name }} {{ $t('robotSuffix') }}</q-chip>
             </div>
         </div>
-        <div v-else :class="[monitorOnly ? 'col' : 'col-5', 'border-rounded border-white bg-dark flex flex-center']">
-            <div class="text-white">{{ $t('noRobotsMsg') }}</div>
+        <div v-else class="border-rounded border-white bg-dark flex flex-center" style="min-height: 120px">
+            <q-spinner-gears v-if="loading" size="40px" color="primary" />
+            <div v-else class="text-white">{{ $t('noRobotsMsg') }}</div>
         </div>
         <template v-if="!monitorOnly || correctionMode">
         <!-- correctionMode 에서는 'startAllDevices' 체크 우회 — 커리큘럼이 이미
@@ -78,8 +90,8 @@
                     <div
                         class="col bg-dark border-rounded text-white row items-center q-col-gutter-x-sm"
                     >
-                        <div>
-                            <div class="text-h6">{{ selectedEpisode?.name }}</div>
+                        <div class="col ellipsis">
+                            <div class="text-h6 ellipsis">{{ selectedEpisode?.name }}</div>
                         </div>
                         <div>
                             <q-btn
@@ -179,8 +191,8 @@
                     class="col bg-dark border-rounded text-white row flex flex-center q-col-gutter-x-sm"
                     v-if="status === 'pending'"
                 >
-                    <div>
-                        <div class="text-h6">{{ checkpoint?.name }}</div>
+                    <div class="col ellipsis">
+                        <div class="text-h6 ellipsis">{{ checkpoint?.name }}</div>
                     </div>
                     <div>
                         <q-btn
@@ -660,7 +672,8 @@ import { useSocket } from 'src/composables/useSocket.js';
 import WebRtcVideo from './WebRtcVideo.vue';
 import EpisodeViewer from 'src/components/v2/EpisodeViewer.vue';
 import FormDialog from './FormDialog.vue';
-import { DEFAULT_KEYBOARD_SETTINGS, AXIS_TO_EE_INDEX, normalizeEventKey } from 'src/configs/teleopDefaults';
+import { DEFAULT_KEYBOARD_SETTINGS } from 'src/configs/teleopDefaults';
+import { useKeyboardTeleop } from 'src/composables/useKeyboardTeleop';
 import TutorialHint from './TutorialHint.vue';
 import { enumerateViews } from 'src/utils/sensorView';
 
@@ -694,6 +707,12 @@ const props = defineProps({
         required: true
     },
     monitorOnly: {
+        type: Boolean,
+        default: false,
+    },
+    // 초기 API 로딩 중에는 sensor/robot 이 비어 있어 "사용 가능한 ... 없습니다"
+    // 빈 상태가 잠깐 뜬다. loading=true 면 그 자리에 스피너를 보여준다.
+    loading: {
         type: Boolean,
         default: false,
     },
@@ -797,25 +816,28 @@ const sensorViewports = computed(() => {
 // dataset/task 호환). `??` 가 아니라 `in` 체크로 "키 존재" 를 판별 — rotation=0
 // 같은 falsy 정상값이 fallback 으로 잘못 넘어가는 버그를 막는다 (`||` 사용 시
 // d["5_2"]=0 → falsy → d["5"]=270 로 빠짐).
+// null 값(예전 addView 버그로 저장된 빈 view 설정)은 "없음"으로 취급해
+// sensorId/기본값으로 폴백한다. null 을 그대로 반환하면 WebRtcVideo 의
+// resize/cropped_area 가 null 이 되어 무한 로딩된다.
 function viewportCropArea(ws, viewKey, sensorId) {
     const d = ws && ws.sensor_cropped_area;
     if (!d) return {};
-    if (viewKey in d) return d[viewKey];
-    if (sensorId in d) return d[sensorId];
+    if (viewKey in d && d[viewKey] != null) return d[viewKey];
+    if (sensorId in d && d[sensorId] != null) return d[sensorId];
     return {};
 }
 function viewportImgSize(ws, viewKey, sensorId) {
     const d = ws && ws.sensor_img_size;
     if (!d) return [640, 480];
-    if (viewKey in d) return d[viewKey];
-    if (sensorId in d) return d[sensorId];
+    if (viewKey in d && d[viewKey] != null) return d[viewKey];
+    if (sensorId in d && d[sensorId] != null) return d[sensorId];
     return [640, 480];
 }
 function viewportRotate(ws, viewKey, sensorId) {
     const d = ws && ws.sensor_rotate;
     if (!d) return 0;
-    if (viewKey in d) return d[viewKey];
-    if (sensorId in d) return d[sensorId];
+    if (viewKey in d && d[viewKey] != null) return d[viewKey];
+    if (sensorId in d && d[sensorId] != null) return d[sensorId];
     return 0;
 }
 const selectedDatasetId = defineModel('selectedDatasetId', {
@@ -1184,8 +1206,6 @@ watch(() => keyboardSetting.value.step_size, (v) => {
     if (typeof v === 'number') eeStepSize.value = v;
 }, { immediate: true });
 
-const activeArms = computed(() => [leftArm.value, rightArm.value].filter(Boolean));
-
 function robotForSide(side) {
     if (isDualArm.value) {
         return side === 'right' ? rightArm.value : leftArm.value;
@@ -1213,106 +1233,39 @@ function toolForSide(side) {
     return left || right;
 }
 
-function sendDelta(robot, eeDelta) {
-    if (!robot?.handler?.moveRobotEEDelta) return;
-    try {
-        robot.handler.moveRobotEEDelta({ ee: eeDelta });
-    } catch (e) {
-        console.error('moveRobotEEDelta error', e);
-    }
-}
-
-const keyboardHandler = (event) => {
-    // Home pose 이동 / vive init 중에는 사용자 키 입력 무시 — 그동안 로봇이 백엔드
-    // 명령으로 움직이고 있으므로 사용자 입력과 충돌하면 충돌 또는 의도치 않은 위치로 감.
-    if (movingHomepose.value || viveInitializing.value) return;
-    // Step size 등 폼 입력란이 포커스된 상태에서, 숫자 편집 키는 입력에 양보하고
-    // 그 외 키(WASD 등 로봇 제어키)는 자동으로 input을 blur 후 그대로 로봇 제어로 처리.
-    const ae = document.activeElement;
-    if (ae) {
-        const tag = ae.tagName;
-        if (tag === 'INPUT' || tag === 'TEXTAREA' || ae.isContentEditable) {
-            const isEditingKey = (
-                /^[0-9]$/.test(event.key) ||
-                event.key === '.' || event.key === 'e' || event.key === 'E' ||
-                event.key === '+' || event.key === '-' ||
-                event.key === 'Backspace' || event.key === 'Delete' ||
-                event.key === 'Tab' || event.key === 'Enter' ||
-                event.key === 'Home' || event.key === 'End' ||
-                event.key.startsWith('Arrow')
-            );
-            if (isEditingKey) return;
-            ae.blur();
+// 키보드 텔레옵 — 공용 composable 로 위임(눌린 키 합산/멀티-EE emit/정지 일원화).
+// record 모드 전용: homepose/vive 이동 중 가드, step size override(eeStepSize),
+// input 편집 키 양보는 옵션으로 주입.
+const _kbTeleop = useKeyboardTeleop({
+    getAxisMap: () => keyboardSetting.value.axis_map,
+    getStepSize: () => Number(eeStepSize.value) || Number(keyboardSetting.value.step_size) || 0.003,
+    robotForSide,
+    toolForSide,
+    canHandle: () => !movingHomepose.value && !viveInitializing.value,
+    shouldCapture: (event) => {
+        const ae = document.activeElement;
+        if (ae) {
+            const tag = ae.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || ae.isContentEditable) {
+                const isEditingKey = (
+                    /^[0-9]$/.test(event.key) ||
+                    event.key === '.' || event.key === 'e' || event.key === 'E' ||
+                    event.key === '+' || event.key === '-' ||
+                    event.key === 'Backspace' || event.key === 'Delete' ||
+                    event.key === 'Tab' || event.key === 'Enter' ||
+                    event.key === 'Home' || event.key === 'End' ||
+                    event.key.startsWith('Arrow')
+                );
+                if (isEditingKey) return false;
+                ae.blur();
+            }
         }
-    }
+        return true;
+    },
+});
 
-    const map = keyboardSetting.value.axis_map || {};
-    // UI step size override; fall back to assembly setting; finally default.
-    const stepSize = Number(eeStepSize.value) || Number(keyboardSetting.value.step_size) || 0.003;
-
-    if (event.key === ' ' || event.key === 'Space') {
-        activeArms.value.forEach((robot) => {
-            const len = robot.tool_inner ? 7 : 6;
-            sendDelta(robot, Array(len).fill(0));
-        });
-        event.preventDefault();
-        return;
-    }
-
-    const normKey = normalizeEventKey(event);
-    const entry = map[normKey];
-    if (!entry) return;
-
-    const side = entry.side || 'left';
-    const robot = robotForSide(side);
-
-    const idx = AXIS_TO_EE_INDEX[entry.axis];
-    if (idx === undefined) return;
-
-    // tool 축: arm 내장 그리퍼면 EE delta[6] 으로 packing, 별도 gripper agent 가
-    // 있으면 그 agent 의 joint delta 로 라우팅. 둘 다 없으면 무시.
-    if (entry.axis === 'tool') {
-        const delta = stepSize * (Number(entry.scale) || 1) * (Number(entry.sign) || 1);
-        if (robot && robot.tool_inner) {
-            const eeDelta = Array(7).fill(0);
-            eeDelta[idx] = delta;
-            sendDelta(robot, eeDelta);
-            event.preventDefault();
-            return;
-        }
-        const tool = toolForSide(side);
-        if (!tool || !tool.handler || !tool.handler.moveRobotJointDelta) return;
-        const len = Array.isArray(tool.joint_names) && tool.joint_names.length > 0
-            ? tool.joint_names.length : 1;
-        const jointDelta = Array(len).fill(0);
-        jointDelta[0] = delta;
-        try {
-            tool.handler.moveRobotJointDelta(jointDelta);
-        } catch (e) {
-            console.error('moveRobotJointDelta error', e);
-        }
-        event.preventDefault();
-        return;
-    }
-
-    if (!robot) return;
-    const len = robot.tool_inner ? 7 : 6;
-    if (idx >= len) return;
-    const eeDelta = Array(len).fill(0);
-    eeDelta[idx] = stepSize * (Number(entry.scale) || 1) * (Number(entry.sign) || 1);
-    sendDelta(robot, eeDelta);
-    event.preventDefault();
-};
-
-function addKeyboardListener() {
-    // 중복 등록 방지를 위해 먼저 제거 후 등록
-    window.removeEventListener('keydown', keyboardHandler);
-    window.addEventListener('keydown', keyboardHandler);
-}
-
-function removeKeyboardListener() {
-    window.removeEventListener('keydown', keyboardHandler);
-}
+function addKeyboardListener() { _kbTeleop.start(); }
+function removeKeyboardListener() { _kbTeleop.stop(); }
 
 function completeEpisode() {
     api.post(`/dataset/${selectedDatasetId.value}/:complete_episode`).catch((error) => {

@@ -2,7 +2,7 @@
   <q-dialog full-width>
     <q-card class="bg-secondary border-rounded border-white" dark>
       <q-card-section class="row bg-dark text-white">
-        <div class="text-h6">{{ checkpoint.name }}</div>
+        <div class="text-h6 ellipsis">{{ checkpoint.name }}</div>
         <q-space></q-space>
         <q-btn dense color="white" round icon="close" text-color="dark" @click="$emit('update:modelValue', false)"/>
       </q-card-section>

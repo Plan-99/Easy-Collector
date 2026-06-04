@@ -457,6 +457,18 @@ class Agent:
         q_iter = np.array(arm_js)
         sol_q = None
         with self.ik_lock:
+            # Dual-arm 안전장치: 이번 호출에서 명령받지 않은 EE 는 현재 포즈로
+            # target 을 고정한다. pink 의 FrameTask 는 set_target 을 호출한 EE 만
+            # 갱신하므로, 한쪽 팔만 움직이는 teleop(키보드/RobotPendant) 에서
+            # 반대팔 task 의 target 이 미설정(첫 호출 → solve 예외 → 전체 no-op)
+            # 이거나 직전 값으로 남아 반대팔을 엉뚱하게 끌어당기는 문제가 있다.
+            # 명령 안 된 EE 를 현재 FK 포즈로 잡아두면 그 팔은 제자리에 머문다.
+            if len(self.ee_names) > 1:
+                held_fk = self.ik_solver.get_ee_position(list(arm_js))
+                for name in self.ee_names:
+                    if name not in ik_targets and name in held_fk:
+                        ik_targets[name] = held_fk[name]
+                        target_tool_values.setdefault(name, None)
             for _ in range(max_iters):
                 sol_q, _ = self.ik_solver.solve_ik(
                     ik_targets, current_lr_arm_motor_q=q_iter
@@ -1015,15 +1027,11 @@ class Agent:
 
     def reset_ik_solver(self, q):
         if self.ik_solver is not None:
-            # 1. home_pose에서 IK에 사용되는 조인트만 추출 (예: 7개 중 앞의 6개)
+            # IK reduced-model 에 들어갈 arm joint 만 추출. get_joint_and_tool_pos
+            # 는 dual_arm 에서도 [L1..L6, R1..R6] 평탄(flat) 리스트를 돌려준다
+            # (left[:-1] + right[:-1]). 과거 주석은 [[left],[right]] 중첩 형태를
+            # 가정해 float 를 다시 순회 → "'float' object is not iterable" 에러를
+            # 냈다. 이미 평탄하므로 그대로 reset_state 에 넘긴다.
             arm_home, _ = self.get_joint_and_tool_pos(q)
-
             with self.ik_lock:
-                # dual_arm인 경우 arm_home은 [[left], [right]] 형태이므로 평탄화(flatten) 필요
-                if self.role == 'dual_arm':
-                    flat_arm_home = []
-                    for joints in arm_home:
-                        flat_arm_home.extend(joints)
-                    self.ik_solver.reset_state(flat_arm_home)
-                else:
-                    self.ik_solver.reset_state(arm_home)
+                self.ik_solver.reset_state(arm_home)

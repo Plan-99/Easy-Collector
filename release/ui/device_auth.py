@@ -26,6 +26,7 @@ import urllib.error
 import urllib.request
 
 from app_context import APP_HOME, load_config, save_config
+from i18n import t
 
 # License-server URL is shared with the legacy validator key for backward
 # compatibility — admins who previously overrode it via config keep their setting.
@@ -297,7 +298,7 @@ def ensure_signed_in_gui() -> bool:
     try:
         start = start_device_auth()
     except Exception as e:
-        QMessageBox.critical(None, "로그인 실패", f"인증 서버 연결에 실패했습니다.\n{e}")
+        QMessageBox.critical(None, t("auth.signInFailed"), t("auth.serverConnectFailed", error=e))
         return False
 
     nonce = start["nonce"]
@@ -312,19 +313,16 @@ def ensure_signed_in_gui() -> bool:
 
     # 3. Modal dialog while we poll.
     dlg = QDialog()
-    dlg.setWindowTitle("Easy Trainer 로그인")
+    dlg.setWindowTitle(t("auth.dialogTitle"))
     dlg.setModal(True)
     dlg.resize(560, 260)
 
     layout = QVBoxLayout(dlg)
-    title = QLabel("Google 계정으로 로그인을 진행해 주세요.")
+    title = QLabel(t("auth.signInWithGoogle"))
     title.setStyleSheet("font-size: 15px; font-weight: 700;")
     layout.addWidget(title)
 
-    desc = QLabel(
-        "브라우저가 자동으로 열리지 않으면 아래 주소를 복사해 직접 여세요.\n"
-        "로그인 후 \"이 기기 등록\" 버튼을 누르면 자동으로 진행됩니다."
-    )
+    desc = QLabel(t("auth.dialogDesc"))
     desc.setStyleSheet("color: #aaaaaa;")
     desc.setWordWrap(True)
     layout.addWidget(desc)
@@ -332,7 +330,7 @@ def ensure_signed_in_gui() -> bool:
     url_row = QHBoxLayout()
     url_edit = QLineEdit(verification_url)
     url_edit.setReadOnly(True)
-    copy_btn = QPushButton("복사")
+    copy_btn = QPushButton(t("common.copy"))
     copy_btn.setFixedWidth(60)
     url_row.addWidget(url_edit, 1)
     url_row.addWidget(copy_btn)
@@ -341,21 +339,21 @@ def ensure_signed_in_gui() -> bool:
     def on_copy():
         try:
             QApplication.clipboard().setText(verification_url)
-            copy_btn.setText("복사됨")
-            QTimer.singleShot(1500, lambda: copy_btn.setText("복사"))
+            copy_btn.setText(t("auth.copied"))
+            QTimer.singleShot(1500, lambda: copy_btn.setText(t("common.copy")))
         except Exception:
             pass
     copy_btn.clicked.connect(on_copy)
 
     button_row = QHBoxLayout()
-    open_btn = QPushButton("브라우저 다시 열기")
-    cancel_btn = QPushButton("취소")
+    open_btn = QPushButton(t("auth.reopenBrowser"))
+    cancel_btn = QPushButton(t("common.cancel"))
     button_row.addWidget(open_btn)
     button_row.addStretch(1)
     button_row.addWidget(cancel_btn)
     layout.addLayout(button_row)
 
-    status_label = QLabel("브라우저에서 로그인을 기다리는 중…")
+    status_label = QLabel(t("auth.waitingForSignIn"))
     status_label.setStyleSheet("color: #cfd8dc;")
     layout.addWidget(status_label)
 
@@ -384,11 +382,11 @@ def ensure_signed_in_gui() -> bool:
         try:
             payload = poll_device_auth(nonce)
         except Exception as e:
-            status_label.setText(f"네트워크 오류 — 재시도 중… ({e})")
+            status_label.setText(t("auth.networkErrorRetrying", error=e))
             return
         s = payload.get("status")
         if s == "PENDING":
-            status_label.setText("브라우저에서 로그인을 기다리는 중…")
+            status_label.setText(t("auth.waitingForSignIn"))
             return
         if s == "APPROVED":
             state["result"] = "approved"
@@ -405,7 +403,7 @@ def ensure_signed_in_gui() -> bool:
             dlg.reject()
             return
         # Unknown — treat as transient.
-        status_label.setText(f"알 수 없는 상태: {s} — 재시도 중…")
+        status_label.setText(t("auth.unknownStatusRetrying", status=s))
 
     timer = QTimer(dlg)
     timer.setInterval(poll_every_s * 1000)
@@ -431,18 +429,15 @@ def ensure_signed_in_gui() -> bool:
         return True
 
     if res == "expired":
-        QMessageBox.warning(None, "시간 초과", "10분 안에 로그인을 마치지 못했습니다.\n다시 시도해 주세요.")
+        QMessageBox.warning(None, t("auth.timeout"), t("auth.timeoutMessage"))
     elif isinstance(res, tuple) and res[0] == "rejected":
         code = res[1]
-        msg = "로그인이 거절되었습니다."
+        msg = t("auth.signInRejected")
         if code == "DEVICE_ALREADY_BOUND":
-            msg = (
-                "이미 사용중인 기기가 있습니다.\n"
-                f"{_get_api_url()}/dashboard 에서 해제 후 다시 시도해 주세요."
-            )
+            msg = t("auth.deviceAlreadyBound", url=_get_api_url())
         elif code == "USER_REJECTED":
-            msg = "사용자가 등록을 취소했습니다."
-        QMessageBox.warning(None, "로그인 실패", msg)
+            msg = t("auth.userRejected")
+        QMessageBox.warning(None, t("auth.signInFailed"), msg)
     # cancelled → silent
 
     return False

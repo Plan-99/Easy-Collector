@@ -20,6 +20,7 @@ from app_context import (
     save_config,
 )
 from service import docker_compose_available
+from i18n import t
 
 class ToolingMixin:
     def _set_import_choice(self, choice: str):
@@ -261,8 +262,8 @@ class ToolingMixin:
         items = [f"{tid}: {name}" for tid, name in tasks]
         choice, ok = QInputDialog.getItem(
             self,
-            "작업 선택",
-            "연결할 작업을 선택하세요.",
+            t("tools.selectTaskTitle"),
+            t("tools.selectTaskPrompt"),
             items,
             0,
             False,
@@ -311,8 +312,8 @@ class ToolingMixin:
         items = [f"{pid}: {label}" for pid, label in policies]
         choice, ok = QInputDialog.getItem(
             self,
-            "정책 선택",
-            "연결할 정책을 선택하세요.",
+            t("tools.selectPolicyTitle"),
+            t("tools.selectPolicyPrompt"),
             items,
             0,
             False,
@@ -437,7 +438,7 @@ class ToolingMixin:
             if choice == "DB":
                 result = QFileDialog.getOpenFileName(
                     self,
-                    "DB 불러오기",
+                    t("tools.importDbTitle"),
                     str(Path.home()),
                     "DB Files (*.db *.sqlite *.sqlite3);;All Files (*)",
                 )
@@ -445,7 +446,7 @@ class ToolingMixin:
             else:
                 src_path = QFileDialog.getExistingDirectory(
                     self,
-                    f"{choice} 불러오기",
+                    t("tools.importChoiceTitle", choice=choice),
                     str(Path.home()),
                 )
         except Exception:
@@ -588,7 +589,7 @@ class ToolingMixin:
                 default_name = src.name if src.name else "main.db"
                 result = QFileDialog.getSaveFileName(
                     self,
-                    "DB 저장 위치 선택",
+                    t("tools.exportDbTitle"),
                     str(Path.home() / default_name),
                     "DB Files (*.db *.sqlite *.sqlite3);;All Files (*)",
                 )
@@ -601,7 +602,7 @@ class ToolingMixin:
             else:
                 dest_dir = QFileDialog.getExistingDirectory(
                     self,
-                    f"{choice} 저장 위치 선택",
+                    t("tools.exportChoiceTitle", choice=choice),
                     str(Path.home()),
                 )
                 if not dest_dir:
@@ -624,12 +625,12 @@ class ToolingMixin:
             self._quick_apply_from_dev_src()
 
     def on_select_dev_src(self):
-        folder = QFileDialog.getExistingDirectory(self, "원본 프로젝트 루트 선택 (backend, frontend 포함)", str(self.dev_src_root or Path.home()))
+        folder = QFileDialog.getExistingDirectory(self, t("tools.selectDevSrcTitle"), str(self.dev_src_root or Path.home()))
         if not folder:
             return
         path = Path(folder)
         if not self._is_valid_dev_src(path):
-            QMessageBox.warning(self, "잘못된 경로", "선택한 폴더에 backend 또는 frontend가 없습니다.")
+            QMessageBox.warning(self, t("tools.invalidPathTitle"), t("tools.invalidDevSrcMsg"))
             return
         self.dev_src_root = path
         cfg = load_config()
@@ -643,10 +644,10 @@ class ToolingMixin:
         if not self._sync_dev_files():
             return
         if not self._apply_compose_variant(self.install_variant):
-            QMessageBox.critical(self, "오류", "선택한 설치 옵션에 맞는 docker-compose 템플릿을 찾을 수 없습니다.")
+            QMessageBox.critical(self, t("tools.error"), t("tools.composeTemplateNotFound"))
             return
         self.append_log("[SYNC] 완료. 서비스 재시작 중...")
-        self._show_preload_dialog("Easy Trainer 준비중...")
+        self._show_preload_dialog(t("tools.preparing"))
         def _after_restart(exit_code: int, *_):
             self.append_log("[RESTART] 완료")
             if exit_code == 0:
@@ -789,11 +790,11 @@ class ToolingMixin:
     def _sync_dev_files(self, show_errors: bool = True) -> bool:
         if not self._is_valid_project_root(self.project_root):
             if show_errors:
-                QMessageBox.warning(self, "프로젝트 필요", "프로젝트가 아직 준비되지 않았습니다.")
+                QMessageBox.warning(self, t("tools.projectRequiredTitle"), t("tools.projectNotReadyMsg"))
             return False
         if not self._is_valid_dev_src(self.dev_src_root):
             if show_errors:
-                QMessageBox.warning(self, "원본 필요", "원본 프로젝트 경로를 먼저 선택하세요.")
+                QMessageBox.warning(self, t("tools.devSrcRequiredTitle"), t("tools.devSrcRequiredMsg"))
             return False
         script = self._resolve_quick_apply_script()
         if script:
@@ -809,7 +810,7 @@ class ToolingMixin:
                 )
             except Exception as e:
                 if show_errors:
-                    QMessageBox.critical(self, "오류", f"동기화 스크립트 실행 실패: {e}")
+                    QMessageBox.critical(self, t("tools.error"), t("tools.syncScriptRunFailed", error=e))
                 else:
                     self.append_log(f"[SYNC][ERROR] 스크립트 실행 실패: {e}")
                 return False
@@ -822,7 +823,7 @@ class ToolingMixin:
                 self._apply_compose_variant(self.install_variant)
                 return True
             if show_errors:
-                QMessageBox.critical(self, "오류", "[SYNC] quick_apply 스크립트가 실패했습니다. 로그를 확인하세요.")
+                QMessageBox.critical(self, t("tools.error"), t("tools.quickApplyFailed"))
             else:
                 self.append_log("[SYNC][ERROR] quick_apply 스크립트가 실패했습니다.")
             return False
@@ -838,7 +839,7 @@ class ToolingMixin:
             return True
         except Exception as e:
             if show_errors:
-                QMessageBox.critical(self, "오류", f"동기화 실패: {e}")
+                QMessageBox.critical(self, t("tools.error"), t("tools.syncFailed", error=e))
             else:
                 self.append_log(f"[SYNC][ERROR] {e}")
             return False
@@ -911,7 +912,7 @@ class ToolingMixin:
                 self.load_ui(open_mode="CURRENT")
                 return
             self.append_log("[SYNC] 빠른 적용 완료. 서비스 시작 중...")
-            self._show_preload_dialog("서비스 시작 중...")
+            self._show_preload_dialog(t("tools.startingService"))
             self._clear_conflicting_containers()
             def _after_restart(exit_code: int, *_):
                 if exit_code == 0:
@@ -927,7 +928,7 @@ class ToolingMixin:
 
     def _on_quick_apply_clicked(self):
         if not self._is_valid_dev_src(self.dev_src_root):
-            self._show_pad_notice(1, "프로젝트 경로 지정", color="#ff6b6b", duration_ms=1000)
+            self._show_pad_notice(1, t("tools.setProjectPath"), color="#ff6b6b", duration_ms=1000)
             try:
                 self._dev_src_prompt_timer.stop()
             except Exception:

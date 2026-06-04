@@ -112,8 +112,8 @@
                                         :key="sensor.id"
                                         :class="sensor.status === 'on' ? 'bg-green-10' : 'bg-grey-8'"
                                     >
-                                        <div class="row items-center">
-                                            <div>{{ sensor.name }}</div>
+                                        <div class="row items-center no-wrap">
+                                            <div class="ellipsis">{{ sensor.name }}</div>
                                             <q-space />
                                             <q-toggle
                                                 :model-value="sensor.status === 'on'"
@@ -208,7 +208,7 @@
                                     :key="robot.id"
                                     :class="robot.status === 'on' ? 'bg-green-10' : (robot.status === 'error' ? 'bg-red-10' : 'bg-grey-8')"
                                 >
-                                    <div>{{ robot.name }}</div>
+                                    <div class="ellipsis">{{ robot.name }}</div>
                                     <q-space />
                                     <q-toggle
                                         :model-value="robot.status === 'on'"
@@ -253,14 +253,14 @@
                         </q-expansion-item>
                     </q-list>
                     <div v-if="focused.id" class="q-mt-md text-white h6">
-                        <div>{{ $t(`${focused.device_type} Config`) }} <span class="text-primary">{{ focused.name }}</span></div>
+                        <div class="ellipsis">{{ $t(`${focused.device_type} Config`) }} <span class="text-primary">{{ focused.name }}</span></div>
                         <TutorialHint class="q-mt-sm" :text="$t('tutorialWorkspaceSensorConfig')" v-if="focused.device_type === 'sensor'" />
                         <TutorialHint class="q-mt-sm" :text="$t('tutorialWorkspaceRobotConfig')" v-else-if="focused.device_type === 'robot'" />
                         <div
                             class="q-pa-sm q-px-md q-mt-sm border-rounded row border-white"
                             v-if="focused.device_type === 'sensor'"
                         >
-                            <div class="text-caption col-12">
+                            <div class="text-caption col-12 q-mb-sm">
                                 {{ $t('workspaceCropHint') }}
                                 <q-btn size="xs" outline color="pink-3" icon="sync" @click="resetCroppedArea()" class="q-ml-sm" />
                                 <!-- <q-btn size="xs" outline color="primary" icon="save" @click="saveCroppedArea" class="q-ml-sm" /> -->
@@ -588,7 +588,7 @@
                                         :class="{ 'bg-primary': selectedEpisode.name === episode.name && selectedDataset && selectedDataset.id === dataset.id }"
                                     >
                                         <q-item-section>
-                                            <q-item-label class="q-ml-xl">{{ episode.name }}</q-item-label>
+                                            <q-item-label class="q-ml-xl" lines="1">{{ episode.name }}</q-item-label>
                                         </q-item-section>
                                         <q-item-section side>
                                             <q-btn
@@ -645,7 +645,7 @@
             </div>
             <div class="col column">
                 <monitoring-window
-                    class="col"
+                    class="full-width"
                     :workspace="selectedWorkspace"
                     :robots="robots"
                     :sensors="selectedSensors"
@@ -892,11 +892,15 @@ function listWorkspaces() {
 // 같은 nested 필드를 안전하게 접근하기 위한 guard — light payload 만 들어있는
 // 사이에 컴포넌트가 렌더되어 ``.sensors.filter`` 같은 호출이 throw 하는 걸 방지.
 const workspaceDetailReady = ref(false);
-async function ensureWorkspaceDetail(id) {
+// force=true 면 이미 detail 이 merge 돼 있어도 GET /tasks/{id} 로 다시 가져온다.
+// (센서 추가/삭제 등 구조 변경 후 — listWorkspaces 의 merge 는 이전 sensors 를
+//  보존하므로 새 센서의 full 객체(read_topic 등)가 안 들어와 새로고침 전까지
+//  무한 로딩되던 버그 방지)
+async function ensureWorkspaceDetail(id, force = false) {
     if (id === 'new' || id == null) return;
     const i = workspaces.value.findIndex(w => w.id === id);
     if (i < 0) return;
-    if (workspaces.value[i].assembly !== undefined) {
+    if (!force && workspaces.value[i].assembly !== undefined) {
         workspaceDetailReady.value = true;   // 이미 detail
         return;
     }
@@ -1104,10 +1108,21 @@ function addView(sensorId) {
 
     sids.push(sidInt);
     ws.sensor_ids = sids;
-    ws.sensor_cropped_area = { ...(ws.sensor_cropped_area || {}), [newViewKey]: newCrop };
-    ws.sensor_img_size = { ...(ws.sensor_img_size || {}), [newViewKey]: newSize };
-    ws.sensor_rotate = { ...(ws.sensor_rotate || {}), [newViewKey]: newRot || 0 };
-    ws.sensor_sam3 = { ...(ws.sensor_sam3 || {}), [newViewKey]: newSam3 };
+    // 복사할 소스 설정이 없으면(null) 해당 키를 만들지 않는다 — MonitoringWindow 가
+    // sensor.id 기본값으로 폴백해 전체 프레임을 정상 표시한다. (null 을 저장하면
+    // viewport 헬퍼가 null 을 반환하고 WebRtcVideo 가 무한 로딩되던 버그 방지)
+    const cropDict = { ...(ws.sensor_cropped_area || {}) };
+    const sizeDict = { ...(ws.sensor_img_size || {}) };
+    const rotDict = { ...(ws.sensor_rotate || {}) };
+    const sam3Dict = { ...(ws.sensor_sam3 || {}) };
+    if (newCrop != null) cropDict[newViewKey] = newCrop;
+    if (newSize != null) sizeDict[newViewKey] = newSize;
+    rotDict[newViewKey] = newRot || 0;
+    if (newSam3 != null) sam3Dict[newViewKey] = newSam3;
+    ws.sensor_cropped_area = cropDict;
+    ws.sensor_img_size = sizeDict;
+    ws.sensor_rotate = rotDict;
+    ws.sensor_sam3 = sam3Dict;
 
     return updateWorkspace({
         sensor_ids: sids,
@@ -1177,8 +1192,11 @@ function removeView(viewKey) {
 
 function updateWorkspace(form) {
     console.log('Updating workspace with form:', form);
-    return api.put(`/task/${selectedWorkspace.value.id}`, form).then(() => {
-        listWorkspaces();
+    const id = selectedWorkspace.value.id;
+    return api.put(`/task/${id}`, form).then(() => {
+        // listWorkspaces 의 merge 는 선택된 워크스페이스의 이전 detail(sensors 등)을
+        // 보존하므로, 센서/뷰 구조 변경이 반영되도록 detail 을 강제 재조회한다.
+        return listWorkspaces().then(() => ensureWorkspaceDetail(id, true));
     });
 }
 

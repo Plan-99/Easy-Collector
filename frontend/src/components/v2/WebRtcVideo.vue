@@ -99,24 +99,31 @@ let _setupGeneration = 0;
 // playing 이벤트) 될 때까지 true. parent 가 주는 props.loading 과 OR 로 묶여
 // q-inner-loading 에 표시된다.
 const streamLoading = ref(false);
+// onTrack 이 videoElement 마운트 전에 호출될 수 있다(풀에 track 이 이미 캐시된
+// 2번째 view 는 _acquire 가 동기로 onTrack 을 부르는데, 이게 immediate loading
+// watch 를 통해 setup() 단계 — onMounted 이전 — 에 실행되어 videoElement 가 아직
+// null). 받은 stream 을 보관했다가 마운트 시 꽂아 무한 로딩을 막는다.
+const pendingStream = ref(null);
 
 const setupWebRTC = () => {
   if (!props.topic) return;
   const myGen = ++_setupGeneration;
   streamLoading.value = true;
   connect(props.topic, {
-    resize: props.resize.length ? props.resize : null,
-    cropped_area: props.cropped_area.length ? props.cropped_area : null,
+    resize: props.resize?.length ? props.resize : null,
+    cropped_area: props.cropped_area?.length ? props.cropped_area : null,
     rotate: props.rotate,
     msg_type: props.msgType,
   }, (event) => {
     // race: 새 setup 이 시작된 뒤 늦게 도착한 track 무시.
     if (myGen !== _setupGeneration) return;
+    const newStream = new MediaStream();
+    newStream.addTrack(event.track);
+    pendingStream.value = newStream;
     if (videoElement.value) {
-      const newStream = new MediaStream();
-      newStream.addTrack(event.track);
       videoElement.value.srcObject = newStream;
     }
+    // videoElement 가 아직 없으면 onMounted 에서 pendingStream 을 꽂는다.
   }).then((res) => {
     if (!res) {
       if (myGen === _setupGeneration) streamLoading.value = false;
@@ -146,17 +153,18 @@ watch(() => props.topic, (newTopic, oldTopic) => {
 
 
 watch(() => props.resize, (newResize, oldResize) => {
-  if (newResize[0] === oldResize[0] && newResize[1] === oldResize[1]) {
-    return;
-  }
-  // [w, undefined] 같이 한 축이 비어있는 transient는 backend cv2.resize를 깨뜨리므로 무시
+  // [w, undefined] 같이 한 축이 비어있는 transient나 null/undefined 는 backend
+  // cv2.resize 를 깨뜨리므로 무시. (타입 가드를 먼저 — null[0] 접근 방지)
   if (!Array.isArray(newResize) || newResize.length !== 2 ||
       typeof newResize[0] !== 'number' || typeof newResize[1] !== 'number') {
     return;
   }
+  if (Array.isArray(oldResize) && newResize[0] === oldResize[0] && newResize[1] === oldResize[1]) {
+    return;
+  }
   addConfig(stream_id, {
     resize: newResize,
-    cropped_area: props.cropped_area.length ? props.cropped_area : null,
+    cropped_area: props.cropped_area?.length ? props.cropped_area : null,
     rotate: props.rotate,
   });
 });
@@ -166,7 +174,7 @@ watch(() => props.cropped_area, (newCroppedArea, oldCroppedArea) => {
     return;
   }
   addConfig(stream_id, {
-    resize: props.resize.length ? props.resize : null,
+    resize: props.resize?.length ? props.resize : null,
     cropped_area: newCroppedArea,
     rotate: props.rotate,
   });
@@ -177,15 +185,16 @@ watch (() => props.rotate, (newRotate, oldRotate) => {
     return;
   }
   addConfig(stream_id, {
-    resize: props.resize.length ? props.resize : null,
-    cropped_area: props.cropped_area.length ? props.cropped_area : null,
+    resize: props.resize?.length ? props.resize : null,
+    cropped_area: props.cropped_area?.length ? props.cropped_area : null,
     rotate: newRotate,
   })
 });
 
 onMounted(() => {
-  if (props.loading) {
-    console.log('Component mounted, waiting for loading to finish');
+  // setup() 단계에서 onTrack 이 먼저 와 보관해 둔 stream 이 있으면 지금 꽂는다.
+  if (pendingStream.value && videoElement.value && !videoElement.value.srcObject) {
+    videoElement.value.srcObject = pendingStream.value;
   }
   if (props.sensorId) {
     socket.on('gradcam', onGradcam);

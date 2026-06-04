@@ -189,7 +189,8 @@ def create_robot():
         }
         _apply_ik_settings(request.json, settings)
 
-    custom_fields = ['can_port', 'ip_address', 'port', 'changer_address', 'serial_port']
+    custom_fields = ['can_port', 'ip_address', 'port', 'changer_address', 'serial_port',
+                     'gripper_port', 'ssh_host', 'ssh_user', 'ssh_port', 'ssh_password']
     for field in custom_fields:
         if field in request.json:
             settings[field] = request.json.get(field)
@@ -245,7 +246,8 @@ def update_robot(id):
         })
         _apply_ik_settings(request.json, settings)
 
-    custom_fields = ['can_port', 'ip_address', 'port', 'changer_address', 'serial_port']
+    custom_fields = ['can_port', 'ip_address', 'port', 'changer_address', 'serial_port',
+                     'gripper_port', 'ssh_host', 'ssh_user', 'ssh_port', 'ssh_password']
     for field in custom_fields:
         if field in request.json:
             settings[field] = request.json.get(field)

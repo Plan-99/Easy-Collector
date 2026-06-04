@@ -22,6 +22,7 @@ import tempfile
 from pathlib import Path
 
 from modules import get_training_server_config, save_training_server_config, _gh_request, _get_repo
+from i18n import t
 
 BACKEND_CONTAINER = "easytrainer_backend"
 DEFAULT_PORT = 5100
@@ -126,7 +127,7 @@ def apply_local_training(enabled: bool, port: int | None = None,
         set_configured_port(port)
     pr = project_root or _project_root()
     if not (pr / "docker-compose.yml").is_file():
-        return False, f"docker-compose.yml not found at {pr}"
+        return False, t("tsi.composeNotFound", path=pr)
     _set_project_root(pr)
 
     env = os.environ.copy()
@@ -139,10 +140,10 @@ def apply_local_training(enabled: bool, port: int | None = None,
             capture_output=True, text=True,
         )
         if result.returncode != 0:
-            return False, f"docker compose up failed: {result.stderr.strip() or result.stdout.strip()}"
+            return False, t("tsi.composeUpFailed", error=result.stderr.strip() or result.stdout.strip())
     except Exception as e:
-        return False, f"Failed to recreate backend: {e}"
-    return True, ("로컬 학습 활성화" if enabled else "로컬 학습 비활성화")
+        return False, t("tsi.recreateFailed", error=e)
+    return True, (t("tsi.localTrainingEnabled") if enabled else t("tsi.localTrainingDisabled"))
 
 
 # ---------------------------------------------------------------------------
@@ -182,7 +183,7 @@ def download_from_release(on_log=None, on_progress=None) -> tuple[bool, str]:
 
     release = fetch_latest_release()
     if not release:
-        return False, "training-server release를 찾지 못했습니다."
+        return False, t("tsi.releaseNotFound")
 
     asset_url = None
     asset_name = None
@@ -193,7 +194,7 @@ def download_from_release(on_log=None, on_progress=None) -> tuple[bool, str]:
             asset_name = name
             break
     if not asset_url:
-        return False, "release에 tar.gz asset이 없습니다."
+        return False, t("tsi.noAsset")
 
     pr = _project_root()
     target_dir = pr / "backend" / "training_server"
@@ -215,7 +216,7 @@ def download_from_release(on_log=None, on_progress=None) -> tuple[bool, str]:
                     if on_progress:
                         on_progress(downloaded, total)
     except Exception as e:
-        return False, f"download 실패: {e}"
+        return False, t("tsi.downloadFailed", error=e)
 
     if target_dir.is_dir():
         try:
@@ -224,7 +225,7 @@ def download_from_release(on_log=None, on_progress=None) -> tuple[bool, str]:
             try:
                 subprocess.run(["sudo", "rm", "-rf", str(target_dir)], check=True, timeout=30)
             except Exception as e:
-                return False, f"기존 디렉터리 삭제 실패: {e}"
+                return False, t("tsi.removeDirFailed", error=e)
 
     _log("Extracting...")
     try:
@@ -239,7 +240,7 @@ def download_from_release(on_log=None, on_progress=None) -> tuple[bool, str]:
                     members.append(m)
             tar.extractall(target_dir, members=members)
     except Exception as e:
-        return False, f"extract 실패: {e}"
+        return False, t("tsi.extractFailed", error=e)
     finally:
         try:
             os.unlink(tmp_path)
@@ -247,8 +248,8 @@ def download_from_release(on_log=None, on_progress=None) -> tuple[bool, str]:
             pass
 
     if not (target_dir / "app.py").is_file():
-        return False, "압축 해제 후 app.py를 찾을 수 없습니다."
-    return True, f"{asset_name} 설치 완료"
+        return False, t("tsi.appPyMissing")
+    return True, t("tsi.installComplete", name=asset_name)
 
 
 def remove() -> tuple[bool, str]:
@@ -264,7 +265,7 @@ def remove() -> tuple[bool, str]:
     if is_running():
         ok, msg = apply_local_training(False, project_root=pr)
         if not ok:
-            return False, f"중지 실패로 제거 중단: {msg}"
+            return False, t("tsi.stopFailedAbort", error=msg)
 
     if src_dir.is_dir():
         try:
@@ -274,12 +275,12 @@ def remove() -> tuple[bool, str]:
                 subprocess.run(["sudo", "rm", "-rf", str(src_dir)],
                                check=True, timeout=30)
             except Exception as e:
-                return False, f"소스 삭제 실패: {e}"
+                return False, t("tsi.srcRemoveFailed", error=e)
         except Exception as e:
-            return False, f"소스 삭제 실패: {e}"
+            return False, t("tsi.srcRemoveFailed", error=e)
 
     set_local_training_enabled(False)
-    return True, "소스 삭제 완료 (학습 데이터는 보존됨)"
+    return True, t("tsi.srcRemoveComplete")
 
 
 def open_log_stream(tail: int = 200) -> subprocess.Popen | None:

@@ -34,8 +34,8 @@
                     </q-img>
 
                     <q-card-section class="q-pa-none q-mt-sm">
-                        <div class="text-bold">{{ robot.name }}</div>
-                        <div class="text-grey-6 text-caption">{{ robot.type }}</div>
+                        <div class="text-bold ellipsis">{{ robot.name }}</div>
+                        <div class="text-grey-6 text-caption ellipsis">{{ robot.type }}</div>
                     </q-card-section>
                     <q-card-section class="q-pa-none q-mt-sm row" v-if="robot.type !== 'custom'">
                         <div class="text-primary text-caption" v-if="robot.status === 'on'">{{ $t('statusOnline') }}</div>
@@ -369,8 +369,15 @@ function openAddSensorForm() {
 
 function openEditRobotForm(robot) {
     ikJsonError.value = ''
+    // 커스텀 필드(ssh_host/ssh_user/ssh_port/ssh_password/gripper_port 등)는
+    // robot 최상위가 아니라 robot.settings 에 들어있다 (모델에 @property 가 없는 키).
+    // 최상위 → settings → default 순으로 값을 채운다.
+    const settings = robot.settings || {}
     robotForm.value.forEach(field => {
-        field.value = robot[field.key] || field.default;
+        let v = robot[field.key]
+        if (v === undefined || v === null) v = settings[field.key]
+        if (v === undefined || v === null) v = field.default
+        field.value = v
     });
     robotForm.value.find((e) => e.key === 'id').value = robot.id;
     // Load existing IK settings as JSON string for custom robots
