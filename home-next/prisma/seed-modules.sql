@@ -34,7 +34,8 @@ INSERT INTO "Module" (
   -- Extensions
   ('vr_teleop',            'VR 텔레오퍼레이션',      'extension', 'VR 기반 원격 조종',                                              0, true, false, false, 'module-vr_teleop-{version}.tar.gz',                  ARRAY[]::TEXT[], NOW(), NOW()),
   ('test_arm',             'Test Arm',               'extension', '테스트 로봇 암 시뮬레이션',                                       0, true, false, false, 'module-test_arm-{version}.tar.gz',                   ARRAY[]::TEXT[], NOW(), NOW()),
-  ('sam3',                 'SAM 3 세그멘테이션',     'extension', 'Meta SAM 3 기반 객체 세그멘테이션 (텍스트/박스 프롬프트, 첫프레임 detect + 트래커)',  0, true, false, false, 'module-sam3-{version}.tar.gz',                       ARRAY[]::TEXT[], NOW(), NOW())
+  ('sam3',                 'SAM 3 세그멘테이션',     'extension', 'Meta SAM 3 기반 객체 세그멘테이션 (텍스트/박스 프롬프트, 첫프레임 detect + 트래커)',  0, true, false, false, 'module-sam3-{version}.tar.gz',                       ARRAY[]::TEXT[], NOW(), NOW()),
+  ('yoloe',                'YOLOE 비주얼-프롬프트 검출', 'extension', 'YOLOE 박스 exemplar 검출 — 한 뷰에서 타겟을 박스로 지정하면 캐싱되어 카메라 뷰가 바뀌어도 같은 객체를 다시 검출 (cross-view one-shot). Wrist View Reach 박스 검출 엔진.',  0, true, false, false, 'module-yoloe-{version}.tar.gz',                      ARRAY[]::TEXT[], NOW(), NOW())
 ON CONFLICT ("id") DO UPDATE SET
   -- Refresh metadata but never overwrite the admin-set price or active flag.
   "name"             = EXCLUDED."name",

@@ -64,6 +64,8 @@ _FALLBACK_REGISTRY: list[ModuleInfo] = [
     ModuleInfo(id="vr_teleop", name="VR 텔레오퍼레이션", category="extension", description="VR 기반 원격 조종", asset_name="module-vr_teleop-{version}.tar.gz"),
     ModuleInfo(id="test_arm", name="Test Arm", category="extension", description="테스트 로봇 암 시뮬레이션", asset_name="module-test_arm-{version}.tar.gz"),
     ModuleInfo(id="sim_isaaclab", name="Isaac Lab 시뮬레이션", category="extension", description="NVIDIA Isaac Lab + cuRobo (GPU 필요, NGC 로그인 필요)", asset_name="module-sim_isaaclab-{version}.tar.gz"),
+    ModuleInfo(id="sam3", name="SAM 3 세그멘테이션", category="extension", description="Meta SAM 3 기반 객체 세그멘테이션 (텍스트/박스 프롬프트)", asset_name="module-sam3-{version}.tar.gz"),
+    ModuleInfo(id="yoloe", name="YOLOE 비주얼-프롬프트 검출", category="extension", description="박스 exemplar로 타겟 지정 → 뷰가 바뀌어도 재검출 (cross-view one-shot)", asset_name="module-yoloe-{version}.tar.gz"),
 ]
 
 # Mutable runtime registry, swapped in-place on remote refresh. Importers
