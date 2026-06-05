@@ -29,70 +29,104 @@ stream_config = {}
 stream_tracks = {}  # stream_id → GRPCImageStreamTrack (config 업데이트 라우팅용)
 
 
-class GRPCImageStreamTrack(VideoStreamTrack):
-    """
-    gRPC server-streaming으로 수신한 JPEG 프레임을 WebRTC로 전달하는 트랙.
-    센서 카메라와 시뮬레이션 모두 이 트랙을 사용.
-    """
-    def __init__(self, grpc_stub, topic: str, msg_type: str, stream_id: str = None):
-        super().__init__()
-        self.stream_id = stream_id or str(uuid.uuid4())
-        self.frame = None
-        self._running = True
-        self._config = {}  # crop, resize, rotate
+class _TopicFrameSource:
+    """topic 별 단일 SubscribeImage 호출 + 디코딩된 cv_image 캐시.
 
-        # gRPC streaming을 백그라운드 스레드에서 실행
-        self._thread = threading.Thread(
-            target=self._grpc_stream_loop,
-            args=(grpc_stub, topic, msg_type),
-            daemon=True,
-        )
+    같은 topic 의 여러 ``GRPCImageStreamTrack`` 이 한 source 를 공유한다 →
+    ros2 gRPC worker 점유, JPEG decode, 네트워크 트래픽 모두 N → 1 로 축소.
+    여러 view 가 카메라 한 대를 분할하는 multi-view 환경 (Planner / Curriculum
+    Monitor) 에서 thread pool 포화 + CPU 부하의 주범이었음.
+
+    Per-view crop/resize/rotate 는 각 track 의 ``recv()`` 에서 적용 (decode 후).
+    """
+
+    _instances_by_topic: dict[str, '_TopicFrameSource'] = {}
+    _registry_lock = threading.Lock()
+
+    def __init__(self, grpc_stub, topic: str, msg_type: str):
+        self.topic = topic
+        self.msg_type = msg_type
+        self._grpc_stub = grpc_stub
+        self._cv_image = None        # latest decoded frame (BGR)
+        self._frame_seq = 0          # 마지막 frame 의 단조 시퀀스 (track 측 cache 비교용)
+        self._refs = 0
+        self._running = True
+        self._thread = threading.Thread(target=self._loop, name=f'src-{topic}', daemon=True)
         self._thread.start()
 
-    def _grpc_stream_loop(self, stub, topic, msg_type):
-        """gRPC SubscribeImage를 호출하고 프레임을 수신."""
+    def _loop(self):
         from ..bridge.generated import robot_bridge_pb2 as pb
-
         try:
             request = pb.SubscribeImageRequest(
-                topic=topic,
-                msg_type=msg_type,
-                stream_id=self.stream_id,
+                topic=self.topic,
+                msg_type=self.msg_type,
+                stream_id=f'src-{self.topic}',
             )
-            for image_frame in stub.SubscribeImage(request):
+            for image_frame in self._grpc_stub.SubscribeImage(request):
                 if not self._running:
                     break
-
                 try:
-                    # JPEG → OpenCV BGR
                     np_arr = np.frombuffer(image_frame.jpeg_data, np.uint8)
                     cv_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
                     if cv_image is None:
                         continue
-
-                    # Apply config (crop, rotate, resize)
-                    cv_image = self._apply_config(cv_image)
-
-                    self.frame = VideoFrame.from_ndarray(cv_image, format="bgr24")
+                    self._cv_image = cv_image
+                    self._frame_seq += 1
                 except Exception as e:
-                    # 잘못된 config 등 일시 오류로 전체 스트림이 죽지 않도록 프레임 단위로 격리
-                    print(f"[GRPCStream] {self.stream_id} frame error: {e}")
+                    print(f"[GRPCStream:src] {self.topic} decode error: {e}")
         except Exception as e:
             if self._running:
-                print(f"[GRPCStream] {self.stream_id} stream error: {e}")
+                print(f"[GRPCStream:src] {self.topic} stream error: {e}")
+
+    def get_frame(self):
+        """Return (cv_image, seq) or (None, 0). track 이 polling 으로 호출."""
+        return self._cv_image, self._frame_seq
+
+    @classmethod
+    def acquire(cls, grpc_stub, topic: str, msg_type: str) -> '_TopicFrameSource':
+        with cls._registry_lock:
+            src = cls._instances_by_topic.get(topic)
+            if src is None:
+                src = cls(grpc_stub, topic, msg_type)
+                cls._instances_by_topic[topic] = src
+                print(f"[GRPCStream:src] created for {topic}")
+            src._refs += 1
+            return src
+
+    @classmethod
+    def release(cls, src: '_TopicFrameSource'):
+        if src is None:
+            return
+        with cls._registry_lock:
+            src._refs -= 1
+            if src._refs <= 0:
+                cls._instances_by_topic.pop(src.topic, None)
+                src._running = False
+                print(f"[GRPCStream:src] released last ref for {src.topic}")
+
+
+class GRPCImageStreamTrack(VideoStreamTrack):
+    """
+    gRPC server-streaming으로 수신한 JPEG 프레임을 WebRTC로 전달하는 트랙.
+    센서 카메라와 시뮬레이션 모두 이 트랙을 사용.
+
+    SubscribeImage 호출은 ``_TopicFrameSource`` 가 topic 별로 공유한다 — N
+    개의 viewport 가 같은 토픽을 봐도 ros2 gRPC worker 한 개만 점유.
+    """
+    def __init__(self, grpc_stub, topic: str, msg_type: str, stream_id: str = None):
+        super().__init__()
+        self.stream_id = stream_id or str(uuid.uuid4())
+        self._running = True
+        self._config = {}  # crop, resize, rotate
+        self._source = _TopicFrameSource.acquire(grpc_stub, topic, msg_type)
+        self._last_seq = -1
 
     def _apply_config(self, cv_image):
         """Delegate to the canonical per-sensor transform pipeline.
 
-        Was a duplicate inline implementation of resize/crop/rotate that
-        could drift from ``fetch_image_with_config`` (the one inference
-        and dataset capture use). Now both paths share the same function
-        — ordering, semantics, and edge-case handling stay in sync by
-        construction.
-
-        Guards against an empty result post-crop (e.g. degenerate box)
-        and falls back to the input frame so the WebRTC track never
-        publishes a zero-sized buffer.
+        Per-view 의 crop/resize/rotate 는 같은 source 의 같은 frame 에 각자
+        독립적으로 적용된다 — 동일 topic 의 viewport 들이 서로 다른 crop 을
+        써도 source 디코딩은 한 번만.
         """
         try:
             out = fetch_image_with_config(cv_image, self._config or {})
@@ -107,9 +141,20 @@ class GRPCImageStreamTrack(VideoStreamTrack):
         self._config.update(config)
 
     async def recv(self):
-        while self.frame is None:
+        # source 의 latest frame 을 polling. 새 frame 이 생길 때까지 짧게 대기.
+        while True:
+            if not self._running:
+                # PC 가 stop 한 경우 — 빈 frame 보내지 말고 그냥 yield 멈춤.
+                # aiortc 가 next_timestamp 호출 후 frame 을 요구하므로 종료
+                # 시그널을 명시적으로 raise.
+                raise ConnectionError('track stopped')
+            cv_image, seq = self._source.get_frame()
+            if cv_image is not None and seq != self._last_seq:
+                self._last_seq = seq
+                break
             await asyncio.sleep(0.01)
-        frame = self.frame
+        cv_image = self._apply_config(cv_image)
+        frame = VideoFrame.from_ndarray(cv_image, format="bgr24")
         pts, time_base = await self.next_timestamp()
         frame.pts = pts
         frame.time_base = time_base
@@ -117,6 +162,8 @@ class GRPCImageStreamTrack(VideoStreamTrack):
 
     def stop(self):
         self._running = False
+        _TopicFrameSource.release(self._source)
+        self._source = None
         super().stop()
 
 

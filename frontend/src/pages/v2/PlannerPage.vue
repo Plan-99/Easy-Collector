@@ -60,8 +60,7 @@
         </div>
         <div class="col row q-mb-md" v-else>
             <!-- First Column: Workspace Selection -->
-            <div class="col-2 bg-secondary q-mr-sm border-rounded q-pa-sm">
-                <div class="text-h6 text-white q-mb-md">{{ $t('plannerWorkspacesTitle') }}</div>
+            <div class="col-2 bg-secondary q-mr-md border-rounded q-pa-sm">
                 <TutorialHint step="1" class="q-mb-sm" :text="$t('tutorialPlannerWorkspaces')" />
                 <q-btn
                     outline
@@ -81,7 +80,7 @@
                         >
                             <template v-slot:header>
                                 <q-item-section>
-                                    <q-item-label>{{ workspace.name }}</q-item-label>
+                                    <q-item-label lines="1">{{ workspace.name }}</q-item-label>
                                 </q-item-section>
                                 <q-item-section side>
                                     <q-btn icon="close" size="sm" flat round @click.stop="removeWorkspace(workspace.id)" />
@@ -94,7 +93,7 @@
                                         class="q-pa-sm q-px-md q-my-xs border-rounded row items-center"
                                         :class="sensor.status === 'on' ? 'bg-green-10' : 'bg-grey-8'"
                                     >
-                                        <div>{{ sensor.name }}</div>
+                                        <div class="ellipsis">{{ sensor.name }}</div>
                                         <q-space />
                                         <q-toggle
                                             :model-value="sensor.status === 'on'"
@@ -118,7 +117,7 @@
                                         class="q-pa-sm q-px-md q-my-xs border-rounded row items-center"
                                         :class="robot.status === 'on' ? 'bg-green-10' : (robot.status === 'error' ? 'bg-red-10' : 'bg-grey-8')"
                                     >
-                                        <div>{{ robot.name }}</div>
+                                        <div class="ellipsis">{{ robot.name }}</div>
                                         <q-space />
                                         <q-toggle
                                             :model-value="robot.status === 'on'"
@@ -146,9 +145,8 @@
             <!-- Right side: Plans (top, horizontal timelines) + Monitoring (bottom) -->
             <div class="col column">
                 <!-- Plans area: 모든 그룹이 통째로 보이도록 자연 높이로 둠 -->
-                <div class="bg-secondary border-rounded q-pa-sm q-mb-sm">
+                <div class="bg-secondary border-rounded q-pa-sm q-mb-md">
                     <div class="row items-center q-mb-sm">
-                        <div class="text-h6 text-white q-mr-md">{{ $t('plannerPlansTitle') }}</div>
                         <TutorialHint step="2" :text="$t('tutorialPlannerBlocks')" class="q-mr-sm" />
                         <TutorialHint step="3" :text="$t('tutorialPlannerRun')" class="q-mr-sm" />
                         <q-space />
@@ -245,92 +243,40 @@
                                 </q-btn>
                             </div>
 
-                            <!-- Horizontal block track -->
+                            <!-- Horizontal block track — q-scroll-area 로 가로
+                                 스크롤. 카드들이 너비를 넘으면 자동 스크롤바. -->
                             <div v-if="!(group.blocks || []).length" class="text-caption text-grey text-center q-pa-md">
                                 {{ $t('plannerNoBlocks') }}
                             </div>
-                            <div v-else class="row no-wrap items-stretch" style="overflow-x: auto; overflow-y: hidden;">
-                                <div
+                            <q-scroll-area
+                                v-else
+                                style="height: 145px; width: 100%;"
+                                :thumb-style="{ height: '6px', borderRadius: '3px', background: 'var(--q-primary)', opacity: 0.5 }"
+                                :bar-style="{ height: '8px', background: 'rgba(255,255,255,0.05)' }"
+                            >
+                                <div class="row no-wrap items-stretch">
+                                <PlannerBlockCard
                                     v-for="(block, index) in (group.blocks || [])"
                                     :key="block.id"
-                                    class="planner-block-card column q-mr-xs"
-                                    :class="[
-                                        runningByGroup[group.id] === index ? 'bg-blue-grey-9' : 'bg-grey-10',
-                                        { 'block-card-active': isDragOver(group.id, index) || runningByGroup[group.id] === index }
-                                    ]"
+                                    :block="block"
+                                    :block-config="blockConfigs[block.type]"
+                                    :running="runningByGroup[group.id] === index"
+                                    :result="blockResultsByGroup[group.id]?.[block.id]"
+                                    :progress="blockProgressById[block.id]"
+                                    :workspace-name="getWorkspaceName(block.workspace_id)"
+                                    :active="isDragOver(group.id, index) || runningByGroup[group.id] === index"
+                                    width="160px"
+                                    class="q-mr-xs"
+                                    :style="{ cursor: isRunning ? 'default' : 'grab' }"
                                     :draggable="!isRunning"
                                     @dragstart="onDragStart(group.id, index, $event)"
                                     @dragover.prevent="onDragOver(group.id, index, $event)"
                                     @drop="onDrop(group.id, index)"
                                     @dragend="onDragEnd"
-                                    :style="{ cursor: isRunning ? 'default' : 'grab' }"
                                 >
-                                    <div :style="{ height: '3px', backgroundColor: blockTypeColor(block.type) }"></div>
-                                    <div class="q-pa-xs col column">
-                                        <div class="row items-center no-wrap">
-                                            <q-icon
-                                                :name="blockConfigs[block.type]?.icon || 'help'"
-                                                :color="blockConfigs[block.type]?.color || 'grey'"
-                                                size="xs"
-                                                class="q-mr-xs"
-                                            />
-                                            <q-spinner
-                                                v-if="runningByGroup[group.id] === index"
-                                                color="primary"
-                                                size="xs"
-                                            />
-                                            <q-icon
-                                                v-else-if="blockResultIcon(group.id, block.id)"
-                                                :name="blockResultIcon(group.id, block.id)"
-                                                :color="blockResultColor(group.id, block.id)"
-                                                size="xs"
-                                            />
-                                            <q-space />
-                                            <q-icon name="drag_indicator" color="grey-7" size="xs" v-if="!isRunning" />
-                                        </div>
-                                        <div class="text-caption text-bold text-white ellipsis q-mt-xs">
-                                            {{ block.name || blockConfigs[block.type]?.label }}
-                                        </div>
-                                        <div class="text-caption text-grey-5 ellipsis">
-                                            <span v-if="block.type === 'joint_position'">
-                                                {{ getWorkspaceName(block.workspace_id) }}
-                                            </span>
-                                            <span v-else-if="block.type === 'checkpoint'">
-                                                {{ block.checkpoint_name }}
-                                            </span>
-                                            <span v-else-if="block.type === 'timesleep'">—</span>
-                                            <span v-else-if="block.type === 'sync'">
-                                                ID: {{ block.sync_id || '—' }}
-                                            </span>
-                                            <span v-else-if="block.type === 'query_pose'">
-                                                {{ block.service_name || '—' }}
-                                            </span>
-                                        </div>
-                                        <q-space />
-                                        <div class="row q-mt-xs" v-if="block.type === 'sync' || block.duration != null || block.until_done">
-                                            <q-badge
-                                                v-if="block.type === 'sync'"
-                                                rounded
-                                                color="teal-8"
-                                            >
-                                                <q-icon name="sync" size="xs" class="q-mr-xs" />{{ $t('plannerSyncBadge') }}
-                                            </q-badge>
-                                            <q-badge
-                                                v-else-if="block.type === 'checkpoint' && block.until_done"
-                                                rounded
-                                                color="purple-8"
-                                            >
-                                                <q-icon name="check_circle" size="xs" class="q-mr-xs" />{{ $t('plannerUntilDoneBadge') }}
-                                            </q-badge>
-                                            <q-badge
-                                                v-else
-                                                rounded
-                                                :color="block.type === 'timesleep' ? 'orange-8' : 'purple-8'"
-                                            >
-                                                <q-icon name="timer" size="xs" class="q-mr-xs" />{{ block.duration }}s
-                                            </q-badge>
-                                        </div>
-                                    </div>
+                                    <template #header-right>
+                                        <q-icon name="drag_indicator" color="grey-7" size="xs" v-if="!isRunning" />
+                                    </template>
                                     <q-menu context-menu v-if="!isRunning">
                                         <q-list bordered separator>
                                             <q-item clickable v-ripple v-close-popup @click="openBlockDetails(block)">
@@ -351,20 +297,22 @@
                                             </q-item>
                                         </q-list>
                                     </q-menu>
+                                </PlannerBlockCard>
                                 </div>
-                            </div>
+                            </q-scroll-area>
                         </div>
                     </div>
                 </div>
 
-                <!-- Monitoring (bottom): 좌측 사이드바 높이에 맞춰 늘어나도록 flex-grow -->
-                <div class="col" style="min-height: 600px;">
+                <!-- Monitoring: 내용만큼 자연 높이로 두고 하단 마진을 맞춘다. -->
+                <div class="q-mb-md">
                     <monitoring-window
-                        class="full-height"
+                        class="full-width"
                         :workspace="monitorWorkspace"
                         :workspaces="selectedWorkspaces"
                         :robots="allSelectedRobots"
                         :sensors="allSelectedSensors"
+                        :loading="detailsLoading"
                         v-model:focused="focused"
                         v-model:selected-dataset-id="monitorDatasetId"
                         v-model:selected-checkpoint-id="monitorCheckpointId"
@@ -372,6 +320,7 @@
                         :datasets="[]"
                         :checkpoints="[]"
                         status="pending"
+                        :visible-view-keys="monitorVisibleViewKeys"
                         monitor-only
                     />
                 </div>
@@ -414,6 +363,22 @@
                             <div class="text-caption text-grey">{{ (detailBlock.positions?.[robot.id] || []).map(v => Number(v).toFixed(4)).join(', ') }}</div>
                         </div>
                     </template>
+                    <template v-if="detailBlock.type === 'move_relative_ee'">
+                        <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerBlockDetailsWorkspace') }}:</span> {{ getWorkspaceName(detailBlock.workspace_id) }}</div>
+                        <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerBlockDetailsDuration') }}:</span> {{ detailBlock.duration }}s</div>
+                        <div v-for="robot in getWorkspaceRobots(detailBlock.workspace_id)" :key="robot.id" class="q-mb-xs">
+                            <div class="text-bold text-caption">
+                                {{ robot.name }}
+                                <q-chip v-if="isToolRobot(robot)" dense color="amber-9" text-color="white" size="sm">tool</q-chip>
+                            </div>
+                            <div v-if="isToolRobot(robot)" class="text-caption text-grey">
+                                abs = [{{ (detailBlock.tool_positions?.[robot.id] || []).map(v => Number(v).toFixed(4)).join(', ') }}]
+                            </div>
+                            <div v-else class="text-caption text-grey">
+                                Δ = [{{ (detailBlock.deltas?.[robot.id] || [0,0,0,0,0,0]).map(v => Number(v).toFixed(4)).join(', ') }}]
+                            </div>
+                        </div>
+                    </template>
                     <template v-if="detailBlock.type === 'checkpoint'">
                         <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerBlockDetailsWorkspace') }}:</span> {{ getWorkspaceName(detailBlock.workspace_id) }}</div>
                         <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerBlockDetailsCheckpoint') }}:</span> {{ detailBlock.checkpoint_name }}</div>
@@ -423,6 +388,22 @@
                         </div>
                         <div class="q-mb-sm" v-else>
                             <span class="text-bold">{{ $t('plannerBlockDetailsDuration') }}:</span> {{ detailBlock.duration }}s
+                        </div>
+                        <div class="q-mb-sm" v-if="detailBlock.max_steps">
+                            <span class="text-bold">{{ $t('plannerMaxSteps') }}:</span> {{ detailBlock.max_steps }}
+                        </div>
+                    </template>
+                    <template v-if="detailBlock.type === 'replay_episode'">
+                        <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerBlockDetailsWorkspace') }}:</span> {{ getWorkspaceName(detailBlock.workspace_id) }}</div>
+                        <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerReplayDatasetLabel') }}:</span> {{ detailBlock.dataset_name || detailBlock.dataset_id }}</div>
+                        <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerReplayEpisodeLabel') }}:</span> {{ detailBlock.episode_index }}</div>
+                        <div class="q-mb-sm"><span class="text-bold">{{ $t('plannerHzLabel') }}:</span> {{ detailBlock.hz }}</div>
+                        <div class="q-mb-sm">
+                            <span class="text-bold">{{ $t('plannerReplayMoveToFirst') }}:</span>
+                            {{ detailBlock.move_to_first ? 'yes' : 'no' }}
+                            <span v-if="detailBlock.move_to_first && detailBlock.settle_sec > 0">
+                                (+{{ detailBlock.settle_sec }}s)
+                            </span>
                         </div>
                     </template>
                     <template v-if="detailBlock.type === 'timesleep'">
@@ -471,7 +452,10 @@
                         <q-tab name="ee" :label="$t('plannerPoseTypeEE')" />
                     </q-tabs>
                     <q-separator dark />
-                    <div class="terminal-block q-mt-md">
+                    <div
+                        class="q-mt-md q-pa-sm"
+                        style="background: #0c1116; border: 1px solid rgba(255,255,255,0.08); border-radius: 6px;"
+                    >
                         <div class="row items-center q-mb-xs">
                             <q-icon name="circle" size="8px" color="red" class="q-mr-xs" />
                             <q-icon name="circle" size="8px" color="amber" class="q-mr-xs" />
@@ -484,7 +468,9 @@
                                 <q-tooltip>{{ $t('plannerExampleCopy') }}</q-tooltip>
                             </q-btn>
                         </div>
-                        <pre class="terminal-code">{{ exampleNodeCode }}</pre>
+                        <pre
+                            style="margin: 0; color: #d6deeb; font-family: 'JetBrains Mono', 'Fira Code', Menlo, Consolas, monospace; font-size: 12px; line-height: 1.55; white-space: pre; overflow-x: auto; max-height: 480px;"
+                        >{{ exampleNodeCode }}</pre>
                     </div>
                     <div class="text-caption text-grey-5 q-mt-md">
                         {{ $t('plannerExampleNodeRunHint') }}
@@ -570,7 +556,7 @@
                                 >
                                     <div class="row items-center q-mb-sm">
                                         <q-icon name="bookmark" color="primary" class="q-mr-xs" />
-                                        <div class="text-caption text-primary text-uppercase letter-spacing-1">{{ $t('plannerSavedPosition') }}</div>
+                                        <div class="text-caption text-primary text-uppercase" style="letter-spacing: 1px;">{{ $t('plannerSavedPosition') }}</div>
                                         <q-space />
                                         <q-btn
                                             size="sm" unelevated color="primary"
@@ -632,9 +618,106 @@
                         </div>
                     </template>
 
-                    <!-- Checkpoint Fields -->
-                    <template v-if="blockForm.type === 'checkpoint'">
-                        <TutorialHint class="q-mb-md" :text="$t('tutorialPlannerBlockCheckpoint')" />
+                    <!-- Move Relative EE Fields -->
+                    <template v-if="blockForm.type === 'move_relative_ee'">
+                        <TutorialHint class="q-mb-md" :text="$t('tutorialPlannerBlockMoveRelativeEE')" />
+                        <q-select
+                            v-if="formWorkspaceOptions.length > 1"
+                            dense outlined dark bg-color="dark"
+                            v-model="blockForm.workspace_id"
+                            :options="formWorkspaceOptions"
+                            :label="$t('plannerWorkspaceLabel')"
+                            class="q-mb-md"
+                            map-options
+                            emit-value
+                        ></q-select>
+                        <q-input
+                            dense outlined dark bg-color="dark"
+                            v-model.number="blockForm.duration"
+                            :label="$t('plannerDurationSeconds')"
+                            type="number"
+                            min="0.1"
+                            step="0.1"
+                            class="q-mb-md"
+                        ></q-input>
+                        <div v-if="blockForm.workspace_id">
+                            <div
+                                v-for="robot in getWorkspaceRobots(blockForm.workspace_id)"
+                                :key="robot.id"
+                                class="q-mb-md"
+                            >
+                                <div class="row items-center q-mb-sm">
+                                    <div class="text-subtitle2">{{ robot.name }}</div>
+                                    <q-chip
+                                        v-if="isToolRobot(robot)"
+                                        dense color="amber-9" text-color="white"
+                                        class="q-ml-sm"
+                                    >tool</q-chip>
+                                    <q-badge
+                                        :color="robot.status === 'on' ? 'positive' : 'grey'"
+                                        class="q-ml-sm"
+                                    >
+                                        {{ robot.status === 'on' ? $t('plannerOnline') : $t('plannerOffline') }}
+                                    </q-badge>
+                                </div>
+                                <!-- Arm: 6-DOF EE delta -->
+                                <div
+                                    v-if="!isToolRobot(robot) && Array.isArray(blockForm.deltas[robot.id])"
+                                    class="border-rounded border-cyan bg-dark q-pa-md"
+                                >
+                                    <div class="text-caption text-grey-5 q-mb-sm">
+                                        {{ $t('plannerRelativeEEHint') }}
+                                    </div>
+                                    <div class="row q-col-gutter-sm">
+                                        <div
+                                            v-for="(label, idx) in ['dx', 'dy', 'dz', 'drx', 'dry', 'drz']"
+                                            :key="idx"
+                                            class="col-4"
+                                        >
+                                            <q-input
+                                                dense outlined dark bg-color="dark"
+                                                hide-bottom-space
+                                                v-model.number="blockForm.deltas[robot.id][idx]"
+                                                :label="label"
+                                                type="number"
+                                                step="0.01"
+                                            ></q-input>
+                                        </div>
+                                    </div>
+                                </div>
+                                <!-- Tool: absolute joint values (no EE / IK) -->
+                                <div
+                                    v-else-if="isToolRobot(robot) && Array.isArray(blockForm.tool_positions[robot.id])"
+                                    class="border-rounded q-pa-md"
+                                    style="border: 1px solid #FF8F00; background: #1a1a1a;"
+                                >
+                                    <div class="text-caption text-grey-5 q-mb-sm">
+                                        {{ $t('plannerToolAbsoluteHint') }}
+                                    </div>
+                                    <div class="row q-col-gutter-sm">
+                                        <div
+                                            v-for="(jointName, jIdx) in (robot.joint_names || [`j${0}`])"
+                                            :key="jIdx"
+                                            class="col-4"
+                                        >
+                                            <q-input
+                                                dense outlined dark bg-color="dark"
+                                                hide-bottom-space
+                                                v-model.number="blockForm.tool_positions[robot.id][jIdx]"
+                                                :label="jointName"
+                                                type="number"
+                                                step="0.01"
+                                            ></q-input>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- Replay Episode Fields -->
+                    <template v-if="blockForm.type === 'replay_episode'">
+                        <TutorialHint class="q-mb-md" :text="$t('tutorialPlannerBlockReplayEpisode')" />
                         <q-select
                             v-if="formWorkspaceOptions.length > 1"
                             dense outlined dark bg-color="dark"
@@ -648,15 +731,83 @@
                         <q-select
                             v-if="blockForm.workspace_id"
                             dense outlined dark bg-color="dark"
-                            v-model="blockForm.checkpoint_id"
-                            :options="filteredCheckpoints"
-                            :label="$t('plannerCheckpointLabel')"
+                            v-model="blockForm.dataset_id"
+                            :options="datasetOptions"
+                            :label="$t('plannerReplayDatasetLabel')"
                             class="q-mb-md"
                             map-options
                             emit-value
-                            option-label="name"
-                            option-value="id"
+                            :no-options-label="$t('plannerReplayNoDatasets')"
                         ></q-select>
+                        <q-select
+                            v-if="blockForm.dataset_id != null"
+                            dense outlined dark bg-color="dark"
+                            v-model="blockForm.episode_index"
+                            :options="episodeOptions"
+                            :label="$t('plannerReplayEpisodeLabel')"
+                            class="q-mb-md"
+                            map-options
+                            emit-value
+                            :no-options-label="$t('plannerReplayNoEpisodes')"
+                        ></q-select>
+                        <q-input
+                            dense outlined dark bg-color="dark"
+                            v-model.number="blockForm.hz"
+                            :label="$t('plannerHzLabel')"
+                            :hint="$t('plannerReplayHzHint')"
+                            type="number"
+                            min="1"
+                            step="1"
+                            class="q-mb-md"
+                        ></q-input>
+                        <q-toggle
+                            v-model="blockForm.move_to_first"
+                            :label="$t('plannerReplayMoveToFirst')"
+                            color="primary"
+                            dark
+                            class="q-mb-xs"
+                        ></q-toggle>
+                        <div class="text-caption text-grey q-mb-md">
+                            {{ $t('plannerReplayMoveToFirstHint') }}
+                        </div>
+                        <q-input
+                            v-if="blockForm.move_to_first"
+                            dense outlined dark bg-color="dark"
+                            v-model.number="blockForm.settle_sec"
+                            :label="$t('plannerReplaySettleSec')"
+                            :hint="$t('plannerReplaySettleSecHint')"
+                            type="number"
+                            min="0"
+                            step="0.5"
+                            class="q-mb-md"
+                        ></q-input>
+                    </template>
+
+                    <!-- Checkpoint Fields -->
+                    <template v-if="blockForm.type === 'checkpoint'">
+                        <TutorialHint class="q-mb-md" :text="$t('tutorialPlannerBlockCheckpoint')" />
+                        <q-select
+                            v-if="formWorkspaceOptions.length > 1"
+                            dense outlined dark bg-color="dark"
+                            v-model="blockForm.workspace_id"
+                            :options="formWorkspaceOptions"
+                            :label="$t('plannerWorkspaceLabel')"
+                            class="q-mb-md"
+                            map-options
+                            emit-value
+                        ></q-select>
+                        <div v-if="blockForm.workspace_id" class="q-mb-md">
+                            <div class="text-caption text-grey-5 q-mb-xs">{{ $t('plannerCheckpointLabel') }}</div>
+                            <q-btn
+                                outline
+                                no-caps
+                                color="primary"
+                                class="full-width"
+                                icon="account_tree"
+                                :label="blockForm.checkpoint_id ? `#${blockForm.checkpoint_id}` : $t('plannerSelectCheckpoint')"
+                                @click="showCheckpointPicker = true"
+                            />
+                        </div>
                         <q-toggle
                             v-model="blockForm.move_homepose"
                             :label="$t('plannerMoveHomepose')"
@@ -734,6 +885,15 @@
                             class="q-mb-md"
                         ></q-input>
                         <q-input
+                            dense outlined dark bg-color="dark"
+                            v-model.number="blockForm.succeed_done_frames"
+                            :label="$t('succeedDoneFrames')"
+                            :hint="$t('succeedDoneFramesHint')"
+                            type="number"
+                            min="1"
+                            class="q-mb-md"
+                        ></q-input>
+                        <q-input
                             v-if="blockForm.re_inference_steps === 1"
                             dense outlined dark bg-color="dark"
                             v-model.number="blockForm.temporal_ensemble_coeff"
@@ -741,7 +901,33 @@
                             :hint="$t('temporalEnsembleCoeffHint')"
                             type="number"
                             step="0.01"
+                            class="q-mb-md"
                         ></q-input>
+
+                        <!-- 실패 설정: step 한도 + fallback 블록 -->
+                        <q-separator dark class="q-my-md" />
+                        <div class="text-subtitle2 text-white q-mb-xs">{{ $t('plannerFailureSettings') }}</div>
+                        <q-input
+                            dense outlined dark bg-color="dark"
+                            v-model.number="blockForm.max_steps"
+                            :label="$t('plannerMaxSteps')"
+                            :hint="$t('plannerMaxStepsHint')"
+                            type="number"
+                            min="1"
+                            step="1"
+                            clearable
+                            class="q-mb-sm"
+                        ></q-input>
+                        <div class="text-caption text-grey q-mb-sm">{{ $t('plannerFallbackHint') }}</div>
+                        <q-select
+                            dense outlined dark bg-color="dark"
+                            v-model="blockForm.fallback_block_id"
+                            :options="fallbackBlockOptions"
+                            :label="$t('plannerFallbackBlock')"
+                            emit-value
+                            map-options
+                            clearable
+                        ></q-select>
                     </template>
 
                     <!-- Timesleep Fields -->
@@ -829,7 +1015,8 @@
                             />
                             <div
                                 v-if="queryPoseTestResult"
-                                class="terminal-block q-mt-sm q-pa-sm"
+                                class="q-mt-sm q-pa-sm"
+                                style="background: #0c1116; border: 1px solid rgba(255,255,255,0.08); border-radius: 6px;"
                             >
                                 <div
                                     :class="queryPoseTestResult.ok ? 'text-positive' : 'text-negative'"
@@ -844,7 +1031,7 @@
                                 </div>
                                 <pre
                                     v-if="queryPoseTestResult.pose"
-                                    class="terminal-code"
+                                    style="margin: 0; color: #d6deeb; font-family: 'JetBrains Mono', 'Fira Code', Menlo, Consolas, monospace; font-size: 12px; line-height: 1.55; white-space: pre; overflow-x: auto; max-height: 480px;"
                                 >{{ JSON.stringify(queryPoseTestResult.pose, null, 2) }}</pre>
                             </div>
                         </div>
@@ -858,6 +1045,26 @@
             </q-card>
         </q-dialog>
 
+        <!-- 체크포인트 선택 — git-graph 다이얼로그에서 노드 클릭으로 선택 -->
+        <q-dialog v-model="showCheckpointPicker">
+            <q-card class="bg-secondary border-rounded border-white" dark style="width: 920px; max-width: 95vw;">
+                <q-card-section class="bg-dark text-white row items-center">
+                    <div class="text-h6">{{ $t('plannerCheckpointLabel') }}</div>
+                    <q-space />
+                    <q-btn dense round flat icon="close" v-close-popup />
+                </q-card-section>
+                <q-separator />
+                <q-card-section class="bg-secondary">
+                    <CheckpointGraph
+                        :checkpoints="filteredCheckpoints"
+                        :selected-id="blockForm.checkpoint_id"
+                        height="440px"
+                        @node-click="onPickerNodeClick"
+                    />
+                </q-card-section>
+            </q-card>
+        </q-dialog>
+
     </q-page>
 </template>
 
@@ -867,6 +1074,8 @@ import { useI18n } from 'vue-i18n';
 import { api } from 'src/boot/axios';
 import FormDialog from 'src/components/v2/FormDialog.vue';
 import MonitoringWindow from 'src/components/v2/MonitoringWindow.vue';
+import PlannerBlockCard from 'src/components/v2/PlannerBlockCard.vue';
+import CheckpointGraph from 'src/components/v2/CheckpointGraph.vue';
 import RobotPendant from 'src/components/v2/RobotPendant.vue';
 import TutorialHint from 'src/components/v2/TutorialHint.vue';
 import { Notify, Loading } from 'quasar';
@@ -874,6 +1083,7 @@ import { useSensor } from '../../composables/useSensor';
 import { useRobot } from 'src/composables/useRobot';
 import { useSocket } from 'src/composables/useSocket';
 import { useTutorialStore } from 'src/stores/tutorialStore';
+import { enumerateViews } from 'src/utils/sensorView';
 
 const { t } = useI18n();
 const { socket } = useSocket();
@@ -966,26 +1176,60 @@ function openAddWorkspacesForm() {
     showAddWorkspacesForm.value = true;
 }
 
+// 다이얼로그 / 멀티셀렉트 옵션 용 — light 만 (드롭다운 label/value 만 필요).
+// 센서/로봇 핸들러 부착은 ``ensureWorkspaceDetails`` 가 실제로 plan 에 포함된
+// (selected) workspace 들에 대해서만 lazy 로 수행.
 function listAvailableWorkspaces() {
     return api.get('/tasks').then((response) => {
         const tasks = response.data?.tasks || [];
-        availableWorkspaces.value = tasks;
-        availableWorkspaces.value.forEach(workspace => {
-            (workspace.sensors || []).forEach(sensor => {
-                sensor.handler = useSensor(sensor);
-                if (sensor.type === 'custom') {
-                    sensor.handler.checkSensorTopic();
-                }
-            });
-            (workspace.assembly?.robots || []).forEach(robot => {
-                robot.handler = useRobot(robot);
-                if (robot.type === 'custom') {
-                    robot.handler.checkRobotTopic();
-                }
-            });
+        // 이전 detail 이 이미 있는 workspace 는 그 detail 유지 (handlers 보존).
+        const prev = new Map(availableWorkspaces.value.map(w => [w.id, w]));
+        availableWorkspaces.value = tasks.map(t => {
+            const old = prev.get(t.id);
+            return (old && old.sensors) ? { ...t, ...old } : t;
         });
     }).catch((error) => {
         console.error('Error fetching available workspaces:', error);
+    });
+}
+
+// 주어진 task id 들의 detail 을 lazy 로 병렬 fetch + sensor/robot 핸들러 부착.
+// 이미 detail 이 있는 (sensors 채워진) 항목은 skip — 같은 세션에서 한 번만.
+async function ensureWorkspaceDetails(ids) {
+    const need = (ids || []).filter(id => {
+        const w = availableWorkspaces.value.find(x => x.id === id);
+        return w && !w.sensors;
+    });
+    if (!need.length) return;
+    detailsLoading.value = true;
+    let results;
+    try {
+        results = await Promise.all(
+            need.map(id => api.get(`/tasks/${id}`).then(r => r.data?.task).catch(() => null))
+        );
+    } finally {
+        detailsLoading.value = false;
+    }
+    results.forEach((detail) => {
+        if (!detail) return;
+        const i = availableWorkspaces.value.findIndex(w => w.id === detail.id);
+        if (i < 0) return;
+        // 먼저 reactive 배열에 넣어 proxy 로 만든 뒤, 그 proxy 객체에 핸들러를
+        // 붙인다. useSensor/useRobot 은 전달된 객체의 status 를 직접 갱신하는데,
+        // raw 객체(배열에 넣기 전)에 붙이면 그 mutation 을 Vue 반응성이 추적하지
+        // 못해(템플릿은 proxy 를 읽음) 재생 버튼을 눌러도 로딩/이미지 등 UI 가
+        // 바뀌지 않는다. (Workspace 는 selectedWorkspace.value.sensors=proxy 에
+        // 직접 useSensor 를 호출해 문제가 없었다.)
+        availableWorkspaces.value[i] = { ...availableWorkspaces.value[i], ...detail };
+        const ws = availableWorkspaces.value[i];
+        (ws.sensors || []).forEach(sensor => {
+            sensor.handler = useSensor(sensor);
+            if (sensor.type === 'custom') sensor.handler.checkSensorTopic();
+        });
+        (ws.assembly?.robots || []).forEach(robot => {
+            robot.handler = useRobot(robot);
+            if (robot.type === 'custom') robot.handler.checkRobotTopic();
+        });
     });
 }
 
@@ -1005,7 +1249,11 @@ function repollCustomDevices() {
 }
 
 function listSelectedWorkspaces() {
-    selectedWorkspaceIds.value = selectedPlanner.value.task_ids || [];
+    const ids = selectedPlanner.value.task_ids || [];
+    selectedWorkspaceIds.value = ids;
+    // plan 에 실제로 포함된 workspace 들의 풀 detail 만 lazy fetch — 드롭다운에만
+    // 나타나는 workspace 는 light 로 충분.
+    ensureWorkspaceDetails(ids);
 }
 
 function removeWorkspace(workspaceId) {
@@ -1015,6 +1263,9 @@ function removeWorkspace(workspaceId) {
 
 // --- Monitoring Window ---
 const focused = ref({});
+// 워크스페이스 detail(센서/로봇) 을 fetch 하는 동안 true — MonitoringWindow 가
+// 빈 상태 메시지 대신 스피너를 표시하도록.
+const detailsLoading = ref(false);
 const monitorDatasetId = ref(null);
 const monitorCheckpointId = ref(null);
 const monitorEpisode = ref({});
@@ -1064,6 +1315,45 @@ const allSelectedRobots = computed(() => {
         });
     });
     return robots;
+});
+
+// 모니터에 보여줄 view 들. 핵심: viewport 는 항상 mount 상태 유지 (MonitoringWindow
+// 가 v-show 로만 가린다) — WebRTC PC 가 destroy/create 를 반복하지 않게.
+//   - 실행 중인 ``checkpoint`` 블록이 있으면 그 체크포인트가 학습된 view 들만
+//     (``task.sensor_ids`` → ``enumerateViews`` 로 view_key 매핑).
+//   - 그 외엔 'primary' — 물리 센서 당 첫 viewport 만 노출 (기본 센서뷰).
+// 체크포인트 블록은 항상 특정 workspace 에 묶여 실행되므로 매칭 키를
+// ``${workspace_id}-${viewKey}`` (= vp.key) 로 잡아 그 workspace 의 해당 view 만
+// 노출. 같은 viewKey 가 다른 workspace 의 viewport 에도 있어도 영향 없음.
+const monitorVisibleViewKeys = computed(() => {
+    const out = new Set();
+    let anyRunningCheckpoint = false;
+    for (const groupId of Object.keys(runningByGroup)) {
+        const blockIdx = runningByGroup[groupId];
+        if (blockIdx == null) continue;
+        const group = plans.value.find(g => g.id === groupId);
+        if (!group) continue;
+        const block = group.blocks?.[blockIdx];
+        if (!block || block.type !== 'checkpoint') continue;
+        const cp = checkpoints.value.find(c => c.id === block.checkpoint_id);
+        if (!cp) continue;
+        // /api/checkpoints 응답이 axios 경로에선 ``task`` 객체를 생략하고
+        // ``task_id`` 만 보낼 때가 있어, availableWorkspaces 에서 task 를 다시
+        // 조회해 sensor_ids 를 얻는다.
+        let cpSids = cp.task?.sensor_ids;
+        if (!cpSids || cpSids.length === 0) {
+            const task = availableWorkspaces.value.find(w => w.id === cp.task_id);
+            cpSids = task?.sensor_ids || [];
+        }
+        if (!cpSids.length) continue;
+        anyRunningCheckpoint = true;
+        const wsId = block.workspace_id;
+        enumerateViews(cpSids).forEach(({ viewKey }) => {
+            out.add(`${wsId}-${viewKey}`);
+        });
+    }
+    if (!anyRunningCheckpoint) return 'primary';
+    return out;
 });
 
 function toggleSensor(sensor) {
@@ -1300,17 +1590,8 @@ function saveGroupBlocks(group) {
     return updatePlanner({ group_id: group.id, blocks: group.blocks });
 }
 
-const BLOCK_TYPE_COLORS = {
-    joint_position: '#2196F3',
-    checkpoint: '#9C27B0',
-    timesleep: '#FF9800',
-    sync: '#009688',
-    query_pose: '#3F51B5',
-};
-
-function blockTypeColor(type) {
-    return BLOCK_TYPE_COLORS[type] || '#9E9E9E';
-}
+// 카드 색/아이콘은 PlannerBlockCard 가 자체 보유 — 여기 BLOCK_TYPE_COLORS 와
+// blockTypeColor 는 컴포넌트 추출 후 더 이상 필요하지 않아 삭제.
 
 function getWorkspaceName(workspaceId) {
     const ws = availableWorkspaces.value.find(w => w.id === workspaceId);
@@ -1333,7 +1614,7 @@ const checkpoints = ref([]);
 
 function listCheckpoints() {
     return api.get('/checkpoints', {
-        params: { where: 'status,=,finished', order: 'created_at DESC' }
+        params: { where: 'status,=,finished', order: 'created_at DESC', light: 1 }
     }).then((response) => {
         checkpoints.value = response.data.checkpoints || [];
     }).catch((error) => {
@@ -1341,10 +1622,58 @@ function listCheckpoints() {
     });
 }
 
+// 체크포인트 선택 다이얼로그(그래프). 노드 클릭 시 해당 체크포인트를 블록에 지정하고 닫는다.
+const showCheckpointPicker = ref(false);
+function onPickerNodeClick(checkpoint) {
+    blockForm.value.checkpoint_id = checkpoint.id;
+    showCheckpointPicker.value = false;
+}
+
 const filteredCheckpoints = computed(() => {
     if (!blockForm.value.workspace_id) return [];
     return checkpoints.value.filter(c => c.task_id === blockForm.value.workspace_id);
 });
+
+// --- Datasets (for replay_episode block) ---
+// Cache keyed by workspace_id so switching workspaces in the form refetches only
+// when needed. Each entry: [{ id, name, episodes: [{ name, index, length }] }, ...].
+const datasetsByWorkspace = ref({});
+
+async function fetchDatasetsForWorkspace(workspaceId) {
+    if (workspaceId == null) return;
+    if (datasetsByWorkspace.value[workspaceId]) return;
+    try {
+        const { data } = await api.get('/datasets', { params: { task_id: workspaceId } });
+        datasetsByWorkspace.value = {
+            ...datasetsByWorkspace.value,
+            [workspaceId]: data.datasets || [],
+        };
+    } catch (e) {
+        console.error('Error fetching datasets:', e);
+    }
+}
+
+const filteredDatasets = computed(() => {
+    const ws = blockForm.value.workspace_id;
+    if (ws == null) return [];
+    return datasetsByWorkspace.value[ws] || [];
+});
+
+const datasetOptions = computed(() => filteredDatasets.value.map(d => ({
+    label: d.name || `Dataset ${d.id}`,
+    value: d.id,
+})));
+
+const episodeOptions = computed(() => {
+    const ds = filteredDatasets.value.find(d => d.id === blockForm.value.dataset_id);
+    if (!ds || !Array.isArray(ds.episodes)) return [];
+    return ds.episodes.map(ep => ({
+        label: `${ep.name} (${ep.length} frames)`,
+        value: ep.index,
+    }));
+});
+
+// (watch 들은 blockForm 정의 이후로 이동했음 — TDZ 회피)
 
 // --- Block Details ---
 const showBlockDetails = ref(false);
@@ -1373,13 +1702,38 @@ const blockForm = ref({
     hz: 10,
     re_inference_steps: 1,
     temporal_ensemble_coeff: 0.01,
+    succeed_done_frames: 3,
     move_homepose: true,
     move_homepose_duration: 5,
     move_homepose_settle_sec: 0,
     positions: {},
+    // move_relative_ee:
+    //   deltas:         { [arm_robot_id]:  [dx,dy,dz,drx,dry,drz] }
+    //   tool_positions: { [tool_robot_id]: [abs joint values, length = joint_names] }
+    // Tool agent (role='tool' or no IK) 는 EE 가 없어 절대 joint 값 사용.
+    deltas: {},
+    tool_positions: {},
+    // replay_episode: 데이터셋의 특정 에피소드를 qaction 으로 직접 replay.
+    dataset_id: null,
+    dataset_name: '',
+    episode_index: null,
+    move_to_first: true,
+    settle_sec: 0,
+    fallback_block_id: null,
+    // checkpoint 실패 조건: done 신호 없이 이 step 수에 도달하면 fail → fallback.
+    max_steps: null,
 });
 
 const formGroup = computed(() => plans.value.find(g => g.id === formGroupId.value) || null);
+
+// 체크포인트 실패 시 이동할 fallback 블록 후보 — 같은 그룹의 다른 블록들.
+const fallbackBlockOptions = computed(() => {
+    const grp = formGroup.value;
+    if (!grp) return [];
+    return (grp.blocks || [])
+        .filter((_, i) => i !== editingBlockIndex.value)
+        .map(b => ({ label: b.name || b.type, value: b.id }));
+});
 
 const selectedCheckpointHasSucceed = computed(() => {
     const cp = checkpoints.value.find(c => c.id === blockForm.value.checkpoint_id);
@@ -1426,9 +1780,19 @@ function openBlockForm(group) {
         hz: 10,
         re_inference_steps: 1,
         temporal_ensemble_coeff: 0.01,
+        succeed_done_frames: 3,
         move_homepose: true,
         move_homepose_duration: 5,
         positions: {},
+        deltas: {},
+        tool_positions: {},
+        dataset_id: null,
+        dataset_name: '',
+        episode_index: null,
+        move_to_first: true,
+        settle_sec: 0,
+        fallback_block_id: null,
+        max_steps: null,
     };
     showBlockForm.value = true;
 }
@@ -1452,17 +1816,42 @@ function openEditBlockForm(group, block, index) {
         hz: typeof block.hz === 'number' ? block.hz : 10,
         re_inference_steps: typeof block.re_inference_steps === 'number' ? block.re_inference_steps : 1,
         temporal_ensemble_coeff: typeof block.temporal_ensemble_coeff === 'number' ? block.temporal_ensemble_coeff : 0.01,
+        succeed_done_frames: typeof block.succeed_done_frames === 'number' ? block.succeed_done_frames : 3,
         move_homepose: block.move_homepose === undefined ? true : !!block.move_homepose,
         move_homepose_duration: typeof block.move_homepose_duration === 'number' ? block.move_homepose_duration : 5,
         move_homepose_settle_sec: typeof block.move_homepose_settle_sec === 'number' ? block.move_homepose_settle_sec : 0,
         positions: block.positions ? JSON.parse(JSON.stringify(block.positions)) : {},
+        deltas: block.deltas ? JSON.parse(JSON.stringify(block.deltas)) : {},
+        tool_positions: block.tool_positions ? JSON.parse(JSON.stringify(block.tool_positions)) : {},
+        dataset_id: block.dataset_id ?? null,
+        dataset_name: block.dataset_name || '',
+        episode_index: typeof block.episode_index === 'number' ? block.episode_index : null,
+        move_to_first: block.move_to_first === undefined ? true : !!block.move_to_first,
+        settle_sec: typeof block.settle_sec === 'number' ? block.settle_sec : 0,
+        fallback_block_id: block.fallback_block_id ?? null,
+        max_steps: typeof block.max_steps === 'number' ? block.max_steps : null,
     };
     showBlockForm.value = true;
 }
 
+// 블록 id 는 plan 전체에 걸쳐 유일하면 됨. 과거에는 ``Date.now() + 랜덤`` 의
+// base36 문자열이었는데 사용자 식별성이 낮아 sequential 정수(문자열) 로 변경.
+// 기존 데이터의 문자열 id 와도 공존 — parseInt 가 NaN 을 돌려주므로 max 계산에
+// 영향 없음. 새 id 만 1, 2, 3, ... 으로 늘어남.
+function nextBlockId() {
+    let maxN = 0;
+    for (const grp of (plans.value || [])) {
+        for (const b of (grp.blocks || [])) {
+            const n = parseInt(b?.id, 10);
+            if (Number.isFinite(n) && n > maxN) maxN = n;
+        }
+    }
+    return String(maxN + 1);
+}
+
 function copyBlock(group, block, index) {
     const copied = JSON.parse(JSON.stringify(block));
-    copied.id = Date.now().toString(36) + Math.random().toString(36).substring(2, 7);
+    copied.id = nextBlockId();
     copied.name = (copied.name || '') + ' (copy)';
     group.blocks.splice(index + 1, 0, copied);
     saveGroupBlocks(group);
@@ -1470,14 +1859,21 @@ function copyBlock(group, block, index) {
 
 watch(() => blockForm.value.workspace_id, (newId, oldId) => {
     if (blockForm.value.type !== 'joint_position' || !newId) return;
+    // 편집 모드의 초기 로드 (openEditBlockForm 직후 workspace_id 가 null → 값
+    // 으로 바뀌어 watch 가 발화) 에는 손대지 않는다. openEditBlockForm 이 이미
+    // blockForm.value.positions 를 block.positions 의 deep clone 으로 세팅
+    // 해뒀고, 여기서 robot.joint_names 의 length 와 prior.length 가 어긋날 때
+    // (저장 당시와 현재 robot 설정이 다를 때) 정상 값이 0 으로 덮여 쓰이는
+    // 버그가 있었다. 사용자가 폼 안에서 워크스페이스를 직접 바꾸는 경우
+    // (oldId 가 null 이 아닌 다른 값) 에만 새 robot 들에 맞게 슬롯 재구성.
+    if (editingBlockIndex.value !== null && oldId === null) return;
     const robots = getWorkspaceRobots(newId);
-    const isEditingInitialLoad = editingBlockIndex.value !== null && oldId === null;
     const existing = blockForm.value.positions || {};
     const positions = {};
     robots.forEach(robot => {
         const dim = robot.joint_names?.length || robot.joint_dim || 6;
         const prior = existing[robot.id];
-        if (isEditingInitialLoad && Array.isArray(prior) && prior.length === dim) {
+        if (Array.isArray(prior) && prior.length === dim) {
             positions[robot.id] = [...prior];
         } else {
             positions[robot.id] = Array(dim).fill(0);
@@ -1485,6 +1881,66 @@ watch(() => blockForm.value.workspace_id, (newId, oldId) => {
     });
     blockForm.value.positions = positions;
 });
+
+// move_relative_ee: workspace 변경 시 arm 별 6-DOF delta 슬롯과 tool 별
+// 절대 joint 슬롯을 0 으로 초기화 (편집 모드면 기존 값 유지). tool 은 EE 가
+// 없어서 absolute joint 위치를 받는다.
+watch(() => blockForm.value.workspace_id, (newId, oldId) => {
+    if (blockForm.value.type !== 'move_relative_ee' || !newId) return;
+    // joint_position watch 와 동일 — 편집 모드 초기 로드 (null → 값) 에는
+    // 손대지 않는다. openEditBlockForm 이 이미 block.deltas / block.tool_positions
+    // 의 deep clone 으로 세팅해뒀고, robot 의 joint_names 길이가 저장 당시와
+    // 다를 때 정상값이 0 으로 덮여쓰이는 동일 버그 방지.
+    if (editingBlockIndex.value !== null && oldId === null) return;
+    const robots = getWorkspaceRobots(newId);
+    const existingDeltas = blockForm.value.deltas || {};
+    const existingTools = blockForm.value.tool_positions || {};
+    const deltas = {};
+    const toolPositions = {};
+    robots.forEach(robot => {
+        if (isToolRobot(robot)) {
+            const dim = robot.joint_names?.length || robot.joint_dim || 1;
+            const prior = existingTools[robot.id];
+            if (Array.isArray(prior) && prior.length === dim) {
+                toolPositions[robot.id] = [...prior];
+            } else {
+                toolPositions[robot.id] = Array(dim).fill(0);
+            }
+        } else {
+            const prior = existingDeltas[robot.id];
+            if (Array.isArray(prior) && prior.length === 6) {
+                deltas[robot.id] = [...prior];
+            } else {
+                deltas[robot.id] = [0, 0, 0, 0, 0, 0];
+            }
+        }
+    });
+    blockForm.value.deltas = deltas;
+    blockForm.value.tool_positions = toolPositions;
+});
+
+// replay_episode: 워크스페이스 바뀌면 dataset 목록 lazy-load.
+watch(() => blockForm.value.workspace_id, (newId) => {
+    if (blockForm.value.type !== 'replay_episode' || !newId) return;
+    fetchDatasetsForWorkspace(newId);
+});
+
+// 폼 타입이 replay_episode 로 바뀌면 그 시점에도 dataset 로드.
+watch(() => blockForm.value.type, (newType) => {
+    if (newType === 'replay_episode' && blockForm.value.workspace_id != null) {
+        fetchDatasetsForWorkspace(blockForm.value.workspace_id);
+    }
+});
+
+// Tool 판정: role==='tool' 또는 ik_solver 가 없으면 tool. arm 은 6-DOF EE
+// 상대 이동, tool 은 절대 joint 위치.
+function isToolRobot(robot) {
+    if (!robot) return false;
+    if (robot.role === 'tool') return true;
+    // ik_solver 가 명시적으로 falsy/null 이면 IK 없는 agent → tool 로 간주
+    if (Object.prototype.hasOwnProperty.call(robot, 'ik_solver') && !robot.ik_solver) return true;
+    return false;
+}
 
 function applyCurrentPos(robot) {
     if (robot.jointState && robot.jointState.length) {
@@ -1536,7 +1992,7 @@ function saveBlock() {
 
     const isEditing = editingBlockIndex.value !== null;
     const block = {
-        id: isEditing ? grp.blocks[editingBlockIndex.value].id : Date.now().toString(36) + Math.random().toString(36).substring(2, 7),
+        id: isEditing ? grp.blocks[editingBlockIndex.value].id : nextBlockId(),
         type: blockForm.value.type,
     };
 
@@ -1549,11 +2005,23 @@ function saveBlock() {
         block.checkpoint_name = cp?.name || '';
     }
 
+    if (block.type === 'replay_episode' && block.dataset_id != null) {
+        const ds = (datasetsByWorkspace.value[block.workspace_id] || []).find(d => d.id === block.dataset_id);
+        block.dataset_name = ds?.name || '';
+    }
+
     if (!block.name) {
         if (block.type === 'joint_position') {
             block.name = t('plannerNameAutoMove', { workspace: getWorkspaceName(block.workspace_id) });
+        } else if (block.type === 'move_relative_ee') {
+            block.name = t('plannerNameAutoMoveRelativeEE', { workspace: getWorkspaceName(block.workspace_id) });
         } else if (block.type === 'checkpoint') {
             block.name = t('plannerNameAutoCheckpoint', { checkpoint: block.checkpoint_name });
+        } else if (block.type === 'replay_episode') {
+            block.name = t('plannerNameAutoReplayEpisode', {
+                dataset: block.dataset_name || block.dataset_id,
+                episode: block.episode_index,
+            });
         } else if (block.type === 'timesleep') {
             block.name = t('plannerNameAutoSleep', { duration: block.duration });
         } else if (block.type === 'sync') {
@@ -1619,23 +2087,12 @@ const currentIterationByGroup = reactive({});
 const runningByGroup = reactive({});  // groupId -> currently running block index
 const runStatusByGroup = reactive({});  // groupId -> status text
 const blockResultsByGroup = reactive({});  // groupId -> { blockId: 'finished'|'stopped'|'error' }
+// blockId -> { step, max_steps } — 체크포인트 블록의 실시간 step 진행도.
+// planner_block_progress 이벤트로 갱신, planner_block_end 에서 정리.
+const blockProgressById = reactive({});
 const groupRunningSet = ref(new Set());  // groupIds currently mid-run
 
-function blockResultIcon(groupId, blockId) {
-    const r = blockResultsByGroup[groupId]?.[blockId];
-    if (r === 'finished') return 'check_circle';
-    if (r === 'stopped') return 'cancel';
-    if (r === 'error') return 'error';
-    return null;
-}
-
-function blockResultColor(groupId, blockId) {
-    const r = blockResultsByGroup[groupId]?.[blockId];
-    if (r === 'finished') return 'positive';
-    if (r === 'stopped') return 'orange';
-    if (r === 'error') return 'negative';
-    return 'grey';
-}
+// blockResultIcon / blockResultColor 는 PlannerBlockCard 내부에서 처리.
 
 function resetRunState() {
     Object.keys(runningByGroup).forEach(k => delete runningByGroup[k]);
@@ -1797,10 +2254,21 @@ function onPlannerIterationStart(payload) {
     runningByGroup[gid] = undefined;
 }
 
+function onPlannerBlockProgress(payload) {
+    const blockId = payload?.block_id;
+    if (!blockId) return;
+    blockProgressById[blockId] = {
+        step: Number(payload.step) || 0,
+        maxSteps: payload.max_steps != null ? Number(payload.max_steps) : null,
+    };
+}
+
 function onPlannerBlockStart(payload) {
     const gid = payload?.group_id;
     if (!gid) return;
     runningByGroup[gid] = payload?.index ?? null;
+    // 새 블록 시작 — 이전 진행도 정리.
+    if (payload?.block_id) delete blockProgressById[payload.block_id];
     let text = t('plannerRunningStatusDetail', {
         current: (payload?.index ?? 0) + 1,
         total: payload?.total ?? 0,
@@ -1818,6 +2286,8 @@ function onPlannerBlockEnd(payload) {
     if (payload?.block_id) {
         if (!blockResultsByGroup[gid]) blockResultsByGroup[gid] = {};
         blockResultsByGroup[gid] = { ...blockResultsByGroup[gid], [payload.block_id]: payload.status };
+        // step 진행 뱃지 정리.
+        delete blockProgressById[payload.block_id];
     }
     if (payload?.status === 'error' && payload?.error) {
         Notify.create({
@@ -1902,6 +2372,7 @@ onUnmounted(() => {
     socket.off('planner_group_start', onPlannerGroupStart);
     socket.off('planner_iteration_start', onPlannerIterationStart);
     socket.off('planner_block_start', onPlannerBlockStart);
+    socket.off('planner_block_progress', onPlannerBlockProgress);
     socket.off('planner_block_end', onPlannerBlockEnd);
     socket.off('planner_group_end', onPlannerGroupEnd);
     socket.off('planner_run_end', onPlannerRunEnd);
@@ -1921,41 +2392,10 @@ onMounted(async () => {
     socket.on('planner_group_start', onPlannerGroupStart);
     socket.on('planner_iteration_start', onPlannerIterationStart);
     socket.on('planner_block_start', onPlannerBlockStart);
+    socket.on('planner_block_progress', onPlannerBlockProgress);
     socket.on('planner_block_end', onPlannerBlockEnd);
     socket.on('planner_group_end', onPlannerGroupEnd);
     socket.on('planner_run_end', onPlannerRunEnd);
     pageLoading.value = false;
 });
 </script>
-
-<style scoped>
-.planner-block-card {
-    width: 160px;
-    min-width: 160px;
-    max-width: 160px;
-    flex-shrink: 0;
-    border-radius: 6px;
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    overflow: hidden;
-    transition: border-color 0.15s ease;
-}
-.planner-block-card.block-card-active {
-    border-color: var(--q-primary);
-}
-.terminal-block {
-    background: #0c1116;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 6px;
-    padding: 10px 12px;
-}
-.terminal-code {
-    margin: 0;
-    color: #d6deeb;
-    font-family: 'JetBrains Mono', 'Fira Code', Menlo, Consolas, monospace;
-    font-size: 12px;
-    line-height: 1.55;
-    white-space: pre;
-    overflow-x: auto;
-    max-height: 480px;
-}
-</style>

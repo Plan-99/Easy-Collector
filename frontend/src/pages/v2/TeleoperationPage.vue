@@ -18,7 +18,7 @@
                     @click="watchingAssembly = assembly"
                 >
                     <q-card-section class="q-pa-none row items-center">
-                        <div class="text-bold text-h6 col">{{ assembly.name }}</div>
+                        <div class="text-bold text-h6 col ellipsis">{{ assembly.name }}</div>
                         <q-btn
                             flat round dense icon="settings" color="grey-4" size="sm"
                             @click.stop="openTeleopSetting(assembly)"
@@ -27,7 +27,7 @@
                         </q-btn>
                     </q-card-section>
                     <q-card-section class="q-pa-none q-mt-md">
-                        <div v-for="part in ['left_arm', 'left_tool', 'right_arm', 'right_tool']" :key="part">
+                        <div class="ellipsis" v-for="part in ['left_arm', 'left_tool', 'right_arm', 'right_tool']" :key="part">
                             {{ part }}
                             <span class="text-primary">{{ assembly[part]?.name }}</span>
                         </div>

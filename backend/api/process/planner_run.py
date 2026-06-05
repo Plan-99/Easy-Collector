@@ -34,6 +34,11 @@ import traceback
 from .checkpoint_test import checkpoint_test
 
 
+# 그룹 스레드 별 현재 실행 중인 group_id 를 보관. 핸들러가 ctx 가 아닌 thread-local
+# 로 그룹 id 를 읽어가도록 해서 다른 그룹의 동시 실행과 race 가 안 나도록.
+_thread_local = threading.local()
+
+
 def _emit(socketio_instance, event, payload):
     if socketio_instance is None:
         return
@@ -175,17 +180,18 @@ def _preload_checkpoints(groups, socketio_instance):
             )
 
             ood = {}
+            # OOD reference: state(qpos) + image(backbone latent).
             ood_path = os.path.join(ckpt_dir, 'ood_features.npz')
-            if os.path.exists(ood_path) and hasattr(policy, 'enable_feature_caching'):
+            if os.path.exists(ood_path):
                 ood_data = np.load(ood_path)
-                if 'image_features' in ood_data:
-                    ood['image_feats'] = torch.from_numpy(ood_data['image_features']).float()
                 if 'state_features' in ood_data:
                     ood['state_feats'] = torch.from_numpy(ood_data['state_features']).float()
-                if 'image_dist_sorted' in ood_data:
-                    ood['image_dist_sorted'] = ood_data['image_dist_sorted']
                 if 'state_dist_sorted' in ood_data:
                     ood['state_dist_sorted'] = ood_data['state_dist_sorted']
+                if 'image_features' in ood_data:
+                    ood['image_feats'] = torch.from_numpy(ood_data['image_features']).float()
+                if 'image_dist_sorted' in ood_data:
+                    ood['image_dist_sorted'] = ood_data['image_dist_sorted']
 
             cache[cid] = {
                 'policy': policy,
@@ -264,6 +270,263 @@ def _run_joint_position(block, ctx, task_control):
                     pass
 
 
+def _is_tool_agent(agent):
+    """Tool agents (e.g. standalone gripper) don't have EE / IK — they take an
+    absolute joint position instead of an EE delta.
+    """
+    return getattr(agent, 'role', None) == 'tool' or getattr(agent, 'ik_solver', None) is None
+
+
+def _run_move_relative_ee(block, ctx, task_control):
+    """Move arms by ``deltas[<arm_id>]`` (6-DOF EE delta from current EE pose),
+    and tools by ``tool_positions[<tool_id>]`` (absolute joint position).
+
+    Two separate dicts because the semantics differ: arms accept a relative
+    EE delta (delta is added to ``get_ee_position()`` at runtime), tools take
+    an absolute joint command (no EE — just open/close to a target).
+
+    ``deltas``: per-arm 6 floats [dx, dy, dz, drx, dry, drz].
+    ``tool_positions``: per-tool list of absolute joint values (length matches
+    the tool's ``joint_names``).
+
+    is_moving polling + cancel pattern mirrors joint_position.
+    """
+    workspace = ctx['workspaces_by_id'].get(block.get('workspace_id'))
+    if workspace is None:
+        raise RuntimeError(f"workspace_id={block.get('workspace_id')} not found")
+
+    robots = (workspace.get('assembly') or {}).get('robots') or []
+    deltas = block.get('deltas') or {}
+    tool_positions = block.get('tool_positions') or {}
+
+    arm_targets = []   # list of (agent, target_ee_dict)
+    tool_targets = []  # list of (agent, abs_joint_position)
+    for robot in robots:
+        agent = ctx['agents'].get(int(robot['id']))
+        if agent is None:
+            raise RuntimeError(
+                f"robot '{robot.get('name')}' (id={robot['id']}) is not running — turn it on first"
+            )
+
+        # Diagnostic: 첫 실행 시 한 번씩 agent 의 분기 판정 근거 출력.
+        print(
+            f"[MoveRelEE] block='{block.get('name')}' robot={robot.get('id')} "
+            f"({robot.get('name')}) agent.role={getattr(agent, 'role', None)!r} "
+            f"agent.ik_solver={getattr(agent, 'ik_solver', None)!r} "
+            f"is_tool={_is_tool_agent(agent)} "
+            f"deltas_has={str(robot['id']) in (deltas or {})} "
+            f"tool_pos_has={str(robot['id']) in (tool_positions or {})}",
+            flush=True,
+        )
+
+        if _is_tool_agent(agent):
+            pos = tool_positions.get(str(robot['id'])) or tool_positions.get(robot['id'])
+            if pos is None:
+                continue
+            if not isinstance(pos, (list, tuple)):
+                raise RuntimeError(
+                    f"block '{block.get('name')}' tool_positions for robot "
+                    f"{robot['id']} must be a list"
+                )
+            tool_targets.append((agent, [float(v) for v in pos]))
+            continue
+
+        # Arm path
+        delta_vec = deltas.get(str(robot['id'])) or deltas.get(robot['id'])
+        if delta_vec is None:
+            continue
+        if not isinstance(delta_vec, (list, tuple)) or len(delta_vec) != 6:
+            raise RuntimeError(
+                f"block '{block.get('name')}' deltas for robot {robot['id']} "
+                f"must be a 6-element list [dx,dy,dz,drx,dry,drz]"
+            )
+        current_ee = agent.get_ee_position()
+        print(
+            f"[MoveRelEE] arm robot={robot.get('id')} current_ee={current_ee}",
+            flush=True,
+        )
+        if not current_ee:
+            raise RuntimeError(
+                f"robot '{robot.get('name')}' returned empty EE pose — make sure IK is configured"
+            )
+        target_ee = {}
+        d = [float(v) for v in delta_vec]
+        for ee_name, cur in current_ee.items():
+            cur = list(cur)
+            # cur 가 [x,y,z,rx,ry,rz] (6) 또는 [x,y,z,rx,ry,rz,gripper] (7) 일 수
+            # 있음. 앞 6 dim 에만 delta 더하고 뒤는 그대로 유지.
+            new_pose = list(cur)
+            for i in range(min(6, len(new_pose))):
+                new_pose[i] = float(cur[i]) + d[i]
+            target_ee[ee_name] = new_pose
+        print(
+            f"[MoveRelEE] arm robot={robot.get('id')} delta={delta_vec} "
+            f"target_ee={target_ee}",
+            flush=True,
+        )
+        arm_targets.append((agent, target_ee))
+
+    if not arm_targets and not tool_targets:
+        print(f"[WARN] block '{block.get('name')}' has no targets, skipping")
+        return
+
+    duration = float(block.get('duration', 3.0))
+    print(
+        f"[MoveRelEE] dispatching arm_targets={len(arm_targets)} "
+        f"tool_targets={len(tool_targets)} duration={duration}s",
+        flush=True,
+    )
+    for agent, target in arm_targets:
+        agent.move_ee_to(target, duration=duration)
+    for agent, pos in tool_targets:
+        agent.move_to(pos, duration=duration)
+
+    timeout_at = time.time() + max(30.0, duration + 5.0)
+    agents_only = [a for a, _ in arm_targets] + [a for a, _ in tool_targets]
+    try:
+        while time.time() < timeout_at:
+            if task_control['stop']:
+                print('[NOTICE] move_relative_ee interrupted by stop signal')
+                for a in agents_only:
+                    try:
+                        a.cancel_move_to()
+                    except Exception as e:
+                        print(f"[WARN] cancel_move_to failed: {e}")
+                break
+            if not any(a.is_moving for a in agents_only):
+                break
+            time.sleep(0.1)
+        else:
+            print('[WARNING] move_relative_ee timed out — moving on')
+            for a in agents_only:
+                try:
+                    a.cancel_move_to()
+                except Exception:
+                    pass
+    finally:
+        if task_control.get('stop'):
+            for a in agents_only:
+                try:
+                    a.cancel_move_to()
+                except Exception:
+                    pass
+
+
+def _run_replay_episode(block, ctx, task_control):
+    """Replay a recorded episode by streaming its ``action.joint`` (qaction) frame
+    by frame to every robot in the workspace. No policy inference — just a
+    deterministic playback of the captured trajectory.
+
+    Behavior:
+      1. (optional) ``agent.move_to(first_qpos)`` for each robot, wait until
+         ``is_moving`` clears, then sleep ``settle_sec``.
+      2. Iterate frames 1..N at ``hz`` calling ``agent.move_joint_step(qaction)``.
+      3. Stop check every frame; on stop, cancel any in-flight ``move_to``.
+
+    Block keys:
+      workspace_id, dataset_id, episode_index, hz, move_to_first, settle_sec.
+    """
+    from ...utils.lerobot_io import read_episode
+    from ...configs.global_configs import DATASET_DIR
+
+    workspace = ctx['workspaces_by_id'].get(block.get('workspace_id'))
+    if workspace is None:
+        raise RuntimeError(f"workspace_id={block.get('workspace_id')} not found")
+
+    robots = (workspace.get('assembly') or {}).get('robots') or []
+    agents_by_id = {}
+    for robot in robots:
+        agent = ctx['agents'].get(int(robot['id']))
+        if agent is None:
+            raise RuntimeError(f"robot '{robot.get('name')}' (id={robot['id']}) is not running")
+        agents_by_id[int(robot['id'])] = agent
+
+    dataset_id = block.get('dataset_id')
+    if dataset_id is None:
+        raise RuntimeError("replay_episode: dataset_id is required")
+    episode_index = int(block.get('episode_index'))
+    hz = float(block.get('hz') or 20)
+    if hz <= 0:
+        raise RuntimeError(f"replay_episode: invalid hz={hz}")
+    move_to_first = bool(block.get('move_to_first', True))
+    settle_sec = float(block.get('settle_sec') or 0)
+
+    dataset_dir = os.path.join(DATASET_DIR, str(dataset_id))
+    if not os.path.isdir(dataset_dir):
+        raise RuntimeError(f"replay_episode: dataset dir not found: {dataset_dir}")
+
+    ep_data = read_episode(dataset_dir, episode_index)
+    states_by_robot = ep_data["states"]    # {robot_name: np.array (T, D)}
+    actions_by_robot = ep_data["actions"]  # {robot_name: np.array (T, D)}
+    num_frames = ep_data["num_frames"]
+
+    # Resolve agents for the dataset's robot_names. "robot_<id>" → agent id.
+    # Robots present in the dataset but not in the workspace are skipped (rather
+    # than failing) — common when datasets were captured with a superset of
+    # robots and the user just wants the matching subset to replay.
+    name_to_agent = {}
+    for robot_name in actions_by_robot.keys():
+        try:
+            aid = int(robot_name.replace("robot_", ""))
+        except ValueError:
+            continue
+        if aid in agents_by_id:
+            name_to_agent[robot_name] = agents_by_id[aid]
+
+    if not name_to_agent:
+        raise RuntimeError(
+            "replay_episode: no overlap between episode's robots "
+            f"({list(actions_by_robot.keys())}) and workspace's robots "
+            f"({list(agents_by_id.keys())})"
+        )
+
+    # 1) Move to first qpos.
+    if move_to_first:
+        for robot_name, agent in name_to_agent.items():
+            first_qpos = states_by_robot[robot_name][0].tolist()
+            agent.move_to(first_qpos, duration=5.0)
+        movers = list(name_to_agent.values())
+        timeout = 30.0
+        start_wait = time.time()
+        while time.time() - start_wait < timeout:
+            if task_control['stop']:
+                for a in movers:
+                    try:
+                        a.cancel_move_to()
+                    except Exception:
+                        pass
+                return
+            if not any(a.is_moving for a in movers):
+                break
+            time.sleep(0.05)
+        if settle_sec > 0:
+            t0 = time.time()
+            while time.time() - t0 < settle_sec:
+                if task_control['stop']:
+                    return
+                time.sleep(0.05)
+
+    # 2) Replay frames at hz. i=0 은 record_episode 의 reset 프레임(qaction 의미
+    # 없음) 이라 1 부터 시작 — read_dataset.py 와 동일한 규칙.
+    period = 1.0 / hz
+    next_tick = time.time()
+    for i in range(1, num_frames):
+        if task_control['stop']:
+            return
+        for robot_name, agent in name_to_agent.items():
+            qaction = actions_by_robot[robot_name][i]
+            agent.move_joint_step(qaction)
+        next_tick += period
+        remaining = next_tick - time.time()
+        if remaining > 0.002:
+            time.sleep(remaining - 0.002)
+        if remaining > 0:
+            while time.time() < next_tick:
+                pass
+        else:
+            next_tick = time.time()
+
+
 def _run_checkpoint(block, ctx, task_control):
     from ...database.models.checkpoint_model import Checkpoint as CheckpointModel
 
@@ -292,7 +555,9 @@ def _run_checkpoint(block, ctx, task_control):
     duration = float(block.get('duration') or 30)
     until_done = bool(block.get('until_done'))
     # block 단위 home pose 토글: 기본 True (frontend default 와 일치).
-    # move_homepose 가 켜져있을 때만 checkpoint_test 의 go_home_first / move_homepose 가 True.
+    # 켜져 있으면 inference 시작 직전에 한 번 home 으로 이동. 이전엔 episode_len
+    # 마다 강제로 home 복귀하는 부수 효과도 있었으나 제거됨 — 사용자가 명시적으로
+    # 멈출 때까지 inference 가 자유롭게 흐른다.
     move_homepose = bool(block.get('move_homepose', True))
     try:
         move_homepose_duration = float(block.get('move_homepose_duration') or 5.0)
@@ -306,8 +571,20 @@ def _run_checkpoint(block, ctx, task_control):
         done_threshold = float(block.get('done_threshold') if block.get('done_threshold') is not None else 0.5)
     except (TypeError, ValueError):
         done_threshold = 0.5
+    # 실패 판정 step 한도. 0/None 이면 비활성 (실패 판정 없음). until_done 모드에서
+    # done 신호가 안 떨어진 채 이 step 수에 도달하면 실패로 간주.
+    max_steps = block.get('max_steps')
+    try:
+        max_steps = int(max_steps) if max_steps is not None else None
+        if max_steps is not None and max_steps <= 0:
+            max_steps = None
+    except (TypeError, ValueError):
+        max_steps = None
     sub_control = {'stop': False, 'done': False, 'done_threshold': done_threshold if until_done else None}
     preloaded = (ctx.get('preloaded') or {}).get(block.get('checkpoint_id'))
+    # record 를 넘기면 checkpoint_test 가 매 step 마다 ``record['steps']`` 를 갱신.
+    # step-based 실패 판정용.
+    record: dict = {}
 
     def _runner():
         try:
@@ -328,8 +605,9 @@ def _run_checkpoint(block, ctx, task_control):
                 re_inference_steps=block.get('re_inference_steps', 1),
                 temporal_ensemble_coeff=block.get('temporal_ensemble_coeff', 0.01),
                 action_type=block.get('action_type'),
+                succeed_done_frames=int(block.get('succeed_done_frames') or 3),
                 preloaded=preloaded,
-                go_home_first=move_homepose,
+                record=record,
             )
         except Exception:
             print(f"[ERROR] checkpoint_test failed: {traceback.format_exc()}")
@@ -338,14 +616,46 @@ def _run_checkpoint(block, ctx, task_control):
     thread.start()
 
     deadline = None if until_done else time.time() + duration
+    failed = False
+    last_emit_step = -1
+    block_id = block.get('id')
+    group_id = getattr(_thread_local, 'group_id', None)
+    socketio = ctx['socketio']
     try:
         while True:
             if task_control['stop']:
+                break
+            # 커리큘럼 롤아웃이 "현재 블록만 중단" (:stop_current_block) 을 요청한
+            # 경우 — task_control 채널로 들어온다. 비타겟 체크포인트는 이 (planner)
+            # 러너로 실행되므로 여기서도 플래그를 봐야 멈춘다. 소비(False) 후 break
+            # 하여 fallback 점프 없이 다음 블록으로 진행. planner 단독 실행에선 이
+            # 키가 set 되지 않으므로 무해.
+            if task_control.get('stop_current_block'):
+                task_control['stop_current_block'] = False
+                print(f"[PLANNER] checkpoint block '{block.get('name')}' stopped by stop_current_block")
                 break
             if sub_control.get('done'):
                 print(f"[PLANNER] checkpoint block '{block.get('name')}' done signal triggered (threshold={done_threshold})")
                 break
             if deadline is not None and time.time() >= deadline:
+                break
+            cur_step = int(record.get('steps') or 0)
+            # UI 가 checkpoint 블록 카드에 "현재 스텝 / max_steps" 뱃지를 보여줄 수
+            # 있도록 step 변동분만 emit (불필요한 트래픽 억제).
+            if cur_step != last_emit_step:
+                last_emit_step = cur_step
+                _emit(socketio, 'planner_block_progress', {
+                    'group_id': group_id,
+                    'block_id': block_id,
+                    'step': cur_step,
+                    'max_steps': max_steps,
+                })
+            if max_steps is not None and cur_step >= max_steps:
+                failed = True
+                print(
+                    f"[PLANNER] checkpoint block '{block.get('name')}' failed: reached max_steps={max_steps} "
+                    f"without done signal"
+                )
                 break
             time.sleep(0.1)
     finally:
@@ -353,6 +663,27 @@ def _run_checkpoint(block, ctx, task_control):
         thread.join(timeout=15)
         if thread.is_alive():
             print('[WARNING] checkpoint_test thread did not exit within 15s')
+
+    # 실패 + fallback 블록 지정 → ``_run_group`` 에 "이 id 의 블록으로 jump" 신호.
+    # 핸들러 안에서 직접 fallback 을 돌리지 않고 _run_group 이 다음 블록으로
+    # 정상 실행하게 해야:
+    #   1) UI 가 planner_block_start 를 받아 fallback 블록이 포커스됨
+    #   2) fallback 이 끝나면 그 뒤 블록부터 plan 이 자연스럽게 계속 진행됨
+    # 사용자가 stop 누른 경우엔 jump 도 트리거하지 않는다.
+    if failed and not task_control.get('stop'):
+        fb_id = block.get('fallback_block_id')
+        fb = (ctx.get('block_by_id') or {}).get(fb_id) if fb_id else None
+        if fb:
+            print(
+                f"[PLANNER] block '{block.get('name')}' failed → jumping to fallback "
+                f"'{fb.get('name')}' (id={fb_id})"
+            )
+            _thread_local.jump_to_block_id = fb_id
+        else:
+            print(
+                f"[WARNING] checkpoint block '{block.get('name')}' failed but no fallback "
+                f"resolvable (fallback_block_id={block.get('fallback_block_id')!r})"
+            )
 
 
 def _run_timesleep(block, ctx, task_control):
@@ -648,6 +979,8 @@ def _run_sync(block, ctx, task_control, group_id):
 
 _HANDLERS = {
     'joint_position': _run_joint_position,
+    'move_relative_ee': _run_move_relative_ee,
+    'replay_episode': _run_replay_episode,
     'checkpoint': _run_checkpoint,
     'timesleep': _run_timesleep,
     'query_pose': _run_query_pose,
@@ -661,8 +994,13 @@ def _run_group(group, ctx, task_control, repeat_count, infinite, total_iteration
     """Execute a single group's plan in this thread. Returns ``(status, error)``."""
     socketio_instance = ctx['socketio']
     group_id = group['id']
+    # 핸들러가 emit 할 때 group_id 를 알 수 있도록 thread-local 에 적재.
+    _thread_local.group_id = group_id
+    _thread_local.jump_to_block_id = None
     plan = list(group.get('blocks') or [])
     total = len(plan)
+    # block_id → index 매핑 — fallback jump 시 빠르게 위치 찾기 위함.
+    id_to_index = {b.get('id'): i for i, b in enumerate(plan) if b.get('id')}
 
     _emit(socketio_instance, 'planner_group_start', {
         'group_id': group_id,
@@ -676,16 +1014,25 @@ def _run_group(group, ctx, task_control, repeat_count, infinite, total_iteration
             return 'stopped', None
 
         iteration += 1
+        # 매 iteration 시작 시 jump flag 초기화 — 직전 iteration 의 fallback 신호가
+        # 새 iteration 으로 새지 않도록.
+        _thread_local.jump_to_block_id = None
         _emit(socketio_instance, 'planner_iteration_start', {
             'group_id': group_id,
             'iteration': iteration,
             'total_iterations': total_iterations,
         })
 
-        for index, block in enumerate(plan):
+        # for 가 아닌 while 로 — fallback jump 처리 시 index 를 자유롭게 옮기기
+        # 위해. 한 iteration 안에서 같은 블록을 두 번 실행하는 무한 루프 방지를
+        # 위해 visited 도 두지는 않음 (사용자가 repeat / 무한 모드를 의도적으로
+        # 쓸 수 있고, 같은 블록 재실행 자체는 정상 시나리오).
+        index = 0
+        while index < total:
             if task_control['stop']:
                 return 'stopped', None
 
+            block = plan[index]
             handler = _HANDLERS.get(block.get('type'))
             block_summary = {
                 'group_id': group_id,
@@ -727,6 +1074,24 @@ def _run_group(group, ctx, task_control, repeat_count, infinite, total_iteration
             if block_status == 'stopped':
                 return 'stopped', None
 
+            # 핸들러가 fallback jump 신호를 남겼는지 확인. 있으면 그 블록의
+            # plan 내 index 로 점프 → 그 다음 iteration step 에서 fallback 이
+            # 정상 블록처럼 실행되고 (block_start emit), 끝나면 그 뒤 블록부터
+            # plan 이 자연스럽게 이어진다.
+            jump_id = getattr(_thread_local, 'jump_to_block_id', None)
+            if jump_id:
+                _thread_local.jump_to_block_id = None
+                target = id_to_index.get(jump_id)
+                if target is not None:
+                    index = target
+                    continue
+                print(
+                    f"[WARNING] [{group_id}] jump target block_id={jump_id!r} not in "
+                    f"this group's plan — continuing sequentially"
+                )
+
+            index += 1
+
     return 'finished', None
 
 
@@ -764,6 +1129,15 @@ def planner_run(groups, workspaces, app, socketio_instance, task_control,
         print(f"[PLANNER] sync barriers: "
               f"{ {sid: sorted(b.expected) for sid, b in sync_barriers.items()} }")
 
+    # fallback_block_id 로 다른 블록을 참조해 실패 시 디스패치할 수 있도록 모든
+    # 블록의 id→block 매핑을 미리 만들어 ctx 에 넣는다. (curriculum_rollout 의
+    # block_by_id 와 동일 패턴.)
+    block_by_id = {}
+    for grp in groups:
+        for blk in grp.get('blocks') or []:
+            if blk.get('id'):
+                block_by_id[blk['id']] = blk
+
     ctx = {
         'app': app,
         'agents': getattr(app, 'agents', {}),
@@ -771,6 +1145,7 @@ def planner_run(groups, workspaces, app, socketio_instance, task_control,
         'workspaces_by_id': {ws['id']: ws for ws in workspaces},
         'preloaded': preloaded,
         'sync_barriers': sync_barriers,
+        'block_by_id': block_by_id,
     }
 
     # 그룹별 상태 수집. 한 그룹이 error여도 다른 그룹은 자기 일을 끝내도록 둠

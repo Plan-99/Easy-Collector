@@ -142,7 +142,20 @@
                                 <div class="col cursor-pointer"
                                     @click="selectDatasetForBatch(dataset)"
                                     :class="{ 'text-primary': selectedDatasetForBatch && selectedDatasetForBatch.id === dataset.id }">
-                                    <div>{{ dataset.name }} ({{ dataset.id }})</div>
+                                    <div class="row items-center q-gutter-x-sm">
+                                        <span class="ellipsis">{{ dataset.name }} ({{ dataset.id }})</span>
+                                    </div>
+                                    <!-- origin='curriculum' 인 데이터셋은 커리큘럼 소유 — 편집/일괄변경은 허용,
+                                         데이터셋 자체 삭제만 차단(아래 컨텍스트 메뉴). 뱃지는 이름 한 줄 아래에
+                                         "스테이지 N {성공/실패/교정}데이터" 로 표시. -->
+                                    <div v-if="dataset.origin === 'curriculum'">
+                                        <q-chip
+                                            size="sm" dense square
+                                            color="amber-9" text-color="white"
+                                            icon="auto_awesome"
+                                            :label="curriculumBadgeLabel(dataset)"
+                                        />
+                                    </div>
                                     <div class="text-caption text-grey-5">
                                         {{ dataset.episodes.length }} {{ $t('datasetEpisodesSuffix') }}
                                     </div>
@@ -165,11 +178,13 @@
                                             <q-item-section>{{ $t('workspaceExportDataset') }}</q-item-section>
                                             <q-item-section side><q-icon name="file_download" size="xs" color="grey-5" /></q-item-section>
                                         </q-item>
-                                        <q-separator dark />
-                                        <q-item clickable v-ripple class="text-negative" v-close-popup @click="deleteDataset(dataset)">
-                                            <q-item-section>{{ $t('workspaceDatasetDelete') }}</q-item-section>
-                                            <q-item-section side><q-icon color="negative" name="delete" size="xs" /></q-item-section>
-                                        </q-item>
+                                        <template v-if="dataset.origin !== 'curriculum'">
+                                            <q-separator dark />
+                                            <q-item clickable v-ripple class="text-negative" v-close-popup @click="deleteDataset(dataset)">
+                                                <q-item-section>{{ $t('workspaceDatasetDelete') }}</q-item-section>
+                                                <q-item-section side><q-icon color="negative" name="delete" size="xs" /></q-item-section>
+                                            </q-item>
+                                        </template>
                                     </q-list>
                                 </q-menu>
                                 <q-space />
@@ -204,7 +219,7 @@
                                         />
                                     </q-item-section>
                                     <q-item-section>
-                                        <q-item-label>{{ episode.name }}</q-item-label>
+                                        <q-item-label lines="1">{{ episode.name }}</q-item-label>
                                         <q-item-label caption class="text-grey-5">
                                             {{ $t('datasetFrames', { count: episode.length || 0 }) }}
                                         </q-item-label>
@@ -400,6 +415,9 @@ const selectedWorkspaceId = ref(null);
 const pageLoading = ref(true);
 
 function listWorkspaces() {
+    // 드롭다운 표시 (option-label='name' option-value='id') 외에 workspace 의
+    // 다른 필드를 안 쓰므로 light 응답으로 충분. 백엔드 기본값이 light 라 별도
+    // 파라미터 없이 호출.
     return api.get('/tasks').then((res) => {
         workspaces.value = res.data.tasks || [];
     });
@@ -484,6 +502,19 @@ function selectedTransfers() {
 const currentEpisode = ref(null);
 const currentDatasetIdForViewer = ref(null);
 const selectedDatasetForBatch = ref(null);
+
+// 커리큘럼 소유 데이터셋 뱃지 라벨: "스테이지 N {성공/실패/교정}데이터".
+// stage_index 는 백엔드 dataset dict 에서 내려옴(rename 에도 견고). role 은 dataset.role.
+function curriculumBadgeLabel(dataset) {
+    const roleMap = {
+        success: t('datasetRoleSuccess'),
+        failure: t('datasetRoleFailure'),
+        dagger: t('datasetRoleDagger'),
+    };
+    const role = roleMap[dataset.role] || dataset.role || '';
+    const n = dataset.stage_index != null ? dataset.stage_index : '?';
+    return t('curriculumStageDataBadge', { n, role });
+}
 
 function selectDatasetForBatch(dataset) {
     if (!dataset || !(dataset.episodes || []).length) {

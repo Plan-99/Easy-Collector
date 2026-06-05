@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# manual-check — MANUAL.md 가 기능 표면보다 오래됐으면 exit≠0 (제3·4원칙: 규칙 아닌 환경 강제).
+# "기능 업데이트마다 매뉴얼 갱신"을 *부탁*이 아니라 게이트로 보장한다.
+# 빨간불이면 manual-writer agent 를 호출해 MANUAL.md 를 동기화하라.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+MANUAL="${MANUAL_PATH:-MANUAL.md}"
+# 이 매뉴얼이 책임지는 기능 표면. forge 가 채운다. (라우트·CLI 명령·UI 컴포넌트·공개 API)
+GLOBS=({{FEATURE_GLOBS}})   # 예: src/**/routes*.py web/**/*.vue src/**/cli.py
+
+if [ ! -f "$MANUAL" ]; then
+  echo "FAIL: $MANUAL 없음 — manual-writer 가 최초 매뉴얼을 작성해야 함"; exit 1
+fi
+
+# --- git 경로(우선): 매뉴얼의 마지막 커밋 이후 기능 표면이 바뀌었나 ---
+if git rev-parse --git-dir >/dev/null 2>&1; then
+  manual_commit="$(git log -1 --format=%H -- "$MANUAL" 2>/dev/null || true)"
+  if [ -z "$manual_commit" ]; then
+    echo "FAIL: $MANUAL 가 아직 커밋되지 않음 — 기능 표면과 동기화 후 커밋하라"; exit 1
+  fi
+  changed="$(git diff --name-only "$manual_commit" HEAD -- "${GLOBS[@]}" 2>/dev/null || true)"
+  if [ -n "$changed" ]; then
+    echo "FAIL: 기능 표면이 MANUAL.md 보다 새로움. 아래 변경을 매뉴얼에 반영하라:"
+    echo "$changed" | sed 's/^/  - /'
+    exit 1
+  fi
+  echo "OK: MANUAL.md 가 기능 표면과 동기화됨 (git)"; exit 0
+fi
+
+# --- mtime 폴백(git 아님): 가장 새로운 기능 파일 vs 매뉴얼 ---
+manual_ts=$(stat -c %Y "$MANUAL")
+newest=0
+for g in "${GLOBS[@]}"; do
+  for f in $g; do
+    [ -f "$f" ] || continue
+    ts=$(stat -c %Y "$f"); [ "$ts" -gt "$newest" ] && newest=$ts
+  done
+done
+if [ "$newest" -gt "$manual_ts" ]; then
+  echo "FAIL: 기능 파일이 MANUAL.md 보다 새로움(mtime) — manual-writer 로 동기화하라"; exit 1
+fi
+echo "OK: MANUAL.md 가 기능 표면과 동기화됨 (mtime)"; exit 0

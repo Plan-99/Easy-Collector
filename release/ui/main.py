@@ -56,6 +56,7 @@ from installer import run_setup_wizard
 from launcher import MainWindow
 from service import RuntimeServiceMixin, docker_compose_available, ensure_signed_in, grant_local_x11_access
 from update import CONFIG_UPGRADE_KEY
+from i18n import t
 
 _APP_STYLE = """
     QMainWindow#LauncherWindow, QWidget#PillWrapper { background-color: transparent; }
@@ -194,10 +195,10 @@ def main() -> int:
     app = QApplication(sys.argv)
     _apply_app_style(app)
     if not _ensure_startup_permissions():
-        QMessageBox.critical(None, "권한 필요", "데이터/프로젝트 경로 권한을 획득하지 못해 종료합니다.")
+        QMessageBox.critical(None, t("main.permTitle"), t("main.permBody"))
         return 1
     if not ensure_signed_in():
-        QMessageBox.critical(None, "로그인 필요", "로그인을 완료하지 못해 프로그램을 종료합니다.")
+        QMessageBox.critical(None, t("main.signInTitle"), t("main.signInBody"))
         return 1
 
     # Warm the module catalog + entitlement caches in the background. The UI
@@ -210,7 +211,7 @@ def main() -> int:
         pass
 
     if not docker_compose_available():
-        QMessageBox.critical(None, "오류", "Docker가 설치되어 있지 않거나 PATH에 없습니다.")
+        QMessageBox.critical(None, t("main.errorTitle"), t("main.dockerMissingBody"))
         return 1
 
     # Docker 컨테이너 내부 root가 호스트 X 서버에 붙을 수 있도록 ACL 추가.
@@ -238,7 +239,7 @@ def main() -> int:
         def _auto_start():
             if not win.auto_launch_enabled():
                 return
-            win._show_preload_dialog("Easy Trainer 준비중...")
+            win._show_preload_dialog(t("main.preparing"))
             QTimer.singleShot(0, win.on_start)
         if win.auto_launch_enabled():
             win._update_manager.set_continue_handler(_auto_start)

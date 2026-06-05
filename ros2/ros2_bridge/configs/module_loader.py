@@ -208,6 +208,55 @@ def get_robot_driver_hooks(robot_type: str) -> dict | None:
     return None
 
 
+def get_robot_driver_remote(robot_type: str) -> dict | None:
+    """robot_type 의 driver.remote 블록을 반환 (원격 SSH 드라이버).
+
+    원격 모드: 로봇 자체 PC(온보드 PC)에서 ROS 드라이버를 실행하고 EasyTrainer 는
+    같은 DDS 도메인에서 토픽만 주고받는 운용. driver_service 가 settings 의
+    host_field(기본 'ssh_host') 가 채워져 있으면 이 블록으로 동작한다.
+
+    스키마:
+      {"enabled_when": "ssh_host",            # settings 에 이 키가 차 있으면 원격 모드
+       "host_field": "ssh_host",              # 호스트명/IP settings 키
+       "user_field": "ssh_user",              # (optional) 사용자 settings 키
+       "port_field": "ssh_port",              # (optional) 포트 settings 키
+       "password_field": "ssh_password",      # (optional) 비밀번호 settings 키.
+                                              #   채워지면 sshpass 로 암호 인증, 비면 키 인증.
+                                              #   (ros2 컨테이너에 apt 'sshpass' 필요)
+       "default_user": "root",                # user_field 비었을 때
+       "default_port": 22,
+       "ros_domain_id": 30,                   # (optional) 바깥 ssh 셸에 export
+       "read_topic": "/joint_states",         # (optional) 원격 모드 토픽 override
+       "write_topic": "/leader/joint_trajectory",
+       "write_topic_msg": "trajectory_msgs/JointTrajectory",
+       "payload": [{"src": "{ros2_root}/remote/foo", "dst": "/remote/path/foo"}],
+       "provision": [{"name": str,
+                      "check": "<sh; exit 0 이면 이미 완료 → skip>",   # optional
+                      "run": "<sh>",
+                      "timeout": 600,                                   # optional, 초
+                      "optional": false}],                             # optional, 실패해도 계속
+       "launch": "<원격에서 blocking 으로 도는 드라이버 실행 sh 명령>"}
+
+    문자열 값은 {ssh_host}, {robot_id}, {namespace}, {key|default} placeholder 를
+    포함 가능 — driver_service 가 settings 와 결합해 치환한다.
+
+    반환값에 `module_id` 가 포함된다 (payload src 의 {ros2_root} 해석에 사용).
+    """
+    for manifest in _iter_manifests():
+        if (manifest.get('category') or '') != 'robot':
+            continue
+        manifest = _resolve_manifest_paths(manifest)
+        for robot in manifest.get('robots') or []:
+            if robot.get('type') != robot_type:
+                continue
+            remote = (robot.get('driver') or {}).get('remote')
+            if isinstance(remote, dict) and (remote.get('launch') or remote.get('provision')):
+                out = dict(remote)
+                out['module_id'] = manifest.get('id', '')
+                return out
+    return None
+
+
 def get_sensor_driver_launch(sensor_type: str) -> dict | None:
     """sensor_type 의 module.json 에서 driver.launch 블록을 반환.
 

@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>omy_description</name>
+  <version>1.0.0</version>
+  <description>
+    ROBOTIS OMY (OMY-3M / OMY-F3M) URDF description for EasyTrainer.
+    Renamed from open_manipulator_description to avoid a colcon package-name
+    clash with the OMX module, which ships the upstream package.
+  </description>
+  <maintainer email="pyo@robotis.com">Pyo</maintainer>
+  <license>Apache 2.0</license>
+  <url type="repository">https://github.com/ROBOTIS-GIT/open_manipulator</url>
+  <author email="ywh@robotis.com">Wonho Yun</author>
+  <author email="wwj@robotis.com">Woojin Wie</author>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <exec_depend>realsense2_description</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

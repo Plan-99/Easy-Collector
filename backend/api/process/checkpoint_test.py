@@ -30,6 +30,45 @@ import gc
 import threading
 
 
+# 현재 실행 중인 추론(checkpoint_test)의 task_control 핸들. 어떤 경로로 호출됐든
+# (워크스페이스 단독 / 커리큘럼 / 플래너) 추론이 도는 동안 여기에 등록되어, vision-map
+# 토글 라우트(:set_inference_vision_map)가 프로세스 이름과 무관하게 이 control 에
+# ``vision_map_method`` 를 쓸 수 있다. 동시 추론은 단일(커리큘럼/플래너는 순차)이라 1개로 충분.
+_active_inference = {'control': None}
+
+# image OOD 재계산 주기(step). backbone forward 가 정책 자체 forward 와 별개로 한 번 더
+# 돌아 비용이 있으므로 매 step 이 아니라 N step 마다만 갱신(이미지 OOD 는 천천히 변함).
+OOD_IMG_EVERY = 5
+
+
+def compute_image_latent(policy, policy_input, image_feature_keys):
+    """정규화된 ``policy_input`` 의 카메라 이미지들을 정책의 vision backbone 에 통과시켜
+    GAP(global average pool) latent 을 카메라 순서대로 concat 한 (1, D) 텐서 반환.
+
+    OOD 판정용 — 학습 데이터셋(generate_ood_features)과 추론(checkpoint_test)이 **같은
+    함수 + 같은 전처리(process_image→preprocessor)** 를 거치므로 표현이 일치한다.
+    backbone 이 없으면(ACT 외 정책) None.
+    """
+    model = getattr(policy, 'model', None)
+    backbone = getattr(model, 'backbone', None) if model is not None else None
+    if backbone is None:
+        return None
+    feats = []
+    for key in (image_feature_keys or []):
+        img = policy_input.get(key)
+        if img is None:
+            continue
+        out = backbone(img)
+        fm = out['feature_map'] if isinstance(out, dict) else out
+        if fm is None:
+            continue
+        # (B, C, H, W) → (B, C)
+        feats.append(fm.mean(dim=[2, 3]))
+    if not feats:
+        return None
+    return torch.cat(feats, dim=1)
+
+
 def _move_to_homepose(agents, home_pose, task_control, socketio_instance, timeout=30.0, duration=5.0, settle_sec=0.0):
     """home_pose가 None이거나 매핑이 없으면 즉시 리턴.
 
@@ -100,12 +139,17 @@ def checkpoint_test(
     re_inference_steps=1,
     temporal_ensemble_coeff=0.01,
     action_type=None,
+    # succeed 토큰이 임계값을 **연속으로 N 프레임** 넘어야 done 으로 인정 — 단발성
+    # succeed 스파이크(예: OOD 시작 자세에서 1~2 step 만에 가짜 성공)로 에피소드가
+    # 즉시 종료/성공 처리되는 것을 방지하는 debounce. 1 이면 기존(즉시) 동작.
+    succeed_done_frames=3,
     language_instruction=None,  # optional VLA prompt for PI0.5; falls back to task['name']
     inference_episode_len=None,  # planner feature: inference 시 별도 episode_len 지정
     preloaded=None,
-    go_home_first=True,
     action_hz=None,       # 로봇 명령 송신 rate. 미지정 시 hz 와 동일 (back-compat).
     inference_hz=None,    # 모델 inference 호출 rate. 미지정 시 action_hz / re_inference_steps.
+    record=None,          # curriculum 롤아웃 녹화 버퍼. dict 를 넘기면 step 마다
+                          # timesteps/succeed_flags 를 채우고 'steps' 를 라이브 갱신한다.
     ):
 
     agents = sorted(agents, key=lambda a: a.id)
@@ -261,17 +305,19 @@ def checkpoint_test(
                 pretrained_path=ckpt_dir,
             )
             ood_cpu = {}
+            # OOD reference: state(qpos) + image(backbone latent). 둘 다 generate_ood_features
+            # 가 lerobot_io / backbone 으로 미리 뽑아둔 것.
             ood_features_path = os.path.join(ckpt_dir, 'ood_features.npz')
-            if os.path.exists(ood_features_path) and hasattr(policy, 'enable_feature_caching'):
+            if os.path.exists(ood_features_path):
                 ood_data = np.load(ood_features_path)
-                if 'image_features' in ood_data:
-                    ood_cpu['image_feats'] = torch.from_numpy(ood_data['image_features']).float()
                 if 'state_features' in ood_data:
                     ood_cpu['state_feats'] = torch.from_numpy(ood_data['state_features']).float()
-                if 'image_dist_sorted' in ood_data:
-                    ood_cpu['image_dist_sorted'] = ood_data['image_dist_sorted']
                 if 'state_dist_sorted' in ood_data:
                     ood_cpu['state_dist_sorted'] = ood_data['state_dist_sorted']
+                if 'image_features' in ood_data:
+                    ood_cpu['image_feats'] = torch.from_numpy(ood_data['image_features']).float()
+                if 'image_dist_sorted' in ood_data:
+                    ood_cpu['image_dist_sorted'] = ood_data['image_dist_sorted']
 
         # Per-block re-inference / temporal ensemble setup. Always reapply because
         # the same cached policy may be reused with different params across blocks.
@@ -348,15 +394,15 @@ def checkpoint_test(
             print(f'[INFER] Loaded preprocessor/postprocessor from {ckpt_dir} '
                   f'(action_key_norm={action_key_norm})')
 
-        # OOD reference tensors — keep originals on CPU (so the cache survives),
-        # ship a CUDA copy into the loop. The CUDA copies are freed in finally.
-        ood_image_feats = ood_cpu['image_feats'].cuda() if ood_cpu.get('image_feats') is not None else None
+        # OOD reference tensors — 원본은 CPU(preloaded 캐시 보존), CUDA 사본을 루프에 투입.
+        # (CUDA 사본은 finally 에서 해제.) state=qpos 거리, image=backbone latent 거리.
         ood_state_feats = ood_cpu['state_feats'].cuda() if ood_cpu.get('state_feats') is not None else None
-        ood_image_dist_sorted = ood_cpu.get('image_dist_sorted')
         ood_state_dist_sorted = ood_cpu.get('state_dist_sorted')
-        if (ood_image_feats is not None or ood_state_feats is not None) and hasattr(policy, 'enable_feature_caching'):
-            policy.enable_feature_caching(True)
-            print(f'[OOD] Loaded reference features: image={ood_image_feats.shape if ood_image_feats is not None else None}, state={ood_state_feats.shape if ood_state_feats is not None else None}')
+        ood_image_feats = ood_cpu['image_feats'].cuda() if ood_cpu.get('image_feats') is not None else None
+        ood_image_dist_sorted = ood_cpu.get('image_dist_sorted')
+        if ood_state_feats is not None or ood_image_feats is not None:
+            print(f'[OOD] Loaded reference: state={tuple(ood_state_feats.shape) if ood_state_feats is not None else None}, '
+                  f'image={tuple(ood_image_feats.shape) if ood_image_feats is not None else None}')
 
         # Grad-CAM 활성화
         gradcam_enabled = hasattr(policy, 'enable_gradcam')
@@ -399,9 +445,10 @@ def checkpoint_test(
         tutorial = any((s.get('settings') or {}).get('is_tutorial') for s in (sensors or []))
         env = RemoteEnv(agents, sensors, tutorial=tutorial)
         vision_backbone = policy_obj.get('vision_backbone')
-        # 추론 1 에피소드 길이 — move_homepose가 켜져 있으면 이 step 만큼 추론한 뒤
-        # 다시 home으로 돌아간다. 프론트에서 명시한 값이 있으면 그것을 쓰고,
-        # 없으면 task의 episode_len * 2를 기본값으로 사용.
+        # 추론 1 에피소드 길이 — UI 진행도 표시(``inference_progress`` emit) 의
+        # 분모로 사용. 이전엔 이 step 마다 home 복귀하는 cycle 의 길이였지만 그
+        # 동작은 제거됨. 프론트에서 명시한 값이 있으면 그것을 쓰고, 없으면 task 의
+        # episode_len * 2 를 기본값으로 사용.
         _base_ep_len = int(task.get('episode_len', 300))
         if inference_episode_len:
             episode_len = max(1, int(inference_episode_len))
@@ -485,7 +532,10 @@ def checkpoint_test(
         probing_freqs = np.linspace(0.1, 0.4, joint_len) * 2 * np.pi
 
         policy.reset()
-        if go_home_first:
+        # 초기 homepose 이동은 ``move_homepose`` toggle 로만 트리거. 이전엔 별도
+        # ``go_home_first`` flag 가 있어 호출자가 빠뜨리면 기본값 True 로 강제
+        # 이동했는데, 이는 UI 토글을 무시하는 경로라 제거.
+        if move_homepose:
             _move_to_homepose(env.agents, home_pose, task_control, socketio_instance, duration=move_homepose_duration, settle_sec=move_homepose_settle_sec)
             if task_control['stop']:
                 return
@@ -621,38 +671,58 @@ def checkpoint_test(
                 if policy_obj['type'] == 'PI05':
                     _lang = language_instruction if (language_instruction and str(language_instruction).strip()) else task.get('name', '')
                     _policy_input['language_instruction'] = _lang
-                for _sensor in sensors:
-                    _img = obs_snap['images'][f'sensor_{_sensor["id"]}']
-                    _sid = str(_sensor['id'])
+                # Multi-view: same physical sensor can appear multiple times in
+                # ``sensors`` (each with its own view_key + crop/rotate/resize).
+                # The raw frame comes from physical 'sensor_{id}' shm; per-view
+                # transforms are applied independently. policy_input keys use
+                # view_key so the model sees one input per view.
+                # Sensor_id stable sort → 같은 sensor 의 view 들이 인접.
+                # build_features/append_episode 와 동일 ordering 이라 모델의
+                # image_features 순서와도 일치.
+                from ...utils.sensor_view import view_key as _view_key
+                _sorted_sensors_bg = sorted(sensors, key=lambda _s: int(_s['id']))
+                _view_occ: dict = {}
+                for _sensor in _sorted_sensors_bg:
+                    _sid_int = int(_sensor['id'])
+                    _occ = _view_occ.get(_sid_int, 0)
+                    _view_occ[_sid_int] = _occ + 1
+                    _vkey = _view_key(_sid_int, _occ)
+                    _sid = str(_sid_int)  # physical id (raw frame lookup)
+                    _img = obs_snap['images'][f'sensor_{_sid}']
                     _raw_shape = getattr(_img, 'shape', None)
+                    # Per-view config: prefer vkey-specific entry, fall back to
+                    # physical sid for backward compat with single-view tasks.
+                    # `or` 대신 lookup_view_setting 사용 — rotate=0 같은 falsy
+                    # 정상값이 sensor 기본값으로 잘못 fallback 되는 버그 방지.
+                    from ...utils.sensor_view import lookup_view_setting as _lvs
                     _img = fetch_image_with_config(_img, {
-                        'sensor_id': _sid,
-                        'sam3': (task.get('sensor_sam3') or {}).get(_sid),
-                        'resize': task['sensor_img_size'][_sid],
-                        'cropped_area': task['sensor_cropped_area'][_sid],
-                        'rotate': task['sensor_rotate'][_sid],
+                        'sensor_id': _vkey,
+                        'sam3': _lvs(task.get('sensor_sam3'), _vkey, _sid),
+                        'resize': _lvs(task.get('sensor_img_size'), _vkey, _sid),
+                        'cropped_area': _lvs(task.get('sensor_cropped_area'), _vkey, _sid),
+                        'rotate': _lvs(task.get('sensor_rotate'), _vkey, _sid, default=0),
                     })
                     if hasattr(_img, 'ndim') and _img.ndim == 3 and _img.shape[2] == 3:
                         _img = _img[:, :, ::-1]
                         _img = np.ascontiguousarray(_img)
-                    # Log the raw→post-pipeline shape ONCE per sensor so the user
+                    # Log the raw→post-pipeline shape ONCE per view so the user
                     # can confirm the inference path produces the same image
                     # shape the model was trained on. Stored on the function obj
-                    # so each sensor logs exactly once across all inference steps.
+                    # so each view logs exactly once across all inference steps.
                     _seen = getattr(checkpoint_test, '_img_shape_seen', None)
                     if _seen is None:
                         _seen = set(); checkpoint_test._img_shape_seen = _seen
-                    if _sid not in _seen:
-                        _seen.add(_sid)
+                    if _vkey not in _seen:
+                        _seen.add(_vkey)
                         print(
-                            f"[checkpoint_test] sensor_{_sid} raw={_raw_shape} "
+                            f"[checkpoint_test] sensor_{_vkey} (phys={_sid}) raw={_raw_shape} "
                             f"→ after fetch_image_with_config={getattr(_img, 'shape', None)} "
                             f"→ process_image target={image_resolution}",
                             flush=True,
                         )
                     _pixel_range = '-11' if policy_obj['type'] == 'PI05' else '01'
                     _img = process_image(_img, vision_backbone, to_cuda=True, pixel_range=_pixel_range, image_resolution=image_resolution)
-                    _policy_input[f'observation.images.sensor_{_sensor["id"]}'] = _img.unsqueeze(0)
+                    _policy_input[f'observation.images.sensor_{_vkey}'] = _img.unsqueeze(0)
 
                 if preprocessor is not None:
                     if policy_obj['type'] == 'PI05' and 'task' not in _policy_input:
@@ -704,27 +774,42 @@ def checkpoint_test(
                 _deltas_local = relative_trajectory_to_delta(_raw_np, current_eepos=_curr_eepos_local)
                 return _deltas_local
 
+        # curriculum 녹화 버퍼 초기화 (opt-in). 호출자가 record dict 를 넘긴 경우만.
+        if record is not None:
+            record.setdefault('timesteps', [])
+            record.setdefault('succeed_flags', [])
+            record['steps'] = 0
+
         start = time.time()
+        # succeed 토큰이 임계값을 연속으로 넘은 프레임 수 (debounce). 중간에 임계값
+        # 아래로 떨어지면 0 으로 리셋.
+        _succeed_streak = 0
+        try:
+            _succeed_done_frames = max(1, int(succeed_done_frames))
+        except (TypeError, ValueError):
+            _succeed_done_frames = 3
+        # image OOD throttle 상태. backbone forward 비용 때문에 매 step 이 아니라
+        # OOD_IMG_EVERY step 마다 재계산하고 그 사이엔 마지막 값을 재사용.
+        _ood_img_tick = 0
+        _ood_img_last = None
+        _vm_ordered_keys = list(policy.config.image_features) if getattr(policy, 'config', None) is not None else []
+        # 추론 시작 신호(단일 진실) + vision-map 토글 라우팅용 control 등록.
+        _active_inference['control'] = task_control
+        try:
+            socketio_instance.emit('inference_active', {
+                'active': True,
+                'checkpoint_id': checkpoint.get('id'),
+                'policy_type': policy_obj.get('type'),
+            })
+        except Exception:
+            pass
         while not task_control['stop']:
-            if step_num % episode_len == 0 and step_num != 0 and move_homepose:
-                print(f"Episode finished. Total Reward: {episode_reward:.4f}")
-                episode_reward = 0.0
-                policy.reset()
-                rel_action_queue.clear()
-                pi05_chunk_queue.clear()  # PI0.5 chunk queue도 reset 시 비우기
-                _move_to_homepose(env.agents, home_pose, task_control, socketio_instance, duration=move_homepose_duration, settle_sec=move_homepose_settle_sec)
-                if task_control['stop']:
-                    return
-                ts = env.reset()
-                for agent in agents:
-                    if agent.role != 'tool' and agent.ik_solver is not None:
-                        prev_qpos_dict[agent.id] = ts.observation['robot_states'][agent.id]['qpos']
-                # 새 episode 시작 — soft start 다시 활성화 (홈에서 정책 첫 cmd 까지 부드럽게).
-                first_step = True
-                print('Robot moved to homepose')
-                socketio_instance.emit('inference_progress', {
-                    'progress': 0.0, 'step': 0, 'episode_len': episode_len,
-                })
+            # 이 step 의 succeed 라벨 (has_succeed 일 때만 갱신).
+            _frame_succeed = 0.0
+            # 이전엔 ``step_num % episode_len == 0`` 마다 강제로 homepose 로 복귀
+            # + policy.reset + env.reset 를 했지만, 사용자가 명시적으로 끝내지
+            # 않는 한 home 으로 돌아가지 않는 게 자연스러운 동작이라 제거.
+            # (until_done / task_control['stop'] / max_timesteps 경로로만 종료.)
 
             if move_homepose:
                 ep_step = step_num % episode_len
@@ -894,21 +979,34 @@ def checkpoint_test(
                         # call eliminates a foot-gun that would silently revert to bad behavior
                         # if anyone ever short-circuited the preprocessor.
                     print(f"[INPUT] state: {qpos_t.shape} = {qpos_t[0].cpu().numpy()}")
-                    for sensor in sensors:
-                        image = obs_t['images'][f'sensor_{sensor["id"]}']
-                        sensor_id = str(sensor['id'])
+                    # Multi-view: see _do_rel_ee_inference for the same pattern.
+                    # 같은 sensor_id 가 sensors 안에서 여러 번 등장하면 각 view 마다
+                    # 독립적으로 crop/rotate/resize 적용 + view_key 별 policy input.
+                    # sensor_id stable sort → 학습 시점 features ordering 과 정합.
+                    from ...utils.sensor_view import view_key as _view_key
+                    _sorted_sensors_main = sorted(sensors, key=lambda _s: int(_s['id']))
+                    _view_occ_main: dict = {}
+                    for sensor in _sorted_sensors_main:
+                        _sid_int = int(sensor['id'])
+                        _occ = _view_occ_main.get(_sid_int, 0)
+                        _view_occ_main[_sid_int] = _occ + 1
+                        _vkey = _view_key(_sid_int, _occ)
+                        sensor_id = str(_sid_int)  # physical
+                        image = obs_t['images'][f'sensor_{sensor_id}']
+                        from ...utils.sensor_view import lookup_view_setting as _lvs
                         image = fetch_image_with_config(image, {
-                            'sensor_id': str(sensor_id),
-                            'sam3': (task.get('sensor_sam3') or {}).get(str(sensor_id)),
-                            'resize': task['sensor_img_size'][str(sensor_id)],
-                            'cropped_area': task['sensor_cropped_area'][str(sensor_id)],
-                            'rotate': task['sensor_rotate'][str(sensor_id)]
+                            'sensor_id': _vkey,
+                            'sam3': _lvs(task.get('sensor_sam3'), _vkey, sensor_id),
+                            'resize': _lvs(task.get('sensor_img_size'), _vkey, sensor_id),
+                            'cropped_area': _lvs(task.get('sensor_cropped_area'), _vkey, sensor_id),
+                            'rotate': _lvs(task.get('sensor_rotate'), _vkey, sensor_id, default=0),
                         })
                         # Capture the post-process frame size — this is what the
                         # WebRTC stream shows in the browser, so the heatmap PNG
-                        # must match this aspect (not the raw camera).
+                        # must match this aspect (not the raw camera). Indexed by
+                        # view_key (matches what compute_vision_map emits).
                         if hasattr(image, 'shape') and len(image.shape) >= 2:
-                            _vm_orig_sizes[f'sensor_{sensor["id"]}'] = (
+                            _vm_orig_sizes[f'sensor_{_vkey}'] = (
                                 int(image.shape[0]), int(image.shape[1])
                             )
                         # BGR → RGB. ros_image_to_numpy() returns BGR (cv2/OpenCV convention),
@@ -927,7 +1025,7 @@ def checkpoint_test(
                         # PI05/PaliGemma pretrained weights expect [-1, 1]-ranged pixels.
                         _pixel_range = '-11' if policy_obj['type'] == 'PI05' else '01'
                         image = process_image(image, vision_backbone, to_cuda=True, pixel_range=_pixel_range, image_resolution=image_resolution)
-                        policy_input_t[f'observation.images.sensor_{sensor["id"]}'] = image.unsqueeze(0)
+                        policy_input_t[f'observation.images.sensor_{_vkey}'] = image.unsqueeze(0)
 
                     # Normalize observation inputs (state, images) using train-time stats.
                     # Shapes are already batched + on CUDA, so AddBatchDim/DeviceProcessor
@@ -1067,33 +1165,34 @@ def checkpoint_test(
                         noise_t_raw = np.zeros_like(state_t)
 
 
-            # === OOD scoring (추론이 실행된 스텝에서만) ===
-            if (ood_image_feats is not None or ood_state_feats is not None) and hasattr(policy, 'get_cached_features'):
-                img_feat, state_feat = policy.get_cached_features()
-                if img_feat is not None or state_feat is not None:
-                    ood_scores = {}
-                    k = 5
-                    if img_feat is not None and ood_image_feats is not None:
-                        dists = torch.cdist(img_feat, ood_image_feats)  # (1, N)
-                        raw_dist = float(dists.topk(k, largest=False).values.mean())
-                        if ood_image_dist_sorted is not None and len(ood_image_dist_sorted) > 0:
-                            idx = int(np.searchsorted(ood_image_dist_sorted, raw_dist))
-                            percentile = idx / len(ood_image_dist_sorted)
-                            ood_scores['image'] = round(min(percentile, 1.0), 3)
-                            print(f"[OOD DEBUG] image raw_dist={raw_dist:.4f}, searchsorted_idx={idx}/{len(ood_image_dist_sorted)}, percentile={percentile:.4f}, ref_range=[{ood_image_dist_sorted[0]:.4f}, {ood_image_dist_sorted[-1]:.4f}]")
-                        else:
-                            ood_scores['image'] = raw_dist
-                    if state_feat is not None and ood_state_feats is not None:
-                        dists = torch.cdist(state_feat, ood_state_feats)  # (1, N)
-                        raw_dist = float(dists.topk(k, largest=False).values.mean())
-                        if ood_state_dist_sorted is not None and len(ood_state_dist_sorted) > 0:
-                            idx = int(np.searchsorted(ood_state_dist_sorted, raw_dist))
-                            percentile = idx / len(ood_state_dist_sorted)
-                            ood_scores['state'] = round(min(percentile, 1.0), 3)
-                            print(f"[OOD DEBUG] state raw_dist={raw_dist:.4f}, searchsorted_idx={idx}/{len(ood_state_dist_sorted)}, percentile={percentile:.4f}, ref_range=[{ood_state_dist_sorted[0]:.4f}, {ood_state_dist_sorted[-1]:.4f}]")
-                        else:
-                            ood_scores['state'] = raw_dist
-                    socketio_instance.emit('ood_score', ood_scores)
+            # === OOD scoring (추론이 실행된 스텝에서만) — image backbone latent 전용 ===
+            # 현재 이미지 backbone latent vs 레퍼런스 latent 분포. 비용(backbone forward
+            # 1회) 때문에 몇 step 마다만. 최신 preprocessed batch(_vm_last_batch)를 그대로
+            # 써서 generate 와 동일 경로 보장.
+            if ood_image_feats is not None:
+                try:
+                    _ood_img_tick += 1
+                    if _ood_img_tick % OOD_IMG_EVERY == 0:
+                        _batch = _vm_last_batch.get('value')
+                        if _batch is not None:
+                            with torch.no_grad():
+                                lat = compute_image_latent(policy, _batch, _vm_ordered_keys)
+                            if lat is not None and lat.shape[1] == ood_image_feats.shape[1]:
+                                lat = lat.float().to(ood_image_feats.device)
+                                kk = min(5, ood_image_feats.shape[0])
+                                rd = float(torch.cdist(lat, ood_image_feats).topk(kk, largest=False).values.mean())
+                                if ood_image_dist_sorted is not None and len(ood_image_dist_sorted) > 0:
+                                    ii = int(np.searchsorted(ood_image_dist_sorted, rd))
+                                    _ood_img_last = round(min(ii / len(ood_image_dist_sorted), 1.0), 3)
+                                    print(f"[OOD] image raw_dist={rd:.3f} score={_ood_img_last} "
+                                          f"ref_range=[{ood_image_dist_sorted[0]:.3f}, {ood_image_dist_sorted[-1]:.3f}] "
+                                          f"median={float(np.median(ood_image_dist_sorted)):.3f}")
+                                else:
+                                    _ood_img_last = round(rd, 4)
+                    if _ood_img_last is not None:
+                        socketio_instance.emit('ood_score', {'image': _ood_img_last})
+                except Exception as _ood_e:
+                    print(f"[OOD] scoring skipped: {_ood_e}")
 
             # === Inference-time Vision Map (frontend toggle via task_control) ===
             # Uses the same forward pass for 'attention' (persistent hooks) —
@@ -1177,19 +1276,25 @@ def checkpoint_test(
                 try:
                     heatmaps = policy.compute_gradcam(_gc_legacy_batch)
                     gradcam_payload = {}
+                    # Multi-view: cam_idx 는 policy 의 image_features 순서. 그
+                    # 순서는 sensors 의 view enumeration 순서와 1:1 매칭이므로
+                    # 같은 enumeration 으로 view_key 를 다시 구한다.
+                    from ...utils.sensor_view import enumerate_views as _enum_views
+                    _view_list = _enum_views([s['id'] for s in sensors])
                     for cam_idx, heatmap in heatmaps.items():
-                        # 히트맵을 원본 이미지에 overlay하여 base64로 변환
-                        sensor = sensors[cam_idx] if cam_idx < len(sensors) else None
-                        if sensor is not None:
-                            import base64
-                            sensor_id = str(sensor['id'])
-                            resize = task['sensor_img_size'].get(sensor_id, [640, 480])
-                            w, h = resize[0], resize[1]
-                            heatmap_resized = cv2.resize(heatmap, (w, h))
-                            heatmap_color = cv2.applyColorMap((heatmap_resized * 255).astype(np.uint8), cv2.COLORMAP_JET)
-                            _, buf = cv2.imencode('.jpg', heatmap_color, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                            b64 = base64.b64encode(buf).decode('utf-8')
-                            gradcam_payload[f'sensor_{sensor["id"]}'] = b64
+                        if cam_idx >= len(_view_list):
+                            continue
+                        _sid_int, _vkey = _view_list[cam_idx]
+                        _sid_str = str(_sid_int)
+                        import base64
+                        _t_size = task.get('sensor_img_size') or {}
+                        resize = _t_size.get(_vkey) or _t_size.get(_sid_str, [640, 480])
+                        w, h = resize[0], resize[1]
+                        heatmap_resized = cv2.resize(heatmap, (w, h))
+                        heatmap_color = cv2.applyColorMap((heatmap_resized * 255).astype(np.uint8), cv2.COLORMAP_JET)
+                        _, buf = cv2.imencode('.jpg', heatmap_color, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                        b64 = base64.b64encode(buf).decode('utf-8')
+                        gradcam_payload[f'sensor_{_vkey}'] = b64
                     if gradcam_payload:
                         socketio_instance.emit('gradcam', gradcam_payload)
                 except Exception as e:
@@ -1223,12 +1328,20 @@ def checkpoint_test(
             if has_succeed:
                 succeed_val = final_action[-1]
                 final_action = final_action[:-1]
+                _frame_succeed = 1.0 if float(succeed_val) > 0.5 else 0.0
                 socketio_instance.emit('inference_succeed', {'succeed': bool(succeed_val > 0.5), 'score': round(float(succeed_val), 4)})
-                # Planner "until done": signal the outer loop when score exceeds threshold.
+                # Planner "until done": signal the outer loop when score exceeds threshold
+                # for ``succeed_done_frames`` consecutive frames (debounce — 단발성 스파이크
+                # 무시). 임계값 아래로 떨어지면 streak 리셋.
                 done_threshold = task_control.get('done_threshold') if isinstance(task_control, dict) else None
-                if done_threshold is not None and float(succeed_val) > float(done_threshold):
-                    task_control['done'] = True
-                    break
+                if done_threshold is not None:
+                    if float(succeed_val) > float(done_threshold):
+                        _succeed_streak += 1
+                    else:
+                        _succeed_streak = 0
+                    if _succeed_streak >= _succeed_done_frames:
+                        task_control['done'] = True
+                        break
 
             # prev_qpos 갱신: 다음 스텝에서 실제 delta 계산에 사용
             for agent in env.agents:
@@ -1343,6 +1456,16 @@ def checkpoint_test(
 
             ts_next = env.record_step()
 
+            # curriculum 녹화: 적용된 action 이 담긴 ts_next 와 이 step 의 succeed
+            # 라벨을 버퍼에 적재. 'steps' 는 outer 핸들러가 max_steps 판정에 쓰도록 라이브 갱신.
+            if record is not None:
+                try:
+                    record['timesteps'].append(ts_next)
+                    record['succeed_flags'].append(_frame_succeed)
+                except Exception as _rec_e:
+                    print(f"[checkpoint_test] record append failed: {_rec_e}", flush=True)
+                record['steps'] = step_num + 1
+
             # === d. OTI-RL 학습 ===
             if oti_rl:
                 uncertainty = bridge_client.uncertainty.GetLatestScore(pb.Empty()).score
@@ -1356,15 +1479,24 @@ def checkpoint_test(
                     obs_t1 = ts_next.observation
                     qpos_t1 = torch.from_numpy(np.concatenate([item['qpos'] for item in obs_t1['robot_states'].values()])).float().cuda().unsqueeze(0)
                     policy_input_t1 = {'observation.state': qpos_t1}
-                    for sensor in sensors:
-                        sensor_id = str(sensor['id'])
+                    # Multi-view: same pattern as main loop.
+                    from ...utils.sensor_view import view_key as _view_key
+                    _sorted_sensors_rl = sorted(sensors, key=lambda _s: int(_s['id']))
+                    _view_occ_rl: dict = {}
+                    for sensor in _sorted_sensors_rl:
+                        _sid_int = int(sensor['id'])
+                        _occ = _view_occ_rl.get(_sid_int, 0)
+                        _view_occ_rl[_sid_int] = _occ + 1
+                        _vkey = _view_key(_sid_int, _occ)
+                        sensor_id = str(_sid_int)
                         image = obs_t1['images'][f'sensor_{sensor_id}']
+                        from ...utils.sensor_view import lookup_view_setting as _lvs
                         image = fetch_image_with_config(image, {
-                            'sensor_id': sensor_id,
-                            'sam3': (task.get('sensor_sam3') or {}).get(sensor_id),
-                            'resize': task['sensor_img_size'][sensor_id],
-                            'cropped_area': task['sensor_cropped_area'][sensor_id].get('cropped_area', None),
-                            'rotate': task['sensor_rotate'][sensor_id]
+                            'sensor_id': _vkey,
+                            'sam3': _lvs(task.get('sensor_sam3'), _vkey, sensor_id),
+                            'resize': _lvs(task.get('sensor_img_size'), _vkey, sensor_id),
+                            'cropped_area': _lvs(task.get('sensor_cropped_area'), _vkey, sensor_id),
+                            'rotate': _lvs(task.get('sensor_rotate'), _vkey, sensor_id, default=0),
                         })
                         # BGR → RGB (same fix as the main inference path above; ros_image_to_numpy
                         # returns BGR but training data on disk is RGB).
@@ -1374,7 +1506,7 @@ def checkpoint_test(
                         # PI05/PaliGemma pretrained weights expect [-1, 1]-ranged pixels.
                         _pixel_range = '-11' if policy_obj['type'] == 'PI05' else '01'
                         image = process_image(image, vision_backbone, to_cuda=True, pixel_range=_pixel_range, image_resolution=image_resolution)
-                        policy_input_t1[f'observation.images.sensor_{sensor_id}'] = image.unsqueeze(0)
+                        policy_input_t1[f'observation.images.sensor_{_vkey}'] = image.unsqueeze(0)
                     state_t1 = policy.select_action(policy_input_t1).squeeze(0).cpu().numpy()
                 
                 replay_buffer.push(state_t, noise_t, reward_t, state_t1, done=False)
@@ -1410,6 +1542,13 @@ def checkpoint_test(
         print(f"Error in main loop: {error_string}")
 
     finally:
+        # 추론 종료 신호 + 레지스트리 해제 (우리 control 일 때만).
+        if _active_inference.get('control') is task_control:
+            _active_inference['control'] = None
+        try:
+            socketio_instance.emit('inference_active', {'active': False})
+        except Exception:
+            pass
         thread_pool.shutdown(wait=False)
         # Background inference executor 도 함께 정리 — 미정리 시 호출 반복마다
         # thread leak + 미완료 future 의 GPU 텐서가 GC 안 됨.
@@ -1427,8 +1566,8 @@ def checkpoint_test(
 
         # Drop GPU copies of the OOD tensors (originals stay on CPU in preloaded).
         try:
-            del ood_image_feats
             del ood_state_feats
+            del ood_image_feats
         except NameError:
             pass
 

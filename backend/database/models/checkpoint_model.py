@@ -15,14 +15,20 @@ class Checkpoint(SoftDeleteModel):
 
     # ── 학습 큐 상태 머신 ──────────────────────────────────────────────────
     # status 가 가질 수 있는 명시적 값들 (열거 전용; DB는 단순 CharField).
-    # 큐 라이프사이클: queued → running → finished | failed | canceled
+    # 큐 라이프사이클: waiting | queued → running → finished | failed | canceled
+    # 'waiting' = curriculum 자동 생성 직후 (server_url 만 있으면 worker 가 자동 픽업)
+    # 'queued'  = 사용자가 명시적으로 train 큐에 enqueue 한 상태
+    # 둘 다 worker 픽업 대상이며 snapshot 의 queued 리스트에 함께 노출.
     # 'training' 은 legacy 별칭 — startup migration이 'running'으로 변환한다.
+    STATUS_WAITING = 'waiting'
     STATUS_QUEUED = 'queued'
     STATUS_RUNNING = 'running'
     STATUS_FINISHED = 'finished'
     STATUS_FAILED = 'failed'
     STATUS_CANCELED = 'canceled'
-    ACTIVE_STATUSES = (STATUS_QUEUED, STATUS_RUNNING)
+    # worker 픽업 대상 (DB 가 single source of truth — in-memory 큐 없음).
+    POOL_STATUSES = (STATUS_WAITING, STATUS_QUEUED)
+    ACTIVE_STATUSES = (STATUS_WAITING, STATUS_QUEUED, STATUS_RUNNING)
 
     name = CharField(null=True)
     dir = CharField(null=True)

@@ -35,8 +35,8 @@
 
 
                     <q-card-section class="q-pa-none q-mt-sm">
-                        <div class="text-bold">{{ sensor.name }}</div>
-                        <div class="text-grey-6 text-caption">{{ sensor.type }}</div>
+                        <div class="text-bold ellipsis">{{ sensor.name }}</div>
+                        <div class="text-grey-6 text-caption ellipsis">{{ sensor.type }}</div>
                         <!-- <div class="text-grey-6 text-caption" v-if="sensor.ip_address">IP Address: {{ sensor.ip_address }}</div> -->
                         <!-- <div class="text-grey-6 text-caption" v-if="sensor.device_index">Device Index: {{ sensor.device_index }}</div> -->
                     </q-card-section>

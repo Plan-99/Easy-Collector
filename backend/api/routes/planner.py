@@ -22,11 +22,29 @@ BLOCK_CONFIGS = {
         'color': 'blue',
         'keys': ['workspace_id', 'positions', 'duration', 'name'],
     },
+    'move_relative_ee': {
+        # Arm 은 현재 EE 기준 6-DOF 상대 이동 (dx, dy, dz, drx, dry, drz).
+        # Tool (gripper 등 IK 없는 agent) 은 절대 joint 위치 — 두 dict 가
+        # 같이 들어간다: ``deltas`` (arm 별) + ``tool_positions`` (tool 별).
+        'label': 'Move Relative EE',
+        'icon': 'open_with',
+        'color': 'cyan',
+        'keys': ['workspace_id', 'deltas', 'tool_positions', 'duration', 'name'],
+    },
     'checkpoint': {
         'label': 'Checkpoint',
         'icon': 'psychology',
         'color': 'purple',
-        'keys': ['workspace_id', 'checkpoint_id', 'checkpoint_name', 'duration', 'until_done', 'done_threshold', 'hz', 're_inference_steps', 'temporal_ensemble_coeff', 'move_homepose', 'move_homepose_duration', 'move_homepose_settle_sec', 'name'],
+        'keys': ['workspace_id', 'checkpoint_id', 'checkpoint_name', 'duration', 'until_done', 'done_threshold', 'hz', 're_inference_steps', 'temporal_ensemble_coeff', 'succeed_done_frames', 'move_homepose', 'move_homepose_duration', 'move_homepose_settle_sec', 'max_steps', 'fallback_block_id', 'name'],
+    },
+    'replay_episode': {
+        # 데이터셋의 특정 에피소드를 frame 별 qaction 으로 직접 replay.
+        # 첫 프레임 qpos 로 이동 후 hz 에 맞춰 ``move_joint_step`` 으로 재생.
+        # 정책 추론과 무관 — 녹화된 trajectory 를 그대로 따라가는 deterministic 블록.
+        'label': 'Replay Episode',
+        'icon': 'replay',
+        'color': 'green',
+        'keys': ['workspace_id', 'dataset_id', 'dataset_name', 'episode_index', 'hz', 'move_to_first', 'settle_sec', 'name'],
     },
     'timesleep': {
         'label': 'Time Sleep',
@@ -366,6 +384,54 @@ def _validate_plan_blocks(blocks, workspaces_by_id, agents, prefix_offset=0):
                 if int(robot['id']) not in agents:
                     errors.append(f"{prefix}: robot '{robot.get('name')}' is not running")
 
+        elif btype == 'move_relative_ee':
+            ws = workspaces_by_id.get(block.get('workspace_id'))
+            if ws is None:
+                errors.append(f"{prefix}: workspace not found")
+                continue
+            for robot in (ws.get('assembly') or {}).get('robots') or []:
+                if int(robot['id']) not in agents:
+                    errors.append(f"{prefix}: robot '{robot.get('name')}' is not running")
+            # Arm 은 deltas (6-DOF), tool (role='tool' or no IK) 은 tool_positions
+            # (절대 joint 위치). 둘 중 어느 한 쪽이라도 비어있지 않으면 통과.
+            deltas = block.get('deltas') or {}
+            tool_positions = block.get('tool_positions') or {}
+            if (not isinstance(deltas, dict) or not deltas) and (
+                not isinstance(tool_positions, dict) or not tool_positions
+            ):
+                errors.append(
+                    f"{prefix}: at least one of deltas (arm 6-DOF) or "
+                    f"tool_positions (tool absolute joints) is required"
+                )
+            if isinstance(deltas, dict):
+                for rid, vec in deltas.items():
+                    if not isinstance(vec, (list, tuple)) or len(vec) != 6:
+                        errors.append(
+                            f"{prefix}: deltas[{rid}] must be a list of 6 floats "
+                            f"(dx, dy, dz, drx, dry, drz)"
+                        )
+                        continue
+                    try:
+                        [float(v) for v in vec]
+                    except (TypeError, ValueError):
+                        errors.append(f"{prefix}: deltas[{rid}] contains non-numeric values")
+            if isinstance(tool_positions, dict):
+                for rid, vec in tool_positions.items():
+                    if not isinstance(vec, (list, tuple)) or len(vec) == 0:
+                        errors.append(
+                            f"{prefix}: tool_positions[{rid}] must be a non-empty list of joint values"
+                        )
+                        continue
+                    try:
+                        [float(v) for v in vec]
+                    except (TypeError, ValueError):
+                        errors.append(f"{prefix}: tool_positions[{rid}] contains non-numeric values")
+            try:
+                if float(block.get('duration') or 0) <= 0:
+                    errors.append(f"{prefix}: duration must be > 0")
+            except (TypeError, ValueError):
+                errors.append(f"{prefix}: duration is invalid")
+
         elif btype == 'checkpoint':
             ws = workspaces_by_id.get(block.get('workspace_id'))
             if ws is None:
@@ -390,6 +456,40 @@ def _validate_plan_blocks(blocks, workspaces_by_id, agents, prefix_offset=0):
                         errors.append(f"{prefix}: done_threshold must be between 0 and 1")
                 except (TypeError, ValueError):
                     errors.append(f"{prefix}: done_threshold is invalid")
+            # max_steps: 실패 판정 step 한도. until_done 일 때만 의미 — done 신호
+            # 없이 이 step 에 도달하면 실패로 보고 fallback 블록을 실행.
+            if block.get('max_steps') is not None:
+                try:
+                    ms = int(block.get('max_steps'))
+                    if ms <= 0:
+                        errors.append(f"{prefix}: max_steps must be > 0")
+                except (TypeError, ValueError):
+                    errors.append(f"{prefix}: max_steps is invalid")
+
+        elif btype == 'replay_episode':
+            ws = workspaces_by_id.get(block.get('workspace_id'))
+            if ws is None:
+                errors.append(f"{prefix}: workspace not found")
+                continue
+            for robot in (ws.get('assembly') or {}).get('robots') or []:
+                if int(robot['id']) not in agents:
+                    errors.append(f"{prefix}: robot '{robot.get('name')}' is not running")
+            try:
+                if block.get('dataset_id') is None or int(block['dataset_id']) <= 0:
+                    errors.append(f"{prefix}: dataset_id is required")
+            except (TypeError, ValueError):
+                errors.append(f"{prefix}: dataset_id is invalid")
+            try:
+                ep_idx = int(block.get('episode_index'))
+                if ep_idx < 0:
+                    errors.append(f"{prefix}: episode_index must be >= 0")
+            except (TypeError, ValueError):
+                errors.append(f"{prefix}: episode_index is required")
+            try:
+                if float(block.get('hz') or 0) <= 0:
+                    errors.append(f"{prefix}: hz must be > 0")
+            except (TypeError, ValueError):
+                errors.append(f"{prefix}: hz is invalid")
 
         elif btype == 'timesleep':
             try:

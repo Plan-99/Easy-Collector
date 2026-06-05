@@ -23,6 +23,7 @@ from app_context import (
     load_config,
     save_config,
 )
+from i18n import t
 try:
     from PySide6.QtCore import QObject, Signal, Slot
 except Exception:
@@ -311,9 +312,9 @@ class UpdateManager:
         self._prompt_open = True
         current_version = self._current_version()
         if info.is_major_upgrade:
-            detail = "버전 업그레이드가 예정되어있어서 약 30분의 시간이 소요됩니다."
+            detail = t("update.majorUpgradeDetail")
         else:
-            detail = "버그 수정 및 개선을 위한 버전 업데이트가 예정되어있습니다."
+            detail = t("update.minorUpdateDetail")
         version_summary = f"{_format_version_display(current_version)} -> {_format_version_display(info.version)}"
         detail = f"{version_summary}\n{detail}"
 
@@ -348,7 +349,7 @@ class UpdateManager:
 
     def _show_check_panel(self, slug: str):
         try:
-            self._window.show_update_check_panel(f"{slug} 최신 릴리즈 확인 중...")
+            self._window.show_update_check_panel(t("update.checking", slug=slug))
         except Exception:
             pass
 
@@ -364,7 +365,7 @@ class UpdateManager:
             return
         self._in_progress = True
         self._from_version = self._current_version()
-        self._show_progress("업데이트를 준비하는 중입니다...")
+        self._show_progress(t("update.preparing"))
         thread = threading.Thread(target=self._apply_update_worker, args=(info,), daemon=True)
         thread.start()
 
@@ -374,31 +375,31 @@ class UpdateManager:
             self._ensure_update_dir(update_dir)
             self._clear_update_dir(update_dir)
             deb_path = update_dir / info.deb_name
-            self._set_progress_text("업데이트 파일을 다운로드하는 중입니다...")
+            self._set_progress_text(t("update.downloading"))
             def _download_progress(percent: int | None):
-                text = f"다운로드 {percent}%" if isinstance(percent, int) else None
+                text = t("update.downloadPercent", percent=percent) if isinstance(percent, int) else None
                 self._ui_call(lambda: self._window.set_update_progress(percent, text))
             self._download_file(info.deb_url, deb_path, progress_cb=_download_progress)
             extract_root = update_dir / "extract"
-            self._set_progress_text("업데이트 파일을 압축 해제하는 중입니다...")
+            self._set_progress_text(t("update.extracting"))
             self._extract_deb(deb_path, extract_root)
             payload_root = extract_root / "usr" / "share" / "easytrainer-project"
-            self._set_progress_text("코드를 동기화하는 중입니다...")
+            self._set_progress_text(t("update.syncing"))
             self._sync_payload(payload_root)
             try:
                 self._window._apply_compose_variant(self._window.install_variant)
             except Exception:
                 pass
-            self._set_progress_text("런처를 업데이트하는 중입니다...")
+            self._set_progress_text(t("update.updatingLauncher"))
             self._sync_launcher_assets(extract_root)
-            self._set_progress_text("마무리하는 중입니다...")
+            self._set_progress_text(t("update.finishing"))
             self._update_app_assets(extract_root)
             cfg = load_config()
             cfg[CONFIG_LAST_APPLIED_KEY] = info.version
             if cfg.get(CONFIG_SKIP_KEY) == info.version:
                 cfg.pop(CONFIG_SKIP_KEY, None)
             save_config(cfg)
-            self._set_progress_text("버전 정보를 갱신하는 중입니다...")
+            self._set_progress_text(t("update.updatingVersion"))
             self._update_version_file(extract_root, info.version)
             self._ui_call(lambda: self._finish_update(success=True, info=info))
         except Exception as e:
@@ -420,12 +421,12 @@ class UpdateManager:
                 return
         except Exception:
             pass
-        raise RuntimeError(f"업데이트 폴더를 생성할 수 없습니다: {path}")
+        raise RuntimeError(t("update.errCreateDir", path=path))
 
     def _clear_update_dir(self, path: Path):
         resolved = path.resolve()
         if not resolved.is_absolute() or len(resolved.parts) < 3:
-            raise RuntimeError(f"업데이트 폴더 경로가 안전하지 않습니다: {resolved}")
+            raise RuntimeError(t("update.errUnsafeDir", path=resolved))
         if not resolved.exists():
             resolved.mkdir(parents=True, exist_ok=True)
             return
@@ -506,20 +507,14 @@ class UpdateManager:
                         # socket.timeout (primary guard) or the watchdog's
                         # shutdown both surface here → report as a stall.
                         if stalled[0] or isinstance(e, (socket.timeout, TimeoutError)):
-                            raise RuntimeError(
-                                f"다운로드가 {stall_timeout}초 동안 진행되지 않아 중단했습니다. "
-                                f"네트워크 연결을 확인한 뒤 다시 시도하세요."
-                            )
+                            raise RuntimeError(t("update.errStalled", seconds=stall_timeout))
                         raise
                     if not chunk:
                         # An empty read can be a genuine EOF OR the watchdog's
                         # shutdown() forcing recv() to return 0 mid-download —
                         # the latter must surface as a stall, not "complete".
                         if stalled[0]:
-                            raise RuntimeError(
-                                f"다운로드가 {stall_timeout}초 동안 진행되지 않아 중단했습니다. "
-                                f"네트워크 연결을 확인한 뒤 다시 시도하세요."
-                            )
+                            raise RuntimeError(t("update.errStalled", seconds=stall_timeout))
                         break
                     last_data[0] = _time.monotonic()
                     f.write(chunk)
@@ -541,10 +536,7 @@ class UpdateManager:
         # Guard against silent truncation: a short file vs the advertised size
         # means the connection dropped mid-download — don't install a partial deb.
         if total and downloaded < total:
-            raise RuntimeError(
-                f"다운로드가 중간에 끊겼습니다 ({downloaded}/{total} 바이트). "
-                f"네트워크 연결을 확인한 뒤 다시 시도하세요."
-            )
+            raise RuntimeError(t("update.errTruncated", downloaded=downloaded, total=total))
         tmp.replace(dest)
         if progress_cb and total:
             try:
@@ -567,7 +559,7 @@ class UpdateManager:
         ar_bin = shutil.which("ar")
         tar_bin = shutil.which("tar")
         if not ar_bin or not tar_bin:
-            raise RuntimeError("deb 압축 해제 도구(dpkg-deb/ar/tar)를 찾지 못했습니다.")
+            raise RuntimeError(t("update.errNoExtractTool"))
         tmp_dir = extract_root / ".ar"
         tmp_dir.mkdir(parents=True, exist_ok=True)
         subprocess.run([ar_bin, "x", str(deb_path)], cwd=str(tmp_dir), check=True, timeout=600)
@@ -576,12 +568,12 @@ class UpdateManager:
             data_tar = cand
             break
         if not data_tar:
-            raise RuntimeError("deb payload를 찾을 수 없습니다.")
+            raise RuntimeError(t("update.errNoPayload"))
         subprocess.run([tar_bin, "-xf", str(data_tar), "-C", str(extract_root)], check=True, timeout=600)
 
     def _sync_payload(self, payload_root: Path):
         if not payload_root.exists():
-            raise RuntimeError(f"payload 경로가 없습니다: {payload_root}")
+            raise RuntimeError(t("update.errPayloadPath", path=payload_root))
         script = None
         try:
             script = self._window._resolve_quick_apply_script()
@@ -763,7 +755,7 @@ class UpdateManager:
         from_version = self._from_version
         self._from_version = None
         if not success:
-            detail = f"업데이트에 실패했습니다:\n{error or '알 수 없는 오류'}"
+            detail = t("update.failedDetail", error=error or t("update.unknownError"))
             def _continue_after_error():
                 try:
                     self._window.hide_update_panel()
@@ -775,7 +767,7 @@ class UpdateManager:
             except Exception:
                 pass
             return
-        detail = "업데이트가 완료되었습니다.\n필요 시 프로그램을 다시 실행해 주세요."
+        detail = t("update.doneDetail")
         try:
             def _close_panel():
                 try:
@@ -818,7 +810,7 @@ class UpdateManager:
                 main_py = Path(__file__).resolve().parent / "main.py"
                 QProcess.startDetached(sys.executable, [str(main_py)])
         except Exception as e:
-            QMessageBox.critical(self._window, "재시작 실패", f"프로그램 재시작에 실패했습니다: {e}")
+            QMessageBox.critical(self._window, t("update.restartFailed"), t("update.restartFailedBody", error=e))
             return
         try:
             setattr(self._window, "_skip_shutdown_on_exit", True)

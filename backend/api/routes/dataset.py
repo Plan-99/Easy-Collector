@@ -24,6 +24,22 @@ from ...utils.lerobot_io import (
 
 dataset_bp = Blueprint('dataset_bp', __name__)
 
+
+def _is_curriculum_owned(dataset):
+    """Curriculum 롤아웃이 생성한 데이터셋인지.
+
+    이 데이터셋들은 편집/일괄변경(transform/augment/merge/trim/move/에피소드 삭제 등)은
+    허용하되, **데이터셋 자체의 삭제만** 차단한다 (커리큘럼이 stage/그룹 단위로 참조하므로
+    행을 통째로 지우면 파이프라인이 깨짐). docs/design-docs/2026-05-29_curriculum-self-training.md 참고.
+    """
+    return dataset is not None and getattr(dataset, 'origin', 'manual') == 'curriculum'
+
+
+_CURRICULUM_LOCKED_MSG = (
+    'This dataset is owned by a Curriculum rollout and cannot be deleted here. '
+    'Use the Curriculum page (reset) instead. (Editing / batch operations are allowed.)'
+)
+
 @dataset_bp.route('/datasets', methods=['GET'])
 def get_datasets():
     params = request.args
@@ -92,6 +108,8 @@ def delete_dataset(id):
     dataset = DatasetModel.find(id)
     if not dataset:
         return {'status': 'error', 'message': 'Dataset not found'}, 404
+    if _is_curriculum_owned(dataset):
+        return {'status': 'error', 'message': _CURRICULUM_LOCKED_MSG, 'locked': True}, 403
 
     folder_path = os.path.join(DATASET_DIR, str(dataset.id))
     if os.path.exists(folder_path) and os.path.isdir(folder_path):
@@ -102,7 +120,12 @@ def delete_dataset(id):
 
 @dataset_bp.route('/dataset/<id>/<episode_name>', methods=['DELETE'])
 def delete_dataset_file(id, episode_name):
-    """Delete a single episode from LeRobot dataset."""
+    """Delete a single episode from LeRobot dataset.
+
+    커리큘럼 소유 데이터셋이라도 **개별 에피소드 삭제는 허용**한다 — 잘못된 성공/실패
+    에피소드(예: 비정상적으로 짧은 성공)를 직접 제거할 수 있어야 하기 때문. 데이터셋
+    자체의 삭제/이름변경(delete_dataset/update_dataset)은 여전히 차단된다.
+    """
     folder_path = os.path.join(DATASET_DIR, id)
     if not os.path.exists(folder_path):
         return {'status': 'error', 'message': 'Dataset not found'}, 404
@@ -161,10 +184,16 @@ def edit_datasets_metadata(id):
     features = info.get("features", {})
     episodes = _read_jsonl(os.path.join(folder_path, EPISODES_PATH))
 
+    # ``new_id`` 는 두 형태를 모두 허용:
+    #   - 정수/숫자문자열 ("7") → "sensor_7" 로 prefix
+    #   - 이미 view_key 형태 ("7_2") → "sensor_7_2" 로 prefix
+    # multi-view 환경에서 한 view 를 다른 view 로 remap 하는 케이스를 위함.
+    def _to_sensor_col(v):
+        return f"observation.images.sensor_{v}"
     sensor_col_remap = {}
     for old_name, new_id in sensor_mappings.items():
         old_col = f"observation.images.{old_name}"
-        new_col = f"observation.images.sensor_{new_id}"
+        new_col = _to_sensor_col(new_id)
         if old_col in features:
             sensor_col_remap[old_col] = new_col
 

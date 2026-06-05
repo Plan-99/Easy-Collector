@@ -26,8 +26,14 @@ _CACHE_LOCK = threading.Lock()
 
 
 def _cache_key(sensors):
-    """sensor 식별자만으로 키 생성 — 동일 sensor set 이면 같은 키."""
-    return tuple(sorted(int(s['id']) for s in sensors if 'id' in s))
+    """sensor 식별자 *유니크 set* 으로 키 생성 — 동일 물리 센서 set 이면 같은 키.
+
+    Multi-view: 같은 sensor_id 가 ``sensors`` 안에 중복으로 들어와도 (한
+    카메라의 여러 ROI 를 등록하는 케이스) ROS subscriber 는 물리 센서당 하나면
+    충분하다 → 캐시 키도 set 기준. 안 그러면 [5,5] 와 [5] 가 서로 다른 키가
+    돼서 같은 카메라에 두 번 subscribe 하는 낭비가 생긴다.
+    """
+    return tuple(sorted({int(s['id']) for s in sensors if 'id' in s}))
 
 
 class RemoteObs:
@@ -61,10 +67,19 @@ class RemoteObs:
             print(f"[RemoteObs] Sensor session started: id={self._session_id}", flush=True)
 
     def get_images(self):
-        """Read latest sensor images from shared memory. No gRPC call."""
-        image_dict = {}
+        """Read latest sensor images from shared memory. No gRPC call.
+
+        Returns dict keyed by *physical* sensor key (``sensor_{id}``, no view
+        suffix). 한 물리 센서당 한 번만 shm 을 읽는다 — 같은 sensor_id 가
+        ``self.sensors`` 에 여러 view 로 중복 등장해도 shm read 는 한 번.
+        per-view 의 crop/rotate/resize 는 caller 가 view_key 별로
+        ``fetch_image_with_config`` 으로 처리하는 게 계약이다.
+        """
+        image_dict: dict = {}
         for sensor in self.sensors:
             sensor_key = f"sensor_{sensor['id']}"
+            if sensor_key in image_dict:
+                continue  # already read this physical camera
             image, _ = self._image_reader.read(sensor_key)
             image_dict[sensor_key] = image
         return image_dict

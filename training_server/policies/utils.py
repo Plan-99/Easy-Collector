@@ -5,7 +5,7 @@ import torch
 import os
 import re
 import shutil
-from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.data import TensorDataset, DataLoader, WeightedRandomSampler
 import json
 from types import SimpleNamespace
 from lerobot.configs.types import PolicyFeature, FeatureType
@@ -1028,6 +1028,27 @@ def _homogeneous_to_eepos(T: np.ndarray) -> np.ndarray:
     return np.concatenate([T[:3, 3], rotvec]).astype(np.float32)
 
 
+def _replicate_pad(arr: np.ndarray, target_len: int) -> np.ndarray:
+    """axis-0 으로 ``target_len`` 까지 채우되, 부족한 부분은 마지막 행을 복제.
+
+    이전엔 chunk 가 에피소드 끝을 넘어가면 zero-pad + ``is_pad`` mask 로 loss 에서
+    제외했다. 그러면 모델이 "에피소드 끝부분에서 어떤 action 을 내야 하는가" 를
+    학습할 기회가 없어, 추론 시 chunk[0] 자리에 succeed=1 이 나타나지 않는다
+    (라벨이 chunk 끝 쪽에만 살았기 때문). 마지막 frame 으로 replicate-pad 하면
+    "task 종료 후엔 마지막 자세 유지 + succeed=1" 이라는 inductive bias 가 자연
+    스럽게 형성된다. 호출자는 ``is_pad`` 를 0 으로 두어 loss 에서 padded slot 도
+    학습되게 해야 한다.
+    """
+    if arr.shape[0] == 0:
+        shape = (target_len,) + arr.shape[1:]
+        return np.zeros(shape, dtype=arr.dtype)
+    if arr.shape[0] >= target_len:
+        return arr[:target_len]
+    pad_count = target_len - arr.shape[0]
+    pad = np.broadcast_to(arr[-1:], (pad_count,) + arr.shape[1:]).copy()
+    return np.concatenate([arr, pad], axis=0)
+
+
 def compute_relative_trajectory_in_local_frame(
     future_eepos: np.ndarray, current_eepos: np.ndarray
 ) -> np.ndarray:
@@ -1475,10 +1496,14 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
         original_action_shape = (self.chunk_size, action_dim)
 
-        if episode_len <= self.chunk_size + self.n_obs_steps - 1:
-            start_ts = self.n_obs_steps - 1
+        # start_ts 범위: 이전엔 ``episode_len - chunk_size`` 까지였는데, 이 경우
+        # chunk[0] 자리에 에피소드 후반(succeed=1 라벨이 사는 자리)이 절대 안 들어가
+        # 학습 분포가 비뚤어진다 (추론 시 chunk[0]→0, chunk[end]→1 패턴 발생). 끝
+        # frame 까지 풀고 부족한 부분은 마지막 frame 으로 replicate-pad 한다.
+        if episode_len <= self.n_obs_steps:
+            start_ts = max(0, episode_len - 1)
         else:
-            start_ts = np.random.choice(np.arange(self.n_obs_steps - 1, episode_len - self.chunk_size))
+            start_ts = int(np.random.choice(np.arange(self.n_obs_steps - 1, episode_len)))
         end_ts = start_ts + self.chunk_size
 
         obs_step_start = start_ts - self.n_obs_steps + 1
@@ -1503,7 +1528,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
                     img_array = np.zeros((224, 224, 3), dtype=np.uint8)
                 image_dict[key].append(img_array)
 
-        # Actions
+        # Actions — 에피소드 끝을 넘어가면 마지막 frame 으로 replicate-pad.
         actual_end = min(episode_len, end_ts)
         action = action_data[start_ts:actual_end]
 
@@ -1514,12 +1539,13 @@ class EpisodicDataset(torch.utils.data.Dataset):
                 succeed = np.zeros((action.shape[0], 1), dtype=np.float32)
             action = np.concatenate([action, succeed], axis=1)
 
-        action_len = min(self.chunk_size, episode_len - start_ts)
+        action_len = min(self.chunk_size, max(0, episode_len - start_ts))
+        action = _replicate_pad(action, self.chunk_size)
 
-        padded_action = np.zeros(original_action_shape, dtype=np.float32)
         if _normalize_action_key(self.action_key) == 'relative_ee_pos' or (self.use_relative_trajectory and _normalize_action_key(self.action_key) == 'ee_delta'):
             # DexUMI: chunk 의 미래 N 개 eepos 를 현재 eepos local frame 으로 변환.
-            # eepos 없으면 (옛 dataset) legacy naive cumsum fallback.
+            # eepos 없으면 (옛 dataset) legacy naive cumsum fallback. future_idx 가
+            # clip 되어 자연스럽게 last-eepos replicate 된다.
             eepos_data = ep.get("eepos_data")
             if eepos_data is not None and len(eepos_data) > start_ts:
                 future_idx = np.arange(start_ts + 1, start_ts + self.chunk_size + 1)
@@ -1527,25 +1553,27 @@ class EpisodicDataset(torch.utils.data.Dataset):
                 future_eepos = eepos_data[future_idx]
                 current_eepos = eepos_data[start_ts]
                 rel_traj = compute_relative_trajectory_in_local_frame(future_eepos, current_eepos)
-                padded_action[:action_len, :rel_traj.shape[1]] = rel_traj[:action_len]
-                # any_has_succeed 면 action 의 마지막 컬럼이 succeed flag — rel_traj
-                # 는 eepos 차원만 다루므로 succeed slot 을 따로 복사해야 모델이 그
-                # dim 을 학습할 수 있다. (get_norm_stats 와 동일 layout).
+                padded_action = np.zeros(original_action_shape, dtype=np.float32)
+                padded_action[:, :rel_traj.shape[1]] = rel_traj
+                # succeed slot — action 은 이미 replicate-pad 되어 chunk_size 행을 가짐.
                 if any_has_succeed and action.shape[1] > rel_traj.shape[1]:
-                    padded_action[:action_len, rel_traj.shape[1]:] = action[:action_len, rel_traj.shape[1]:]
+                    padded_action[:, rel_traj.shape[1]:] = action[:, rel_traj.shape[1]:]
             else:
-                padded_action[:action_len] = delta_to_relative_trajectory(action[:action_len])
+                # Legacy fallback: cumulative delta 가 padding 행에서 drift 하므로
+                # 옛 zero-pad 동작 유지.
+                padded_action = np.zeros(original_action_shape, dtype=np.float32)
+                if action_len > 0:
+                    padded_action[:action_len] = delta_to_relative_trajectory(action[:action_len])
         elif _normalize_action_key(self.action_key) == 'relative_joint_pos':
             # chunk-anchored joint delta: action[t in chunk] - qpos[chunk_start].
             # anchor를 ep["state_data"]에서 직접 읽음 (training_server에서 state_data
             # 가 곧 qpos이므로 anchor source로 직접 사용). obs_state_keys와 별개 채널.
             # absolute dims (gripper/tool/done)는 dataset features에서 자동 추출.
             qpos_anchor_data = ep.get("state_data")
-            chunk_slice = action[:action_len]
             if qpos_anchor_data is not None and len(qpos_anchor_data) > start_ts:
                 if qpos_anchor_data.ndim == 1:
                     qpos_anchor_data = qpos_anchor_data.reshape(-1, 1)
-                action_dim = chunk_slice.shape[1]
+                action_dim = action.shape[1]
                 anchor_dim = qpos_anchor_data.shape[1]
                 _features = (self._dataset_info or {}).get('features', {})
                 _action_names = _features.get('action.joint', {}).get('names', [])
@@ -1560,17 +1588,17 @@ class EpisodicDataset(torch.utils.data.Dataset):
                     shared = min(anchor_dim, action_dim)
                     effective_mask = [True] * shared + [False] * (action_dim - shared)
                 anchor_at_start = qpos_anchor_data[start_ts]
-                delta_chunk = chunk_slice.copy()
+                padded_action = action.copy()
                 for i, is_delta in enumerate(effective_mask):
                     if is_delta and i < anchor_dim:
-                        delta_chunk[:, i] = delta_chunk[:, i] - anchor_at_start[i]
-                padded_action[:action_len] = delta_chunk
+                        padded_action[:, i] = padded_action[:, i] - anchor_at_start[i]
             else:
-                padded_action[:action_len] = chunk_slice
+                padded_action = action.copy()
         else:
-            padded_action[:action_len] = action
+            padded_action = action.copy()
+        # is_pad: replicate-pad 으로 "task 끝 후 자세 유지 + succeed=1" 학습 슬롯이
+        # 의미를 가지므로 0 으로 둔다 (loss 에서 마스킹 안 됨).
         is_pad = np.zeros(self.chunk_size)
-        is_pad[action_len:] = 1
 
         item = dict()
         item['language_instruction'] = language_instruction
@@ -1580,9 +1608,17 @@ class EpisodicDataset(torch.utils.data.Dataset):
         _pixel_range = '-11' if self.policy_type == 'PI05' else '01'
         for sensor_id in self.sensor_ids:
             processed_images = []
+            # Multi-view: sensor_id 가 view_key ("5" or "5_2") 일 수 있음. wrist
+            # 판정은 항상 물리 sensor_id 기준.
             # Wrist cams: ColorJitter only (preserve spatial geometry).
             # Other cams: full aug (RandomResizedCrop + RandomRotation + ColorJitter).
-            if int(sensor_id) in getattr(self, 'wrist_sensor_ids', set()):
+            _vk = str(sensor_id)
+            _phys_sid_str = _vk.split('_', 1)[0]
+            try:
+                _phys_sid = int(_phys_sid_str)
+            except ValueError:
+                _phys_sid = None
+            if _phys_sid is not None and _phys_sid in getattr(self, 'wrist_sensor_ids', set()):
                 aug = getattr(self, '_image_augment_color_only', None)
             else:
                 aug = getattr(self, '_image_augment_full', None)
@@ -2076,9 +2112,17 @@ class FullScanDataset(EpisodicDataset):
         _pixel_range = '-11' if self.policy_type == 'PI05' else '01'
         for sensor_id in self.sensor_ids:
             processed_images = []
+            # Multi-view: sensor_id 가 view_key ("5" or "5_2") 일 수 있음. wrist
+            # 판정은 항상 물리 sensor_id 기준.
             # Wrist cams: ColorJitter only (preserve spatial geometry).
             # Other cams: full aug (RandomResizedCrop + RandomRotation + ColorJitter).
-            if int(sensor_id) in getattr(self, 'wrist_sensor_ids', set()):
+            _vk = str(sensor_id)
+            _phys_sid_str = _vk.split('_', 1)[0]
+            try:
+                _phys_sid = int(_phys_sid_str)
+            except ValueError:
+                _phys_sid = None
+            if _phys_sid is not None and _phys_sid in getattr(self, 'wrist_sensor_ids', set()):
                 aug = getattr(self, '_image_augment_color_only', None)
             else:
                 aug = getattr(self, '_image_augment_full', None)
@@ -2167,18 +2211,55 @@ def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_tra
     # ColorJitter-only (audit-doc bug #31). val/eval: augment=False.
     train_dataset = EpisodicDataset(train_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys, augment=True, wrist_sensor_ids=_wrist_set, image_resolution=image_resolution)
     val_dataset = EpisodicDataset(val_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys, augment=False, wrist_sensor_ids=_wrist_set, image_resolution=image_resolution)
+
+    # Per-episode sampling weights sidecar (written by the backend when
+    # multiple datasets with non-uniform weights are merged). Absent file ⇒
+    # uniform sampling (legacy path).
+    train_sampler = None
+    weights_path = os.path.join(dataset_dir, 'meta', 'episode_sample_weights.json')
+    if os.path.exists(weights_path):
+        try:
+            with open(weights_path, 'r') as f:
+                ep_weights_all = json.load(f)
+            # Align with train_indices (post split + skipped_episodes filter).
+            # Each train_indices[i] is the original episode index in the merged
+            # dataset, which matches the position in ep_weights_all.
+            per_sample = [float(ep_weights_all[int(ei)]) for ei in train_indices]
+            if any(w <= 0 for w in per_sample):
+                raise ValueError('non-positive weight found')
+            train_sampler = WeightedRandomSampler(
+                weights=per_sample,
+                num_samples=len(per_sample),
+                replacement=True,
+            )
+            uniq = sorted(set(round(w, 4) for w in per_sample))
+            print(f'[CONFIG] WeightedRandomSampler enabled — {len(per_sample)} train episodes, '
+                  f'unique weights={uniq}', flush=True)
+        except Exception as e:
+            print(f'[CONFIG][WARN] failed to load episode_sample_weights.json '
+                  f'({weights_path}): {e} — falling back to uniform sampling.', flush=True)
+            train_sampler = None
+
     # Keep workers alive across epochs so EpisodicDataset._ep_cache (and OS page
     # cache backing the mmap'd frame .npy files) survives between epochs.
-    loader_kwargs = dict(
-        shuffle=True,
+    common_loader_kwargs = dict(
         pin_memory=True,
         num_workers=num_workers,
     )
     if num_workers > 0:
-        loader_kwargs["persistent_workers"] = True
-        loader_kwargs["prefetch_factor"] = 4
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train, **loader_kwargs)
-    val_dataloader = DataLoader(val_dataset, batch_size=batch_size_val, **loader_kwargs)
+        common_loader_kwargs["persistent_workers"] = True
+        common_loader_kwargs["prefetch_factor"] = 4
+    if train_sampler is not None:
+        # sampler is mutually exclusive with shuffle in DataLoader.
+        train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train,
+                                      sampler=train_sampler, **common_loader_kwargs)
+    else:
+        train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train,
+                                      shuffle=True, **common_loader_kwargs)
+    # Validation always samples uniformly so the reported loss reflects the
+    # natural episode distribution — weights only bias training optimization.
+    val_dataloader = DataLoader(val_dataset, batch_size=batch_size_val,
+                                shuffle=True, **common_loader_kwargs)
 
     input_features = {k: v for k, v in train_dataset.info.items() if k.startswith("observation")}
     output_features = {k: v for k, v in train_dataset.info.items() if k.startswith("action")}

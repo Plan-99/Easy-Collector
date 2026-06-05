@@ -1,9 +1,11 @@
 """Routes proxying the remote training server."""
+import datetime
 import json
 import os
 import shutil
 import tarfile
 import tempfile
+import threading
 import time
 import traceback
 
@@ -325,12 +327,17 @@ def _build_train_config(checkpoint):
     }
 
 
-def _tar_datasets(dataset_ids, tar_path):
+def _tar_datasets(dataset_ids, tar_path, dataset_weights=None):
     """Create a tar.gz bundle of the requested dataset directories.
 
     Single dataset: bundle contents at archive root (meta/, data/, videos/).
     Multi dataset: merge into a temp dir first (non-destructive), then tar that
     so training_server sees a single LeRobot-format dataset.
+
+    ``dataset_weights``: optional dict {dataset_id: float}. When merging,
+    writes ``meta/episode_sample_weights.json`` (a flat list of floats indexed
+    by the new episode index) so training_server can build a
+    ``WeightedRandomSampler``. Irrelevant for the single-dataset case.
     """
     dataset_ids = [str(x) for x in dataset_ids]
     for ds_id in dataset_ids:
@@ -346,19 +353,25 @@ def _tar_datasets(dataset_ids, tar_path):
 
     merge_dir = tempfile.mkdtemp(prefix='et_merge_')
     try:
-        _merge_datasets_to_dir(dataset_ids, merge_dir)
+        _merge_datasets_to_dir(dataset_ids, merge_dir, dataset_weights=dataset_weights)
         with tarfile.open(tar_path, 'w:gz') as tar:
             tar.add(merge_dir, arcname='.')
     finally:
         shutil.rmtree(merge_dir, ignore_errors=True)
 
 
-def _merge_datasets_to_dir(dataset_ids, output_dir):
+def _merge_datasets_to_dir(dataset_ids, output_dir, dataset_weights=None):
     """Merge multiple LeRobot datasets into output_dir as a single dataset.
 
     First dataset becomes the base (full copy). Subsequent datasets get their
     episodes appended with re-indexed parquet/video/image paths and merged
     tasks.jsonl. Source datasets are not modified.
+
+    ``dataset_weights``: optional dict {dataset_id (str): float}. When provided
+    and any weight ≠ 1.0, writes ``meta/episode_sample_weights.json`` — a flat
+    list of floats indexed by the *new* (post-merge) episode index. The
+    training_server reads this and builds a WeightedRandomSampler so episodes
+    from a dataset with weight=W are sampled W× as often as weight=1 episodes.
     """
     from ...utils.lerobot_io import (
         _read_json, _write_json, _read_jsonl, _write_jsonl, _append_jsonl,
@@ -378,6 +391,15 @@ def _merge_datasets_to_dir(dataset_ids, output_dir):
     if os.path.isdir(output_dir):
         shutil.rmtree(output_dir)
     shutil.copytree(base_path, output_dir, symlinks=False)
+
+    # Per-new-episode-index sampling weights. Base dataset contributes
+    # episodes 0..(N_base-1) all with base_weight; subsequent datasets append.
+    weights_lookup = {str(k): float(v) for k, v in (dataset_weights or {}).items()}
+    def _w(ds_id):
+        return weights_lookup.get(str(ds_id), 1.0)
+    base_info_initial = get_dataset_info(output_dir) or {}
+    n_base = int(base_info_initial.get('total_episodes', 0))
+    episode_weights = [_w(base_id)] * n_base
 
     for tgt_id in dataset_ids[1:]:
         tgt_id = str(tgt_id)
@@ -458,6 +480,16 @@ def _merge_datasets_to_dir(dataset_ids, output_dir):
                 {'episode_index': new_ep_idx, 'stats': ep_stats},
                 os.path.join(output_dir, EPISODES_STATS_PATH),
             )
+            episode_weights.append(_w(tgt_id))
+
+    # Only emit the sidecar when at least one weight diverges from 1.0 —
+    # otherwise uniform sampling stays implicit and training_server skips the
+    # WeightedRandomSampler path entirely.
+    if any(abs(w - 1.0) > 1e-6 for w in episode_weights):
+        weights_path = os.path.join(output_dir, 'meta', 'episode_sample_weights.json')
+        os.makedirs(os.path.dirname(weights_path), exist_ok=True)
+        with open(weights_path, 'w') as f:
+            json.dump(episode_weights, f)
 
 
 def _tar_checkpoint(checkpoint_id, tar_path):
@@ -578,6 +610,146 @@ def _trigger_ood_features(checkpoint, socketio_instance, log_id):
     threading.Thread(target=_worker, daemon=True, name='ood_features').start()
 
 
+def _resume_polling(checkpoint_id, server_url, socketio_instance):
+    """Backend 재시작 시 이미 training_server 에 떠 있는 학습을 다시 polling
+    해서 결과를 처리. upload / start 는 skip — 이미 진행 중이므로 status +
+    log polling 만.
+
+    완료 시: download_and_install_model + status='finished' + graduation hook.
+    실패/취소: status 마무리.
+    job 을 못 찾으면 (training_server 도 죽었거나 GC): status='failed'.
+    """
+    from ...database.models.checkpoint_model import Checkpoint as CheckpointModel
+    from ...utils.machine_id import machine_id as _mid
+
+    machine_id = _mid()
+    job_id = f'{machine_id[:8]}_ckpt_{checkpoint_id}'
+    log_id = PROCESS_ID
+    last_log_cursor = 0
+    last_progress = -1.0
+    print(f'[resume_polling] cp{checkpoint_id} job={job_id} server={server_url}')
+
+    def _finalize(status):
+        try:
+            ck = CheckpointModel.find(checkpoint_id)
+            if ck is not None and ck.status == 'running':
+                ck.status = status
+                ck.finished_at = datetime.datetime.now()
+                ck.save()
+        except Exception as e:
+            print(f'[resume_polling] cp{checkpoint_id} finalize {status} failed: {e}')
+        try:
+            socketio_instance.emit('train_queue_changed', {})
+        except Exception:
+            pass
+        try:
+            from ..process.curriculum_train import notify_checkpoint_finished
+            notify_checkpoint_finished(checkpoint_id, socketio_instance)
+        except Exception as e:
+            print(f'[resume_polling] cp{checkpoint_id} graduation hook failed: {e}')
+
+    while True:
+        # 로그 스트림 — 가능한 만큼 따라 잡기.
+        try:
+            log_resp = requests.get(
+                f'{server_url}/api/train/logs/{job_id}',
+                params={'since': last_log_cursor}, timeout=10,
+            )
+            if log_resp.status_code == 200:
+                ld = log_resp.json()
+                for line in ld.get('lines', []):
+                    try:
+                        socketio_instance.emit('task_log', {
+                            'id': log_id,
+                            'message': line.get('message', ''),
+                            'type': line.get('type', 'stdout'),
+                        })
+                    except Exception:
+                        pass
+                last_log_cursor = ld.get('next', last_log_cursor)
+        except requests.exceptions.RequestException:
+            pass
+
+        # 상태 확인.
+        try:
+            resp = requests.get(f'{server_url}/api/train/status/{job_id}', timeout=10)
+            if resp.status_code == 404:
+                print(f'[resume_polling] cp{checkpoint_id} job not found → failed')
+                _finalize('failed')
+                return
+            if resp.status_code != 200:
+                time.sleep(5)
+                continue
+            job = resp.json().get('job', {})
+        except requests.exceptions.RequestException:
+            time.sleep(5)
+            continue
+
+        status = job.get('status')
+        progress = float(job.get('progress', 0) or 0)
+        if abs(progress - last_progress) >= 0.01:
+            try:
+                socketio_instance.emit('train_progress', {
+                    'checkpoint_id': checkpoint_id,
+                    'progress': progress, 'status': status,
+                })
+            except Exception:
+                pass
+            last_progress = progress
+
+        if status == 'finished':
+            try:
+                _download_and_install_model(server_url, job_id, checkpoint_id)
+                ck = CheckpointModel.find(checkpoint_id)
+                if ck is not None:
+                    _persist_train_result(ck, socketio_instance, log_id)
+                    _trigger_ood_features(ck, socketio_instance, log_id)
+                _finalize('finished')
+                return
+            except Exception as e:
+                print(f'[resume_polling] cp{checkpoint_id} download/install failed: {e}')
+                _finalize('failed')
+                return
+        if status == 'failed':
+            _finalize('failed')
+            return
+        if status in ('stopped', 'canceled'):
+            _finalize('canceled')
+            return
+
+        time.sleep(5)
+
+
+def resume_inflight_trainings(app, socketio_instance):
+    """Backend 시작 시점에 status='running' 인 체크포인트들에 대해 polling
+    스레드를 spawn. training_server (별도 프로세스) 에선 학습이 계속 진행 중일
+    수 있으므로 backend 가 재시작돼도 결과를 놓치지 않게.
+    """
+    from ...database.models.checkpoint_model import Checkpoint as CheckpointModel
+    try:
+        running = list(CheckpointModel.all_active().where(
+            CheckpointModel.status == 'running'
+        ))
+    except Exception as e:
+        print(f'[resume_inflight] DB query failed: {e}')
+        return
+    spawned = 0
+    for ckpt in running:
+        ts = ckpt._get_json_field('train_settings') or {}
+        server_url = _normalize_url(ts.get('server_url', ''))
+        if not server_url:
+            print(f'[resume_inflight] cp{ckpt.id} has no server_url, leaving as running')
+            continue
+        threading.Thread(
+            target=_resume_polling,
+            args=(ckpt.id, server_url, socketio_instance),
+            daemon=True, name=f'resume_polling_cp{ckpt.id}',
+        ).start()
+        spawned += 1
+    if spawned:
+        print(f'[resume_inflight] spawned {spawned} polling threads')
+
+
 def run_training_job(checkpoint, server_url, callback_url,
                       stop_event, socketio_instance):
     """Pure execution function: dataset upload → start → poll → download model.
@@ -608,6 +780,22 @@ def run_training_job(checkpoint, server_url, callback_url,
             _emit_log(socketio_instance, log_id, '[ERROR] No datasets assigned to checkpoint', 'error')
             return CheckpointModel.STATUS_FAILED
 
+        # Per-dataset sampling weights (frontend "샘플링 비중"). Legacy
+        # dataset_info entries lack the field — default to 1.0.
+        dataset_weights = {}
+        for ds_id, meta in (config['dataset_info'] or {}).items():
+            if isinstance(meta, dict) and 'weight' in meta:
+                try:
+                    dataset_weights[str(ds_id)] = float(meta['weight'])
+                except (TypeError, ValueError):
+                    dataset_weights[str(ds_id)] = 1.0
+            else:
+                dataset_weights[str(ds_id)] = 1.0
+        _non_default = {k: v for k, v in dataset_weights.items() if abs(v - 1.0) > 1e-6}
+        if _non_default and len(dataset_ids) > 1:
+            _emit_log(socketio_instance, log_id,
+                      f'Per-dataset sampling weights: {_non_default}')
+
         # Multi-dataset: backend merges into a temp dir and uploads as a single
         # synthetic bundle so training_server stays single-dataset oriented.
         if len(dataset_ids) > 1:
@@ -622,7 +810,7 @@ def run_training_job(checkpoint, server_url, callback_url,
         with tempfile.NamedTemporaryFile(suffix='.tar.gz', delete=False) as tmp:
             tar_path = tmp.name
         try:
-            _tar_datasets(dataset_ids, tar_path)
+            _tar_datasets(dataset_ids, tar_path, dataset_weights=dataset_weights)
             size_mb = os.path.getsize(tar_path) / (1024 * 1024)
             _emit_log(socketio_instance, log_id, f'Uploading dataset ({size_mb:.1f} MB)...')
             with open(tar_path, 'rb') as f:

@@ -9,7 +9,7 @@
                 color="blue-grey-7"
                 icon="refresh"
                 :loading="refreshing"
-                @click="manualRefresh"
+                @click="refresh"
             >
                 <q-tooltip>Refresh queue</q-tooltip>
             </q-btn>
@@ -58,8 +58,15 @@ defineEmits(['watch']);
 // TrainingDialog가 종료 상태(finished/failed)로 자연스럽게 전환될 수 있도록 한다.
 const queue = ref({ running: null, queued: [], recent: [] });
 const refreshing = ref(false);
+// 진행 중인 refresh 개수 — 수동 클릭/socketio 이벤트/마운트/부모 호출이 겹쳐도
+// 마지막 하나가 끝날 때까지 loading 을 유지하기 위한 카운터.
+let inflight = 0;
 
+// 모든 큐 새로고침의 단일 경로. 어떤 트리거(버튼/socketio/부모)든 이 함수를 거치므로
+// refreshing(loading)이 모든 로딩을 포괄한다.
 async function refresh() {
+    inflight += 1;
+    refreshing.value = true;
     try {
         const res = await api.get('/train/queue');
         queue.value = {
@@ -69,18 +76,12 @@ async function refresh() {
         };
     } catch {
         // 네트워크 일시 단절 — 다음 tick에 재시도
-    }
-}
-
-// 사용자가 직접 누르는 새로고침. refresh() 는 socketio 이벤트와 공유하므로
-// loading 스피너는 manual 전용 래퍼에서만 띄운다.
-async function manualRefresh() {
-    if (refreshing.value) return;
-    refreshing.value = true;
-    try {
-        await refresh();
     } finally {
-        refreshing.value = false;
+        inflight -= 1;
+        if (inflight <= 0) {
+            inflight = 0;
+            refreshing.value = false;
+        }
     }
 }
 

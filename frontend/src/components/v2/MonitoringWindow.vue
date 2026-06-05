@@ -1,9 +1,16 @@
 <template>
-    <div class="column full-height border-rounded" :style="{ maxHeight: monitorOnly ? null : '700px' }">
+    <!-- 레이아웃은 monitorOnly 와 무관하게 통일 — 세로 flex 분배(column/col)나
+         높이 고정 없이 카메라(고정 320px) → 로봇(관절 수만큼 자연 높이) →
+         (녹화 뷰면) 컨트롤 순으로 그대로 흐른다. 높이는 호출부가 준 박스/페이지가
+         처리한다. monitorOnly 는 이제 녹화 컨트롤 노출 여부에만 쓰인다. -->
+    <div class="border-rounded">
         <TutorialHint v-if="!monitorOnly" :text="$t(monitoringHintKey)" class="q-mb-sm" />
-        <div class="bg-secondary border-rounded column q-px-sm col">
-        <div :class="[monitorOnly ? 'col' : 'col-6', 'row flex felx-center q-col-gutter-x-sm']" v-if="sensorViewports.length > 0">
-            <div v-for="vp in sensorViewports" :key="vp.key" class="col q-py-sm relative-position">
+        <div class="bg-secondary border-rounded column q-px-sm">
+        <div class="row flex felx-center q-col-gutter-x-sm" style="height: 320px" v-if="sensorViewports.length > 0">
+            <!-- v-show 로 숨김 (v-if 아님) — 숨겨도 WebRtcVideo 가 unmount 되지
+                 않아 PC/track 이 살아있다. v-if 면 매 토글마다 WebRTC 재협상이
+                 일어나 streaming server 부하 + 짧은 black screen 발생. -->
+            <div v-for="vp in sensorViewports" :key="vp.key" v-show="isViewportVisible(vp)" class="col q-py-sm relative-position">
                 <web-rtc-video
                     :process-id="`sensor_${vp.sensor.id}`"
                     :topic="vp.sensor.read_topic"
@@ -13,26 +20,29 @@
                     :loading="vp.sensor.status !== 'on'"
                     v-if="vp.sensor.status !== 'off'"
                     :class="{
-                        'border-primary': focused.id === vp.sensor.id && focused.device_type === 'sensor',
+                        'border-primary': focused.viewKey === vp.viewKey && focused.device_type === 'sensor',
                     }"
-                    @click="focusSensorRobot(vp.sensor, 'sensor')"
-                    :resize="viewportImgSize(vp.workspace, vp.sensor.id)"
-                    :cropped_area="viewportCropArea(vp.workspace, vp.sensor.id)"
-                    :rotate="viewportRotate(vp.workspace, vp.sensor.id)"
-                    :overlay-src="status === 'testing' && inferenceVisionMapOn ? inferenceHeatmaps[`sensor_${vp.sensor.id}`] : null"
+                    @click="focusSensorRobot(vp.sensor, 'sensor', vp.viewKey)"
+                    :resize="viewportImgSize(vp.workspace, vp.viewKey, vp.sensor.id)"
+                    :cropped_area="viewportCropArea(vp.workspace, vp.viewKey, vp.sensor.id)"
+                    :rotate="viewportRotate(vp.workspace, vp.viewKey, vp.sensor.id)"
+                    :overlay-src="procStatus === 'testing' && inferenceVisionMapOn ? inferenceHeatmaps[`sensor_${vp.viewKey}`] : null"
                 ></web-rtc-video>
                 <div class="full-height border-white bg-dark border-rounded flex flex-center" v-else>
                     <q-btn round flat icon="play_arrow" text-color="white" size="xl" @click="vp.sensor.handler.startSensor(vp.sensor)"></q-btn>
                 </div>
-                <q-chip color="blue-10" text-color="white" class="absolute-top-left" style="top: 20px; left: 15px; z-index: 2">
-                    {{ vp.sensor.name }} {{ $t('sensorSuffix') }}<span v-if="vp.workspaceName"> · {{ vp.workspaceName }}</span>
+                <q-chip color="blue-10" text-color="white" class="absolute-top-left ellipsis" style="top: 20px; left: 15px; z-index: 2; max-width: calc(100% - 30px)">
+                    {{ vp.sensor.name }}<span v-if="vp.occurrence > 0"> · view {{ vp.occurrence + 1 }}</span> {{ $t('sensorSuffix') }}<span v-if="vp.workspaceName"> · {{ vp.workspaceName }}</span>
                 </q-chip>
             </div>
         </div>
-        <div v-else :class="[monitorOnly ? 'col' : 'col-6', 'q-py-sm']">
-            <div class="text-white border-rounded border-white bg-dark full-height flex flex-center">{{ $t('noSensorsMsg') }}</div>
+        <div v-else class="q-py-sm" style="height: 320px">
+            <div class="text-white border-rounded border-white bg-dark full-height flex flex-center">
+                <q-spinner-gears v-if="loading" size="40px" color="primary" />
+                <template v-else>{{ $t('noSensorsMsg') }}</template>
+            </div>
         </div>
-        <div :class="[monitorOnly ? 'col' : 'col-5', 'row q-gutter-x-sm']" v-if="robots.length > 0">
+        <div class="row q-gutter-x-sm" v-if="robots.length > 0">
             <div v-for="robot in robots" :key="robot.id" class="col column q-pa-md relative-position border-rounded border-white text-white cursor-pointer"
                     :class="{
                         'border-primary': focused.id === robot.id && focused.device_type === 'robot',
@@ -40,10 +50,14 @@
                     }"
                     @click="focusSensorRobot(robot, 'robot')"
                 >
-                <div v-for="(j, i) in robot.joint_names" :key="i" class="col flex flex-center q-gutter-x-md">
-                    <div class="border-rounded border-white q-px-md q-py-xs text-center">{{ j }} {{ robot.jointState ? robot.jointState[i]?.toFixed(4) : $t('unreadable') }}</div>
-                    <q-icon name="arrow_forward"></q-icon>
-                    <div class="border-rounded border-primary q-px-md q-py-xs text-center text-primary">{{ j }} {{ robot.jointAction ? robot.jointAction[i]?.toFixed(4) : $t('unreadable') }}</div>
+                <!-- 관절 행은 자연 높이로 렌더 — 세로 flex 분배(col)를 쓰지 않아
+                     관절 수(dual_arm=14)만큼 그대로 늘어난다. -->
+                <div class="column q-gutter-y-xs full-width">
+                    <div v-for="(j, i) in robot.joint_names" :key="i" class="row flex flex-center q-gutter-x-md no-wrap">
+                        <div class="border-rounded border-white q-px-md q-py-xs text-center">{{ j }} {{ robot.jointState ? robot.jointState[i]?.toFixed(4) : $t('unreadable') }}</div>
+                        <q-icon name="arrow_forward"></q-icon>
+                        <div class="border-rounded border-primary q-px-md q-py-xs text-center text-primary">{{ j }} {{ robot.jointAction ? robot.jointAction[i]?.toFixed(4) : $t('unreadable') }}</div>
+                    </div>
                 </div>
                 <q-btn
                     class="absolute-center q-mb-md q-mr-md"
@@ -55,14 +69,22 @@
                     @click="robot.handler.startRobot(robot)"
                     v-if="robot.status === 'off'"
                 ></q-btn>
-                <q-chip color="green-10" text-color="white" class="absolute-top-left" style="top: 20px; left: 15px">{{ robot.name }} {{ $t('robotSuffix') }}</q-chip>
+                <q-chip color="green-10" text-color="white" class="absolute-top-left ellipsis" style="top: 20px; left: 15px; max-width: calc(100% - 30px)">{{ robot.name }} {{ $t('robotSuffix') }}</q-chip>
             </div>
         </div>
-        <div v-else :class="[monitorOnly ? 'col' : 'col-5', 'border-rounded border-white bg-dark flex flex-center']">
-            <div class="text-white">{{ $t('noRobotsMsg') }}</div>
+        <div v-else class="border-rounded border-white bg-dark flex flex-center" style="min-height: 120px">
+            <q-spinner-gears v-if="loading" size="40px" color="primary" />
+            <div v-else class="text-white">{{ $t('noRobotsMsg') }}</div>
         </div>
-        <template v-if="!monitorOnly">
-        <div class="flex flex-center col" v-if="!isRobotSensorAllOn">
+        <!-- 하단 바: monitor 의도(idle+monitorOnly)면 숨김. 실제 프로세스가 돌면
+             (procStatus !== 'pending') monitorOnly 라도 노출 — 커리큘럼/플래너 rollout
+             추론이 돌면 inference 바가 자동으로 뜬다. -->
+        <template v-if="!monitorOnly || correctionMode || procStatus !== 'pending'">
+        <!-- correctionMode 에서는 'startAllDevices' 체크 우회 — 커리큘럼이 이미
+             필요한 device 를 켜놓은 상태이고, props.sensors 가 모든 워크스페이스
+             의 union 이라 다른 워크스페이스의 sensor 가 off 일 수 있다 (그건
+             교정 record 와 무관). -->
+        <div class="flex flex-center col" v-if="!isRobotSensorAllOn && !correctionMode">
             <div class="text-yellow">{{ $t('startAllDevices') }}</div>
         </div>
         <div class="col q-py-sm" v-else>
@@ -71,8 +93,8 @@
                     <div
                         class="col bg-dark border-rounded text-white row items-center q-col-gutter-x-sm"
                     >
-                        <div>
-                            <div class="text-h6">{{ selectedEpisode?.name }}</div>
+                        <div class="col ellipsis">
+                            <div class="text-h6 ellipsis">{{ selectedEpisode?.name }}</div>
                         </div>
                         <div>
                             <q-btn
@@ -80,10 +102,10 @@
                                 round
                                 flat
                                 @click="selectedEpisode = {}"
-                                v-if="status === 'pending'"
+                                v-if="procStatus === 'pending'"
                             ></q-btn>
                         </div>
-                        <q-space class="col" v-if="status === 'pending'"></q-space>
+                        <q-space class="col" v-if="procStatus === 'pending'"></q-space>
                         <div class="col q-px-md" v-else>
                             <q-linear-progress
                                 :value="replayProgress"
@@ -97,7 +119,7 @@
                                 </div>
                             </q-linear-progress>
                         </div>
-                        <div class="row items-center q-gutter-x-sm" v-if="status === 'pending'">
+                        <div class="row items-center q-gutter-x-sm" v-if="procStatus === 'pending'">
                             <span class="text-caption text-grey">{{ $t('replayActionType') }}:</span>
                             <q-radio
                                 v-model="replayActionType"
@@ -146,7 +168,7 @@
                                 :label="$t('replayPlay')"
                                 icon="play_arrow"
                                 @click="startReplay"
-                                v-if="status === 'pending'"
+                                v-if="procStatus === 'pending'"
                             ></q-btn>
                             <q-btn
                                 color="white"
@@ -167,13 +189,13 @@
               'inferencing' 으로 바뀐다 → 이 분기 대신 아래의 데이터 수집
               분기 (v-else) 로 흘러가야 한다.
             -->
-            <div v-else-if="checkpoint && (status === 'pending' || status === 'testing')" class="row q-mb-sm">
+            <div v-else-if="procStatus === 'testing' || (checkpoint && procStatus === 'pending')" class="row q-mb-sm">
                 <div
                     class="col bg-dark border-rounded text-white row flex flex-center q-col-gutter-x-sm"
-                    v-if="status === 'pending'"
+                    v-if="procStatus === 'pending'"
                 >
-                    <div>
-                        <div class="text-h6">{{ checkpoint?.name }}</div>
+                    <div class="col ellipsis">
+                        <div class="text-h6 ellipsis">{{ checkpoint?.name }}</div>
                     </div>
                     <div>
                         <q-btn
@@ -191,7 +213,7 @@
                             :label="$t('startInference')"
                             icon="play_arrow"
                             @click="startInference"
-                            v-if="status === 'pending'"
+                            v-if="procStatus === 'pending'"
                         />
                     </div>
                 </div>
@@ -267,7 +289,10 @@
                             </q-item>
                         </q-list>
                     </q-btn-dropdown>
+                    <!-- monitorOnly(커리큘럼/플래너)에서는 실행 제어를 그쪽 컨트롤이 담당하므로
+                         DAgger/Stop 은 숨기고 모니터링 위젯(succeed/OOD/Vision Map)만 노출. -->
                     <q-btn
+                        v-if="!monitorOnly"
                         color="amber"
                         text-color="dark"
                         :label="$t('daggerBtn')"
@@ -278,6 +303,7 @@
                         <q-tooltip>{{ $t('daggerDialogDesc') }}</q-tooltip>
                     </q-btn>
                     <q-btn
+                        v-if="!monitorOnly"
                         color="white"
                         text-color="red"
                         :label="$t('stopBtn')"
@@ -287,7 +313,7 @@
                 </div>
             </div>
             <div v-else>
-                <div class="text-grey bg-dark border-rounded row full-height flex flex-center" v-if="status === 'pending'">
+                <div class="text-grey bg-dark border-rounded row full-height flex flex-center" v-if="procStatus === 'pending'">
                     <q-select
                         v-model="selectedDatasetId"
                         dense
@@ -579,7 +605,7 @@
                 style=""
             />
             <process-console
-                :process="status === 'testing' ? 'checkpoint_test' : 'record_episode'"
+                :process="procStatus === 'testing' ? 'checkpoint_test' : 'record_episode'"
                 class="q-mt-md"
                 style="border: 1px solid #ffffff; background-color: #1e1e1e; z-index: 1000; width: 800px; height: 400px;"
                 v-show="showProcessConsole"
@@ -597,7 +623,7 @@
                 flat
                 @click="selectedEpisode = {}"
                 color="white"
-                v-if="status === 'pending'"
+                v-if="procStatus === 'pending'"
             ></q-btn>
             <episode-viewer
                 :path="`${selectedDatasetId}/${selectedEpisode.name}`"
@@ -650,15 +676,32 @@ import { useI18n } from 'vue-i18n';
 import { api } from 'src/boot/axios';
 import ProcessConsole from './ProcessConsole.vue';
 import { useSocket } from 'src/composables/useSocket.js';
+import { useProcessStore } from 'src/stores/processStore';
 import WebRtcVideo from './WebRtcVideo.vue';
 import EpisodeViewer from 'src/components/v2/EpisodeViewer.vue';
 import FormDialog from './FormDialog.vue';
-import { DEFAULT_KEYBOARD_SETTINGS, AXIS_TO_EE_INDEX, normalizeEventKey } from 'src/configs/teleopDefaults';
+import { DEFAULT_KEYBOARD_SETTINGS } from 'src/configs/teleopDefaults';
+import { useKeyboardTeleop } from 'src/composables/useKeyboardTeleop';
 import TutorialHint from './TutorialHint.vue';
+import { enumerateViews } from 'src/utils/sensorView';
 
 
 const { socket } = useSocket();
 const { t } = useI18n();
+const processStore = useProcessStore();
+
+// 실행 중인 추론(checkpoint_test)의 메타. 백엔드 'inference_active' 이벤트로만 채워지며
+// 워크스페이스 단독·커리큘럼·플래너 모든 경로를 단일 신호로 커버한다. null = 추론 아님.
+const inferenceActive = ref(null);
+
+// 하단 바를 결정하는 "실제 실행 중 프로세스" 단일 진실. 부모가 넘기던 status 대신 사용.
+//   추론 중 → 'testing', record_episode 중 → 'inferencing', replay 중 → 'replaying', 그 외 → 'pending'.
+const procStatus = computed(() => {
+    if (inferenceActive.value) return 'testing';
+    if (processStore.isRunning('record_episode')) return 'inferencing';
+    if (processStore.isRunning('replay_episode')) return 'replaying';
+    return 'pending';
+});
 
 const props = defineProps({
     workspace: {
@@ -677,15 +720,24 @@ const props = defineProps({
         type: Array,
         required: true
     },
+    // (deprecated) 더 이상 사용하지 않음 — 실행 상태는 procStatus 로 백엔드에서 도출.
+    // 부모가 넘기지 않아도 되도록 optional 로 둔다.
     status: {
         type: String,
-        required: true
+        required: false,
+        default: 'pending'
     },
     datasets: {
         type: Array,
         required: true
     },
     monitorOnly: {
+        type: Boolean,
+        default: false,
+    },
+    // 초기 API 로딩 중에는 sensor/robot 이 비어 있어 "사용 가능한 ... 없습니다"
+    // 빈 상태가 잠깐 뜬다. loading=true 면 그 자리에 스피너를 보여준다.
+    loading: {
         type: Boolean,
         default: false,
     },
@@ -696,50 +748,122 @@ const props = defineProps({
         type: Array,
         default: null,
     },
+    // (선택) Planner 같은 multi-view 모드에서 일부 viewport 만 화면에 노출하고
+    // 싶을 때 사용. **viewport 자체는 항상 마운트** (WebRTC PC 가 destroy/create
+    // 를 반복하지 않도록) 하고, ``v-show`` 로 숨김. 값 종류:
+    //   - ``null`` (기본): 모두 노출 (기존 동작)
+    //   - ``'primary'``: 물리 센서 당 첫 번째 view (occurrence=0) 만 노출
+    //   - ``Set<string>``: 해당 viewKey 만 노출 (예: 체크포인트가 학습된 view 들)
+    visibleViewKeys: {
+        type: [Object, String, Set],
+        default: null,
+    },
+    // CurriculumPage 의 교정 record_episode 흐름 — monitorOnly=true 와도
+    // 호환되도록 바텀 record 패널을 강제 노출. record_episode 의 outer 루프
+    // 가 iter=1 로 호출되어 1 에피소드 후 종료되고, MonitoringWindow 는
+    // 일반 record 와 동일한 progress / Success / Complete / Throw / Stop UI 를
+    // 그대로 사용한다 (간격/Success 버튼 등 일관성 유지). 버튼 클릭 시 부모
+    // (CurriculumPage) 가 후속 resume 신호를 보내도록 추가 emit 만.
+    correctionMode: {
+        type: Boolean,
+        default: false,
+    },
 });
+
+// 교정 record 종료 시 CurriculumPage 가 적절한 resume 신호 (next / fallback /
+// 전체 stop) 를 보내도록 emit. completeEpisode/throwEpisode/stopDataCollection
+// 의 API 호출은 그대로 두고 (record_episode 워커 정상 종료), 추가로 emit 만.
+const emit = defineEmits(['correction-done', 'correction-throw', 'correction-stop']);
+
+// "primary" 모드용: sensorViewports 를 순회하며 처음 만난 sensor 의 viewport 만
+// 살린다. workspace 가 여러 개라도 같은 물리 센서는 한 번만 노출 → "기본 센서 뷰".
+const primaryViewportKeys = computed(() => {
+    const seenSids = new Set();
+    const keys = new Set();
+    for (const vp of sensorViewports.value) {
+        const sid = vp.sensor?.id;
+        if (sid == null) continue;
+        if (seenSids.has(sid)) continue;
+        seenSids.add(sid);
+        keys.add(vp.key);
+    }
+    return keys;
+});
+
+// 한 viewport 를 화면에 보일지 여부. props.visibleViewKeys 의 mode 에 따라 분기.
+// 핵심: 숨기더라도 컴포넌트는 마운트 상태 유지 → WebRTC 연결은 끊기지 않는다.
+//   Set 매칭 키는 ``vp.key`` (``${workspaceId}-${viewKey}``) — 같은 viewKey 가
+//   여러 workspace 에 있어도 정확히 한 workspace 의 viewport 만 노출 가능.
+function isViewportVisible(vp) {
+    const v = props.visibleViewKeys;
+    if (v == null) return true;
+    if (v === 'primary') return primaryViewportKeys.value.has(vp.key);
+    if (v instanceof Set) return v.has(String(vp.key));
+    return true;
+}
 
 const focused = defineModel('focused', {
     type: Object,
     default: () => ({ id: null, device_type: null })
 });
 
-// 각 viewport 가 (workspace, sensor) 쌍을 표현. 다중 workspace 인 Planner 모드에서
-// 같은 sensor 라도 workspace 마다 crop/resize/rotate 가 다르면 별개 viewport 로 분리.
-// 단일 workspace 모드(WorkspacePage 등)에선 기존과 동일하게 sensor 당 1 viewport.
+// Multi-view: 각 viewport = (workspace, view) 쌍. 한 workspace 가 같은 sensor 의
+// 여러 view 를 등록하면 그만큼 viewport 도 늘어남. Planner 모드 (props.workspaces)
+// 와 단일 workspace 모드 모두 같은 enumeration 으로 처리.
 const sensorViewports = computed(() => {
-    const sensorById = new Map(props.sensors.map(s => [s.id, s]));
+    const sensorById = new Map(props.sensors.map(s => [Number(s.id), s]));
+    const buildItems = (ws, wsName) => {
+        const sids = (ws && ws.sensor_ids) || [];
+        return enumerateViews(sids).map(({ sensorId, viewKey, occurrence }) => {
+            const live = sensorById.get(sensorId);
+            if (!live) return null;
+            return {
+                key: `${ws.id || 'ws'}-${viewKey}`,
+                workspace: ws,
+                workspaceName: wsName,
+                sensor: live,
+                viewKey,
+                occurrence,
+            };
+        }).filter(Boolean);
+    };
     if (props.workspaces && props.workspaces.length > 0) {
         const items = [];
         props.workspaces.forEach((ws) => {
-            (ws.sensors || []).forEach((wsSensor) => {
-                const live = sensorById.get(wsSensor.id);
-                if (!live) return;
-                items.push({
-                    key: `${ws.id}-${live.id}`,
-                    workspace: ws,
-                    workspaceName: ws.name || '',
-                    sensor: live,
-                });
-            });
+            items.push(...buildItems(ws, ws.name || ''));
         });
         return items;
     }
-    return props.sensors.map((s) => ({
-        key: String(s.id),
-        workspace: props.workspace || {},
-        workspaceName: '',
-        sensor: s,
-    }));
+    return buildItems(props.workspace || {}, '');
 });
 
-function viewportCropArea(ws, sensorId) {
-    return (ws && ws.sensor_cropped_area && ws.sensor_cropped_area[sensorId]) || {};
+// 모든 lookup: view_key 우선, 없으면 sensor_id 로 fallback (기존 single-view
+// dataset/task 호환). `??` 가 아니라 `in` 체크로 "키 존재" 를 판별 — rotation=0
+// 같은 falsy 정상값이 fallback 으로 잘못 넘어가는 버그를 막는다 (`||` 사용 시
+// d["5_2"]=0 → falsy → d["5"]=270 로 빠짐).
+// null 값(예전 addView 버그로 저장된 빈 view 설정)은 "없음"으로 취급해
+// sensorId/기본값으로 폴백한다. null 을 그대로 반환하면 WebRtcVideo 의
+// resize/cropped_area 가 null 이 되어 무한 로딩된다.
+function viewportCropArea(ws, viewKey, sensorId) {
+    const d = ws && ws.sensor_cropped_area;
+    if (!d) return {};
+    if (viewKey in d && d[viewKey] != null) return d[viewKey];
+    if (sensorId in d && d[sensorId] != null) return d[sensorId];
+    return {};
 }
-function viewportImgSize(ws, sensorId) {
-    return (ws && ws.sensor_img_size && ws.sensor_img_size[sensorId]) || [640, 480];
+function viewportImgSize(ws, viewKey, sensorId) {
+    const d = ws && ws.sensor_img_size;
+    if (!d) return [640, 480];
+    if (viewKey in d && d[viewKey] != null) return d[viewKey];
+    if (sensorId in d && d[sensorId] != null) return d[sensorId];
+    return [640, 480];
 }
-function viewportRotate(ws, sensorId) {
-    return (ws && ws.sensor_rotate && ws.sensor_rotate[sensorId]) || 0;
+function viewportRotate(ws, viewKey, sensorId) {
+    const d = ws && ws.sensor_rotate;
+    if (!d) return 0;
+    if (viewKey in d && d[viewKey] != null) return d[viewKey];
+    if (sensorId in d && d[sensorId] != null) return d[sensorId];
+    return 0;
 }
 const selectedDatasetId = defineModel('selectedDatasetId', {
     type: [String, Number],
@@ -813,9 +937,9 @@ const monitoringHintKey = computed(() => {
     if (!isRobotSensorAllOn.value) return 'tutorialMonOverview';
     if (selectedEpisode.value?.name && selectedDatasetId.value) return 'tutorialMonReplay';
     if (checkpoint.value) {
-        return props.status === 'pending' ? 'tutorialMonInferenceSelected' : 'tutorialMonInferenceRunning';
+        return procStatus.value === 'pending' ? 'tutorialMonInferenceSelected' : 'tutorialMonInferenceRunning';
     }
-    if (props.status === 'pending') return 'tutorialMonIdlePending';
+    if (procStatus.value === 'pending') return 'tutorialMonIdlePending';
     if (viveInitializing.value) return 'tutorialMonViveInit';
     if (movingHomepose.value) return 'tutorialMonMovingHome';
     switch (teleType.value) {
@@ -829,18 +953,36 @@ const monitoringHintKey = computed(() => {
     }
 });
 
-function focusSensorRobot(device, type) {
+// Multi-view: backend 의 record_episode / checkpoint_test / replay 는 ``sensors``
+// 배열을 view 와 1:1 매칭으로 받는다 (같은 sensor_id 가 N 번 들어와도 그대로
+// N 개로). WorkspacePage 가 카드 표시용으로 deduped `selectedSensors` 를 넘기지만,
+// 백엔드 payload 에는 sensor_ids 순서대로 펼친 list 가 필요하다.
+function expandSensorsForBackend(taskSource = null) {
+    const ws = taskSource || props.workspace;
+    const sensorById = new Map((props.sensors || []).map((s) => [Number(s.id), s]));
+    const sids = ws?.sensor_ids || [];
+    return sids.map((sid) => sensorById.get(Number(sid))).filter(Boolean);
+}
+
+function focusSensorRobot(device, type, viewKey = undefined) {
     if (device.status !== 'on') {
         return;
     }
-    if (focused.value && focused.value.id === device.id && focused.value.device_type === type) {
+    // Multi-view: 같은 sensor 의 다른 view 도 별개 focused 로 취급. viewKey 가
+    // 같이 일치할 때만 toggle off (그래야 다른 view 클릭 시 그쪽으로 전환).
+    const sameTarget = focused.value
+        && focused.value.id === device.id
+        && focused.value.device_type === type
+        && (type !== 'sensor' || focused.value.viewKey === viewKey);
+    if (sameTarget) {
         focused.value = {};
         return;
     }
 
     focused.value = {
         ...device, // device 객체의 모든 속성을 복사
-        device_type: type // device_type 속성을 추가 (또는 덮어쓰기)
+        device_type: type, // device_type 속성을 추가 (또는 덮어쓰기)
+        ...(type === 'sensor' && viewKey ? { viewKey } : {}),
     };
 }
 
@@ -886,9 +1028,11 @@ const oodScoreDisplay = computed(() => {
     if (!oodScore.value) return '';
     const img = oodScore.value.image;
     const state = oodScore.value.state;
-    const imgStr = typeof img === 'number' ? img.toFixed(2) : '-';
-    const stateStr = typeof state === 'number' ? state.toFixed(2) : '-';
-    return `${oodTotal.value.toFixed(2)} (${imgStr} + ${stateStr})`;
+    // 현재는 state-only OOD — 둘 다 있을 때만 분해 표기, 아니면 합산값만.
+    if (typeof img === 'number' && typeof state === 'number') {
+        return `${oodTotal.value.toFixed(2)} (img ${img.toFixed(2)} + state ${state.toFixed(2)})`;
+    }
+    return oodTotal.value.toFixed(2);
 });
 
 // =========================================================================
@@ -904,14 +1048,19 @@ const inferenceVisionMapMethodOptions = computed(() => [
     { label: t('visionMapAttention'), value: 'attention' },
     { label: t('visionMapGradcam'), value: 'gradcam' },
 ]);
-// Only ACT supports the inference-time hooks (no equivalent on Diffusion/PI0).
-const supportsInferenceVisionMap = computed(() =>
-    String(checkpoint.value?.policy?.type || '').toUpperCase() === 'ACT',
-);
+// 추론 중인 체크포인트의 정책 타입 — 워크스페이스(선택 checkpoint) 또는 monitorOnly
+// (inference_active 이벤트의 policy_type). ACT 만 inference-time hook 지원.
+const supportsInferenceVisionMap = computed(() => {
+    const t = checkpoint.value?.policy?.type || inferenceActive.value?.policy_type;
+    return String(t || '').toUpperCase() === 'ACT';
+});
 
 function applyInferenceVisionMap(method) {
-    if (!selectedCheckpointId.value) return;
-    api.post(`/checkpoint/${selectedCheckpointId.value}/:set_inference_vision_map`, { method })
+    // 토글 대상 checkpoint id — 워크스페이스 선택 또는 monitorOnly 의 실행 중 checkpoint.
+    // (백엔드는 _active_inference 레지스트리로 라우팅하므로 id 는 URL 형식용.)
+    const cpId = selectedCheckpointId.value || inferenceActive.value?.checkpoint_id;
+    if (!cpId) return;
+    api.post(`/checkpoint/${cpId}/:set_inference_vision_map`, { method })
         .catch((err) => console.warn('[InferenceVisionMap] set failed:', err));
 }
 
@@ -925,9 +1074,9 @@ function setInferenceVisionMap(method) {
 }
 
 watch([inferenceVisionMapOn, inferenceVisionMapMethod], () => {
-    // Only push to backend when inference is actually running — the status
+    // Only push to backend when inference is actually running — the procStatus
     // watcher below re-applies on transition into 'testing'.
-    if (props.status !== 'testing') return;
+    if (procStatus.value !== 'testing') return;
     if (inferenceVisionMapOn.value) {
         applyInferenceVisionMap(inferenceVisionMapMethod.value);
     } else {
@@ -936,7 +1085,7 @@ watch([inferenceVisionMapOn, inferenceVisionMapMethod], () => {
     }
 });
 
-watch(() => props.status, (newStatus, oldStatus) => {
+watch(procStatus, (newStatus, oldStatus) => {
     if (newStatus === 'testing' && oldStatus !== 'testing') {
         // Inference just started — re-push the current toggle so the backend
         // emits heatmaps from the very first step.
@@ -978,7 +1127,10 @@ function _doStartDataCollection(effectiveTeleType, options = {}) {
     // 누른 시점에서 즉시 텔레옵으로 넘기고 싶기 때문에 home pose 이동을
     // 강제로 비활성화한다. 일반 collection 흐름은 옵션 없이 호출 → 기존 값
     // (moveHomposeInDataCollection.value) 그대로 사용.
+    // ``taskOverride`` 는 curriculum 교정 흐름 전용 — 실패한 체크포인트의
+    // max_steps 를 task.episode_len 으로 덮어쓰기 위해 사용.
     const moveHomepose = options.forceNoHomepose ? false : moveHomposeInDataCollection.value;
+    const taskForBackend = options.taskOverride || props.workspace;
 
     if (effectiveTeleType === 'keyboard') {
         addKeyboardListener();
@@ -997,21 +1149,31 @@ function _doStartDataCollection(effectiveTeleType, options = {}) {
         movingHomepose.value = true;
     }
     const payload = {
-        task: props.workspace,
+        task: taskForBackend,
         robots: props.robots,
-        sensors: props.sensors,
+        sensors: expandSensorsForBackend(taskForBackend),
         tele_type: effectiveTeleType,
-        assembly_id: props.workspace.assembly_id,
+        assembly_id: taskForBackend.assembly_id,
         move_homepose: moveHomepose,
         move_homepose_duration: Number(moveHomposeDuration.value) || 5.0,
         hz: collectionHz.value,
         language_instruction: languageInstruction.value || '',
     };
+    // ``options.iter`` — record_episode 의 outer 루프 횟수. 교정 흐름은 1 episode
+    // 후 자동 종료가 필요해서 iter=1 로 호출 → 사용자가 완료/버리기/중지 중
+    // 어떤 걸 누르더라도 outer 루프가 한 번 돌고 끝나서 stop_process emit 이
+    // 발생, CurriculumPage 가 적절한 resume 신호를 보낸다.
+    if (options.iter != null) {
+        payload.iter = options.iter;
+    }
     if (teleType.value === 'motion_planning' && ros2Service.value) {
         payload.ros2_service = ros2Service.value;
     }
     return api.post(`/dataset/${selectedDatasetId.value}/:start_collection`, payload).catch((error) => {
         viveInitializing.value = false;
+        // 실패 시 등록한 listener 도 정리해야 다음 시도에서 중복 등록 안 됨.
+        if (effectiveTeleType === 'keyboard') removeKeyboardListener();
+        removeSucceedKeyListener();
         console.error('Error starting data collection:', error);
         Notify.create({
             color: 'negative',
@@ -1020,6 +1182,26 @@ function _doStartDataCollection(effectiveTeleType, options = {}) {
         throw error;
     });
 }
+
+// CurriculumPage 교정 흐름 진입점 — 외부에서 ref 로 호출. 내부 refs 를
+// cfg 에 맞춰 동기화한 뒤 일반 record 흐름 (_doStartDataCollection) 으로
+// 위임 → keyboard / succeed listener, moving_homepose 처리 등이 그대로
+// 재사용된다. 직접 ``/:start_collection`` 을 호출하지 말 것 (listener 누락).
+function startCorrectionRecording(cfg) {
+    selectedDatasetId.value = cfg.datasetId;
+    teleType.value = cfg.teleType || 'keyboard';
+    collectionHz.value = Number(cfg.hz) || 20;
+    languageInstruction.value = cfg.languageInstruction || '';
+    // 교정은 실패 직후 위치에서 시연이므로 home pose 이동 강제 off.
+    moveHomposeInDataCollection.value = false;
+    return _doStartDataCollection(teleType.value, {
+        forceNoHomepose: true,
+        taskOverride: cfg.taskOverride,
+        iter: 1,  // single-episode 모드 — 완료/버리기 후 record_episode 자동 종료.
+    });
+}
+
+defineExpose({ startCorrectionRecording });
 
 function cancelViveInit() {
     viveInitializing.value = false;
@@ -1056,8 +1238,6 @@ watch(() => keyboardSetting.value.step_size, (v) => {
     if (typeof v === 'number') eeStepSize.value = v;
 }, { immediate: true });
 
-const activeArms = computed(() => [leftArm.value, rightArm.value].filter(Boolean));
-
 function robotForSide(side) {
     if (isDualArm.value) {
         return side === 'right' ? rightArm.value : leftArm.value;
@@ -1085,106 +1265,39 @@ function toolForSide(side) {
     return left || right;
 }
 
-function sendDelta(robot, eeDelta) {
-    if (!robot?.handler?.moveRobotEEDelta) return;
-    try {
-        robot.handler.moveRobotEEDelta({ ee: eeDelta });
-    } catch (e) {
-        console.error('moveRobotEEDelta error', e);
-    }
-}
-
-const keyboardHandler = (event) => {
-    // Home pose 이동 / vive init 중에는 사용자 키 입력 무시 — 그동안 로봇이 백엔드
-    // 명령으로 움직이고 있으므로 사용자 입력과 충돌하면 충돌 또는 의도치 않은 위치로 감.
-    if (movingHomepose.value || viveInitializing.value) return;
-    // Step size 등 폼 입력란이 포커스된 상태에서, 숫자 편집 키는 입력에 양보하고
-    // 그 외 키(WASD 등 로봇 제어키)는 자동으로 input을 blur 후 그대로 로봇 제어로 처리.
-    const ae = document.activeElement;
-    if (ae) {
-        const tag = ae.tagName;
-        if (tag === 'INPUT' || tag === 'TEXTAREA' || ae.isContentEditable) {
-            const isEditingKey = (
-                /^[0-9]$/.test(event.key) ||
-                event.key === '.' || event.key === 'e' || event.key === 'E' ||
-                event.key === '+' || event.key === '-' ||
-                event.key === 'Backspace' || event.key === 'Delete' ||
-                event.key === 'Tab' || event.key === 'Enter' ||
-                event.key === 'Home' || event.key === 'End' ||
-                event.key.startsWith('Arrow')
-            );
-            if (isEditingKey) return;
-            ae.blur();
+// 키보드 텔레옵 — 공용 composable 로 위임(눌린 키 합산/멀티-EE emit/정지 일원화).
+// record 모드 전용: homepose/vive 이동 중 가드, step size override(eeStepSize),
+// input 편집 키 양보는 옵션으로 주입.
+const _kbTeleop = useKeyboardTeleop({
+    getAxisMap: () => keyboardSetting.value.axis_map,
+    getStepSize: () => Number(eeStepSize.value) || Number(keyboardSetting.value.step_size) || 0.003,
+    robotForSide,
+    toolForSide,
+    canHandle: () => !movingHomepose.value && !viveInitializing.value,
+    shouldCapture: (event) => {
+        const ae = document.activeElement;
+        if (ae) {
+            const tag = ae.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || ae.isContentEditable) {
+                const isEditingKey = (
+                    /^[0-9]$/.test(event.key) ||
+                    event.key === '.' || event.key === 'e' || event.key === 'E' ||
+                    event.key === '+' || event.key === '-' ||
+                    event.key === 'Backspace' || event.key === 'Delete' ||
+                    event.key === 'Tab' || event.key === 'Enter' ||
+                    event.key === 'Home' || event.key === 'End' ||
+                    event.key.startsWith('Arrow')
+                );
+                if (isEditingKey) return false;
+                ae.blur();
+            }
         }
-    }
+        return true;
+    },
+});
 
-    const map = keyboardSetting.value.axis_map || {};
-    // UI step size override; fall back to assembly setting; finally default.
-    const stepSize = Number(eeStepSize.value) || Number(keyboardSetting.value.step_size) || 0.003;
-
-    if (event.key === ' ' || event.key === 'Space') {
-        activeArms.value.forEach((robot) => {
-            const len = robot.tool_inner ? 7 : 6;
-            sendDelta(robot, Array(len).fill(0));
-        });
-        event.preventDefault();
-        return;
-    }
-
-    const normKey = normalizeEventKey(event);
-    const entry = map[normKey];
-    if (!entry) return;
-
-    const side = entry.side || 'left';
-    const robot = robotForSide(side);
-
-    const idx = AXIS_TO_EE_INDEX[entry.axis];
-    if (idx === undefined) return;
-
-    // tool 축: arm 내장 그리퍼면 EE delta[6] 으로 packing, 별도 gripper agent 가
-    // 있으면 그 agent 의 joint delta 로 라우팅. 둘 다 없으면 무시.
-    if (entry.axis === 'tool') {
-        const delta = stepSize * (Number(entry.scale) || 1) * (Number(entry.sign) || 1);
-        if (robot && robot.tool_inner) {
-            const eeDelta = Array(7).fill(0);
-            eeDelta[idx] = delta;
-            sendDelta(robot, eeDelta);
-            event.preventDefault();
-            return;
-        }
-        const tool = toolForSide(side);
-        if (!tool || !tool.handler || !tool.handler.moveRobotJointDelta) return;
-        const len = Array.isArray(tool.joint_names) && tool.joint_names.length > 0
-            ? tool.joint_names.length : 1;
-        const jointDelta = Array(len).fill(0);
-        jointDelta[0] = delta;
-        try {
-            tool.handler.moveRobotJointDelta(jointDelta);
-        } catch (e) {
-            console.error('moveRobotJointDelta error', e);
-        }
-        event.preventDefault();
-        return;
-    }
-
-    if (!robot) return;
-    const len = robot.tool_inner ? 7 : 6;
-    if (idx >= len) return;
-    const eeDelta = Array(len).fill(0);
-    eeDelta[idx] = stepSize * (Number(entry.scale) || 1) * (Number(entry.sign) || 1);
-    sendDelta(robot, eeDelta);
-    event.preventDefault();
-};
-
-function addKeyboardListener() {
-    // 중복 등록 방지를 위해 먼저 제거 후 등록
-    window.removeEventListener('keydown', keyboardHandler);
-    window.addEventListener('keydown', keyboardHandler);
-}
-
-function removeKeyboardListener() {
-    window.removeEventListener('keydown', keyboardHandler);
-}
+function addKeyboardListener() { _kbTeleop.start(); }
+function removeKeyboardListener() { _kbTeleop.stop(); }
 
 function completeEpisode() {
     api.post(`/dataset/${selectedDatasetId.value}/:complete_episode`).catch((error) => {
@@ -1194,6 +1307,7 @@ function completeEpisode() {
             message: t('errorCompleteEpisode'),
         });
     });
+    if (props.correctionMode) emit('correction-done');
 }
 
 function setSucceed() {
@@ -1208,6 +1322,7 @@ function throwEpisode() {
     api.post(`/dataset/${selectedDatasetId.value}/:throw_episode`).catch((error) => {
         console.error('Error throwing episode:', error);
     });
+    if (props.correctionMode) emit('correction-throw');
 }
 
 const succeedKeyHandler = (event) => {
@@ -1259,6 +1374,7 @@ function stopDataCollection() {
     api.post(`/dataset/${selectedDatasetId.value}/:stop_collection`).then(() => {
         collectingProgress.value = 0;
     })
+    if (props.correctionMode) emit('correction-stop');
 }
 
 const hz = ref(10);
@@ -1350,7 +1466,7 @@ function onInferenceSubmit(formData) {
         task: props.workspace,
         policy: checkpoint.value.policy,
         robot_ids: props.robots.map(r => r.id),
-        sensors: props.sensors,
+        sensors: expandSensorsForBackend(),
         checkpoint: checkpoint.value,
         move_homepose: !!formData.move_homepose,
         move_homepose_duration: Number(formData.move_homepose_duration) || 5.0,
@@ -1450,7 +1566,7 @@ function startReplay() {
     const payload = {
         episode: selectedEpisode.value,
         robot_ids: props.robots.map(r => r.id),
-        sensors: props.sensors,
+        sensors: expandSensorsForBackend(),
         task: props.workspace,
         action_type: replayActionType.value,
         hz: replayHz.value,
@@ -1552,6 +1668,27 @@ onMounted(() => {
         oodScore.value = data;
     });
 
+    // 추론 시작/종료 단일 신호 — procStatus('testing') 의 source. 워크스페이스 단독·
+    // 커리큘럼·플래너 모두 checkpoint_test 가 보내므로 monitorOnly 에서도 inference 바가 뜬다.
+    socket.on('inference_active', (data) => {
+        if (data && data.active) {
+            inferenceActive.value = {
+                checkpoint_id: data.checkpoint_id,
+                policy_type: data.policy_type,
+            };
+        } else {
+            inferenceActive.value = null;
+            // 추론 종료 — 추론 관련 표시 상태 정리(stop_process checkpoint_test 와 동일).
+            // 커리큘럼/플래너는 checkpoint_test 가 pm 프로세스가 아니라 stop_process 가
+            // 안 오므로 여기서 정리해야 한다.
+            inferenceSucceed.value = false;
+            succeedScore.value = null;
+            oodScore.value = null;
+            inferenceProgress.value = { progress: 0, step: 0, episodeLen: 0 };
+            inferenceHeatmaps.value = {};
+        }
+    });
+
     socket.on('vive_node_ready', () => {
         viveInitializing.value = false;
     });
@@ -1585,6 +1722,7 @@ onUnmounted(() => {
     socket.off('vive_node_error');
     socket.off('inference_succeed');
     socket.off('ood_score');
+    socket.off('inference_active');
     socket.off('inference_progress');
     socket.off('episode_saving');
     socket.off('episode_saved');

@@ -26,8 +26,11 @@ from .routes.sim import sim_bp
 from .routes.robot_pose import robot_pose_bp
 from .routes.remote_train import remote_train_bp
 from .routes.tutorial import tutorial_bp
+from .routes.dual_arm_test import dual_arm_test_bp
+from .routes.dual_arm_assembly_test import dual_arm_assembly_test_bp
 from .routes.remote_train import run_training_job
 from .routes.planner import planner_bp
+from .routes.curriculum import curriculum_bp
 from .routes.module import module_bp
 
 from ..bridge.client import get_bridge_client
@@ -100,7 +103,10 @@ app.register_blueprint(sim_bp, url_prefix='/api')
 app.register_blueprint(robot_pose_bp, url_prefix='/api')
 app.register_blueprint(remote_train_bp, url_prefix='/api')
 app.register_blueprint(tutorial_bp, url_prefix='/api')
+app.register_blueprint(dual_arm_test_bp, url_prefix='/api')
+app.register_blueprint(dual_arm_assembly_test_bp, url_prefix='/api')
 app.register_blueprint(planner_bp, url_prefix='/api')
+app.register_blueprint(curriculum_bp, url_prefix='/api')
 app.register_blueprint(module_bp, url_prefix='/api')
 
 socketio.on_namespace(SensorNamespace('/sensor', pm))
@@ -325,6 +331,17 @@ def main():
     except Exception as e:
         print(f"[WARN] Tutorial seeding skipped: {e}")
 
+    # Dual-arm TEST workspaces are seeded eagerly too so they appear in the UI
+    # workspace list without first hitting :start.
+    try:
+        from .routes.sim_test_common import ensure_rows as _ensure_sim_test_rows
+        from ..configs.dual_arm_defaults import SPEC as _DUAL_ARM_SPEC
+        from ..configs.dual_arm_assembly_defaults import SPEC as _DUAL_ARM_ASM_SPEC
+        _ensure_sim_test_rows(_DUAL_ARM_SPEC)
+        _ensure_sim_test_rows(_DUAL_ARM_ASM_SPEC)
+    except Exception as e:
+        print(f"[WARN] Dual-arm test seeding skipped: {e}")
+
     app.node = node  # 호환성 유지 (None)
     app.bridge_client = bridge_client  # gRPC bridge 클라이언트
     app.pm = pm  # Flask 앱에 프로세스 관리 객체 할당
@@ -346,6 +363,14 @@ def main():
         # Training scheduler 시작 — 학습 큐 워커. enqueue 시 자동으로 깨어남.
         training_scheduler.start()
         print("TrainingScheduler started (single worker, FIFO queue)")
+
+        # 재시작 직전에 학습 중이던 체크포인트들에 대해 polling 재개. backend
+        # 가 죽었다 깨어나도 training_server 의 학습 결과를 놓치지 않게.
+        try:
+            from .routes.remote_train import resume_inflight_trainings
+            resume_inflight_trainings(app, socketio)
+        except Exception as _e:
+            print(f"[resume_inflight] failed: {_e}")
 
         # WebRTC streaming 서버 시작 (port 5002, 별도 스레드)
         from .streaming import start_streaming_server

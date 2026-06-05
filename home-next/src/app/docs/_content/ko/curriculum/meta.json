@@ -1,0 +1,5 @@
+{
+  "title": "커리큘럼",
+  "order": 14,
+  "items": ["setup", "run"]
+}

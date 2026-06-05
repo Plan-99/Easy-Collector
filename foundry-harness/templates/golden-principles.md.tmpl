@@ -1,0 +1,18 @@
+# Golden Principles — {{PROJECT_NAME}}
+
+> 규칙은 **기계적으로 검증 가능한 것만** 적는다. "좋게 짜라" 같은 훈계는 금지.
+> 각 규칙에는 *왜*와 *어기면 어떻게 드러나는지*를 한 줄로 붙인다.
+> 규칙은 세금이다 — 실제 실패 사례가 있는 것만 남긴다.
+
+## 규칙
+1. **{{RULE}}** — 왜: {{WHY}} / 위반 감지: {{HOW_DETECTED}}
+2. ...
+
+## 검증 (이 규칙들이 지켜지는지 확인하는 법)
+- {{LINT_OR_TEST_OR_CHECK}}
+- (기본) 검증 테스트는 happy-path가 아니라 **경계·악성 입력**(최대길이·0·결측·비ASCII)을 최소 1케이스
+  포함한다 — 통과 시 exit 0, 위반 시 exit≠0로 기계 검증. 왜: happy-path/짧은 픽스처는 실데이터
+  엣지 버그를 통과시킨다(근거: coin-tournament strategy.m8 0틱 ZeroDivision, insta-horror-bot F3 길이초과·F4 글리프).
+
+## 변경 이력
+- 규칙 추가/제거 시 사유를 `learning.md`에도 남긴다. (특히 [pruned])

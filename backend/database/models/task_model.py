@@ -115,6 +115,10 @@ class Task(SoftDeleteModel):
 
     @property
     def sensors(self):
+        # Multi-view: sensor_ids 에 같은 sensor_id 가 N 번 들어오면 sensor 객체도
+        # 그대로 N 번 리턴 (인덱스가 view 순서를 결정). frontend 의 selectedSensors
+        # computed 가 first-occurrence dedup 으로 카드 개수를 물리 sensor 단위로
+        # 줄이고, selectedViews computed 가 enumerateViews 로 chip 을 펼친다.
         from .sensor_model import Sensor
         sensors = []
         for sensor_id in self._sensor_ids:
@@ -123,39 +127,75 @@ class Task(SoftDeleteModel):
                 sensors.append(sensor.to_dict())
         return sensors
 
+    def _enumerate_view_keys(self):
+        """``sensor_ids`` 를 view_key 들로 펼침. ``sensor_view.enumerate_views``
+        와 같은 규칙 + (sensor_id, occurrence) 오름차순 정렬 — frontend, 데이터셋
+        features 순서, 학습/추론 image_features 가 모두 같은 ordering 으로 정합.
+        """
+        seen = {}
+        items = []
+        for sensor_id in self._sensor_ids:
+            sid = int(sensor_id)
+            idx = seen.get(sid, 0)
+            seen[sid] = idx + 1
+            vkey = str(sid) if idx == 0 else f"{sid}_{idx + 1}"
+            items.append((sid, idx, vkey))
+        items.sort(key=lambda t: (t[0], t[1]))
+        return [(sid, vkey) for sid, _occ, vkey in items]
+
     @property
     def sensor_img_size_computed(self):
+        # Multi-view: view_key 별로 별도 entry. 같은 sensor 의 두 번째 view
+        # ("5_2") 가 설정에 없으면 첫 view ("5") 값으로 fallback — 새로 추가된
+        # view 가 아직 설정 안 잡혔을 때 깨지지 않게.
         img_size = {}
-        for sensor_id in self._sensor_ids:
-            if str(sensor_id) not in self._settings.get('sensors', {}):
-                img_size[str(sensor_id)] = [640, 480]
-            else:
-                img_size[str(sensor_id)] = self._settings['sensors'][str(sensor_id)].get('img_size', [640, 480])
+        sensors_settings = self._settings.get('sensors', {})
+        for sid, vkey in self._enumerate_view_keys():
+            sid_str = str(sid)
+            stored = (
+                sensors_settings.get(vkey, {}).get('img_size')
+                if vkey in sensors_settings else None
+            ) or (
+                sensors_settings.get(sid_str, {}).get('img_size')
+                if sid_str in sensors_settings else None
+            )
+            img_size[vkey] = stored if stored else [640, 480]
         return img_size
 
     @property
     def sensor_cropped_area_computed(self):
         cropped_area = {}
-        for sensor_id in self._sensor_ids:
-            if str(sensor_id) not in self._settings.get('sensors', {}):
-                cropped_area[str(sensor_id)] = [0, 0, 640, 480]
-            else:
-                cropped_area[str(sensor_id)] = self._settings['sensors'][str(sensor_id)].get('cropped_area', [0, 0, 640, 480])
+        sensors_settings = self._settings.get('sensors', {})
+        for sid, vkey in self._enumerate_view_keys():
+            sid_str = str(sid)
+            stored = (
+                sensors_settings.get(vkey, {}).get('cropped_area')
+                if vkey in sensors_settings else None
+            ) or (
+                sensors_settings.get(sid_str, {}).get('cropped_area')
+                if sid_str in sensors_settings else None
+            )
+            cropped_area[vkey] = stored if stored else [0, 0, 640, 480]
         return cropped_area
 
     @property
     def sensor_rotate_computed(self):
         rotation = {}
-        for sensor_id in self._sensor_ids:
-            if str(sensor_id) not in self._settings.get('sensors', {}):
-                rotation[str(sensor_id)] = 0
-            else:
-                rotation[str(sensor_id)] = self._settings['sensors'][str(sensor_id)].get('rotate', 0)
+        sensors_settings = self._settings.get('sensors', {})
+        for sid, vkey in self._enumerate_view_keys():
+            sid_str = str(sid)
+            stored = (
+                sensors_settings.get(vkey, {}).get('rotate')
+                if vkey in sensors_settings else None
+            )
+            if stored is None and sid_str in sensors_settings:
+                stored = sensors_settings.get(sid_str, {}).get('rotate')
+            rotation[vkey] = stored if stored is not None else 0
         return rotation
 
     @property
     def sensor_sam3_computed(self):
-        # SAM3 per-sensor segmentation config. Default = disabled / no-op so
+        # SAM3 per-view segmentation config. Default = disabled / no-op so
         # the rest of the pipeline can read this dict unconditionally.
         default = {
             'enabled': False,
@@ -165,10 +205,17 @@ class Task(SoftDeleteModel):
             'color': [0, 0, 0],
         }
         out = {}
-        for sensor_id in self._sensor_ids:
-            sid = str(sensor_id)
-            stored = self._settings.get('sensors', {}).get(sid, {}).get('sam3') or {}
-            out[sid] = {**default, **stored}
+        sensors_settings = self._settings.get('sensors', {})
+        for sid, vkey in self._enumerate_view_keys():
+            sid_str = str(sid)
+            stored = (
+                sensors_settings.get(vkey, {}).get('sam3')
+                if vkey in sensors_settings else None
+            ) or (
+                sensors_settings.get(sid_str, {}).get('sam3')
+                if sid_str in sensors_settings else None
+            ) or {}
+            out[vkey] = {**default, **stored}
         return out
 
     def to_dict(self):
@@ -187,3 +234,19 @@ class Task(SoftDeleteModel):
         assembly = self.assembly
         data['assembly'] = assembly.to_dict() if assembly else None
         return data
+
+    def light_dict(self):
+        """리스트/드롭다운 용 경량 payload — sensor/assembly resolve, view-key
+        computation, runtime 조회 모두 skip. 한 row 당 DB 추가 쿼리 0회.
+        상세 사항이 필요한 호출자는 ``/tasks/<id>`` 로 따로 fetch.
+        """
+        return {
+            'id': self.id,
+            'name': self.name,
+            'image': self.image,
+            'episode_len': self.episode_len,
+            'assembly_id': self.assembly_id,
+            'sensor_ids': self._sensor_ids,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }

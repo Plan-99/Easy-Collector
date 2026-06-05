@@ -99,7 +99,6 @@ def read_dataset(node, episode_path, socketio_instance, sid, task_control, move_
         # 메인 루프는 로봇 커맨드 전송 + 타이밍만 담당한다.
         period = 1.0 / hz
         next_tick = time.time()
-        last_tick_time = time.time()
 
         def _resolve_range_local(value, default=0.0, integer=False):
             """Per-tick range sampler. Matches transform_dataset._resolve_range
@@ -253,12 +252,6 @@ def read_dataset(node, episode_path, socketio_instance, sid, task_control, move_
             break
 
         for i in range(loop_start, total_steps):
-            now = time.time()
-            dt = now - last_tick_time
-            last_tick_time = now
-            if dt > 0:
-                print(f"[ReadDataset] {1.0/dt:.1f} Hz", flush=True)
-
             if task_control['stop']:
                 print("Stopping read_dataset process. Captured data discarded.")
                 return

@@ -442,10 +442,51 @@ class Agent:
                     ik_targets[name] = val_list
                     target_tool_values[name] = None
 
-        # 2. IK 풀기 (모든 팔을 한 번에 계산)
-        # current_lr_arm_motor_q에 현재 조인트 상태를 전달하여 연속성 확보
+        # 2. IK 풀기 — pink 의 solve_ik 는 task-space velocity 를 한 step 만
+        # 적분하는 incremental solver 라 한 번 호출로는 target 의 ~30-40% 만
+        # 진행한다 (teleop 처럼 매 step 호출하는 경로는 누적으로 도달).
+        # move_ee_to / move_ee_step 같은 one-shot 호출에선 수렴할 때까지
+        # 반복 호출해야 final_action 이 진짜 target 에 해당하는 joint config 가
+        # 된다. 안 그러면 robot 이 commanded delta 의 일부 거리만 이동.
+        # 수렴 판정은 position only (xyz 0.1mm) — rotation 은 axis-angle 의
+        # Euler wrap 으로 산술적 비교가 불안정해서 IK 가 orientation 도 함께
+        # 풀고 있다는 가정 하에 위치만으로 수렴 체크. orientation 비활성 task
+        # 라면 어차피 의미 없음.
+        max_iters = 200
+        tol_xyz = 1e-4   # 0.1 mm
+        q_iter = np.array(arm_js)
+        sol_q = None
         with self.ik_lock:
-            sol_q, _ = self.ik_solver.solve_ik(ik_targets, current_lr_arm_motor_q=np.array(arm_js))
+            # Dual-arm 안전장치: 이번 호출에서 명령받지 않은 EE 는 현재 포즈로
+            # target 을 고정한다. pink 의 FrameTask 는 set_target 을 호출한 EE 만
+            # 갱신하므로, 한쪽 팔만 움직이는 teleop(키보드/RobotPendant) 에서
+            # 반대팔 task 의 target 이 미설정(첫 호출 → solve 예외 → 전체 no-op)
+            # 이거나 직전 값으로 남아 반대팔을 엉뚱하게 끌어당기는 문제가 있다.
+            # 명령 안 된 EE 를 현재 FK 포즈로 잡아두면 그 팔은 제자리에 머문다.
+            if len(self.ee_names) > 1:
+                held_fk = self.ik_solver.get_ee_position(list(arm_js))
+                for name in self.ee_names:
+                    if name not in ik_targets and name in held_fk:
+                        ik_targets[name] = held_fk[name]
+                        target_tool_values.setdefault(name, None)
+            for _ in range(max_iters):
+                sol_q, _ = self.ik_solver.solve_ik(
+                    ik_targets, current_lr_arm_motor_q=q_iter
+                )
+                if sol_q is None:
+                    break
+                q_iter = np.asarray(sol_q)
+                fk = self.ik_solver.get_ee_position(q_iter.tolist())
+                err = 0.0
+                for name, target_vec in ik_targets.items():
+                    cur_vec = fk.get(name)
+                    if cur_vec is None:
+                        err = float('inf')
+                        break
+                    dx = max(abs(cur_vec[i] - target_vec[i]) for i in range(3))
+                    err = max(err, dx)
+                if err < tol_xyz:
+                    break
 
         if sol_q is None:
             return None
@@ -986,15 +1027,11 @@ class Agent:
 
     def reset_ik_solver(self, q):
         if self.ik_solver is not None:
-            # 1. home_pose에서 IK에 사용되는 조인트만 추출 (예: 7개 중 앞의 6개)
+            # IK reduced-model 에 들어갈 arm joint 만 추출. get_joint_and_tool_pos
+            # 는 dual_arm 에서도 [L1..L6, R1..R6] 평탄(flat) 리스트를 돌려준다
+            # (left[:-1] + right[:-1]). 과거 주석은 [[left],[right]] 중첩 형태를
+            # 가정해 float 를 다시 순회 → "'float' object is not iterable" 에러를
+            # 냈다. 이미 평탄하므로 그대로 reset_state 에 넘긴다.
             arm_home, _ = self.get_joint_and_tool_pos(q)
-
             with self.ik_lock:
-                # dual_arm인 경우 arm_home은 [[left], [right]] 형태이므로 평탄화(flatten) 필요
-                if self.role == 'dual_arm':
-                    flat_arm_home = []
-                    for joints in arm_home:
-                        flat_arm_home.extend(joints)
-                    self.ik_solver.reset_state(flat_arm_home)
-                else:
-                    self.ik_solver.reset_state(arm_home)
+                self.ik_solver.reset_state(arm_home)

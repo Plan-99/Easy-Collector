@@ -38,6 +38,7 @@ from modules import (
     _REGISTRY_MAP,
 )
 from service import docker_compose_available, get_compose_cmd
+from i18n import t
 
 if TYPE_CHECKING:
     from launcher import MainWindow
@@ -80,7 +81,13 @@ def run_setup_wizard(self: "MainWindow") -> bool:
 
     # Sidebar
     steps = QListWidget(); steps.setFixedWidth(170); steps.setEnabled(False)
-    for s in ["소프트웨어 사용권 계약", "설치 준비", "학습 서버", "설치 중", "완료"]:
+    for s in [
+        t("installer.stepEula"),
+        t("installer.stepPrepare"),
+        t("installer.stepTraining"),
+        t("installer.stepInstalling"),
+        t("installer.stepDone"),
+    ]:
         QListWidgetItem(s, steps)
 
     # Pages inside a bordered content box
@@ -88,10 +95,10 @@ def run_setup_wizard(self: "MainWindow") -> bool:
     container_layout = QVBoxLayout(); container.setLayout(container_layout)
 
     page_eula = QWidget(); v1b = QVBoxLayout()
-    v1b.addWidget(QLabel("소프트웨어 사용권 계약을 확인해 주세요."))
+    v1b.addWidget(QLabel(t("installer.eulaPrompt")))
     eula_text = QTextEdit()
     eula_text.setReadOnly(True)
-    eula_text.setPlainText(
+    eula_text.setPlainText(t("installer.eulaBody") if t("installer.eulaBody") != "installer.eulaBody" else (
         "Easy Trainer 소프트웨어 사용권 계약 (EULA)\n"
         "\n"
         "최종 업데이트: 2025년 4월\n"
@@ -157,10 +164,10 @@ def run_setup_wizard(self: "MainWindow") -> bool:
         "2. 본 계약에 명시되지 않은 사항은 관련 법령 및 상관례에 따릅니다.\n"
         "\n"
         "Copyright (c) 2025 Vertical Labs. All rights reserved.\n"
-    )
+    ))
     v1b.addWidget(eula_text, 1)
     eula_agree_row = QHBoxLayout()
-    chk_eula_agree = QCheckBox("동의함")
+    chk_eula_agree = QCheckBox(t("installer.eulaAgree"))
     eula_agree_row.addWidget(chk_eula_agree)
     eula_agree_row.addStretch(1)
     v1b.addLayout(eula_agree_row)
@@ -169,7 +176,7 @@ def run_setup_wizard(self: "MainWindow") -> bool:
     page_prepare = QWidget(); v2 = QVBoxLayout()
     lbl_space = QLabel("")
     # 안내 문구 아래에 현재 여유 공간을 표시
-    v2.addWidget(QLabel("설치를 위한 저장 공간을 확인합니다(권장 20GB 이상)."))
+    v2.addWidget(QLabel(t("installer.checkDiskSpace")))
     v2.addWidget(lbl_space)
     v2.addStretch(1)
     page_prepare.setLayout(v2)
@@ -177,12 +184,12 @@ def run_setup_wizard(self: "MainWindow") -> bool:
     variant_choice = {"value": None}
 
     page_variant = QWidget(); v2b = QVBoxLayout()
-    hdr_variant = QLabel("설치 방식을 선택하세요. 이후에도 동일한 모드로 서비스가 실행됩니다.")
+    hdr_variant = QLabel(t("installer.variantPrompt"))
     hdr_variant.setWordWrap(True)
     v2b.addWidget(hdr_variant)
     v2b.addSpacing(10)
-    rb_cpu = QRadioButton("CPU 버전 : 일부 모델은 CPU에서 느릴 수 있습니다.")
-    rb_gpu = QRadioButton("GPU 버전 (권장) : CUDA 가속을 사용할 수 있습니다. *NVIDIA 드라이버 사전 설치 필요")
+    rb_cpu = QRadioButton(t("installer.variantCpu"))
+    rb_gpu = QRadioButton(t("installer.variantGpu"))
     v2b.addWidget(rb_cpu)
     v2b.addWidget(rb_gpu)
     v2b.addStretch(1)
@@ -198,11 +205,11 @@ def run_setup_wizard(self: "MainWindow") -> bool:
     # ── Training server page ──
     page_training = QWidget()
     v_train = QVBoxLayout()
-    v_train.addWidget(QLabel("학습 서버 설정"))
+    v_train.addWidget(QLabel(t("installer.trainingTitle")))
     v_train.addSpacing(6)
 
     # GPU info display
-    gpu_info_label = QLabel("GPU 정보를 확인하는 중...")
+    gpu_info_label = QLabel(t("installer.gpuChecking"))
     gpu_info_label.setStyleSheet("font-size: 12px; color: #ccc;")
     gpu_info_label.setWordWrap(True)
     v_train.addWidget(gpu_info_label)
@@ -211,30 +218,36 @@ def run_setup_wizard(self: "MainWindow") -> bool:
     def _refresh_gpu_info():
         gpus = detect_gpus()
         if not gpus:
-            gpu_info_label.setText("⚠ NVIDIA GPU가 감지되지 않았습니다.")
+            gpu_info_label.setText(t("installer.gpuNotDetected"))
             gpu_info_label.setStyleSheet("font-size: 12px; color: #ff9800;")
         else:
             lines = []
             for g in gpus:
                 lines.append(
-                    f"🖥 GPU {g.index}: {g.name}  —  "
-                    f"VRAM {g.vram_total_mb} MB (사용: {g.vram_used_mb} MB / 여유: {g.vram_free_mb} MB)"
+                    t(
+                        "installer.gpuInfoLine",
+                        index=g.index,
+                        name=g.name,
+                        total=g.vram_total_mb,
+                        used=g.vram_used_mb,
+                        free=g.vram_free_mb,
+                    )
                 )
             gpu_info_label.setText("\n".join(lines))
             gpu_info_label.setStyleSheet("font-size: 12px; color: #86efac;")
 
     training_choice = {"value": "remote"}
 
-    rb_local = QRadioButton("로컬 학습 서버 설치 (이 PC에서 학습)")
+    rb_local = QRadioButton(t("installer.trainingLocal"))
     rb_local.setStyleSheet("font-size: 12px;")
-    rb_remote = QRadioButton("원격 학습 서버 사용 (별도 서버에서 학습)")
+    rb_remote = QRadioButton(t("installer.trainingRemote"))
     rb_remote.setStyleSheet("font-size: 12px;")
     rb_remote.setChecked(True)
 
-    local_desc = QLabel("    이 PC에 학습 서버 Docker 이미지를 설치합니다. GPU VRAM 8GB 이상 권장.")
+    local_desc = QLabel(t("installer.trainingLocalDesc"))
     local_desc.setStyleSheet("color: #999; font-size: 11px;")
     local_desc.setWordWrap(True)
-    remote_desc = QLabel("    별도 GPU 서버에서 학습을 실행합니다. 이 PC에는 학습 서버를 설치하지 않습니다.")
+    remote_desc = QLabel(t("installer.trainingRemoteDesc"))
     remote_desc.setStyleSheet("color: #999; font-size: 11px;")
     remote_desc.setWordWrap(True)
 
@@ -260,12 +273,12 @@ def run_setup_wizard(self: "MainWindow") -> bool:
     bar = QProgressBar(); bar.setRange(0, 100); bar.setValue(0); bar.setTextVisible(True); bar.setFormat("0.00%")
     # 설치 상태: 왼쪽 문구만 표시
     status_row = QHBoxLayout(); status_row.setContentsMargins(0,0,0,0); status_row.setSpacing(6)
-    lbl_status_left = QLabel("설치 중...")
+    lbl_status_left = QLabel(t("common.installing"))
     status_row.addWidget(lbl_status_left)
     status_row.addStretch(1)
     progress_row = QHBoxLayout(); progress_row.setContentsMargins(0,0,0,0); progress_row.setSpacing(6)
-    lbl_elapsed = QLabel("경과 00:00")
-    lbl_remaining = QLabel("잔여 --:--")
+    lbl_elapsed = QLabel(t("installer.elapsed", time="00:00"))
+    lbl_remaining = QLabel(t("installer.remaining", time="--:--"))
     progress_row.addWidget(lbl_elapsed)
     progress_row.addStretch(1)
     progress_row.addWidget(lbl_remaining)
@@ -273,8 +286,8 @@ def run_setup_wizard(self: "MainWindow") -> bool:
     page_install.setLayout(v3)
 
     page_done = QWidget(); v4 = QVBoxLayout()
-    v4.addWidget(QLabel("설치가 완료되었습니다. ‘완료’를 눌러 시작하세요."))
-    chk_launch = QCheckBox("Easy Trainer 실행하기")
+    v4.addWidget(QLabel(t("installer.doneMessage")))
+    chk_launch = QCheckBox(t("installer.launchEasyTrainer"))
     chk_launch.setChecked(True)
     v4.addWidget(chk_launch)
     v4.addStretch(1)
@@ -303,10 +316,10 @@ def run_setup_wizard(self: "MainWindow") -> bool:
             try:
                 target = self._disk_usage_target()
                 usage = shutil.disk_usage(str(target))
-                lbl_space.setText(f"현재 여유 공간: {usage.free / (1024**3):.1f} GB")
+                lbl_space.setText(t("installer.freeSpace", space=f"{usage.free / (1024**3):.1f} GB"))
                 has_space = usage.free >= 20 * 1024**3
             except Exception:
-                lbl_space.setText("현재 여유 공간: 확인 불가")
+                lbl_space.setText(t("installer.freeSpaceUnknown"))
                 has_space = True
             btn_next.setEnabled(has_space and docker_compose_available())
         elif idx == 2:
@@ -326,7 +339,7 @@ def run_setup_wizard(self: "MainWindow") -> bool:
     body.addSpacing(6)  # explicit vertical gap between sidebar and content box
 
     # Footer buttons (placed under content inside the right panel)
-    btn_prev = QPushButton("이전"); btn_next = QPushButton("다음"); btn_install = QPushButton("설치"); btn_finish = QPushButton("완료")
+    btn_prev = QPushButton(t("installer.prev")); btn_next = QPushButton(t("installer.next")); btn_install = QPushButton(t("common.install")); btn_finish = QPushButton(t("installer.finish"))
     btn_install.setEnabled(False)
     footer = QHBoxLayout()
     footer_left = QHBoxLayout(); footer_left.setSpacing(6)
@@ -443,8 +456,8 @@ def run_setup_wizard(self: "MainWindow") -> bool:
             if elapsed is not None:
                 remaining = elapsed * max(0.0, 100.0 - pct) / max(pct, 0.01)
             remain_str = _format_duration(remaining)
-        lbl_elapsed.setText(f"경과 {elapsed_str}")
-        lbl_remaining.setText(f"잔여 {remain_str}")
+        lbl_elapsed.setText(t("installer.elapsed", time=elapsed_str))
+        lbl_remaining.setText(t("installer.remaining", time=remain_str))
 
     def _increment_progress(lines: int):
         if lines <= 0 or not progress_state["tracking"] or progress_state["complete"]:
@@ -458,7 +471,7 @@ def run_setup_wizard(self: "MainWindow") -> bool:
         progress_state["lines"] = progress_state["target"]
         _update_progress_display(force_complete=True)
         try:
-            lbl_status_left.setText("설치 완료")
+            lbl_status_left.setText(t("installer.installComplete"))
         except Exception:
             pass
         try:
@@ -478,7 +491,7 @@ def run_setup_wizard(self: "MainWindow") -> bool:
             except Exception:
                 pass
             _update_progress_display()
-            QMessageBox.critical(dlg, "오류", f"설치 실패 (code={code})")
+            QMessageBox.critical(dlg, t("installer.errorTitle"), t("installer.installFailed", code=code))
 
     def _start_docker_build():
         # rebuild_images.sh 가 두 단계를 처리한다:
@@ -546,7 +559,7 @@ def run_setup_wizard(self: "MainWindow") -> bool:
         gpu_proc.readyReadStandardError.connect(lambda: _append_gpu(True))
         def _after_gpu(exit_code: int, *_):
             if exit_code != 0:
-                QMessageBox.critical(dlg, "오류", f"NVIDIA Container Toolkit 설치 실패 (code={exit_code}). 로그를 확인하세요.")
+                QMessageBox.critical(dlg, t("installer.errorTitle"), t("installer.nvidiaToolkitFailed", code=exit_code))
                 return
             if self._has_nvidia_runtime():
                 log.append("[GPU] NVIDIA Container Toolkit 설치가 완료되었습니다.")
@@ -558,12 +571,12 @@ def run_setup_wizard(self: "MainWindow") -> bool:
 
     def on_install_click():
         if not docker_compose_available():
-            QMessageBox.critical(dlg, "오류", self._compose_help_text()); return
+            QMessageBox.critical(dlg, t("installer.errorTitle"), self._compose_help_text()); return
         # Auto-detect GPU
         variant = "gpu" if self._has_host_nvidia_driver() else "cpu"
         self._set_install_variant(variant)
         if not self._apply_compose_variant(variant):
-            QMessageBox.critical(dlg, "오류", "선택한 설치 옵션에 맞는 docker-compose 템플릿을 찾을 수 없습니다.")
+            QMessageBox.critical(dlg, t("installer.errorTitle"), t("installer.composeTemplateNotFound"))
             return
         # Mark required modules (core/feature) as installed; everything else
         # is opt-in via the launcher's "모듈 관리" dialog after first launch.
@@ -596,7 +609,7 @@ def run_setup_wizard(self: "MainWindow") -> bool:
         except Exception:
             pass
         try:
-            lbl_status_left.setText("설치 중...")
+            lbl_status_left.setText(t("common.installing"))
         except Exception:
             pass
 
@@ -647,7 +660,7 @@ def run_setup_wizard(self: "MainWindow") -> bool:
 
         def _after_migrate(rc: int):
             if rc != 0:
-                QMessageBox.critical(dlg, "오류", f"마이그레이션 실패 (code={rc}) — 로그를 확인하세요.")
+                QMessageBox.critical(dlg, t("installer.errorTitle"), t("installer.migrationFailed", code=rc))
                 return
             # Step 2: bring up service
             log.append(f"[POST] Bringing up service '{svc}' ...")
@@ -658,7 +671,7 @@ def run_setup_wizard(self: "MainWindow") -> bool:
                     except Exception:
                         running = False
                     if not running:
-                        QMessageBox.critical(dlg, "오류", f"서비스 시작 실패 (code={exit_code})")
+                        QMessageBox.critical(dlg, t("installer.errorTitle"), t("installer.serviceStartFailed", code=exit_code))
                         return
                     log.append(f"[POST][WARN] 서비스 시작 exit_code={exit_code}, 하지만 컨테이너가 실행 중입니다.")
                 # Step 3: Install required modules that ship as separate
@@ -826,8 +839,8 @@ def run_setup_wizard(self: "MainWindow") -> bool:
         if not self.is_installed():
             res = QMessageBox.question(
                 dlg,
-                "종료 확인",
-                "아직 설치되지 않았습니다. 정말 종료하시겠습니까?",
+                t("installer.exitConfirmTitle"),
+                t("installer.exitConfirmBody"),
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No,
             )

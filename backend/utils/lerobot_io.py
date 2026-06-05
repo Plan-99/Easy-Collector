@@ -265,16 +265,37 @@ def build_features(agents, sensors, task, action_key="joint"):
             "names": ee_names_list,
         }
 
-    # Video features (stored as MP4, not in parquet)
-    for sensor in sensors:
+    # Video features (stored as MP4, not in parquet).
+    # Multi-view: ``sensors`` 는 task['sensor_ids'] 순서대로 들어오고 같은
+    # 물리 sensor_id 가 여러 번 등장할 수 있다. 각 view 는 자기 view_key 로
+    # 별도 feature entry 를 갖는다 (예: observation.images.sensor_5,
+    # observation.images.sensor_5_2). single-view 워크스페이스는 vkey 가
+    # str(sensor_id) 와 같아 기존 dataset 와 bit-for-bit 동일.
+    # 정렬: sensor_id stable sort 로 같은 물리 sensor 의 view 들이 인접 →
+    # features dict 의 entry 순서, monitoring viewport 순서, 추론
+    # image_features 순서가 모두 (sensor_id, occurrence) 오름차순으로 통일.
+    from .sensor_view import view_key as _view_key
+    _sorted_sensors = sorted(
+        sensors,
+        key=lambda _s: int((_s if isinstance(_s, dict) else _s.__dict__).get('id')),
+    )
+    _seen_occ: dict = {}
+    sensor_img_size = task.get('sensor_img_size') or {}
+    for sensor in _sorted_sensors:
         s = sensor if isinstance(sensor, dict) else sensor.__dict__
-        s_id = str(s.get('id'))
+        s_id = int(s.get('id'))
+        occ = _seen_occ.get(s_id, 0)
+        _seen_occ[s_id] = occ + 1
+        vkey = _view_key(s_id, occ)
         # Get image resolution from task config. Falls back to a per-sensor default
         # when the task config is missing or partially None — this avoids the
         # "'NoneType' object is not subscriptable" crash when task.sensor_img_size
         # is None at the dict level (e.g., new tasks where the user hasn't set it).
-        sensor_img_size = task.get('sensor_img_size') or {}
-        img_size = sensor_img_size.get(s_id) if isinstance(sensor_img_size, dict) else None
+        # Lookup priority: view_key (new schema) → sensor_id str (old schema fallback,
+        # only meaningful for first occurrence where vkey == str(s_id) anyway).
+        img_size = None
+        if isinstance(sensor_img_size, dict):
+            img_size = sensor_img_size.get(vkey) or sensor_img_size.get(str(s_id))
         if not img_size:
             # Try sensor's own settings (sensor.settings.resolution = [w, h])
             sensor_settings = s.get('settings') or {}
@@ -288,7 +309,7 @@ def build_features(agents, sensors, task, action_key="joint"):
         if not img_size:
             img_size = [640, 480]  # final fallback
         h, w = int(img_size[1]), int(img_size[0])  # [width, height] -> (H, W)
-        features[f"observation.images.sensor_{s_id}"] = {
+        features[f"observation.images.sensor_{vkey}"] = {
             "dtype": "video",
             "shape": (h, w, 3),
             "names": ["height", "width", "channels"],
@@ -438,9 +459,24 @@ def append_episode(dataset_dir, timesteps, agents, sensors, task,
     # propagate masks for the rest of the episode, then tear down. No-op when
     # the extension isn't installed.
     from .sam3_helper import start_episode as _sam3_start, end_episode as _sam3_end
-    for sensor in sensors:
-        s_id = str(sensor['id'])
-        feature_key = f"observation.images.sensor_{s_id}"
+    from .sensor_view import view_key as _view_key
+    # Multi-view: 같은 물리 sensor 가 여러 view 로 등장하면 각 view 마다
+    # 별도 비디오를 저장한다. raw frame (ts.observation['images']['sensor_5'])
+    # 은 공유하고, view 별 crop/rotate/resize/sam3 만 다르게 적용.
+    # Sensor_id stable sort → 같은 sensor 의 view 들 인접 + build_features 와
+    # 동일 ordering (features 와 mp4 디렉터리 순서가 정합).
+    _sorted_sensors_ep = sorted(
+        sensors,
+        key=lambda _s: int(_s['id']),
+    )
+    _view_occ: dict = {}
+    for sensor in _sorted_sensors_ep:
+        s_id_int = int(sensor['id'])
+        occ = _view_occ.get(s_id_int, 0)
+        _view_occ[s_id_int] = occ + 1
+        vkey = _view_key(s_id_int, occ)
+        s_id = str(s_id_int)  # physical id (for raw frame lookup)
+        feature_key = f"observation.images.sensor_{vkey}"
 
         # Save frames as PNGs (encode_video_frames expects frame_NNNNNN.png)
         imgs_dir = os.path.join(
@@ -448,28 +484,49 @@ def append_episode(dataset_dir, timesteps, agents, sensors, task,
         )
         os.makedirs(imgs_dir, exist_ok=True)
 
-        sam3_cfg = (task.get('sensor_sam3') or {}).get(s_id)
+        # Per-view config lookup: new schema 는 vkey 로, 기존 single-view 는
+        # vkey == s_id 라 같은 dict 접근. Multi-view 환경에서 vkey 가
+        # task['sensor_sam3'] 등에 없으면 (예: 마이그레이션 도중 부분 설정)
+        # physical s_id 로 fallback — view 들끼리 같은 sam3/rotate/crop 공유.
+        sam3_cfg = (task.get('sensor_sam3') or {}).get(vkey)
+        if sam3_cfg is None:
+            sam3_cfg = (task.get('sensor_sam3') or {}).get(s_id)
         if num_frames > 0 and sam3_cfg and sam3_cfg.get('enabled'):
             first_img = timesteps[0].observation['images'][f'sensor_{s_id}']
-            _sam3_start(s_id, first_img, sam3_cfg)
+            # SAM3 tracker key 는 view_key 단위 (같은 카메라의 다른 view 가
+            # 서로 다른 mask 를 가질 수 있게).
+            _sam3_start(vkey, first_img, sam3_cfg)
 
         try:
             for t in range(num_frames):
                 ts = timesteps[t]
+                # Raw frame 은 물리 센서 단위로 obs dict 에 저장됨.
                 img = ts.observation['images'][f'sensor_{s_id}']
 
                 if fetch_image_fn is not None:
+                    # `or` 대신 lookup_view_setting — rotate=0 같은 falsy 정상값이
+                    # sensor 기본값으로 잘못 fallback 되는 버그 방지.
+                    from .sensor_view import lookup_view_setting as _lvs
                     img = fetch_image_fn(img, {
-                        'sensor_id': s_id,
+                        'sensor_id': vkey,  # SAM3 tracker key 일치
                         'sam3': sam3_cfg,
-                        'resize': task.get('sensor_img_size', {}).get(s_id),
-                        'cropped_area': task.get('sensor_cropped_area', {}).get(s_id, {}),
-                        'rotate': task.get('sensor_rotate', {}).get(s_id, 0),
+                        'resize': _lvs(task.get('sensor_img_size'), vkey, s_id),
+                        'cropped_area': _lvs(task.get('sensor_cropped_area'), vkey, s_id, default={}),
+                        'rotate': _lvs(task.get('sensor_rotate'), vkey, s_id, default=0),
                     })
 
                 if isinstance(img, np.ndarray):
-                    # OpenCV uses BGR, convert to RGB for PIL/video encoding
+                    # yuv420p / libx264 는 width/height 가 *짝수* 여야 함. crop
+                    # 영역이나 resize 가 홀수 dim 을 만들면 avcodec_open2 실패
+                    # ("Generic error in an external library"). multi-view 환경에서
+                    # view 별로 다른 crop 을 잡으면 한쪽이 홀수가 되는 케이스가 흔함.
+                    # 마지막 row/col 1px 만 잘라서 짝수로 normalize — view 의 의미
+                    # 가 깨질 정도가 아니라 안전.
                     if img.ndim == 3 and img.shape[2] == 3:
+                        h, w = img.shape[:2]
+                        if h % 2 or w % 2:
+                            img = img[: h - (h % 2), : w - (w % 2), :]
+                        # OpenCV uses BGR, convert to RGB for PIL/video encoding
                         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
                     img_pil = Image.fromarray(img)
                 else:
@@ -484,7 +541,7 @@ def append_episode(dataset_dir, timesteps, agents, sensors, task,
                 img_pil.save(frame_path)
         finally:
             if sam3_cfg and sam3_cfg.get('enabled'):
-                _sam3_end(s_id)
+                _sam3_end(vkey)
 
         # Encode PNGs to MP4
         video_path = os.path.join(

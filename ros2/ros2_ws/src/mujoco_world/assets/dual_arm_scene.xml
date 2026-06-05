@@ -1,0 +1,239 @@
+<!--
+  EasyTrainer Dual-Arm Test World  (single-topic / humanoid-style)
+  ================================================================
+  Self-contained MJCF: TWO 6DOF arms + per-arm 1DOF gripper sharing one
+  workspace, plus a manipulable cube, a target plate, and two RGB cameras.
+
+  This scene backs the `dual_arm_test` workspace: a SINGLE EasyTrainer robot
+  row with role='dual_arm' (14 joints) published on one topic prefix. The
+  joint ordering below is the contract the dual_arm agent code relies on:
+
+    full 14-vector = [ L1..L6, Lgrip,  R1..R6, Rgrip ]   (mid = 7)
+       left half  = [ L1..L6, Lgrip ]   (last = tool)
+       right half = [ R1..R6, Rgrip ]   (last = tool)
+
+  Joints are name-prefixed left_/right_; the mujoco_world node maps ROS
+  joint_command/joint_states by NAME, so the published order is whatever the
+  launch file's `joint_names` param lists (must equal the 14-vector above).
+
+  MJCF qpos layout (addressed by body/joint DECLARATION order, NOT joint_names):
+    left arm   : left_joint1..6 (6) + left_gripper + left_gripper_mirror (2) = 8
+    right arm  : right_joint1..6 (6) + right_gripper + right_gripper_mirror (2) = 8
+    cube free  : xyz + quat = 7
+    => keyframe qpos length = 23
+    => keyframe ctrl length = 14  (7 actuators per arm)
+-->
+<mujoco model="easytrainer_dual_arm_world">
+  <compiler angle="radian" autolimits="true"/>
+
+  <option timestep="0.002" iterations="50" solver="Newton" tolerance="1e-8" gravity="0 0 -9.81"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="135" elevation="-25"/>
+  </visual>
+
+  <default>
+    <default class="arm_link">
+      <geom type="capsule" rgba="0.85 0.85 0.85 1" mass="0.5"
+            contype="8" conaffinity="3" friction="1.0 0.005 0.001"/>
+      <joint type="hinge" damping="2.0" armature="0.05" frictionloss="0.05"/>
+    </default>
+    <default class="arm_visual">
+      <geom rgba="0.85 0.85 0.85 1" mass="0.0" contype="0" conaffinity="0"/>
+    </default>
+    <default class="gripper_finger">
+      <geom type="box" size="0.010 0.008 0.024" rgba="0.2 0.2 0.2 1" mass="0.03"
+            contype="4" conaffinity="3" friction="2.0 0.10 0.005" condim="6"/>
+    </default>
+  </default>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.5 0.7 0.9" rgb2="0.1 0.2 0.4" width="512" height="512"/>
+    <texture name="floor_tex" type="2d" builtin="checker" rgb1="0.2 0.3 0.4" rgb2="0.3 0.4 0.5" width="300" height="300"/>
+    <material name="floor_mat" texture="floor_tex" texrepeat="2 2" reflectance="0.1"/>
+    <material name="cube_mat" rgba="0.85 0.15 0.15 1"/>
+    <material name="lmarker_mat" rgba="0.20 0.55 0.95 1"/>
+    <material name="rmarker_mat" rgba="0.95 0.55 0.10 1"/>
+    <material name="plate_mat" rgba="0.95 0.95 0.95 1" reflectance="0.05"/>
+  </asset>
+
+  <worldbody>
+    <light name="top_light" pos="0 0 2.0" dir="0 0 -1" diffuse="0.6 0.6 0.6" specular="0.1 0.1 0.1"/>
+    <light name="side_light" pos="0.8 0.8 1.5" dir="-0.5 -0.5 -1" diffuse="0.3 0.3 0.3"/>
+
+    <geom name="floor" type="plane" size="3 3 0.1" material="floor_mat"
+          contype="1" conaffinity="14" friction="1.0 0.005 0.001"/>
+
+    <!-- ============================ LEFT ARM ============================ -->
+    <!-- base offset +y 0.15 so the two arms straddle a shared workspace.   -->
+    <body name="left_base" pos="0 0.15 0.05">
+      <geom type="cylinder" size="0.06 0.05" rgba="0.3 0.3 0.3 1" mass="2.0"
+            contype="0" conaffinity="0"/>
+
+      <body name="left_link1" pos="0 0 0.05" gravcomp="1">
+        <joint name="left_joint1" class="arm_link" axis="0 0 1" range="-3.14 3.14"/>
+        <geom class="arm_link" fromto="0 0 0  0 0 0.10" size="0.045"/>
+        <geom class="arm_visual" type="box" size="0.025 0.012 0.012" pos="0.045 0 0.05"
+              material="lmarker_mat"/>
+
+        <body name="left_link2" pos="0 0 0.10" gravcomp="1">
+          <joint name="left_joint2" class="arm_link" axis="0 -1 0" range="-1.57 1.57"/>
+          <geom class="arm_link" fromto="0 0 0  0.20 0 0" size="0.04"/>
+
+          <body name="left_link3" pos="0.20 0 0" gravcomp="1">
+            <joint name="left_joint3" class="arm_link" axis="0 -1 0" range="-2.40 0.50"/>
+            <geom class="arm_link" fromto="0 0 0  0.18 0 0" size="0.035"/>
+
+            <body name="left_link4" pos="0.18 0 0" gravcomp="1">
+              <joint name="left_joint4" class="arm_link" axis="1 0 0" range="-3.14 3.14"/>
+              <geom class="arm_link" fromto="0 0 0  0.08 0 0" size="0.030"/>
+              <geom class="arm_visual" type="box" size="0.040 0.034 0.004" pos="0.040 0 0.030"
+                    material="lmarker_mat"/>
+
+              <body name="left_link5" pos="0.08 0 0" gravcomp="1">
+                <joint name="left_joint5" class="arm_link" axis="0 -1 0" range="-1.40 1.40"/>
+                <geom class="arm_link" fromto="0 0 0  0.06 0 0" size="0.028"/>
+
+                <body name="left_link6" pos="0.06 0 0" gravcomp="1">
+                  <joint name="left_joint6" class="arm_link" axis="1 0 0" range="-3.14 3.14"/>
+                  <geom class="arm_visual" type="cylinder" size="0.025 0.020"
+                        pos="0.020 0 0" euler="0 1.5708 0" mass="0.2"/>
+
+                  <body name="left_gripper_base" pos="0.045 0 0" gravcomp="1">
+                    <geom type="box" size="0.020 0.030 0.012" rgba="0.2 0.2 0.2 1" mass="0.1"
+                          contype="0" conaffinity="0"/>
+                    <site name="left_ee_site" pos="0.05 0 0" size="0.005" rgba="0 1 0 0.8"/>
+
+                    <body name="left_finger_left" pos="0.030 0.018 0" gravcomp="1">
+                      <joint name="left_gripper" type="slide" axis="0 1 0" range="0 0.04"
+                             damping="50" frictionloss="0.05"/>
+                      <geom class="gripper_finger"/>
+                    </body>
+                    <body name="left_finger_right" pos="0.030 -0.018 0" gravcomp="1">
+                      <joint name="left_gripper_mirror" type="slide" axis="0 -1 0" range="0 0.04"
+                             damping="50" frictionloss="0.05"/>
+                      <geom class="gripper_finger"/>
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+
+    <!-- ============================ RIGHT ARM =========================== -->
+    <!-- base offset -y 0.15.                                               -->
+    <body name="right_base" pos="0 -0.15 0.05">
+      <geom type="cylinder" size="0.06 0.05" rgba="0.3 0.3 0.3 1" mass="2.0"
+            contype="0" conaffinity="0"/>
+
+      <body name="right_link1" pos="0 0 0.05" gravcomp="1">
+        <joint name="right_joint1" class="arm_link" axis="0 0 1" range="-3.14 3.14"/>
+        <geom class="arm_link" fromto="0 0 0  0 0 0.10" size="0.045"/>
+        <geom class="arm_visual" type="box" size="0.025 0.012 0.012" pos="0.045 0 0.05"
+              material="rmarker_mat"/>
+
+        <body name="right_link2" pos="0 0 0.10" gravcomp="1">
+          <joint name="right_joint2" class="arm_link" axis="0 -1 0" range="-1.57 1.57"/>
+          <geom class="arm_link" fromto="0 0 0  0.20 0 0" size="0.04"/>
+
+          <body name="right_link3" pos="0.20 0 0" gravcomp="1">
+            <joint name="right_joint3" class="arm_link" axis="0 -1 0" range="-2.40 0.50"/>
+            <geom class="arm_link" fromto="0 0 0  0.18 0 0" size="0.035"/>
+
+            <body name="right_link4" pos="0.18 0 0" gravcomp="1">
+              <joint name="right_joint4" class="arm_link" axis="1 0 0" range="-3.14 3.14"/>
+              <geom class="arm_link" fromto="0 0 0  0.08 0 0" size="0.030"/>
+              <geom class="arm_visual" type="box" size="0.040 0.034 0.004" pos="0.040 0 0.030"
+                    material="rmarker_mat"/>
+
+              <body name="right_link5" pos="0.08 0 0" gravcomp="1">
+                <joint name="right_joint5" class="arm_link" axis="0 -1 0" range="-1.40 1.40"/>
+                <geom class="arm_link" fromto="0 0 0  0.06 0 0" size="0.028"/>
+
+                <body name="right_link6" pos="0.06 0 0" gravcomp="1">
+                  <joint name="right_joint6" class="arm_link" axis="1 0 0" range="-3.14 3.14"/>
+                  <geom class="arm_visual" type="cylinder" size="0.025 0.020"
+                        pos="0.020 0 0" euler="0 1.5708 0" mass="0.2"/>
+
+                  <body name="right_gripper_base" pos="0.045 0 0" gravcomp="1">
+                    <geom type="box" size="0.020 0.030 0.012" rgba="0.2 0.2 0.2 1" mass="0.1"
+                          contype="0" conaffinity="0"/>
+                    <site name="right_ee_site" pos="0.05 0 0" size="0.005" rgba="0 1 0 0.8"/>
+
+                    <body name="right_finger_left" pos="0.030 0.018 0" gravcomp="1">
+                      <joint name="right_gripper" type="slide" axis="0 1 0" range="0 0.04"
+                             damping="50" frictionloss="0.05"/>
+                      <geom class="gripper_finger"/>
+                    </body>
+                    <body name="right_finger_right" pos="0.030 -0.018 0" gravcomp="1">
+                      <joint name="right_gripper_mirror" type="slide" axis="0 -1 0" range="0 0.04"
+                             damping="50" frictionloss="0.05"/>
+                      <geom class="gripper_finger"/>
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+
+    <!-- Shared manipulable cube, centered between the two arms. -->
+    <body name="cube" pos="0.32 0 0.02">
+      <freejoint name="cube_free"/>
+      <geom name="cube_geom" type="box" size="0.020 0.020 0.020" material="cube_mat"
+            contype="2" conaffinity="13" friction="1.0 0.05 0.005" condim="6" mass="0.05"/>
+    </body>
+
+    <!-- Static white target plate. -->
+    <geom name="plate" type="cylinder" size="0.055 0.0005" pos="0.32 0.0 0.0005"
+          material="plate_mat"
+          contype="1" conaffinity="14" friction="1.0 0.005 0.001"/>
+
+    <!-- Cameras track the shared cube so the workspace stays centered. -->
+    <camera name="top_cam" pos="-0.05 0.0 0.95" mode="targetbody" target="cube" fovy="58"/>
+    <camera name="front_cam" pos="0.90 0.00 0.22" mode="targetbody" target="cube" fovy="52"/>
+  </worldbody>
+
+  <!-- One mirror equality per arm so a single gripper command drives both fingers. -->
+  <equality>
+    <joint joint1="left_gripper"  joint2="left_gripper_mirror"  polycoef="0 1 0 0 0"/>
+    <joint joint1="right_gripper" joint2="right_gripper_mirror" polycoef="0 1 0 0 0"/>
+  </equality>
+
+  <!-- 14 position actuators: 7 per arm (6 arm joints + 1 gripper). -->
+  <actuator>
+    <position name="left_act_joint1" joint="left_joint1" kp="80"  kv="6"  ctrlrange="-3.14 3.14"/>
+    <position name="left_act_joint2" joint="left_joint2" kp="120" kv="10" ctrlrange="-1.57 1.57"/>
+    <position name="left_act_joint3" joint="left_joint3" kp="100" kv="8"  ctrlrange="-2.40 0.50"/>
+    <position name="left_act_joint4" joint="left_joint4" kp="60"  kv="5"  ctrlrange="-3.14 3.14"/>
+    <position name="left_act_joint5" joint="left_joint5" kp="50"  kv="4"  ctrlrange="-1.40 1.40"/>
+    <position name="left_act_joint6" joint="left_joint6" kp="40"  kv="3"  ctrlrange="-3.14 3.14"/>
+    <position name="left_act_gripper" joint="left_gripper" kp="400" kv="30" ctrlrange="0 0.04"/>
+
+    <position name="right_act_joint1" joint="right_joint1" kp="80"  kv="6"  ctrlrange="-3.14 3.14"/>
+    <position name="right_act_joint2" joint="right_joint2" kp="120" kv="10" ctrlrange="-1.57 1.57"/>
+    <position name="right_act_joint3" joint="right_joint3" kp="100" kv="8"  ctrlrange="-2.40 0.50"/>
+    <position name="right_act_joint4" joint="right_joint4" kp="60"  kv="5"  ctrlrange="-3.14 3.14"/>
+    <position name="right_act_joint5" joint="right_joint5" kp="50"  kv="4"  ctrlrange="-1.40 1.40"/>
+    <position name="right_act_joint6" joint="right_joint6" kp="40"  kv="3"  ctrlrange="-3.14 3.14"/>
+    <position name="right_act_gripper" joint="right_gripper" kp="400" kv="30" ctrlrange="0 0.04"/>
+  </actuator>
+
+  <!--
+    Home pose: both arms in the tutorial home posture (EE hovering near the
+    shared cube). qpos order follows body declaration: left(8) right(8) cube(7).
+    ctrl order follows actuator declaration: left(7) right(7).
+  -->
+  <keyframe>
+    <key name="home"
+         qpos="0 1.21 -1.70 0 -1.08 0  0 0   0 1.21 -1.70 0 -1.08 0  0 0   0.32 0 0.02 1 0 0 0"
+         ctrl="0 1.21 -1.70 0 -1.08 0  0    0 1.21 -1.70 0 -1.08 0  0"/>
+  </keyframe>
+</mujoco>

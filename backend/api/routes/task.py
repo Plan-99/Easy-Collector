@@ -11,14 +11,27 @@ task_bp = Blueprint('task', __name__)
 
 @task_bp.route('/tasks', methods=['GET'])
 def get_tasks():
-    tasks = TaskModel.select().where(TaskModel.deleted_at.is_null())
-    tasks = [task.to_dict() for task in tasks]
+    """기본값: 경량(``light_dict``) — id/name/image/episode_len/assembly_id/
+    sensor_ids 만. 드롭다운/리스트 용. 상세는 ``/tasks/<id>`` 로 lazy fetch.
+
+    ``?full=1`` 옵션: 종전 풀 payload (sensors/assembly.robots + runtime + ros2
+    ListProcesses). 여러 task 의 풀 정보를 동시에 필요할 때만 사용 — 호출 비용이
+    매우 크다 (N × DB 쿼리 + ros2 gRPC).
+    """
+    full = request.args.get('full', '').lower() in ('1', 'true', 'yes')
+    task_rows = TaskModel.select().where(TaskModel.deleted_at.is_null())
+    if not full:
+        tasks = [task.light_dict() for task in task_rows]
+        return {'status': 'success', 'tasks': tasks}, 200
+
+    tasks = [task.to_dict() for task in task_rows]
     processes = set(current_app.pm.list_processes())
     try:
         from ...bridge.client import get_bridge_client
         from ...bridge.generated import robot_bridge_pb2 as pb
         client = get_bridge_client()
-        ros2_procs = client.driver.ListProcesses(pb.Empty())
+        # 짧은 timeout — ros2 gRPC worker pool 포화 시 route 가 매달리지 않도록.
+        ros2_procs = client.driver.ListProcesses(pb.Empty(), timeout=2.0)
         processes.update(ros2_procs.names)
     except Exception:
         pass
@@ -43,7 +56,8 @@ def get_task(id):
         from ...bridge.client import get_bridge_client
         from ...bridge.generated import robot_bridge_pb2 as pb
         client = get_bridge_client()
-        ros2_procs = client.driver.ListProcesses(pb.Empty())
+        # 짧은 timeout — ros2 gRPC worker pool 포화 시 route 가 매달리지 않도록.
+        ros2_procs = client.driver.ListProcesses(pb.Empty(), timeout=2.0)
         processes.update(ros2_procs.names)
     except Exception:
         pass

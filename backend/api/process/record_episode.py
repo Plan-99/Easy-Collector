@@ -241,10 +241,17 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                         task_control['stop'] = True
                         return
 
-            # 센서 첫 프레임 대기: get_observation()으로 이미지 확인
+            # 센서 첫 프레임 대기: get_observation()으로 이미지 확인.
+            # Multi-view: 같은 sensor_id 가 여러 view 로 등장해도 raw shm 은
+            # 한 곳이라 dedup. obs['images'] 의 키는 physical 'sensor_{id}'.
+            _seen_wait: set = set()
             for sensor in sensors:
-                sensor_key = f'sensor_{sensor["id"]}'
-                print(f'[NOTICE] Waiting for first frame from sensor {sensor["id"]}...')
+                sid = sensor['id']
+                if sid in _seen_wait:
+                    continue
+                _seen_wait.add(sid)
+                sensor_key = f'sensor_{sid}'
+                print(f'[NOTICE] Waiting for first frame from sensor {sid}...')
                 elapsed = 0.0
                 while True:
                     if task_control['stop']:
@@ -259,7 +266,7 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                     time.sleep(0.1)
                     elapsed += 0.1
                     if elapsed >= 10.0:
-                        print(f'[ERROR] No data from sensor {sensor["id"]} after 10.0s timeout')
+                        print(f'[ERROR] No data from sensor {sid} after 10.0s timeout')
                         task_control['stop'] = True
                         return
                 print(f'[NOTICE] Sensor {sensor["id"]} first frame received ({elapsed:.1f}s)')
