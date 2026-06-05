@@ -357,15 +357,23 @@ def set_inference_vision_map(id):
     The inference loop reads ``task_control['vision_map_method']`` each step and
     emits an ``inference_vision_map`` socket event when the method is set.
     """
-    task = current_app.pm._get('checkpoint_test')
-    if task is None:
-        return {'status': 'error', 'message': 'No inference running'}, 400
-
     data = request.json or {}
     method = data.get('method')
     if method not in ('attention', 'gradcam', None):
         return {'status': 'error', 'message': f'Invalid method: {method}'}, 400
-    task.control['vision_map_method'] = method
+
+    # 실행 중인 추론의 task_control 에 직접 쓴다 — 워크스페이스 단독(pm 'checkpoint_test')
+    # 이든 커리큘럼/플래너 rollout 안의 스레드든, checkpoint_test 가 시작 시 자신의
+    # task_control 을 _active_inference 에 등록하므로 프로세스 이름과 무관하게 닿는다.
+    from ..process.checkpoint_test import _active_inference
+    control = _active_inference.get('control')
+    if control is None:
+        # 폴백: 과거 경로(pm 등록 프로세스).
+        task = current_app.pm._get('checkpoint_test')
+        control = task.control if task is not None else None
+    if control is None:
+        return {'status': 'error', 'message': 'No inference running'}, 400
+    control['vision_map_method'] = method
     return {'status': 'success', 'method': method}, 200
 
 

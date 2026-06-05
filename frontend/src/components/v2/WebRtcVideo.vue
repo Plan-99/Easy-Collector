@@ -10,27 +10,10 @@
       @loadeddata="streamLoading = false"
     ></video>
     <img
-      v-if="gradcamOn && gradcamSrc"
-      :src="gradcamSrc"
-      style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0.6; pointer-events: none;"
-    />
-    <img
       v-if="overlaySrc"
       :src="overlaySrc"
       style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0.6; pointer-events: none;"
     />
-    <q-btn
-      v-if="sensorId"
-      round
-      dense
-      size="sm"
-      :icon="gradcamOn ? 'visibility' : 'visibility_off'"
-      :color="gradcamOn ? 'orange' : 'grey-7'"
-      style="position: absolute; bottom: 8px; right: 8px; z-index: 1;"
-      @click.stop="gradcamOn = !gradcamOn"
-    >
-      <q-tooltip>{{ $t('gradcamTooltip') }}</q-tooltip>
-    </q-btn>
     <q-inner-loading :showing="props.loading || streamLoading">
     </q-inner-loading>
   </div>
@@ -39,7 +22,6 @@
 <script setup>
 import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { useWebRTC } from 'src/composables/useWebRTC';
-import { useSocket } from 'src/composables/useSocket.js';
 
 const props = defineProps({
   topic: {
@@ -78,18 +60,6 @@ const props = defineProps({
 
 const videoElement = ref(null);
 const { connect, disconnect, addConfig } = useWebRTC();
-const { socket } = useSocket();
-
-// Grad-CAM overlay
-const gradcamOn = ref(false);
-const gradcamSrc = ref(null);
-
-function onGradcam(data) {
-  const key = `sensor_${props.sensorId}`;
-  if (data[key]) {
-    gradcamSrc.value = 'data:image/jpeg;base64,' + data[key];
-  }
-}
 let stream_id = '';
 // 컴포넌트 마운트 동안 단 하나의 active stream 만 유지. setupWebRTC 가
 // 여러 번 호출돼도 마지막 것만 살아남도록 generation 토큰으로 race 방어.
@@ -196,21 +166,10 @@ onMounted(() => {
   if (pendingStream.value && videoElement.value && !videoElement.value.srcObject) {
     videoElement.value.srcObject = pendingStream.value;
   }
-  if (props.sensorId) {
-    socket.on('gradcam', onGradcam);
-    socket.on('stop_process', (data) => {
-      if (data.id === 'checkpoint_test') {
-        gradcamSrc.value = null;
-      }
-    });
-  }
 });
 
 onUnmounted(() => {
   disconnect();
-  if (props.sensorId) {
-    socket.off('gradcam', onGradcam);
-  }
 });
 
 </script>
