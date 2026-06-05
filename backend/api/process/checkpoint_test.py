@@ -30,6 +30,45 @@ import gc
 import threading
 
 
+# 현재 실행 중인 추론(checkpoint_test)의 task_control 핸들. 어떤 경로로 호출됐든
+# (워크스페이스 단독 / 커리큘럼 / 플래너) 추론이 도는 동안 여기에 등록되어, vision-map
+# 토글 라우트(:set_inference_vision_map)가 프로세스 이름과 무관하게 이 control 에
+# ``vision_map_method`` 를 쓸 수 있다. 동시 추론은 단일(커리큘럼/플래너는 순차)이라 1개로 충분.
+_active_inference = {'control': None}
+
+# image OOD 재계산 주기(step). backbone forward 가 정책 자체 forward 와 별개로 한 번 더
+# 돌아 비용이 있으므로 매 step 이 아니라 N step 마다만 갱신(이미지 OOD 는 천천히 변함).
+OOD_IMG_EVERY = 5
+
+
+def compute_image_latent(policy, policy_input, image_feature_keys):
+    """정규화된 ``policy_input`` 의 카메라 이미지들을 정책의 vision backbone 에 통과시켜
+    GAP(global average pool) latent 을 카메라 순서대로 concat 한 (1, D) 텐서 반환.
+
+    OOD 판정용 — 학습 데이터셋(generate_ood_features)과 추론(checkpoint_test)이 **같은
+    함수 + 같은 전처리(process_image→preprocessor)** 를 거치므로 표현이 일치한다.
+    backbone 이 없으면(ACT 외 정책) None.
+    """
+    model = getattr(policy, 'model', None)
+    backbone = getattr(model, 'backbone', None) if model is not None else None
+    if backbone is None:
+        return None
+    feats = []
+    for key in (image_feature_keys or []):
+        img = policy_input.get(key)
+        if img is None:
+            continue
+        out = backbone(img)
+        fm = out['feature_map'] if isinstance(out, dict) else out
+        if fm is None:
+            continue
+        # (B, C, H, W) → (B, C)
+        feats.append(fm.mean(dim=[2, 3]))
+    if not feats:
+        return None
+    return torch.cat(feats, dim=1)
+
+
 def _move_to_homepose(agents, home_pose, task_control, socketio_instance, timeout=30.0, duration=5.0, settle_sec=0.0):
     """home_pose가 None이거나 매핑이 없으면 즉시 리턴.
 
@@ -266,17 +305,19 @@ def checkpoint_test(
                 pretrained_path=ckpt_dir,
             )
             ood_cpu = {}
+            # OOD reference: state(qpos) + image(backbone latent). 둘 다 generate_ood_features
+            # 가 lerobot_io / backbone 으로 미리 뽑아둔 것.
             ood_features_path = os.path.join(ckpt_dir, 'ood_features.npz')
-            if os.path.exists(ood_features_path) and hasattr(policy, 'enable_feature_caching'):
+            if os.path.exists(ood_features_path):
                 ood_data = np.load(ood_features_path)
-                if 'image_features' in ood_data:
-                    ood_cpu['image_feats'] = torch.from_numpy(ood_data['image_features']).float()
                 if 'state_features' in ood_data:
                     ood_cpu['state_feats'] = torch.from_numpy(ood_data['state_features']).float()
-                if 'image_dist_sorted' in ood_data:
-                    ood_cpu['image_dist_sorted'] = ood_data['image_dist_sorted']
                 if 'state_dist_sorted' in ood_data:
                     ood_cpu['state_dist_sorted'] = ood_data['state_dist_sorted']
+                if 'image_features' in ood_data:
+                    ood_cpu['image_feats'] = torch.from_numpy(ood_data['image_features']).float()
+                if 'image_dist_sorted' in ood_data:
+                    ood_cpu['image_dist_sorted'] = ood_data['image_dist_sorted']
 
         # Per-block re-inference / temporal ensemble setup. Always reapply because
         # the same cached policy may be reused with different params across blocks.
@@ -353,15 +394,15 @@ def checkpoint_test(
             print(f'[INFER] Loaded preprocessor/postprocessor from {ckpt_dir} '
                   f'(action_key_norm={action_key_norm})')
 
-        # OOD reference tensors — keep originals on CPU (so the cache survives),
-        # ship a CUDA copy into the loop. The CUDA copies are freed in finally.
-        ood_image_feats = ood_cpu['image_feats'].cuda() if ood_cpu.get('image_feats') is not None else None
+        # OOD reference tensors — 원본은 CPU(preloaded 캐시 보존), CUDA 사본을 루프에 투입.
+        # (CUDA 사본은 finally 에서 해제.) state=qpos 거리, image=backbone latent 거리.
         ood_state_feats = ood_cpu['state_feats'].cuda() if ood_cpu.get('state_feats') is not None else None
-        ood_image_dist_sorted = ood_cpu.get('image_dist_sorted')
         ood_state_dist_sorted = ood_cpu.get('state_dist_sorted')
-        if (ood_image_feats is not None or ood_state_feats is not None) and hasattr(policy, 'enable_feature_caching'):
-            policy.enable_feature_caching(True)
-            print(f'[OOD] Loaded reference features: image={ood_image_feats.shape if ood_image_feats is not None else None}, state={ood_state_feats.shape if ood_state_feats is not None else None}')
+        ood_image_feats = ood_cpu['image_feats'].cuda() if ood_cpu.get('image_feats') is not None else None
+        ood_image_dist_sorted = ood_cpu.get('image_dist_sorted')
+        if ood_state_feats is not None or ood_image_feats is not None:
+            print(f'[OOD] Loaded reference: state={tuple(ood_state_feats.shape) if ood_state_feats is not None else None}, '
+                  f'image={tuple(ood_image_feats.shape) if ood_image_feats is not None else None}')
 
         # Grad-CAM 활성화
         gradcam_enabled = hasattr(policy, 'enable_gradcam')
@@ -747,6 +788,21 @@ def checkpoint_test(
             _succeed_done_frames = max(1, int(succeed_done_frames))
         except (TypeError, ValueError):
             _succeed_done_frames = 3
+        # image OOD throttle 상태. backbone forward 비용 때문에 매 step 이 아니라
+        # OOD_IMG_EVERY step 마다 재계산하고 그 사이엔 마지막 값을 재사용.
+        _ood_img_tick = 0
+        _ood_img_last = None
+        _vm_ordered_keys = list(policy.config.image_features) if getattr(policy, 'config', None) is not None else []
+        # 추론 시작 신호(단일 진실) + vision-map 토글 라우팅용 control 등록.
+        _active_inference['control'] = task_control
+        try:
+            socketio_instance.emit('inference_active', {
+                'active': True,
+                'checkpoint_id': checkpoint.get('id'),
+                'policy_type': policy_obj.get('type'),
+            })
+        except Exception:
+            pass
         while not task_control['stop']:
             # 이 step 의 succeed 라벨 (has_succeed 일 때만 갱신).
             _frame_succeed = 0.0
@@ -1109,33 +1165,34 @@ def checkpoint_test(
                         noise_t_raw = np.zeros_like(state_t)
 
 
-            # === OOD scoring (추론이 실행된 스텝에서만) ===
-            if (ood_image_feats is not None or ood_state_feats is not None) and hasattr(policy, 'get_cached_features'):
-                img_feat, state_feat = policy.get_cached_features()
-                if img_feat is not None or state_feat is not None:
-                    ood_scores = {}
-                    k = 5
-                    if img_feat is not None and ood_image_feats is not None:
-                        dists = torch.cdist(img_feat, ood_image_feats)  # (1, N)
-                        raw_dist = float(dists.topk(k, largest=False).values.mean())
-                        if ood_image_dist_sorted is not None and len(ood_image_dist_sorted) > 0:
-                            idx = int(np.searchsorted(ood_image_dist_sorted, raw_dist))
-                            percentile = idx / len(ood_image_dist_sorted)
-                            ood_scores['image'] = round(min(percentile, 1.0), 3)
-                            print(f"[OOD DEBUG] image raw_dist={raw_dist:.4f}, searchsorted_idx={idx}/{len(ood_image_dist_sorted)}, percentile={percentile:.4f}, ref_range=[{ood_image_dist_sorted[0]:.4f}, {ood_image_dist_sorted[-1]:.4f}]")
-                        else:
-                            ood_scores['image'] = raw_dist
-                    if state_feat is not None and ood_state_feats is not None:
-                        dists = torch.cdist(state_feat, ood_state_feats)  # (1, N)
-                        raw_dist = float(dists.topk(k, largest=False).values.mean())
-                        if ood_state_dist_sorted is not None and len(ood_state_dist_sorted) > 0:
-                            idx = int(np.searchsorted(ood_state_dist_sorted, raw_dist))
-                            percentile = idx / len(ood_state_dist_sorted)
-                            ood_scores['state'] = round(min(percentile, 1.0), 3)
-                            print(f"[OOD DEBUG] state raw_dist={raw_dist:.4f}, searchsorted_idx={idx}/{len(ood_state_dist_sorted)}, percentile={percentile:.4f}, ref_range=[{ood_state_dist_sorted[0]:.4f}, {ood_state_dist_sorted[-1]:.4f}]")
-                        else:
-                            ood_scores['state'] = raw_dist
-                    socketio_instance.emit('ood_score', ood_scores)
+            # === OOD scoring (추론이 실행된 스텝에서만) — image backbone latent 전용 ===
+            # 현재 이미지 backbone latent vs 레퍼런스 latent 분포. 비용(backbone forward
+            # 1회) 때문에 몇 step 마다만. 최신 preprocessed batch(_vm_last_batch)를 그대로
+            # 써서 generate 와 동일 경로 보장.
+            if ood_image_feats is not None:
+                try:
+                    _ood_img_tick += 1
+                    if _ood_img_tick % OOD_IMG_EVERY == 0:
+                        _batch = _vm_last_batch.get('value')
+                        if _batch is not None:
+                            with torch.no_grad():
+                                lat = compute_image_latent(policy, _batch, _vm_ordered_keys)
+                            if lat is not None and lat.shape[1] == ood_image_feats.shape[1]:
+                                lat = lat.float().to(ood_image_feats.device)
+                                kk = min(5, ood_image_feats.shape[0])
+                                rd = float(torch.cdist(lat, ood_image_feats).topk(kk, largest=False).values.mean())
+                                if ood_image_dist_sorted is not None and len(ood_image_dist_sorted) > 0:
+                                    ii = int(np.searchsorted(ood_image_dist_sorted, rd))
+                                    _ood_img_last = round(min(ii / len(ood_image_dist_sorted), 1.0), 3)
+                                    print(f"[OOD] image raw_dist={rd:.3f} score={_ood_img_last} "
+                                          f"ref_range=[{ood_image_dist_sorted[0]:.3f}, {ood_image_dist_sorted[-1]:.3f}] "
+                                          f"median={float(np.median(ood_image_dist_sorted)):.3f}")
+                                else:
+                                    _ood_img_last = round(rd, 4)
+                    if _ood_img_last is not None:
+                        socketio_instance.emit('ood_score', {'image': _ood_img_last})
+                except Exception as _ood_e:
+                    print(f"[OOD] scoring skipped: {_ood_e}")
 
             # === Inference-time Vision Map (frontend toggle via task_control) ===
             # Uses the same forward pass for 'attention' (persistent hooks) —
@@ -1485,6 +1542,13 @@ def checkpoint_test(
         print(f"Error in main loop: {error_string}")
 
     finally:
+        # 추론 종료 신호 + 레지스트리 해제 (우리 control 일 때만).
+        if _active_inference.get('control') is task_control:
+            _active_inference['control'] = None
+        try:
+            socketio_instance.emit('inference_active', {'active': False})
+        except Exception:
+            pass
         thread_pool.shutdown(wait=False)
         # Background inference executor 도 함께 정리 — 미정리 시 호출 반복마다
         # thread leak + 미완료 future 의 GPU 텐서가 GC 안 됨.
@@ -1502,8 +1566,8 @@ def checkpoint_test(
 
         # Drop GPU copies of the OOD tensors (originals stay on CPU in preloaded).
         try:
-            del ood_image_feats
             del ood_state_feats
+            del ood_image_feats
         except NameError:
             pass
 

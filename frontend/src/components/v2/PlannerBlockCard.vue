@@ -173,7 +173,7 @@ const defaultSubtitle = computed(() => {
         case 'move_relative_ee':
             return props.workspaceName;
         case 'checkpoint':
-            return b.checkpoint_name || '';
+            return b.checkpoint_id ? `#${b.checkpoint_id}` : '';
         case 'replay_episode':
             return `${b.dataset_name || `Dataset ${b.dataset_id}`} · ep.${b.episode_index}`;
         case 'timesleep':

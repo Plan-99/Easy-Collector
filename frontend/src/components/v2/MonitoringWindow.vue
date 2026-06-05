@@ -26,7 +26,7 @@
                     :resize="viewportImgSize(vp.workspace, vp.viewKey, vp.sensor.id)"
                     :cropped_area="viewportCropArea(vp.workspace, vp.viewKey, vp.sensor.id)"
                     :rotate="viewportRotate(vp.workspace, vp.viewKey, vp.sensor.id)"
-                    :overlay-src="status === 'testing' && inferenceVisionMapOn ? inferenceHeatmaps[`sensor_${vp.viewKey}`] : null"
+                    :overlay-src="procStatus === 'testing' && inferenceVisionMapOn ? inferenceHeatmaps[`sensor_${vp.viewKey}`] : null"
                 ></web-rtc-video>
                 <div class="full-height border-white bg-dark border-rounded flex flex-center" v-else>
                     <q-btn round flat icon="play_arrow" text-color="white" size="xl" @click="vp.sensor.handler.startSensor(vp.sensor)"></q-btn>
@@ -76,7 +76,10 @@
             <q-spinner-gears v-if="loading" size="40px" color="primary" />
             <div v-else class="text-white">{{ $t('noRobotsMsg') }}</div>
         </div>
-        <template v-if="!monitorOnly || correctionMode">
+        <!-- 하단 바: monitor 의도(idle+monitorOnly)면 숨김. 실제 프로세스가 돌면
+             (procStatus !== 'pending') monitorOnly 라도 노출 — 커리큘럼/플래너 rollout
+             추론이 돌면 inference 바가 자동으로 뜬다. -->
+        <template v-if="!monitorOnly || correctionMode || procStatus !== 'pending'">
         <!-- correctionMode 에서는 'startAllDevices' 체크 우회 — 커리큘럼이 이미
              필요한 device 를 켜놓은 상태이고, props.sensors 가 모든 워크스페이스
              의 union 이라 다른 워크스페이스의 sensor 가 off 일 수 있다 (그건
@@ -99,10 +102,10 @@
                                 round
                                 flat
                                 @click="selectedEpisode = {}"
-                                v-if="status === 'pending'"
+                                v-if="procStatus === 'pending'"
                             ></q-btn>
                         </div>
-                        <q-space class="col" v-if="status === 'pending'"></q-space>
+                        <q-space class="col" v-if="procStatus === 'pending'"></q-space>
                         <div class="col q-px-md" v-else>
                             <q-linear-progress
                                 :value="replayProgress"
@@ -116,7 +119,7 @@
                                 </div>
                             </q-linear-progress>
                         </div>
-                        <div class="row items-center q-gutter-x-sm" v-if="status === 'pending'">
+                        <div class="row items-center q-gutter-x-sm" v-if="procStatus === 'pending'">
                             <span class="text-caption text-grey">{{ $t('replayActionType') }}:</span>
                             <q-radio
                                 v-model="replayActionType"
@@ -165,7 +168,7 @@
                                 :label="$t('replayPlay')"
                                 icon="play_arrow"
                                 @click="startReplay"
-                                v-if="status === 'pending'"
+                                v-if="procStatus === 'pending'"
                             ></q-btn>
                             <q-btn
                                 color="white"
@@ -186,10 +189,10 @@
               'inferencing' 으로 바뀐다 → 이 분기 대신 아래의 데이터 수집
               분기 (v-else) 로 흘러가야 한다.
             -->
-            <div v-else-if="checkpoint && (status === 'pending' || status === 'testing')" class="row q-mb-sm">
+            <div v-else-if="procStatus === 'testing' || (checkpoint && procStatus === 'pending')" class="row q-mb-sm">
                 <div
                     class="col bg-dark border-rounded text-white row flex flex-center q-col-gutter-x-sm"
-                    v-if="status === 'pending'"
+                    v-if="procStatus === 'pending'"
                 >
                     <div class="col ellipsis">
                         <div class="text-h6 ellipsis">{{ checkpoint?.name }}</div>
@@ -210,7 +213,7 @@
                             :label="$t('startInference')"
                             icon="play_arrow"
                             @click="startInference"
-                            v-if="status === 'pending'"
+                            v-if="procStatus === 'pending'"
                         />
                     </div>
                 </div>
@@ -286,7 +289,10 @@
                             </q-item>
                         </q-list>
                     </q-btn-dropdown>
+                    <!-- monitorOnly(커리큘럼/플래너)에서는 실행 제어를 그쪽 컨트롤이 담당하므로
+                         DAgger/Stop 은 숨기고 모니터링 위젯(succeed/OOD/Vision Map)만 노출. -->
                     <q-btn
+                        v-if="!monitorOnly"
                         color="amber"
                         text-color="dark"
                         :label="$t('daggerBtn')"
@@ -297,6 +303,7 @@
                         <q-tooltip>{{ $t('daggerDialogDesc') }}</q-tooltip>
                     </q-btn>
                     <q-btn
+                        v-if="!monitorOnly"
                         color="white"
                         text-color="red"
                         :label="$t('stopBtn')"
@@ -306,7 +313,7 @@
                 </div>
             </div>
             <div v-else>
-                <div class="text-grey bg-dark border-rounded row full-height flex flex-center" v-if="status === 'pending'">
+                <div class="text-grey bg-dark border-rounded row full-height flex flex-center" v-if="procStatus === 'pending'">
                     <q-select
                         v-model="selectedDatasetId"
                         dense
@@ -598,7 +605,7 @@
                 style=""
             />
             <process-console
-                :process="status === 'testing' ? 'checkpoint_test' : 'record_episode'"
+                :process="procStatus === 'testing' ? 'checkpoint_test' : 'record_episode'"
                 class="q-mt-md"
                 style="border: 1px solid #ffffff; background-color: #1e1e1e; z-index: 1000; width: 800px; height: 400px;"
                 v-show="showProcessConsole"
@@ -616,7 +623,7 @@
                 flat
                 @click="selectedEpisode = {}"
                 color="white"
-                v-if="status === 'pending'"
+                v-if="procStatus === 'pending'"
             ></q-btn>
             <episode-viewer
                 :path="`${selectedDatasetId}/${selectedEpisode.name}`"
@@ -669,6 +676,7 @@ import { useI18n } from 'vue-i18n';
 import { api } from 'src/boot/axios';
 import ProcessConsole from './ProcessConsole.vue';
 import { useSocket } from 'src/composables/useSocket.js';
+import { useProcessStore } from 'src/stores/processStore';
 import WebRtcVideo from './WebRtcVideo.vue';
 import EpisodeViewer from 'src/components/v2/EpisodeViewer.vue';
 import FormDialog from './FormDialog.vue';
@@ -680,6 +688,20 @@ import { enumerateViews } from 'src/utils/sensorView';
 
 const { socket } = useSocket();
 const { t } = useI18n();
+const processStore = useProcessStore();
+
+// 실행 중인 추론(checkpoint_test)의 메타. 백엔드 'inference_active' 이벤트로만 채워지며
+// 워크스페이스 단독·커리큘럼·플래너 모든 경로를 단일 신호로 커버한다. null = 추론 아님.
+const inferenceActive = ref(null);
+
+// 하단 바를 결정하는 "실제 실행 중 프로세스" 단일 진실. 부모가 넘기던 status 대신 사용.
+//   추론 중 → 'testing', record_episode 중 → 'inferencing', replay 중 → 'replaying', 그 외 → 'pending'.
+const procStatus = computed(() => {
+    if (inferenceActive.value) return 'testing';
+    if (processStore.isRunning('record_episode')) return 'inferencing';
+    if (processStore.isRunning('replay_episode')) return 'replaying';
+    return 'pending';
+});
 
 const props = defineProps({
     workspace: {
@@ -698,9 +720,12 @@ const props = defineProps({
         type: Array,
         required: true
     },
+    // (deprecated) 더 이상 사용하지 않음 — 실행 상태는 procStatus 로 백엔드에서 도출.
+    // 부모가 넘기지 않아도 되도록 optional 로 둔다.
     status: {
         type: String,
-        required: true
+        required: false,
+        default: 'pending'
     },
     datasets: {
         type: Array,
@@ -912,9 +937,9 @@ const monitoringHintKey = computed(() => {
     if (!isRobotSensorAllOn.value) return 'tutorialMonOverview';
     if (selectedEpisode.value?.name && selectedDatasetId.value) return 'tutorialMonReplay';
     if (checkpoint.value) {
-        return props.status === 'pending' ? 'tutorialMonInferenceSelected' : 'tutorialMonInferenceRunning';
+        return procStatus.value === 'pending' ? 'tutorialMonInferenceSelected' : 'tutorialMonInferenceRunning';
     }
-    if (props.status === 'pending') return 'tutorialMonIdlePending';
+    if (procStatus.value === 'pending') return 'tutorialMonIdlePending';
     if (viveInitializing.value) return 'tutorialMonViveInit';
     if (movingHomepose.value) return 'tutorialMonMovingHome';
     switch (teleType.value) {
@@ -1003,9 +1028,11 @@ const oodScoreDisplay = computed(() => {
     if (!oodScore.value) return '';
     const img = oodScore.value.image;
     const state = oodScore.value.state;
-    const imgStr = typeof img === 'number' ? img.toFixed(2) : '-';
-    const stateStr = typeof state === 'number' ? state.toFixed(2) : '-';
-    return `${oodTotal.value.toFixed(2)} (${imgStr} + ${stateStr})`;
+    // 현재는 state-only OOD — 둘 다 있을 때만 분해 표기, 아니면 합산값만.
+    if (typeof img === 'number' && typeof state === 'number') {
+        return `${oodTotal.value.toFixed(2)} (img ${img.toFixed(2)} + state ${state.toFixed(2)})`;
+    }
+    return oodTotal.value.toFixed(2);
 });
 
 // =========================================================================
@@ -1021,14 +1048,19 @@ const inferenceVisionMapMethodOptions = computed(() => [
     { label: t('visionMapAttention'), value: 'attention' },
     { label: t('visionMapGradcam'), value: 'gradcam' },
 ]);
-// Only ACT supports the inference-time hooks (no equivalent on Diffusion/PI0).
-const supportsInferenceVisionMap = computed(() =>
-    String(checkpoint.value?.policy?.type || '').toUpperCase() === 'ACT',
-);
+// 추론 중인 체크포인트의 정책 타입 — 워크스페이스(선택 checkpoint) 또는 monitorOnly
+// (inference_active 이벤트의 policy_type). ACT 만 inference-time hook 지원.
+const supportsInferenceVisionMap = computed(() => {
+    const t = checkpoint.value?.policy?.type || inferenceActive.value?.policy_type;
+    return String(t || '').toUpperCase() === 'ACT';
+});
 
 function applyInferenceVisionMap(method) {
-    if (!selectedCheckpointId.value) return;
-    api.post(`/checkpoint/${selectedCheckpointId.value}/:set_inference_vision_map`, { method })
+    // 토글 대상 checkpoint id — 워크스페이스 선택 또는 monitorOnly 의 실행 중 checkpoint.
+    // (백엔드는 _active_inference 레지스트리로 라우팅하므로 id 는 URL 형식용.)
+    const cpId = selectedCheckpointId.value || inferenceActive.value?.checkpoint_id;
+    if (!cpId) return;
+    api.post(`/checkpoint/${cpId}/:set_inference_vision_map`, { method })
         .catch((err) => console.warn('[InferenceVisionMap] set failed:', err));
 }
 
@@ -1042,9 +1074,9 @@ function setInferenceVisionMap(method) {
 }
 
 watch([inferenceVisionMapOn, inferenceVisionMapMethod], () => {
-    // Only push to backend when inference is actually running — the status
+    // Only push to backend when inference is actually running — the procStatus
     // watcher below re-applies on transition into 'testing'.
-    if (props.status !== 'testing') return;
+    if (procStatus.value !== 'testing') return;
     if (inferenceVisionMapOn.value) {
         applyInferenceVisionMap(inferenceVisionMapMethod.value);
     } else {
@@ -1053,7 +1085,7 @@ watch([inferenceVisionMapOn, inferenceVisionMapMethod], () => {
     }
 });
 
-watch(() => props.status, (newStatus, oldStatus) => {
+watch(procStatus, (newStatus, oldStatus) => {
     if (newStatus === 'testing' && oldStatus !== 'testing') {
         // Inference just started — re-push the current toggle so the backend
         // emits heatmaps from the very first step.
@@ -1636,6 +1668,27 @@ onMounted(() => {
         oodScore.value = data;
     });
 
+    // 추론 시작/종료 단일 신호 — procStatus('testing') 의 source. 워크스페이스 단독·
+    // 커리큘럼·플래너 모두 checkpoint_test 가 보내므로 monitorOnly 에서도 inference 바가 뜬다.
+    socket.on('inference_active', (data) => {
+        if (data && data.active) {
+            inferenceActive.value = {
+                checkpoint_id: data.checkpoint_id,
+                policy_type: data.policy_type,
+            };
+        } else {
+            inferenceActive.value = null;
+            // 추론 종료 — 추론 관련 표시 상태 정리(stop_process checkpoint_test 와 동일).
+            // 커리큘럼/플래너는 checkpoint_test 가 pm 프로세스가 아니라 stop_process 가
+            // 안 오므로 여기서 정리해야 한다.
+            inferenceSucceed.value = false;
+            succeedScore.value = null;
+            oodScore.value = null;
+            inferenceProgress.value = { progress: 0, step: 0, episodeLen: 0 };
+            inferenceHeatmaps.value = {};
+        }
+    });
+
     socket.on('vive_node_ready', () => {
         viveInitializing.value = false;
     });
@@ -1669,6 +1722,7 @@ onUnmounted(() => {
     socket.off('vive_node_error');
     socket.off('inference_succeed');
     socket.off('ood_score');
+    socket.off('inference_active');
     socket.off('inference_progress');
     socket.off('episode_saving');
     socket.off('episode_saved');

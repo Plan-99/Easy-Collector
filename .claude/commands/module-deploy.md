@@ -100,6 +100,20 @@ bash scripts/release_module.sh <category/name> "커밋 메시지"
    ```
    재배포 불필요(즉시 반영). 스크립트가 라이브 API 로 노출 확인까지 한다.
 
+### 카탈로그 썸네일 이미지 (있으면)
+모듈 카드 이미지는 [home-next/src/app/dashboard/modules/ModuleCatalog.tsx](../../home-next/src/app/dashboard/modules/ModuleCatalog.tsx)
+의 `MODULE_IMAGE` 맵(`<module_id>` → `/modules/<name>.png`)으로 붙는다. 매핑이 없으면
+카드에 이미지가 안 뜬다(나머지 정보는 정상).
+- 맵에 `"<module_id>": "/modules/<name>.png"` 한 줄 추가.
+- 실제 PNG 를 [home-next/public/modules/](../../home-next/public/modules/)`<name>.png` 에 둔다
+  (기존 `piper.png` 등과 같은 폴더/형식). 사용자가 채팅에 붙여넣은 이미지는 바이트로 저장
+  못 하니 파일 경로(예: `/tmp/<name>.png`)로 받아 옮긴다.
+- **로봇 모듈은 런처(frontend)에도 이미지가 따로 있다** — RobotPage/AssemblyForm 은
+  `/images/<company>.png` (`frontend/public/images/`, **회사 단위** — 모델 단위 아님).
+  home-next(모델별)와 frontend(회사별)는 **배포가 분리**돼 런타임 공유 불가 → 각 public 에
+  **수동으로** 둔다(중복 허용 — 사용자 결정). 같은 회사 여러 모델(예: ROBOTIS 의 omx/omy/
+  ai_worker)이면 frontend 는 `ROBOTIS.png` 하나를 공유한다.
+
 ## 5. 본체 코드(있으면) 는 별도로
 
 모듈의 새 `driver.*` 필드를 **소비하는 코드**(예: `ros2/ros2_bridge` 의 원격 드라이버

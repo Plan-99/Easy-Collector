@@ -23,6 +23,9 @@ function formatKrw(amountKrw: number) {
 // Modules without a specific image fall back to a category placeholder.
 const MODULE_IMAGE: Record<string, string> = {
   robot_piper: "/modules/piper.png",
+  robot_omx: "/modules/omx.png",
+  robot_omy: "/modules/omy.png",
+  robot_ai_worker: "/modules/aiworker.png",
   robot_unitree: "/modules/unitree.png",
   robot_rbpodo: "/modules/rainbow.png",
   robot_kinova: "/modules/kinova.png",

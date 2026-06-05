@@ -91,6 +91,7 @@ import { computed, defineProps, onMounted, ref, watch, defineEmits } from 'vue';
 import { api } from 'src/boot/axios';
 import { Notify } from 'quasar';
 import { useI18n } from 'vue-i18n';
+import { robotImage } from 'src/utils/robotImage';
 
 const { t } = useI18n();
 
@@ -113,7 +114,7 @@ function listRobots() {
     api.get('/robots').then((response) => {
         robots.value = response.data.robots;
         robots.value.forEach(robot => {
-            robot.image = '/images/' + robot.company + '.png'; // Default image if not provided
+            robot.image = robotImage(robot);
         });
     });
 }

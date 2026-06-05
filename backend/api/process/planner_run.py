@@ -180,17 +180,18 @@ def _preload_checkpoints(groups, socketio_instance):
             )
 
             ood = {}
+            # OOD reference: state(qpos) + image(backbone latent).
             ood_path = os.path.join(ckpt_dir, 'ood_features.npz')
-            if os.path.exists(ood_path) and hasattr(policy, 'enable_feature_caching'):
+            if os.path.exists(ood_path):
                 ood_data = np.load(ood_path)
-                if 'image_features' in ood_data:
-                    ood['image_feats'] = torch.from_numpy(ood_data['image_features']).float()
                 if 'state_features' in ood_data:
                     ood['state_feats'] = torch.from_numpy(ood_data['state_features']).float()
-                if 'image_dist_sorted' in ood_data:
-                    ood['image_dist_sorted'] = ood_data['image_dist_sorted']
                 if 'state_dist_sorted' in ood_data:
                     ood['state_dist_sorted'] = ood_data['state_dist_sorted']
+                if 'image_features' in ood_data:
+                    ood['image_feats'] = torch.from_numpy(ood_data['image_features']).float()
+                if 'image_dist_sorted' in ood_data:
+                    ood['image_dist_sorted'] = ood_data['image_dist_sorted']
 
             cache[cid] = {
                 'policy': policy,
