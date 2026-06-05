@@ -13,6 +13,7 @@
     "datasets",
     "training",
     "inference",
-    "planner"
+    "planner",
+    "curriculum"
   ]
 }

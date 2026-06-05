@@ -604,6 +604,7 @@ def _run_checkpoint(block, ctx, task_control):
                 re_inference_steps=block.get('re_inference_steps', 1),
                 temporal_ensemble_coeff=block.get('temporal_ensemble_coeff', 0.01),
                 action_type=block.get('action_type'),
+                succeed_done_frames=int(block.get('succeed_done_frames') or 3),
                 preloaded=preloaded,
                 record=record,
             )
@@ -622,6 +623,15 @@ def _run_checkpoint(block, ctx, task_control):
     try:
         while True:
             if task_control['stop']:
+                break
+            # 커리큘럼 롤아웃이 "현재 블록만 중단" (:stop_current_block) 을 요청한
+            # 경우 — task_control 채널로 들어온다. 비타겟 체크포인트는 이 (planner)
+            # 러너로 실행되므로 여기서도 플래그를 봐야 멈춘다. 소비(False) 후 break
+            # 하여 fallback 점프 없이 다음 블록으로 진행. planner 단독 실행에선 이
+            # 키가 set 되지 않으므로 무해.
+            if task_control.get('stop_current_block'):
+                task_control['stop_current_block'] = False
+                print(f"[PLANNER] checkpoint block '{block.get('name')}' stopped by stop_current_block")
                 break
             if sub_control.get('done'):
                 print(f"[PLANNER] checkpoint block '{block.get('name')}' done signal triggered (threshold={done_threshold})")

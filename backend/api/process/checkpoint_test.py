@@ -100,6 +100,10 @@ def checkpoint_test(
     re_inference_steps=1,
     temporal_ensemble_coeff=0.01,
     action_type=None,
+    # succeed 토큰이 임계값을 **연속으로 N 프레임** 넘어야 done 으로 인정 — 단발성
+    # succeed 스파이크(예: OOD 시작 자세에서 1~2 step 만에 가짜 성공)로 에피소드가
+    # 즉시 종료/성공 처리되는 것을 방지하는 debounce. 1 이면 기존(즉시) 동작.
+    succeed_done_frames=3,
     language_instruction=None,  # optional VLA prompt for PI0.5; falls back to task['name']
     inference_episode_len=None,  # planner feature: inference 시 별도 episode_len 지정
     preloaded=None,
@@ -736,6 +740,13 @@ def checkpoint_test(
             record['steps'] = 0
 
         start = time.time()
+        # succeed 토큰이 임계값을 연속으로 넘은 프레임 수 (debounce). 중간에 임계값
+        # 아래로 떨어지면 0 으로 리셋.
+        _succeed_streak = 0
+        try:
+            _succeed_done_frames = max(1, int(succeed_done_frames))
+        except (TypeError, ValueError):
+            _succeed_done_frames = 3
         while not task_control['stop']:
             # 이 step 의 succeed 라벨 (has_succeed 일 때만 갱신).
             _frame_succeed = 0.0
@@ -1262,11 +1273,18 @@ def checkpoint_test(
                 final_action = final_action[:-1]
                 _frame_succeed = 1.0 if float(succeed_val) > 0.5 else 0.0
                 socketio_instance.emit('inference_succeed', {'succeed': bool(succeed_val > 0.5), 'score': round(float(succeed_val), 4)})
-                # Planner "until done": signal the outer loop when score exceeds threshold.
+                # Planner "until done": signal the outer loop when score exceeds threshold
+                # for ``succeed_done_frames`` consecutive frames (debounce — 단발성 스파이크
+                # 무시). 임계값 아래로 떨어지면 streak 리셋.
                 done_threshold = task_control.get('done_threshold') if isinstance(task_control, dict) else None
-                if done_threshold is not None and float(succeed_val) > float(done_threshold):
-                    task_control['done'] = True
-                    break
+                if done_threshold is not None:
+                    if float(succeed_val) > float(done_threshold):
+                        _succeed_streak += 1
+                    else:
+                        _succeed_streak = 0
+                    if _succeed_streak >= _succeed_done_frames:
+                        task_control['done'] = True
+                        break
 
             # prev_qpos 갱신: 다음 스텝에서 실제 delta 계산에 사용
             for agent in env.agents:

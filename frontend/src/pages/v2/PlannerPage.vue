@@ -894,6 +894,15 @@
                             class="q-mb-md"
                         ></q-input>
                         <q-input
+                            dense outlined dark bg-color="dark"
+                            v-model.number="blockForm.succeed_done_frames"
+                            :label="$t('succeedDoneFrames')"
+                            :hint="$t('succeedDoneFramesHint')"
+                            type="number"
+                            min="1"
+                            class="q-mb-md"
+                        ></q-input>
+                        <q-input
                             v-if="blockForm.re_inference_steps === 1"
                             dense outlined dark bg-color="dark"
                             v-model.number="blockForm.temporal_ensemble_coeff"
@@ -1860,6 +1869,7 @@ const blockForm = ref({
     hz: 10,
     re_inference_steps: 1,
     temporal_ensemble_coeff: 0.01,
+    succeed_done_frames: 3,
     move_homepose: true,
     move_homepose_duration: 5,
     move_homepose_settle_sec: 0,
@@ -2204,6 +2214,7 @@ function openBlockForm(group) {
         hz: 10,
         re_inference_steps: 1,
         temporal_ensemble_coeff: 0.01,
+        succeed_done_frames: 3,
         move_homepose: true,
         move_homepose_duration: 5,
         positions: {},
@@ -2253,6 +2264,7 @@ function openEditBlockForm(group, block, index) {
         hz: typeof block.hz === 'number' ? block.hz : 10,
         re_inference_steps: typeof block.re_inference_steps === 'number' ? block.re_inference_steps : 1,
         temporal_ensemble_coeff: typeof block.temporal_ensemble_coeff === 'number' ? block.temporal_ensemble_coeff : 0.01,
+        succeed_done_frames: typeof block.succeed_done_frames === 'number' ? block.succeed_done_frames : 3,
         move_homepose: block.move_homepose === undefined ? true : !!block.move_homepose,
         move_homepose_duration: typeof block.move_homepose_duration === 'number' ? block.move_homepose_duration : 5,
         move_homepose_settle_sec: typeof block.move_homepose_settle_sec === 'number' ? block.move_homepose_settle_sec : 0,

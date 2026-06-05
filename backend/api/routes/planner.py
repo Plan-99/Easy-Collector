@@ -35,7 +35,7 @@ BLOCK_CONFIGS = {
         'label': 'Checkpoint',
         'icon': 'psychology',
         'color': 'purple',
-        'keys': ['workspace_id', 'checkpoint_id', 'checkpoint_name', 'duration', 'until_done', 'done_threshold', 'hz', 're_inference_steps', 'temporal_ensemble_coeff', 'move_homepose', 'move_homepose_duration', 'move_homepose_settle_sec', 'max_steps', 'fallback_block_id', 'name'],
+        'keys': ['workspace_id', 'checkpoint_id', 'checkpoint_name', 'duration', 'until_done', 'done_threshold', 'hz', 're_inference_steps', 'temporal_ensemble_coeff', 'succeed_done_frames', 'move_homepose', 'move_homepose_duration', 'move_homepose_settle_sec', 'max_steps', 'fallback_block_id', 'name'],
     },
     'replay_episode': {
         # 데이터셋의 특정 에피소드를 frame 별 qaction 으로 직접 replay.
