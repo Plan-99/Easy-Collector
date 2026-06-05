@@ -388,20 +388,44 @@ def fetch_module_release(module_id: str, version: str | None = None, repo: str |
         except Exception:
             return None
 
-    # version not specified: find the latest release for this module
+    # version not specified: find the latest release for this module.
+    # 이 repo 는 모듈×버전마다 릴리즈가 쌓여(현재 70+개) GitHub /releases 목록이
+    # 날짜순으로 안정적이지 않다 — 한 페이지(50/100)만 보면 새 모듈이 윈도우 밖으로
+    # 밀려 "release not found" 가 난다(예: ai_worker index 51). 전체 페이지를 돌며
+    # prefix 매칭 중 **버전이 가장 높은** 릴리즈를 고른다.
     prefix = f"module-{module_id}-v"
-    url = f"https://api.github.com/repos/{repo}/releases?per_page=50"
-    req = _gh_request(url)
+
+    def _vkey(v: str):
+        out = []
+        for p in v.split("."):
+            try:
+                out.append(int(p))
+            except ValueError:
+                out.append(0)
+        return tuple(out)
+
+    best = None
+    best_key: tuple = ()
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            releases = json.loads(resp.read().decode())
-        for r in releases:
-            tag = r.get("tag_name", "")
-            if tag.startswith(prefix):
-                return r
+        for page in range(1, 21):  # per_page=100 × 20 = 2000 릴리즈까지 커버
+            url = f"https://api.github.com/repos/{repo}/releases?per_page=100&page={page}"
+            req = _gh_request(url)
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                releases = json.loads(resp.read().decode())
+            if not releases:
+                break
+            for r in releases:
+                tag = r.get("tag_name", "")
+                if tag.startswith(prefix):
+                    k = _vkey(tag[len(prefix):])
+                    if k >= best_key:
+                        best_key = k
+                        best = r
+            if len(releases) < 100:
+                break
     except Exception:
         pass
-    return None
+    return best
 
 
 def get_remote_versions(release: dict | None = None) -> dict[str, str]:
@@ -427,37 +451,57 @@ def _scan_remote_module_releases() -> dict[str, dict]:
     import urllib.request
 
     repo = _get_repo()
-    url = f"https://api.github.com/repos/{repo}/releases?per_page=100"
-    req = _gh_request(url)
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            releases = json.loads(resp.read().decode())
-    except Exception:
-        return {}
 
+    def _vkey(v: str):
+        out = []
+        for p in v.split("."):
+            try:
+                out.append(int(p))
+            except ValueError:
+                out.append(0)
+        return tuple(out)
+
+    # /releases 목록은 날짜순이 안정적이지 않고 항목이 70+개라, 전체 페이지를 돌며
+    # 모듈별로 **버전이 가장 높은** 릴리즈를 고른다(한 페이지·first-hit 는 신규 모듈을
+    # 누락하거나 옛 버전을 집을 수 있음).
     result: dict[str, dict] = {}
-    for r in releases:
-        tag = r.get("tag_name", "")
-        if not tag.startswith("module-"):
-            continue
-        stripped = tag[len("module-"):]
-        parts = stripped.rsplit("-v", 1)
-        if len(parts) != 2 or not parts[1] or not parts[1][0].isdigit():
-            continue
-        mid, ver = parts[0], parts[1]
-        if mid in result:  # newest-first ordering — keep first hit only
-            continue
-        info: dict = {"version": ver}
-        prefix = f"module-{mid}-"
-        for asset in r.get("assets", []) or []:
-            name = asset.get("name", "")
-            if name.startswith(prefix) and name.endswith(".tar.gz"):
-                try:
-                    info["size"] = int(asset.get("size") or 0)
-                except Exception:
-                    pass
+    best_key: dict[str, tuple] = {}
+    try:
+        for page in range(1, 21):  # per_page=100 × 20
+            url = f"https://api.github.com/repos/{repo}/releases?per_page=100&page={page}"
+            req = _gh_request(url)
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                releases = json.loads(resp.read().decode())
+            if not releases:
                 break
-        result[mid] = info
+            for r in releases:
+                tag = r.get("tag_name", "")
+                if not tag.startswith("module-"):
+                    continue
+                stripped = tag[len("module-"):]
+                parts = stripped.rsplit("-v", 1)
+                if len(parts) != 2 or not parts[1] or not parts[1][0].isdigit():
+                    continue
+                mid, ver = parts[0], parts[1]
+                k = _vkey(ver)
+                if mid in best_key and k < best_key[mid]:
+                    continue
+                best_key[mid] = k
+                info: dict = {"version": ver}
+                prefix = f"module-{mid}-"
+                for asset in r.get("assets", []) or []:
+                    name = asset.get("name", "")
+                    if name.startswith(prefix) and name.endswith(".tar.gz"):
+                        try:
+                            info["size"] = int(asset.get("size") or 0)
+                        except Exception:
+                            pass
+                        break
+                result[mid] = info
+            if len(releases) < 100:
+                break
+    except Exception:
+        pass
     return result
 
 
