@@ -238,6 +238,7 @@ import { useRobot } from 'src/composables/useRobot';
 import FormDialog from 'src/components/v2/FormDialog.vue';
 import RobotPendant from 'src/components/v2/RobotPendant.vue';
 import TutorialHint from 'src/components/v2/TutorialHint.vue';
+import { robotImage } from 'src/utils/robotImage';
 import { useTutorialStore } from 'src/stores/tutorialStore.js';
 import { useI18n } from 'vue-i18n';
 // import SimView from 'src/components/v2/SimView.vue'; // 시뮬레이션 안정화 후 활성화
@@ -342,8 +343,7 @@ function listRobots() {
     return api.get('/robots').then((response) => {
         robots.value = response.data.robots || [];
         robots.value.forEach(robot => {
-            robot.image = '/images/' + robot.company + '.png'; // Default image if not provided
-            console.log(robot.image)
+            robot.image = robotImage(robot);
 
             robot.loading = false;
             robot.handler = useRobot(robot, () => {
