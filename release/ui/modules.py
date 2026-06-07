@@ -904,6 +904,49 @@ def install_modules_batch(
     return results
 
 
+def _force_remove_root_owned(host_path: Path, container_path: str) -> bool:
+    """Remove a path that may have been root-owned inside the ros2 container.
+
+    Used after `shutil.rmtree` fails with PermissionError because colcon /
+    pip / docker entrypoints created files inside the bind-mounted folder
+    while running as root. Tries `docker exec ... rm -rf` (which has root
+    inside the container) up to a few times — handles the common race where
+    the container is mid-restart from a previous module install.
+
+    Returns True if the path is gone, False otherwise. The caller decides
+    whether to raise. Never invokes `sudo` (the GUI launcher cannot answer
+    a password prompt — that path always fails with "터미널이 필요합니다").
+    """
+    import subprocess as _sp
+    import time as _time
+
+    def _gone() -> bool:
+        try:
+            return not host_path.exists()
+        except OSError:
+            return False
+
+    for attempt in range(3):
+        try:
+            _sp.run(
+                ["docker", "exec", _ROS2_CONTAINER, "rm", "-rf", container_path],
+                check=False, timeout=15,
+            )
+        except Exception as e:
+            print(f"[MODULE] docker exec rm attempt {attempt + 1} failed: {e}")
+        if _gone():
+            return True
+        _time.sleep(1.5)  # container may be mid-restart from earlier install
+
+    if not _gone():
+        print(
+            f"[MODULE] could not remove {host_path}: root-owned files left over from "
+            f"a previous install (likely colcon build/ or __pycache__). "
+            f"Run `sudo rm -rf {host_path}` in a terminal and retry."
+        )
+    return _gone()
+
+
 def _install_robot_sensor_module(tar_path: str, module_id: str) -> None:
     """Extract a robot/sensor module and copy ros2/ and sdk/ to their targets.
 
@@ -948,13 +991,9 @@ def _install_robot_sensor_module(tar_path: str, module_id: str) -> None:
                 try:
                     shutil.rmtree(ros2_target)
                 except PermissionError:
-                    import subprocess as _sp
                     parts = ros2_target.relative_to(project).parts
                     container_path = '/root/' + '/'.join(parts[1:])
-                    _sp.run(["docker", "exec", _ROS2_CONTAINER, "rm", "-rf", container_path],
-                            check=False, timeout=15)
-                    if ros2_target.exists():
-                        _sp.run(["sudo", "rm", "-rf", str(ros2_target)], check=False, timeout=15)
+                    _force_remove_root_owned(ros2_target, container_path)
             ros2_target.mkdir(parents=True, exist_ok=True)
             for item in module_dir.iterdir():
                 if item.name == "module.json":
@@ -988,14 +1027,9 @@ def _install_robot_sensor_module(tar_path: str, module_id: str) -> None:
                     shutil.rmtree(ros2_target)
                 except PermissionError:
                     # 호스트 <project>/ros2/ros2_ws/src/<id> ↔ 컨테이너 /root/ros2_ws/src/<id>
-                    import subprocess as _sp
                     parts = ros2_target.relative_to(project).parts  # ('ros2', 'ros2_ws', ...)
                     container_path = '/root/' + '/'.join(parts[1:])
-                    _sp.run(["docker", "exec", _ROS2_CONTAINER, "rm", "-rf", container_path],
-                            check=False, timeout=15)
-                    if ros2_target.exists():
-                        _sp.run(["sudo", "rm", "-rf", str(ros2_target)], check=False, timeout=15)
-                    if ros2_target.exists():
+                    if not _force_remove_root_owned(ros2_target, container_path):
                         raise
 
             # ros2/src/ 가 있으면 그 안의 패키지들을 module_name/ 아래에 복사.
@@ -1046,12 +1080,8 @@ def _install_robot_sensor_module(tar_path: str, module_id: str) -> None:
                     try:
                         shutil.rmtree(dst) if dst.is_dir() else dst.unlink()
                     except PermissionError:
-                        import subprocess as _sp
                         container_path = f"/root/robot_sdk/{module_id}/{item.name}"
-                        _sp.run(["docker", "exec", _ROS2_CONTAINER, "rm", "-rf", container_path],
-                                check=False, timeout=10)
-                        if dst.exists():
-                            _sp.run(["sudo", "rm", "-rf", str(dst)], check=False, timeout=10)
+                        _force_remove_root_owned(dst, container_path)
                 shutil.copytree(item, dst) if item.is_dir() else shutil.copy2(item, dst)
 
         # Copy module.json into ros2 target for dependency resolution.
@@ -1532,12 +1562,8 @@ def remove_module(module_id: str) -> bool:
             try:
                 shutil.rmtree(sdk_path)
             except PermissionError:
-                import subprocess as _sp
                 container_path = sdk_target.replace("ros2/robot_sdk", "/root/robot_sdk")
-                _sp.run(["docker", "exec", _ROS2_CONTAINER, "rm", "-rf", container_path],
-                        check=False, timeout=10)
-                if sdk_path.is_dir():
-                    _sp.run(["sudo", "rm", "-rf", str(sdk_path)], check=False, timeout=10)
+                _force_remove_root_owned(sdk_path, container_path)
             _log += f"  removed {sdk_path}\n"
     else:
         # extension: backend/extensions/ 에서 삭제
