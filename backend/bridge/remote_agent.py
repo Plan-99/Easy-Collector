@@ -230,13 +230,20 @@ class RemoteAgent:
             req.velocity_arg = vel_arg
         client.agent.MoveEEDeltaStep(req)
 
-    def move_ee_to(self, target_ee_dict, duration=5.0, hz=100.0):
+    def move_ee_to(self, target_ee_dict, duration=5.0, hz=100.0, orientation_cost=None):
         """Async — EE 좌표를 IK 로 풀어 move_to 와 동일하게 보간 이동.
-        즉시 return. is_moving 폴링 또는 cancel_move_to 로 제어."""
+        즉시 return. is_moving 폴링 또는 cancel_move_to 로 제어.
+
+        orientation_cost: 설정 시 이번 IK 풀이에서 방향 가중치를 일시 override.
+        낮출수록(예: 0.05) 위치 도달을 우선하고 방향을 느슨하게 푼다. proto 변경 없이
+        예약 키(``__orientation_cost__``)로 실어 보내고 ros2 측이 풀이 후 복원한다."""
         client = get_bridge_client()
+        payload = dict(target_ee_dict)
+        if orientation_cost is not None:
+            payload['__orientation_cost__'] = float(orientation_cost)
         client.agent.MoveEETo(pb.MoveEEToRequest(
             agent_id=self._agent_id,
-            target_ee_json=json.dumps(target_ee_dict),
+            target_ee_json=json.dumps(payload),
             duration=float(duration),
             hz=float(hz),
         ))

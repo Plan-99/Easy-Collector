@@ -68,17 +68,18 @@ BLOCK_CONFIGS = {
         # Wrist depth-camera로 타겟을 보고 EE를 타겟 위(살짝 높게)로 이동.
         # 타겟 지정: text_prompts(SAM3) 또는 boxes(바운딩박스), 없으면 색상 fallback.
         # observe_positions: 관찰 자세(joint preset). rgbd_service: wrist RGB-D 소스.
-        'label': 'Wrist View Reach',
+        'label': 'Segmentation Reach',
         'icon': 'my_location',
         'color': 'pink',
-        # cam_pose_mode: 'service'(센서가 카메라 월드 pose 제공) | 'manual_ee'(캘리브레이션
-        # 없이 EE 기준 대략적 카메라 마운트를 사람이 입력). manual_ee 시 cam_offset[x,y,z]
-        # (EE 프레임, m) + cam_pitch/cam_yaw/cam_roll(deg)로 카메라 pose를 EE FK와 합성.
+        # 카메라 pose 는 터치 캘리브로 cam_offset[x,y,z]+cam_pitch/yaw/roll(deg)에 저장.
+        # wrist_view=True → EE 장착(움직임) 카메라(파라미터=EE 기준), False → 외부/탑뷰
+        # 고정 카메라(파라미터=base 절대). 둘 다 동일한 터치 캘리브 플로우.
         'keys': ['workspace_id', 'sensor_id', 'rgbd_service', 'target_mode', 'text_prompts', 'boxes',
-                 'exemplar_image', 'exemplar_box', 'references',
-                 'target_color', 'observe_positions', 'hover', 'duration', 'settle_sec',
-                 'cam_pose_mode', 'cam_offset', 'cam_pitch', 'cam_yaw', 'cam_roll',
-                 'cam_convention', 'name'],
+                 'exemplar_image', 'exemplar_box', 'references', 'detect_conf',
+                 'target_color', 'observe_positions', 'hover', 'reach_offset_x', 'reach_offset_y',
+                 'reach_orientation_cost', 'duration', 'settle_sec',
+                 'wrist_view', 'cam_offset', 'cam_pitch', 'cam_yaw', 'cam_roll',
+                 'cam_convention', 'cam_calibrated', 'calib_samples', 'name'],
     },
 }
 
@@ -118,7 +119,8 @@ def test_wrist_reach():
         'references': body.get('references'),           # 멀티 레퍼런스(여러 각도) [{image,box},...]
         'exemplar_image': body.get('exemplar_image'),  # box-defined visual exemplar (refer frame)
         'exemplar_box': body.get('exemplar_box'),
-        'cam_pose_mode': body.get('cam_pose_mode'),
+        'detect_conf': body.get('detect_conf'),         # cross-view 검출 임계값(낮을수록 민감)
+        'wrist_view': body.get('wrist_view', True),      # True=EE 장착, False=외부/탑뷰 고정
         'cam_offset': body.get('cam_offset'),
         'cam_pitch': body.get('cam_pitch'),
         'cam_yaw': body.get('cam_yaw'),
@@ -160,11 +162,12 @@ def test_wrist_reach():
     # without running the whole plan. Best-effort: skipped if no robot/EE pose.
     target_xyz = None
     target_note = None
+    ee_pose = None
+    p_cam = None
     if detected:
         try:
             ws_id = body.get('workspace_id')
             agents = getattr(current_app, 'agents', {}) or {}
-            ee_pose = None
             if ws_id is not None:
                 ws = TaskModel.find(ws_id)
                 robots = ((ws.to_dict().get('assembly') or {}).get('robots') or []) if ws else []
@@ -175,13 +178,14 @@ def test_wrist_reach():
                         if poses:
                             ee_pose = [float(v) for v in next(iter(poses.values()))]
                         break
-            cam_mode = block.get('cam_pose_mode') or ('manual_ee' if block.get('cam_offset') is not None else 'service')
-            if cam_mode == 'manual_ee' and ee_pose is None:
+            # wrist 모델은 검출 시점 EE pose 가 필요(외부/탑뷰 고정 카메라는 불필요).
+            if block.get('wrist_view', True) and ee_pose is None:
                 target_note = 'robot_off'   # need a running arm for the EE pose
             else:
                 bp = _visual_reach_backproject(payload, mask, block, ee_pose=ee_pose)
                 if bp:
                     target_xyz = bp['target_xyz']
+                    p_cam = bp.get('p_cam')
         except Exception as e:
             target_note = f'target calc skipped: {e}'
 
@@ -194,6 +198,11 @@ def test_wrist_reach():
         'image': f'data:image/png;base64,{img_b64}' if img_b64 else None,
         'target_xyz': target_xyz,
         'target_note': target_note,
+        # touch-calibration: camera-frame object point + the EE pose it was observed
+        # from. The frontend captures this at "검출 캡처", then the EE pose at the
+        # touch, to solve the camera mount (see :solve_wrist_calib).
+        'p_cam': p_cam,
+        'ee_pose': ee_pose,
     }, 200
 
 
@@ -246,9 +255,16 @@ def define_wrist_exemplar():
 
     refer_b64 = payload['rgb_jpeg_b64']
     rgb = _visual_reach_decode_rgb(refer_b64)
-    # validate + preview: detect on the SAME frame (refer == target)
+    # validate + preview: detect on the SAME frame (refer == target). NOTE: this is
+    # the trivial same-frame case (box overlaps the object) so conf is inflated — it
+    # does NOT prove cross-view detection at run time. Use the same low conf the
+    # runtime uses so the threshold is consistent.
     try:
-        mask = yoloe_helper.detect_exemplar(rgb, rgb, box)
+        conf = float(body.get('detect_conf'))
+    except (TypeError, ValueError):
+        conf = 0.10
+    try:
+        mask = yoloe_helper.detect_exemplar(rgb, rgb, box, conf=conf)
     except Exception as e:
         return {'status': 'error', 'message': f'YOLOE detect failed: {e}'}, 500
     detected = bool(np.asarray(mask).any())
@@ -260,6 +276,109 @@ def define_wrist_exemplar():
         'exemplar_box': box,
         'mask_pixels': int(np.asarray(mask).sum()),
         'image': f'data:image/png;base64,{img_b64}' if img_b64 else None,
+    }, 200
+
+
+def _workspace_arm_ee_pose(workspace_id):
+    """Live EE pose [x,y,z,ax,ay,az] (rotvec, robot base frame) of the workspace's
+    first non-tool arm, from its running agent. Returns (ee_pose|None, error|None).
+    Shared by :get_ee_pose and reused by the touch-calibration flow."""
+    from ..process.planner_run import _is_tool_agent
+    if workspace_id is None:
+        return None, 'workspace_id is required'
+    ws = TaskModel.find(workspace_id)
+    if not ws:
+        return None, 'workspace not found'
+    agents = getattr(current_app, 'agents', {}) or {}
+    robots = ((ws.to_dict().get('assembly') or {}).get('robots') or [])
+    for rb in robots:
+        ag = agents.get(int(rb['id']))
+        if ag is not None and not _is_tool_agent(ag):
+            poses = ag.get_ee_position() or {}
+            if poses:
+                return [float(v) for v in next(iter(poses.values()))], None
+            return None, 'IK 가 구성되지 않았거나 EE pose 를 읽지 못했습니다'
+    return None, '실행 중인 로봇(arm) 이 없습니다. 로봇을 먼저 켜세요.'
+
+
+@planner_bp.route('/planner/:get_ee_pose', methods=['POST'])
+def get_ee_pose():
+    """Live EE world pose of the workspace's arm — touch-calibration captures this
+    at the moment the user has jogged the EE to touch the object (obj_world)."""
+    body = request.json or {}
+    ee_pose, err = _workspace_arm_ee_pose(body.get('workspace_id'))
+    if err:
+        return {'status': 'error', 'message': err}, 400
+    return {'status': 'success', 'ee_pose': ee_pose}, 200
+
+
+@planner_bp.route('/planner/:solve_wrist_calib', methods=['POST'])
+def solve_wrist_calib():
+    """Solve the wrist-camera mount (cam_offset + pitch/yaw/roll) from touch samples.
+
+    Each sample is one (object detection, EE touch) pair captured at a different
+    object position; ``obj_world`` is the EE position when it touched the object.
+
+    wrist_view=True (camera on the EE): ``target = ee_pos + R_ee·offset + R_ee·R_cam·p_cam``,
+      so q_i = R_ee_i⁻¹·(obj_world_i − ee_pos_i) = R_cam·p_cam_i + offset → Umeyama(p_cam→q)
+      gives the EE-relative offset + rotation.
+    wrist_view=False (external/top-view camera fixed in base): ``target = cam_pos + R_cam·p_cam``,
+      so q_i = obj_world_i directly → Umeyama(p_cam→obj_world) gives the base-absolute
+      camera position + rotation.
+    Needs ≥3 non-collinear samples for the rotation."""
+    import numpy as np
+    from scipy.spatial.transform import Rotation as R_
+
+    body = request.json or {}
+    samples = body.get('samples') or []
+    wrist_view = body.get('wrist_view', True)
+    if len(samples) < 3:
+        return {'status': 'error', 'message': '캘리브레이션에는 최소 3개의 터치 샘플이 필요합니다 '
+                '(물체 위치를 바꿔가며 3회 이상).'}, 422
+    try:
+        P, Q = [], []
+        for s in samples:
+            p_cam = np.array([float(v) for v in s['p_cam']], dtype=float)
+            obj = np.array([float(v) for v in s['obj_world']], dtype=float)
+            if wrist_view:
+                ee = [float(v) for v in s['ee_observe']]
+                ee_pos = np.array(ee[:3], dtype=float)
+                R_ee = R_.from_rotvec(ee[3:6]).as_matrix() if len(ee) >= 6 else np.eye(3)
+                q = R_ee.T @ (obj - ee_pos)   # EE-frame target
+            else:
+                q = obj                       # base-frame target (camera fixed in base)
+            P.append(p_cam)
+            Q.append(q)
+        P = np.asarray(P)   # camera-frame points
+        Q = np.asarray(Q)   # EE-frame target points
+    except Exception as e:
+        return {'status': 'error', 'message': f'잘못된 샘플 형식: {e}'}, 422
+
+    # Umeyama (no scaling): rigid transform P -> Q.
+    pc, qc = P.mean(0), Q.mean(0)
+    Pc, Qc = P - pc, Q - qc
+    # non-collinearity guard: the source point spread must be 3D enough.
+    sv = np.linalg.svd(Pc, compute_uv=False)
+    if sv.size < 3 or sv[2] < 1e-4:
+        return {'status': 'error', 'message': '터치 지점들이 거의 한 직선/평면 위에 있습니다. '
+                '물체를 x·y·z 로 충분히 다른 위치에 두고 다시 시도하세요.'}, 422
+    H = Pc.T @ Qc
+    U, _, Vt = np.linalg.svd(H)
+    D = np.eye(3)
+    D[2, 2] = np.sign(np.linalg.det(Vt.T @ U.T))
+    R_ee_cam = Vt.T @ D @ U.T
+    offset = qc - R_ee_cam @ pc
+    pitch, yaw, roll = R_.from_matrix(R_ee_cam).as_euler('xyz', degrees=True)
+    resid = Q - (P @ R_ee_cam.T + offset)
+    rms = float(np.sqrt((resid ** 2).sum(1).mean()))
+    return {
+        'status': 'success',
+        'cam_offset': [round(float(v), 5) for v in offset],
+        'cam_pitch': round(float(pitch), 2),
+        'cam_yaw': round(float(yaw), 2),
+        'cam_roll': round(float(roll), 2),
+        'rms': round(rms, 4),
+        'n': len(samples),
     }, 200
 
 

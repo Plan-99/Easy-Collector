@@ -134,6 +134,18 @@ class IK_Solver:
         # 4. Set initial state
         self.q = pin.neutral(self.model)
 
+    def get_orientation_cost(self):
+        """현재 EE task 들의 orientation cost (첫 task 기준). 복원용."""
+        for task in self.tasks.values():
+            return float(np.atleast_1d(task.orientation_cost)[0])
+        return None
+
+    def set_orientation_cost(self, orientation_cost):
+        """모든 EE task 의 orientation cost 를 일괄 변경(런타임 override). 낮출수록
+        IK 가 위치를 우선하고 방향을 느슨하게 푼다(reach 시 위치 도달 우선용)."""
+        for task in self.tasks.values():
+            task.set_orientation_cost(float(orientation_cost))
+
     def solve_ik(self, target_poses: dict, current_lr_arm_motor_q=None, current_lr_arm_motor_dq=None):
         """
         Solves the inverse kinematics problem using pink.

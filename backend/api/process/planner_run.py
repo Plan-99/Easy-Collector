@@ -1049,11 +1049,19 @@ def _visual_reach_mask(rgb, text_prompts, boxes, block):
             raise RuntimeError(
                 "Wrist View Reach 검출에는 YOLOE 확장이 필요합니다. "
                 "모듈 관리에서 'YOLOE Visual-Prompt Detection'을 설치하세요.")
+        # cross-view VP confidence is far LOWER than the same-frame define check
+        # (define: refer==target → conf inflated; runtime: refer→fresh frame →
+        # conf often 0.05~0.20). A fixed 0.25 silently drops legit matches. Use a
+        # low, block-configurable threshold (detect_conf, 기본 0.10).
+        try:
+            conf = float(block.get('detect_conf'))
+        except (TypeError, ValueError):
+            conf = 0.10
         # box exemplar(s) take precedence (pins a specific instance); else text.
         if refers:
             decoded = [(_visual_reach_decode_rgb(img), box) for img, box in refers]
-            return yoloe_helper.detect_exemplar_multi(rgb, decoded)
-        return yoloe_helper.detect_text(rgb, text_prompts)
+            return yoloe_helper.detect_exemplar_multi(rgb, decoded, conf=conf)
+        return yoloe_helper.detect_text(rgb, text_prompts, conf=conf)
 
     # No YOLOE prompt set → manual box union, else color threshold (legacy fallback).
     if boxes:
@@ -1206,7 +1214,7 @@ def _visual_reach_backproject(payload, mask, block, ee_pose=None):
 
     payload : the RGBD service payload (height/width/depth_f32_b64/intrinsics[/cam pose]).
     mask    : HxW bool target mask (already computed from the RGB).
-    block   : block dict (cam_pose_mode, cam_offset, cam_pitch/yaw/roll, cam_convention).
+    block   : block dict (wrist_view, cam_offset, cam_pitch/yaw/roll, cam_convention).
     ee_pose : live EE pose [x,y,z,ax,ay,az] (rotvec, robot base frame) for 'manual_ee'.
               Required for manual mode; ignored for 'service' mode.
 
@@ -1253,29 +1261,34 @@ def _visual_reach_backproject(payload, mask, block, ee_pose=None):
     else:
         p_cam = np.array([(u - cx) / fx * z, -(v - cy) / fy * z, -z])
 
-    cam_mode = block.get('cam_pose_mode') or (
-        'manual_ee' if block.get('cam_offset') is not None else 'service')
+    # Camera pose is calibrated by touch (see :solve_wrist_calib) and stored as
+    # cam_offset + cam_pitch/yaw/roll. A single boolean `wrist_view` picks the model:
+    #   wrist_view=True  → camera on the EE: pose is EE-relative, composed with the live
+    #                      EE pose every frame (target = ee_pos + R_ee·offset + R_ee·R_cam·p_cam).
+    #   wrist_view=False → external/top-view camera fixed in the base frame: pose is a
+    #                      base-absolute constant (target = cam_pos + R_cam·p_cam), no EE term.
+    # Output target_xyz is in the robot base frame either way. Default True (back-compat).
+    from scipy.spatial.transform import Rotation as _Rot
+    wrist_view = block.get('wrist_view', True)
+    offset = np.array(([float(o) for o in (block.get('cam_offset') or [])] + [0, 0, 0])[:3])
+    pitch = float(block.get('cam_pitch') or 0.0)
+    yaw = float(block.get('cam_yaw') or 0.0)
+    roll = float(block.get('cam_roll') or 0.0)
+    R_cam = _Rot.from_euler('xyz', [pitch, yaw, roll], degrees=True).as_matrix()
     ee_pos_out = None
-    if cam_mode == 'manual_ee':
-        from scipy.spatial.transform import Rotation as _Rot
+    if wrist_view:
         if not ee_pose:
-            raise RuntimeError("visual_reach manual pose: empty EE pose (IK not configured?)")
+            raise RuntimeError("visual_reach(wrist): 빈 EE pose (로봇이 켜져 있고 IK 가 구성돼야 합니다)")
         ee = [float(v) for v in ee_pose]
         ee_pos = np.array(ee[:3], dtype=float)
         R_ee = _Rot.from_rotvec(ee[3:6]).as_matrix() if len(ee) >= 6 else np.eye(3)
-        offset = np.array(([float(o) for o in (block.get('cam_offset') or [])] + [0, 0, 0])[:3])
-        pitch = float(block.get('cam_pitch') or 0.0)
-        yaw = float(block.get('cam_yaw') or 0.0)
-        roll = float(block.get('cam_roll') or 0.0)
-        R_ee_cam = _Rot.from_euler('xyz', [pitch, yaw, roll], degrees=True).as_matrix()
-        cam_pos = ee_pos + R_ee @ offset
-        R = R_ee @ R_ee_cam
-        target_xyz = cam_pos + R @ p_cam
+        cam_pos = ee_pos + R_ee @ offset          # offset = EE-frame camera position
+        R = R_ee @ R_cam                          # R_cam = camera rot relative to EE
         ee_pos_out = ee_pos.round(4).tolist()
     else:
-        cam_pos = np.array(payload['cam_pos'], dtype=float)
-        R = np.array(payload['cam_mat'], dtype=float).reshape(3, 3)
-        target_xyz = cam_pos + R @ p_cam
+        cam_pos = offset                          # offset = absolute camera position in base
+        R = R_cam                                 # R_cam = camera rot in base
+    target_xyz = cam_pos + R @ p_cam
     return {
         'target_xyz': target_xyz.round(4).tolist(),
         'centroid': [u, v],
@@ -1283,8 +1296,11 @@ def _visual_reach_backproject(payload, mask, block, ee_pose=None):
         'cam_pos': cam_pos.round(4).tolist(),
         'ee_pos': ee_pos_out,
         'convention': conv,
-        'cam_mode': cam_mode,
+        'cam_mode': 'wrist' if wrist_view else 'external',
         'mask_pixels': int(m.sum()),
+        # camera-frame object point — touch-calibration pairs this with the EE pose
+        # at the touch to solve cam_offset + rotation (see planner.py :solve_wrist_calib).
+        'p_cam': p_cam.round(6).tolist(),
     }
 
 
@@ -1341,9 +1357,6 @@ def _run_visual_reach(block, ctx, task_control):
     service_name = _resolve_rgbd_service(block)
     client = get_bridge_client()
 
-    cam_mode = block.get('cam_pose_mode') or (
-        'manual_ee' if block.get('cam_offset') is not None else 'service')
-
     # 검출은 일시적으로 실패할 수 있다 (sim 물리-렌더 starve 로 빈/오래된 프레임,
     # YOLOE 매칭 순간 0px 등). 한 번 실패했다고 RuntimeError 를 던지면 커리큘럼
     # 롤아웃이 그룹 전체를 abort 하고 첫 home 부터 재시작하므로(_run_group_once
@@ -1377,12 +1390,12 @@ def _run_visual_reach(block, ctx, task_control):
                                     crop=stream_crop, size=stream_size)
         except Exception as _e:
             print(f"[visual_reach] mask overlay emit skipped: {_e}", flush=True)
-        ee_pose = None
-        if cam_mode == 'manual_ee':
-            ee_poses = agent.get_ee_position() or {}
-            if not ee_poses:
-                raise RuntimeError("visual_reach manual pose: empty EE pose (IK not configured?)")
-            ee_pose = [float(v) for v in next(iter(ee_poses.values()))]
+        # wrist 카메라는 검출 시점 EE pose 가 필요(EE 기준 캘리브). 외부/탑뷰 고정
+        # 카메라는 base 기준이라 불필요.
+        ee_poses = agent.get_ee_position() or {}
+        ee_pose = [float(v) for v in next(iter(ee_poses.values()))] if ee_poses else None
+        if block.get('wrist_view', True) and not ee_pose:
+            raise RuntimeError("visual_reach(wrist): 빈 EE pose (로봇이 켜져 있고 IK 가 구성돼야 합니다)")
         mask_px = int(np.asarray(mask).astype(bool).sum())
         bp = _visual_reach_backproject(payload, mask, block, ee_pose=ee_pose)
         if bp is not None:
@@ -1409,23 +1422,34 @@ def _run_visual_reach(block, ctx, task_control):
           f"cam_pos={bp['cam_pos']} centroid=({u:.1f},{v:.1f}) depth={z:.3f} "
           f"target_xyz={bp['target_xyz']}", flush=True)
 
-    # 4) move EE to hover above target (keep current/observe orientation)
+    # 4) move EE above target (keep current/observe orientation) with offsets.
+    #    hover = z above the target; reach_offset_x/y = additional x/y nudge so the
+    #    EE can be parked beside (not directly on) the object.
     hover = float(block.get('hover') or 0.06)
+    off_x = float(block.get('reach_offset_x') or 0.0)
+    off_y = float(block.get('reach_offset_y') or 0.0)
+    # 6-DOF 팔은 관찰 자세의 방향을 그대로 유지하며 타겟 위치에 도달하기 어려워(IK 가
+    # orientation 까지 맞추려다 위치가 어긋남) reach 시에는 방향을 매우 느슨하게
+    # (orientation_cost↓) 풀어 위치 도달을 우선한다. 블록에서 override 가능.
+    reach_oc = block.get('reach_orientation_cost')
+    reach_oc = 0.05 if reach_oc is None else float(reach_oc)
     current_ee = agent.get_ee_position()
     if not current_ee:
         raise RuntimeError("visual_reach: empty EE pose — IK not configured?")
     target_ee = {}
     for ee_name, cur in current_ee.items():
         new_pose = [float(x) for x in cur]
-        new_pose[0], new_pose[1] = float(target_xyz[0]), float(target_xyz[1])
+        new_pose[0] = float(target_xyz[0] + off_x)
+        new_pose[1] = float(target_xyz[1] + off_y)
         if len(new_pose) > 2:
             new_pose[2] = float(target_xyz[2] + hover)
         target_ee[ee_name] = new_pose
     _emit(ctx.get('socketio'), 'planner_visual_reach', {
         'block': block.get('name'), 'target': target_xyz.tolist(),
         'centroid': [u, v], 'depth': z, 'hover': hover,
+        'offset': [off_x, off_y], 'orientation_cost': reach_oc,
     })
-    agent.move_ee_to(target_ee, duration=duration)
+    agent.move_ee_to(target_ee, duration=duration, orientation_cost=reach_oc)
     # Track the target while the reach move runs — re-detect ~2Hz and emit the mask
     # overlay so the monitoring view follows the object for the block's duration.
     _visual_reach_track_wait(agent, task_control, duration, ctx, block, service_name,

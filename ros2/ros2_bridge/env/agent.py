@@ -412,11 +412,13 @@ class Agent:
             msg.velocity[-1] = 100.0
         self._waypoint_pub.publish(msg)
 
-    def _solve_ee_to_joints(self, target_ee_dict):
+    def _solve_ee_to_joints(self, target_ee_dict, orientation_cost=None):
         """
         target_ee_dict 를 IK 로 풀어서 로봇에 보낼 final_action(조인트 벡터)을 반환한다.
         풀 수 없으면 None.
         입력 규격: target_ee_dict = {'L_ee': [x, y, z, r, p, y, tool], 'R_ee': [x, y, z, r, p, y, tool]}
+        orientation_cost: 설정 시 이번 풀이에서만 방향 가중치를 일시 override(낮을수록
+        위치 우선). 풀이 후 원래 값으로 복원해 teleop 등 다른 경로에 영향 없음.
         """
         if self.role == 'tool' or self.ik_solver is None:
             return None
@@ -457,36 +459,51 @@ class Agent:
         q_iter = np.array(arm_js)
         sol_q = None
         with self.ik_lock:
-            # Dual-arm 안전장치: 이번 호출에서 명령받지 않은 EE 는 현재 포즈로
-            # target 을 고정한다. pink 의 FrameTask 는 set_target 을 호출한 EE 만
-            # 갱신하므로, 한쪽 팔만 움직이는 teleop(키보드/RobotPendant) 에서
-            # 반대팔 task 의 target 이 미설정(첫 호출 → solve 예외 → 전체 no-op)
-            # 이거나 직전 값으로 남아 반대팔을 엉뚱하게 끌어당기는 문제가 있다.
-            # 명령 안 된 EE 를 현재 FK 포즈로 잡아두면 그 팔은 제자리에 머문다.
-            if len(self.ee_names) > 1:
-                held_fk = self.ik_solver.get_ee_position(list(arm_js))
-                for name in self.ee_names:
-                    if name not in ik_targets and name in held_fk:
-                        ik_targets[name] = held_fk[name]
-                        target_tool_values.setdefault(name, None)
-            for _ in range(max_iters):
-                sol_q, _ = self.ik_solver.solve_ik(
-                    ik_targets, current_lr_arm_motor_q=q_iter
-                )
-                if sol_q is None:
-                    break
-                q_iter = np.asarray(sol_q)
-                fk = self.ik_solver.get_ee_position(q_iter.tolist())
-                err = 0.0
-                for name, target_vec in ik_targets.items():
-                    cur_vec = fk.get(name)
-                    if cur_vec is None:
-                        err = float('inf')
+            # orientation_cost override (이번 풀이 한정) — 끝나면 finally 에서 복원.
+            _restore_oc = None
+            if orientation_cost is not None and hasattr(self.ik_solver, 'set_orientation_cost'):
+                try:
+                    _restore_oc = self.ik_solver.get_orientation_cost()
+                    self.ik_solver.set_orientation_cost(float(orientation_cost))
+                except Exception:
+                    _restore_oc = None
+            try:
+                # Dual-arm 안전장치: 이번 호출에서 명령받지 않은 EE 는 현재 포즈로
+                # target 을 고정한다. pink 의 FrameTask 는 set_target 을 호출한 EE 만
+                # 갱신하므로, 한쪽 팔만 움직이는 teleop(키보드/RobotPendant) 에서
+                # 반대팔 task 의 target 이 미설정(첫 호출 → solve 예외 → 전체 no-op)
+                # 이거나 직전 값으로 남아 반대팔을 엉뚱하게 끌어당기는 문제가 있다.
+                # 명령 안 된 EE 를 현재 FK 포즈로 잡아두면 그 팔은 제자리에 머문다.
+                if len(self.ee_names) > 1:
+                    held_fk = self.ik_solver.get_ee_position(list(arm_js))
+                    for name in self.ee_names:
+                        if name not in ik_targets and name in held_fk:
+                            ik_targets[name] = held_fk[name]
+                            target_tool_values.setdefault(name, None)
+                for _ in range(max_iters):
+                    sol_q, _ = self.ik_solver.solve_ik(
+                        ik_targets, current_lr_arm_motor_q=q_iter
+                    )
+                    if sol_q is None:
                         break
-                    dx = max(abs(cur_vec[i] - target_vec[i]) for i in range(3))
-                    err = max(err, dx)
-                if err < tol_xyz:
-                    break
+                    q_iter = np.asarray(sol_q)
+                    fk = self.ik_solver.get_ee_position(q_iter.tolist())
+                    err = 0.0
+                    for name, target_vec in ik_targets.items():
+                        cur_vec = fk.get(name)
+                        if cur_vec is None:
+                            err = float('inf')
+                            break
+                        dx = max(abs(cur_vec[i] - target_vec[i]) for i in range(3))
+                        err = max(err, dx)
+                    if err < tol_xyz:
+                        break
+            finally:
+                if _restore_oc is not None:
+                    try:
+                        self.ik_solver.set_orientation_cost(_restore_oc)
+                    except Exception:
+                        pass
 
         if sol_q is None:
             return None
@@ -541,8 +558,12 @@ class Agent:
         target_ee_dict 를 IK 로 풀어서, move_to 로 duration 초에 걸쳐 보간 이동한다.
         move_ee_step 과 달리 단발 명령이 아니라 시간 기반 보간 모션이다.
         입력 규격: target_ee_dict = {'L_ee': [x, y, z, r, p, y, tool], ...}
+        예약 키 ``__orientation_cost__`` 가 있으면 이번 풀이의 방향 가중치로 쓴다
+        (proto 변경 없이 backend 가 실어 보냄 — visual_reach 의 느슨한 회전 도달).
         """
-        final_action = self._solve_ee_to_joints(target_ee_dict)
+        target = dict(target_ee_dict)
+        orientation_cost = target.pop('__orientation_cost__', None)
+        final_action = self._solve_ee_to_joints(target, orientation_cost=orientation_cost)
         if final_action:
             self.move_to(final_action, duration=duration, hz=hz)
 

@@ -1181,12 +1181,29 @@
                                 y: visualReachDetectInfo.target_xyz[1].toFixed(3),
                                 z: visualReachDetectInfo.target_xyz[2].toFixed(3) }) }}
                         </div>
+                        <!-- 검출 민감도: cross-view VP conf 임계값. 레퍼런스 추가(같은 프레임)는
+                             conf 가 높게 나오지만 검출 추적(다른 뷰)은 낮아져, 0.25 면 잘려 미검출됨. -->
+                        <q-input v-if="visualReachStreamTopic"
+                            dense outlined dark bg-color="dark"
+                            v-model.number="blockForm.detect_conf"
+                            :label="$t('plannerVisualReachConf')"
+                            :hint="$t('plannerVisualReachConfHint')"
+                            type="number" min="0.01" max="1" step="0.01"
+                            class="q-mb-md"
+                        ></q-input>
+                        <!-- 도달 위치 미세조정: 타겟 기준 x/y/z 오프셋 (z=타겟 위로 띄우기) -->
+                        <div class="text-caption text-grey-6 q-mb-xs">{{ $t('plannerReachOffsetHint') }}</div>
+                        <div class="row q-col-gutter-sm q-mb-md">
+                            <div class="col-4"><q-input dense outlined dark bg-color="dark" type="number" step="0.005" v-model.number="blockForm.reach_offset_x" :label="$t('plannerReachOffsetX')" /></div>
+                            <div class="col-4"><q-input dense outlined dark bg-color="dark" type="number" step="0.005" v-model.number="blockForm.reach_offset_y" :label="$t('plannerReachOffsetY')" /></div>
+                            <div class="col-4"><q-input dense outlined dark bg-color="dark" type="number" step="0.005" v-model.number="blockForm.hover" :label="$t('plannerReachOffsetZ')" /></div>
+                        </div>
                         <q-input
                             dense outlined dark bg-color="dark"
-                            v-model.number="blockForm.hover"
-                            :label="$t('plannerVisualReachHover')"
-                            :hint="$t('plannerVisualReachHoverHint')"
-                            type="number" min="0" step="0.01"
+                            v-model.number="blockForm.reach_orientation_cost"
+                            :label="$t('plannerReachOrientCost')"
+                            :hint="$t('plannerReachOrientCostHint')"
+                            type="number" min="0" max="1" step="0.05"
                             class="q-mb-md"
                         ></q-input>
                         <q-input
@@ -1203,37 +1220,77 @@
                             type="number" min="0" step="0.1"
                             class="q-mb-md"
                         ></q-input>
-                        <q-select
-                            dense outlined dark bg-color="dark"
-                            v-model="blockForm.cam_pose_mode"
-                            :options="[
-                                { label: $t('plannerVisualReachPoseModeManual'), value: 'manual_ee' },
-                                { label: $t('plannerVisualReachPoseModeService'), value: 'service' },
-                            ]"
-                            :label="$t('plannerVisualReachPoseMode')"
-                            class="q-mb-md"
-                            map-options
-                            emit-value
-                        ></q-select>
-                        <template v-if="blockForm.cam_pose_mode === 'manual_ee'">
-                            <div class="text-caption text-grey-5 q-mb-xs">{{ $t('plannerVisualReachOffset') }}</div>
-                            <div class="text-caption text-grey-6 q-mb-xs">{{ $t('plannerVisualReachOffsetHint') }}</div>
+                        <!-- 카메라 장착 위치: 체크=EE 장착(wrist), 해제=외부/탑뷰 고정 -->
+                        <q-toggle
+                            dense color="primary" class="q-mb-xs"
+                            v-model="blockForm.wrist_view"
+                            :label="$t('plannerVisualReachWristView')"
+                        ></q-toggle>
+                        <div class="text-caption text-grey-6 q-mb-md">
+                            {{ blockForm.wrist_view ? $t('plannerVisualReachWristViewOn') : $t('plannerVisualReachWristViewOff') }}
+                        </div>
+                        <template v-if="true">
+                            <!-- 터치 캘리브레이션: 보드 없이 물체 검출+터치로 카메라 마운트 산출 -->
+                            <div class="row items-center q-gutter-sm q-mb-sm">
+                                <q-chip v-if="!blockForm.cam_calibrated" dense color="orange-9" text-color="white" icon="warning" size="sm">
+                                    {{ $t('plannerCalibNeeded') }}
+                                </q-chip>
+                                <q-chip v-else dense color="green-9" text-color="white" icon="check" size="sm">
+                                    {{ $t('plannerCalibDone') }}
+                                </q-chip>
+                                <span v-if="(blockForm.calib_samples || []).length" class="text-caption text-grey-6">
+                                    {{ $t('plannerCalibSavedSamples', { n: blockForm.calib_samples.length }) }}
+                                </span>
+                                <q-space />
+                                <q-btn v-if="!calibMode" dense color="primary" icon="touch_app"
+                                    :label="$t('plannerCalibStart')"
+                                    @click="startCalib" />
+                            </div>
+
+                            <!-- 캘리브레이션 진행 패널 -->
+                            <q-card v-if="calibMode" flat bordered class="bg-dark q-pa-sm q-mb-md">
+                                <div class="text-caption text-amber q-mb-xs">{{ $t('plannerCalibGuide') }}</div>
+                                <div class="text-caption text-grey-5 q-mb-sm">{{ $t('plannerCalibKeys') }}</div>
+                                <div class="row q-gutter-sm items-center">
+                                    <q-btn dense color="primary" icon="center_focus_strong"
+                                        :label="$t('plannerCalibStep1')" :loading="calibBusy" @click="calibCaptureDetect" />
+                                    <q-btn dense color="teal" icon="ads_click"
+                                        :label="$t('plannerCalibStep2')" :disable="!calibPending || calibBusy"
+                                        @click="calibRecordTouch" />
+                                    <q-space />
+                                    <span class="text-caption" :class="calibSamples.length >= 3 ? 'text-green' : 'text-grey-5'">
+                                        {{ $t('plannerCalibSampleCount', { n: calibSamples.length }) }}
+                                    </span>
+                                </div>
+                                <div v-if="calibPending" class="text-caption text-teal q-mt-xs">{{ $t('plannerCalibPending') }}</div>
+                                <div v-if="calibSamples.length" class="row q-gutter-xs q-mt-sm">
+                                    <q-chip v-for="(s, i) in calibSamples" :key="i" dense removable
+                                        color="blue-grey-8" text-color="white" size="sm"
+                                        @remove="calibRemoveSample(i)">#{{ i + 1 }}</q-chip>
+                                </div>
+                                <div class="row q-gutter-sm q-mt-sm">
+                                    <q-btn dense color="positive" icon="calculate"
+                                        :label="$t('plannerCalibSolve')" :disable="calibSamples.length < 3 || calibBusy"
+                                        :loading="calibBusy" @click="calibSolve" />
+                                    <q-btn v-if="calibSamples.length" dense flat color="negative" icon="delete_sweep"
+                                        :label="$t('plannerCalibClear')" @click="calibClearSamples" />
+                                    <q-space />
+                                    <q-btn dense flat color="grey" :label="$t('cancel')" @click="cancelCalib" />
+                                </div>
+                            </q-card>
+
+                            <div class="text-caption text-grey-5 q-mb-xs">{{ blockForm.wrist_view ? $t('plannerVisualReachOffset') : $t('plannerVisualReachBasePos') }}</div>
+                            <div class="text-caption text-grey-6 q-mb-xs">{{ blockForm.wrist_view ? $t('plannerVisualReachOffsetHint') : $t('plannerVisualReachBasePosHint') }}</div>
                             <div class="row q-col-gutter-sm q-mb-md">
                                 <div class="col-4"><q-input dense outlined dark bg-color="dark" type="number" step="0.005" v-model.number="blockForm.cam_off_x" label="x (m)" /></div>
                                 <div class="col-4"><q-input dense outlined dark bg-color="dark" type="number" step="0.005" v-model.number="blockForm.cam_off_y" label="y (m)" /></div>
                                 <div class="col-4"><q-input dense outlined dark bg-color="dark" type="number" step="0.005" v-model.number="blockForm.cam_off_z" label="z (m)" /></div>
                             </div>
-                            <q-input
-                                dense outlined dark bg-color="dark"
-                                v-model.number="blockForm.cam_pitch"
-                                :label="$t('plannerVisualReachPitch')"
-                                :hint="$t('plannerVisualReachPitchHint')"
-                                type="number" step="1"
-                                class="q-mb-md"
-                            ></q-input>
+                            <div class="text-caption text-grey-6 q-mb-xs">{{ $t('plannerVisualReachPitchHint') }}</div>
                             <div class="row q-col-gutter-sm q-mb-md">
-                                <div class="col-6"><q-input dense outlined dark bg-color="dark" type="number" step="1" v-model.number="blockForm.cam_yaw" :label="$t('plannerVisualReachYaw')" /></div>
-                                <div class="col-6"><q-input dense outlined dark bg-color="dark" type="number" step="1" v-model.number="blockForm.cam_roll" :label="$t('plannerVisualReachRoll')" /></div>
+                                <div class="col-4"><q-input dense outlined dark bg-color="dark" type="number" step="1" v-model.number="blockForm.cam_pitch" :label="$t('plannerVisualReachPitch')" /></div>
+                                <div class="col-4"><q-input dense outlined dark bg-color="dark" type="number" step="1" v-model.number="blockForm.cam_yaw" :label="$t('plannerVisualReachYaw')" /></div>
+                                <div class="col-4"><q-input dense outlined dark bg-color="dark" type="number" step="1" v-model.number="blockForm.cam_roll" :label="$t('plannerVisualReachRoll')" /></div>
                             </div>
                         </template>
                     </template>
@@ -1283,6 +1340,8 @@ import WebRtcVideo from 'src/components/v2/WebRtcVideo.vue';
 import { Notify, Loading } from 'quasar';
 import { useSensor } from '../../composables/useSensor';
 import { useRobot } from 'src/composables/useRobot';
+import { useKeyboardTeleop } from 'src/composables/useKeyboardTeleop';
+import { DEFAULT_KEYBOARD_AXIS_MAP, DEFAULT_KEYBOARD_SETTINGS } from 'src/configs/teleopDefaults';
 import { useSocket } from 'src/composables/useSocket';
 import { useTutorialStore } from 'src/stores/tutorialStore';
 import { enumerateViews } from 'src/utils/sensorView';
@@ -2125,6 +2184,7 @@ async function defineExemplar(boxNorm) {
             sensor_id: blockForm.value.sensor_id,
             rgbd_service: blockForm.value.rgbd_service,
             box_norm: boxNorm,
+            detect_conf: blockForm.value.detect_conf,
         });
         // 캡처된 (이미지+박스)를 멀티 레퍼런스 리스트에 추가(여러 각도 누적).
         // thumb = 박스 크롭(표시 전용), image = 검출용 full refer frame.
@@ -2187,10 +2247,11 @@ function _doWristDetect(silent) {
         references: isText ? [] : (blockForm.value.references || []),
         exemplar_image: isText ? null : blockForm.value.exemplar_image,
         exemplar_box: isText ? null : blockForm.value.exemplar_box,
+        detect_conf: blockForm.value.detect_conf,
         target_color: blockForm.value.target_color,
         workspace_id: blockForm.value.workspace_id,
-        cam_pose_mode: blockForm.value.cam_pose_mode,
-        cam_offset: blockForm.value.cam_pose_mode === 'manual_ee' ? camOffset : null,
+        wrist_view: blockForm.value.wrist_view,
+        cam_offset: camOffset,
         cam_pitch: blockForm.value.cam_pitch,
         cam_yaw: blockForm.value.cam_yaw,
         cam_roll: blockForm.value.cam_roll,
@@ -2237,6 +2298,144 @@ function toggleWristTrack() {
     }, VR_TRACK_INTERVAL_MS);
 }
 
+// ─── 터치 캘리브레이션 (wrist cam mount: cam_offset + pitch/yaw/roll) ───
+// 보드 없이: 물체를 검출(p_cam, ee_observe 캡처) → 키보드로 EE 를 움직여 물체를
+// 터치(obj_world 캡처). 물체 위치를 바꿔가며 3회+ → Umeyama 강체정합으로 카메라
+// 외부파라미터 산출(:solve_wrist_calib). 결과는 편집 가능한 input form 에 채워진다.
+const calibMode = ref(false);
+const calibBusy = ref(false);
+const calibSamples = ref([]);          // [{p_cam:[3], ee_observe:[6], obj_world:[3]}]
+const calibPending = ref(null);        // {p_cam, ee_observe} — 검출은 했고 터치 대기
+
+// 캘리브 대상 arm = 이 블록 workspace 의 tool 이 아닌 첫 로봇(IK agent). handler 가
+// 이미 붙어 있어(useRobot, fetchWorkspaceDetail) moveRobotEEDelta 로 jog 가능.
+function calibArm() {
+    const robots = getWorkspaceRobots(blockForm.value.workspace_id) || [];
+    return robots.find(r => !isToolRobot(r)) || null;
+}
+function calibTool() {
+    const robots = getWorkspaceRobots(blockForm.value.workspace_id) || [];
+    return robots.find(r => isToolRobot(r)) || null;
+}
+const calibTeleop = useKeyboardTeleop({
+    getAxisMap: () => DEFAULT_KEYBOARD_AXIS_MAP,
+    getStepSize: () => DEFAULT_KEYBOARD_SETTINGS.step_size,
+    robotForSide: () => calibArm(),
+    toolForSide: () => calibTool(),
+    canHandle: () => calibMode.value,
+    // 폼 input(숫자/텍스트) 편집 중에는 키 입력을 가로채지 않는다.
+    shouldCapture: (e) => !/^(INPUT|TEXTAREA)$/.test(e?.target?.tagName || ''),
+    onError: (name, err) => Notify.create({ color: 'negative', message: `${name}: ${err?.message || err}` }),
+});
+
+// calibSamples 는 블록에 영속화되는 blockForm.calib_samples 의 작업용 미러.
+// 매 변경마다 _syncCalibSamples() 로 폼에 반영 → 저장 시 블록에 쌓여 누적된다.
+function _syncCalibSamples() {
+    blockForm.value.calib_samples = JSON.parse(JSON.stringify(calibSamples.value));
+}
+function startCalib() {
+    const arm = calibArm();
+    if (!arm || !arm.handler?.moveRobotEEDelta) {
+        Notify.create({ color: 'warning', message: t('plannerCalibNoRobot') });
+        return;
+    }
+    // 기존에 쌓인 샘플을 이어받아 누적(초기화하지 않음).
+    calibSamples.value = Array.isArray(blockForm.value.calib_samples)
+        ? JSON.parse(JSON.stringify(blockForm.value.calib_samples)) : [];
+    calibPending.value = null;
+    calibMode.value = true;
+    stopWristTrack();           // 추적 폴링은 멈춤 — 캘리브는 단발 "검출 캡처" 사용
+    calibTeleop.start();
+}
+function cancelCalib() {
+    calibMode.value = false;
+    calibPending.value = null;
+    calibTeleop.stop();
+}
+// 누적된 캘리브 샘플 전체 삭제(마운트가 바뀐 경우 등).
+function calibClearSamples() {
+    calibSamples.value = [];
+    _syncCalibSamples();
+}
+// ① 검출 캡처 — 현재 관찰 자세에서 1회 검출 → (p_cam, ee_observe) 보관.
+function calibCaptureDetect() {
+    calibBusy.value = true;
+    _doWristDetect(false).then((ok) => {
+        const info = visualReachDetectInfo.value;
+        if (!ok || !info?.detected || !info?.p_cam || !info?.ee_pose) {
+            Notify.create({ color: 'warning', message: t('plannerCalibCaptureFail') });
+            calibPending.value = null;
+            return;
+        }
+        calibPending.value = { p_cam: info.p_cam, ee_observe: info.ee_pose };
+        Notify.create({ color: 'positive', message: t('plannerCalibCaptureOk') });
+    }).finally(() => { calibBusy.value = false; });
+}
+// ② 터치 기록 — EE 를 물체에 댄 상태의 EE 월드 pose 를 obj_world 로 캡처 → 샘플 완성.
+function calibRecordTouch() {
+    if (!calibPending.value) return;
+    calibBusy.value = true;
+    api.post('/planner/:get_ee_pose', { workspace_id: blockForm.value.workspace_id })
+        .then((res) => {
+            const ee = res.data?.ee_pose;
+            if (!Array.isArray(ee) || ee.length < 3) {
+                Notify.create({ color: 'negative', message: t('plannerCalibTouchFail') });
+                return;
+            }
+            calibSamples.value.push({
+                p_cam: calibPending.value.p_cam,
+                ee_observe: calibPending.value.ee_observe,
+                obj_world: ee.slice(0, 3),
+            });
+            _syncCalibSamples();   // 블록에 즉시 반영(저장 시 누적)
+            calibPending.value = null;
+            Notify.create({ color: 'positive',
+                message: t('plannerCalibTouchOk', { n: calibSamples.value.length }) });
+        })
+        .catch((err) => Notify.create({ color: 'negative', message: err?.response?.data?.message || err.message }))
+        .finally(() => { calibBusy.value = false; });
+}
+function calibRemoveSample(i) {
+    calibSamples.value.splice(i, 1);
+    _syncCalibSamples();
+}
+// 계산 — 모은 샘플로 cam_offset + pitch/yaw/roll 산출 → 폼에 채우고 캘리브 완료.
+function calibSolve() {
+    if (calibSamples.value.length < 3) return;
+    calibBusy.value = true;
+    api.post('/planner/:solve_wrist_calib', { samples: calibSamples.value, wrist_view: blockForm.value.wrist_view })
+        .then((res) => {
+            const d = res.data;
+            blockForm.value.cam_off_x = d.cam_offset[0];
+            blockForm.value.cam_off_y = d.cam_offset[1];
+            blockForm.value.cam_off_z = d.cam_offset[2];
+            blockForm.value.cam_pitch = d.cam_pitch;
+            blockForm.value.cam_yaw = d.cam_yaw;
+            blockForm.value.cam_roll = d.cam_roll;
+            blockForm.value.cam_calibrated = true;
+            calibMode.value = false;
+            calibPending.value = null;
+            calibTeleop.stop();
+            Notify.create({ color: 'positive', timeout: 5000,
+                message: t('plannerCalibSolved', { rms: (d.rms * 1000).toFixed(1), n: d.n }) });
+        })
+        .catch((err) => Notify.create({ color: 'negative', timeout: 5000,
+            message: err?.response?.data?.message || err.message }))
+        .finally(() => { calibBusy.value = false; });
+}
+// 다이얼로그가 닫히거나 블록 타입이 바뀌면 캘리브/텔레옵 정리(키 후킹 잔존 방지).
+watch(() => [showBlockForm.value, blockForm.value.type], () => {
+    if (!showBlockForm.value || blockForm.value.type !== 'visual_reach') cancelCalib();
+});
+onUnmounted(() => calibTeleop.stop());
+// wrist_view 를 바꾸면 저장된 cam_offset/회전이 다른 모델 기준이라 무효 → 재계산 필요.
+// 터치 샘플(calib_samples)은 모델 무관이라 유지하고, "계산"만 다시 누르면 된다.
+watch(() => blockForm.value.wrist_view, (nv, ov) => {
+    if (ov !== undefined && nv !== ov && blockForm.value.type === 'visual_reach') {
+        blockForm.value.cam_calibrated = false;
+    }
+});
+
 // No auto-pick: the user explicitly chooses the wrist camera from the sensor list
 // (see visualReachSensorOptions). The live stream + "Test detect" only appear once a
 // sensor is selected — we don't start streaming a camera the user didn't choose.
@@ -2268,7 +2467,6 @@ watch(() => blockForm.value.sensor_id, () => {
         const preset = isSim
             ? { x: -0.075, y: 0, z: 0.045, pitch: 60, yaw: 0, roll: -90 }
             : { x: 0, y: 0.07, z: -0.03, pitch: -30, yaw: 0, roll: 180 };
-        blockForm.value.cam_pose_mode = 'manual_ee';
         blockForm.value.cam_off_x = preset.x; blockForm.value.cam_off_y = preset.y; blockForm.value.cam_off_z = preset.z;
         blockForm.value.cam_pitch = preset.pitch; blockForm.value.cam_yaw = preset.yaw; blockForm.value.cam_roll = preset.roll;
     }
@@ -2310,17 +2508,20 @@ function openBlockForm(group) {
         sensor_id: null,
         rgbd_service: '',
         hover: 0.06,
+        reach_offset_x: 0, reach_offset_y: 0, reach_orientation_cost: 0.05,
         text_prompt: '',
         box_x1: null, box_y1: null, box_x2: null, box_y2: null,
         target_mode: 'box',
-        exemplar_image: null, exemplar_box: null, references: [],
+        exemplar_image: null, exemplar_box: null, references: [], detect_conf: 0.1,
         text_prompts: [], boxes: [], target_color: null, observe_positions: {},
         // wrist-view-reach camera pose (no-calibration manual mount).
         // Defaults = tutorial MuJoCo wrist_cam mount (verified manual≡FK in sim);
         // tune offset/pitch/yaw/roll for a real wrist camera.
-        cam_pose_mode: 'manual_ee',
+        wrist_view: true,        // 체크=EE 장착(wrist), 해제=외부/탑뷰 고정
         cam_off_x: -0.075, cam_off_y: 0, cam_off_z: 0.045,
         cam_pitch: 60, cam_yaw: 0, cam_roll: -90,
+        cam_calibrated: false,   // 새 블록 → 터치 캘리브레이션 필요
+        calib_samples: [],       // 터치 캘리브 샘플 누적(영속화)
     };
     showBlockForm.value = true;
 }
@@ -2361,6 +2562,9 @@ function openEditBlockForm(group, block, index) {
         sensor_id: block.sensor_id ?? null,
         rgbd_service: block.rgbd_service || '',
         hover: typeof block.hover === 'number' ? block.hover : 0.06,
+        reach_offset_x: typeof block.reach_offset_x === 'number' ? block.reach_offset_x : 0,
+        reach_offset_y: typeof block.reach_offset_y === 'number' ? block.reach_offset_y : 0,
+        reach_orientation_cost: typeof block.reach_orientation_cost === 'number' ? block.reach_orientation_cost : 0.05,
         text_prompt: (block.text_prompts && block.text_prompts[0]) || '',
         box_x1: block.boxes?.[0]?.[0] ?? null,
         box_y1: block.boxes?.[0]?.[1] ?? null,
@@ -2376,16 +2580,22 @@ function openEditBlockForm(group, block, index) {
             ? JSON.parse(JSON.stringify(block.references))
             : (block.exemplar_image && block.exemplar_box
                 ? [{ image: block.exemplar_image, box: [...block.exemplar_box] }] : []),
+        detect_conf: typeof block.detect_conf === 'number' ? block.detect_conf : 0.1,
         target_color: block.target_color ?? null,
         observe_positions: block.observe_positions ? JSON.parse(JSON.stringify(block.observe_positions)) : {},
-        // wrist-view-reach camera pose — unfold cam_offset[] back into x/y/z inputs
-        cam_pose_mode: block.cam_pose_mode || (block.cam_offset != null ? 'manual_ee' : 'service'),
+        // wrist-view-reach camera pose — unfold cam_offset[] back into x/y/z inputs.
+        // 기존 블록은 wrist_view 필드가 없으면 EE 장착(true)으로 간주(하위호환).
+        wrist_view: block.wrist_view ?? true,
         cam_off_x: block.cam_offset?.[0] ?? 0,
         cam_off_y: block.cam_offset?.[1] ?? 0,
         cam_off_z: block.cam_offset?.[2] ?? 0,
         cam_pitch: typeof block.cam_pitch === 'number' ? block.cam_pitch : 0,
         cam_yaw: typeof block.cam_yaw === 'number' ? block.cam_yaw : 0,
         cam_roll: typeof block.cam_roll === 'number' ? block.cam_roll : 0,
+        // 기존(동작하던) 블록은 cam_offset 이 있으면 캘리브된 것으로 간주 → 잔소리 안 함.
+        cam_calibrated: block.cam_calibrated ?? (block.cam_offset != null),
+        calib_samples: Array.isArray(block.calib_samples)
+            ? JSON.parse(JSON.stringify(block.calib_samples)) : [],
     };
     showBlockForm.value = true;
 }
@@ -2618,20 +2828,16 @@ function saveBlock() {
         const bx = [blockForm.value.box_x1, blockForm.value.box_y1, blockForm.value.box_x2, blockForm.value.box_y2];
         blockForm.value.boxes = bx.every(v => typeof v === 'number' && !Number.isNaN(v)) ? [bx] : [];
         if (!blockForm.value.observe_positions) blockForm.value.observe_positions = {};
-        // manual_ee camera pose: fold offset x/y/z into cam_offset[]. In 'service' mode
-        // we drop the manual fields so the backend uses the sensor-provided pose.
-        if (blockForm.value.cam_pose_mode === 'manual_ee') {
-            blockForm.value.cam_offset = [
-                Number(blockForm.value.cam_off_x) || 0,
-                Number(blockForm.value.cam_off_y) || 0,
-                Number(blockForm.value.cam_off_z) || 0,
-            ];
-            blockForm.value.cam_pitch = Number(blockForm.value.cam_pitch) || 0;
-            blockForm.value.cam_yaw = Number(blockForm.value.cam_yaw) || 0;
-            blockForm.value.cam_roll = Number(blockForm.value.cam_roll) || 0;
-        } else {
-            blockForm.value.cam_offset = null;
-        }
+        // 카메라 pose: x/y/z 입력을 cam_offset[] 으로 접어 저장. wrist_view=true 면
+        // EE 기준 오프셋, false 면 base 절대 위치(같은 필드, backend 가 wrist_view 로 해석).
+        blockForm.value.cam_offset = [
+            Number(blockForm.value.cam_off_x) || 0,
+            Number(blockForm.value.cam_off_y) || 0,
+            Number(blockForm.value.cam_off_z) || 0,
+        ];
+        blockForm.value.cam_pitch = Number(blockForm.value.cam_pitch) || 0;
+        blockForm.value.cam_yaw = Number(blockForm.value.cam_yaw) || 0;
+        blockForm.value.cam_roll = Number(blockForm.value.cam_roll) || 0;
     }
 
     const isEditing = editingBlockIndex.value !== null;
