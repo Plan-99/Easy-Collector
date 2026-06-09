@@ -93,6 +93,23 @@ ls nightwatch/scenarios/*.md
 발견을 `nightwatch/findings/round_<N>.md` 에 모은다: `[scenario-id] FAIL — <관찰된 증상> @ <route>`.
 green(전부 pass)이면 5단계로.
 
+### 2.1 장시간 작업: 보이는 창 + 주기적 스크린샷 (사람이 감시 가능하게)
+
+데이터 수집·학습처럼 **수십 분 이상 도는 흐름**은 backend script 를 직접 찌르지 말고 **사람처럼 UI 를
+Playwright 로 조작**한다(센서·워크스페이스 → 수집 REC → 학습 → 추론). 그리고:
+
+- **보이는 창으로 띄운다** — `chromium.launch({ headless: false })` + `DISPLAY=:1`. 사람이 화면에서 직접
+  "지금 잘 되고 있는지" 볼 수 있어야 한다. headless 로만 돌리면 사람이 감시 못 하고 렌더 멈춤/깨짐을 놓친다.
+- **같은 세션에서 주기적으로 스크린샷 + console-error 스캔** — 폴링 루프(예: 30s)마다
+  `page.screenshot({ path: '/tmp/<job>-mon/latest.png' })` + `page.on('console'/'pageerror')` 로 UI 깨짐/에러를
+  실측한다. `Read` 로 그 스크린샷을 주기적으로 확인해 "버그·UI 깨짐 없음"을 *결정적으로* 판정(자기보고 금지).
+- **새 탭/브라우저로 모니터링하지 말 것 (단일 세션 불변식)** — 많은 SPA 는 onMount 에서 stale 프로세스를
+  정리한다. EasyTrainer `App.vue` 의 `cleanup()` 은 `/stop_process` 로 실행 중인 `record_episode` 를 죽인다.
+  즉 **수집/학습 중 앱을 새로 열면 그 작업이 중단된다.** 모니터링·스크린샷은 *작업을 시작한 바로 그
+  페이지*에서만 하고, 별도 detect 가 필요하면 작업이 끝난 뒤에 연다.
+- **부하 주의** — 단일 스레드 sim 은 host 부하에 민감하다. 수집/학습 중엔 rebuild·다중 브라우저 등
+  무거운 작업을 같이 돌리지 말 것(planner/추론 성공률이 떨어진다).
+
 ## 3. fix — 수선자 (제품 소스만)
 
 `--fix on` 일 때만. 각 FAIL 에 대해:

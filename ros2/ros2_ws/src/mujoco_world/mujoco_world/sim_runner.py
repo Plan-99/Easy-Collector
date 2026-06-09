@@ -19,6 +19,7 @@ transport (e.g. a future gRPC/shm streaming path) without changes.
 """
 from __future__ import annotations
 
+import math
 import os
 import threading
 import time
@@ -86,6 +87,17 @@ class SimRunner:
         self._frame_buffers: dict[int, np.ndarray] = {}
         self._buffer_lock = threading.Lock()
 
+        # Wrist depth: the `visual_reach` planner block needs RGB-D from the wrist
+        # camera. We render a depth map for 'wrist_cam' each tick (SimRunner thread
+        # only) and snapshot the camera pose/intrinsics + ee_site pose alongside it,
+        # so the backend can back-project a pixel to world XYZ. Absent if no wrist_cam.
+        self._depth_renderer: Optional[mujoco.Renderer] = None
+        self._wrist_cam_idx = (self._camera_names.index("wrist_cam")
+                               if "wrist_cam" in self._camera_names else -1)
+        self._ee_site_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "ee_site")
+        self._wrist_depth: Optional[np.ndarray] = None
+        self._wrist_meta: Optional[dict] = None
+
         self._target_lock = threading.Lock()
         self._stop_event = threading.Event()
         self._reset_objects_event = threading.Event()
@@ -115,6 +127,35 @@ class SimRunner:
                         key_qpos[qpos_addr:qpos_addr + 7].copy(),
                         np.zeros(6, dtype=np.float64),
                     ))
+
+        # Name-keyed view of the same free joints (peg / hole_base) so the
+        # /tutorial/randomize service can move a *specific* object. Maps body
+        # name → (qpos_addr, dof_addr, home_qpos7). Built from the home keyframe.
+        self._object_specs_by_name: dict[str, tuple[int, int, np.ndarray]] = {}
+        if home_id >= 0:
+            key_qpos = np.asarray(self.model.key_qpos[home_id])
+            for jid in range(self.model.njnt):
+                if int(self.model.jnt_type[jid]) != int(mujoco.mjtJoint.mjJNT_FREE):
+                    continue
+                bid = int(self.model.jnt_bodyid[jid])
+                bname = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, bid)
+                if not bname:
+                    continue
+                qpos_addr = int(self.model.jnt_qposadr[jid])
+                dof_addr = int(self.model.jnt_dofadr[jid])
+                self._object_specs_by_name[bname] = (
+                    qpos_addr, dof_addr, key_qpos[qpos_addr:qpos_addr + 7].copy())
+
+        # Randomize request plumbing — mirrors the reset mechanism so all mjData
+        # mutation happens on the physics thread (no race with mj_step).
+        self._randomize_request = threading.Event()
+        self._randomize_done = threading.Event()
+        self._randomize_ranges: dict = {}
+        self._randomize_sampled: dict = {}
+        # Physics steps to let randomized objects come to rest before the sampled
+        # poses are reported (so the planner grasps where they actually settle).
+        self._randomize_settle_steps = 300
+        self._rng = np.random.default_rng()
 
     def _build_joint_specs(self, joint_names: Sequence[str]) -> list[JointSpec]:
         specs: list[JointSpec] = []
@@ -196,6 +237,65 @@ class SimRunner:
         for i, j in enumerate(self._joints):
             self.data.ctrl[j.actuator_id] = target[i]
 
+    def _update_grasp(self) -> None:
+        """Kinematic auto-grasp. While the gripper is closed *around* the peg,
+        force the peg to follow the gripper rigidly — a closed gripper reliably
+        holds the peg (real behaviour) instead of the contact solver squeezing
+        the rigid peg out (watermelon-seed ejection) the moment motion stops.
+        Captured the instant the fingers close past a threshold (before contact,
+        so the capture pose is clean); released when the gripper opens. Called
+        right after mj_step so it overrides the physics result for the peg only."""
+        m, d = self.model, self.data
+        if not hasattr(self, "_grasp_ids"):
+            self._grasping = False
+            try:
+                spec = self._object_specs_by_name.get("peg")
+                grip_jid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, "gripper")
+                self._grasp_ids = {
+                    "peg_bid": mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "peg"),
+                    "peg_qadr": int(spec[0]) if spec else -1,
+                    "peg_vadr": int(spec[1]) if spec else -1,
+                    "grip_qadr": int(m.jnt_qposadr[grip_jid]) if grip_jid >= 0 else -1,
+                    "site": int(self._ee_site_id) if self._ee_site_id is not None else -1,
+                }
+            except Exception:
+                self._grasp_ids = None
+        ids = self._grasp_ids
+        if not ids or ids["peg_qadr"] < 0 or ids["grip_qadr"] < 0 or ids["site"] < 0 \
+                or ids["peg_bid"] < 0:
+            return
+        grip = float(d.qpos[ids["grip_qadr"]])
+        closed = grip < 0.012                  # fingers closed (gripping)
+        p_site = np.array(d.site_xpos[ids["site"]], dtype=float)
+        R_site = np.array(d.site_xmat[ids["site"]], dtype=float).reshape(3, 3)
+        peg_pos = np.array(d.xpos[ids["peg_bid"]], dtype=float)
+        qa, va = ids["peg_qadr"], ids["peg_vadr"]
+
+        if not self._grasping:
+            # Capture only while the fingers close *near* the peg (threshold 0.012
+            # fires ~5 mm before contact → clean capture pose). Once captured the
+            # grasp LATCHES — see below.
+            if closed and float(np.linalg.norm(peg_pos - p_site)) < 0.06:
+                peg_R = np.array(d.xmat[ids["peg_bid"]], dtype=float).reshape(3, 3)
+                self._grasp_rel_pos = R_site.T @ (peg_pos - p_site)
+                self._grasp_rel_R = R_site.T @ peg_R
+                self._grasping = True
+            return
+
+        # LATCHED: hold the peg as long as the gripper stays closed, regardless of
+        # where the peg currently is — this overrides an external /tutorial/reset_
+        # world (env.reset() at the start of an insert correction) that teleports
+        # the peg back to its home keyframe. Released only when the gripper opens.
+        if not closed:
+            self._grasping = False
+            return
+        new_pos = p_site + R_site @ self._grasp_rel_pos
+        quat = np.zeros(4)
+        mujoco.mju_mat2Quat(quat, (R_site @ self._grasp_rel_R).flatten())
+        d.qpos[qa:qa + 3] = new_pos
+        d.qpos[qa + 3:qa + 7] = quat
+        d.qvel[va:va + 6] = 0.0
+
     def render_rgb(self, cam_idx: int = 0) -> np.ndarray:
         """Return the most recent cached frame for `cam_idx` (HxWx3, uint8).
 
@@ -230,6 +330,112 @@ class SimRunner:
         except Exception:
             pass
 
+    # ------------------------------------------------------------------
+    # Object pose readout + scene randomization (model-tester data pipeline)
+    # ------------------------------------------------------------------
+    def get_object_poses(self, names: Optional[Sequence[str]] = None) -> dict:
+        """World poses ``{body: [x,y,z, qw,qx,qy,qz]}`` for movable objects.
+
+        Read-only snapshot of the freejoint bodies (peg / hole_base). Quaternion
+        is MuJoCo convention [w,x,y,z], matching ``task_success.check_success``.
+        Safe to call from any thread (plain reads of mjData body pose arrays).
+        """
+        if names is None:
+            names = list(self._object_specs_by_name.keys())
+        out: dict[str, list] = {}
+        for name in names:
+            bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, name)
+            if bid < 0:
+                continue
+            pos = self.data.xpos[bid]
+            quat = self.data.xquat[bid]
+            out[name] = [float(pos[0]), float(pos[1]), float(pos[2]),
+                         float(quat[0]), float(quat[1]), float(quat[2]), float(quat[3])]
+        return out
+
+    def randomize_objects(self, ranges: dict, timeout: float = 6.0) -> dict:
+        """Re-sample movable-object freejoint poses within ``ranges`` and snap the
+        arm back to the home keyframe. Sampling runs on the physics thread to
+        avoid racing mj_step; falls back to in-place sampling if the loop is down.
+
+        ``ranges``: ``{body_name: {"x":[lo,hi], "y":[lo,hi], "yaw":[lo,hi]?}}``.
+        Returns the sampled world poses ``{body_name: [x,y,z, qw,qx,qy,qz]}``.
+        """
+        self._randomize_ranges = ranges or {}
+        if self._thread is None or not self._thread.is_alive():
+            with self._target_lock:
+                self._randomize_apply(self._randomize_ranges)
+            return dict(self._randomize_sampled)
+        self._randomize_done.clear()
+        self._randomize_request.set()
+        self._randomize_done.wait(timeout=timeout)
+        return dict(self._randomize_sampled)
+
+    def randomize_peg(self, delta: float = 0.05) -> dict:
+        """Re-place ONLY the peg: x,y uniformly within ±``delta`` of its home
+        position, upright; the hole (and every other movable) snaps back to its
+        fixed home pose. Used by the standalone peg-watchdog to recover after the
+        peg gets knocked over. Restores ``_randomize_ranges`` so it doesn't change
+        the default /tutorial/randomize behavior."""
+        spec = self._object_specs_by_name.get("peg")
+        if spec is None:
+            return {}
+        home_qpos = spec[2]
+        hx, hy = float(home_qpos[0]), float(home_qpos[1])
+        ranges = {"peg": {"x": [hx - delta, hx + delta], "y": [hy - delta, hy + delta]}}
+        saved = self._randomize_ranges
+        try:
+            return self.randomize_objects(ranges)
+        finally:
+            self._randomize_ranges = saved
+
+    def _randomize_apply(self, ranges: dict) -> None:
+        """Physics-thread only (caller holds _target_lock). Snap arm home, then
+        sample peg/hole_base freejoint qpos in ``ranges`` (home z + upright
+        orientation preserved; yaw optional)."""
+        self._reset_to_home()
+        for i, j in enumerate(self._joints):
+            self._target[i] = float(self.data.ctrl[j.actuator_id])
+        for name, (qpos_addr, dof_addr, home_qpos) in self._object_specs_by_name.items():
+            qpos = home_qpos.copy()
+            r = ranges.get(name) if ranges else None
+            if r:
+                if "x" in r:
+                    qpos[0] = float(self._rng.uniform(r["x"][0], r["x"][1]))
+                if "y" in r:
+                    qpos[1] = float(self._rng.uniform(r["y"][0], r["y"][1]))
+                if "yaw" in r:
+                    yaw = float(self._rng.uniform(r["yaw"][0], r["yaw"][1]))
+                    qpos[3] = math.cos(yaw / 2.0)
+                    qpos[4] = 0.0
+                    qpos[5] = 0.0
+                    qpos[6] = math.sin(yaw / 2.0)
+            self.data.qpos[qpos_addr:qpos_addr + 7] = qpos
+            self.data.qvel[dof_addr:dof_addr + 6] = 0.0
+        try:
+            mujoco.mj_forward(self.model, self.data)
+        except Exception:
+            pass
+        # Settle so freejoint dynamics (drop onto the table, contact with walls)
+        # fully resolve, then report the *rested* poses. The planner grasps where
+        # the object actually ends up — reporting the pre-settle command pose made
+        # it aim tens of mm off and miss the grasp. Arm holds home (ctrl persists).
+        for _ in range(self._randomize_settle_steps):
+            try:
+                mujoco.mj_step(self.model, self.data)
+            except Exception:
+                break
+        sampled: dict[str, list] = {}
+        for name, (qpos_addr, dof_addr, _home) in self._object_specs_by_name.items():
+            bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, name)
+            if bid < 0:
+                continue
+            pos = self.data.xpos[bid]
+            quat = self.data.xquat[bid]
+            sampled[name] = [float(pos[0]), float(pos[1]), float(pos[2]),
+                             float(quat[0]), float(quat[1]), float(quat[2]), float(quat[3])]
+        self._randomize_sampled = sampled
+
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
             return
@@ -255,6 +461,15 @@ class SimRunner:
         except Exception as e:
             print(f"[SimRunner] Renderer init failed: {e} — cameras will be unavailable")
             self._renderer = None
+        # Separate depth renderer for the wrist camera (visual_reach block).
+        if self._wrist_cam_idx >= 0 and self._renderer is not None:
+            try:
+                self._depth_renderer = mujoco.Renderer(
+                    self.model, height=self._image_height, width=self._image_width)
+                self._depth_renderer.enable_depth_rendering()
+            except Exception as e:
+                print(f"[SimRunner] depth Renderer init failed: {e} — wrist depth unavailable")
+                self._depth_renderer = None
 
     def _setup_viewer(self) -> None:
         if not self._show_viewer:
@@ -283,6 +498,43 @@ class SimRunner:
         if new_frames:
             with self._buffer_lock:
                 self._frame_buffers.update(new_frames)
+        # Wrist depth + camera pose/intrinsics + ee_site snapshot (visual_reach).
+        if self._wrist_cam_idx >= 0 and self._depth_renderer is not None:
+            try:
+                cid = self._camera_ids[self._wrist_cam_idx]
+                self._depth_renderer.update_scene(self.data, camera=cid)
+                depth = self._depth_renderer.render()  # HxW float32, metric (m)
+                meta = {
+                    "cam_pos": self.data.cam_xpos[cid].copy().tolist(),
+                    "cam_mat": self.data.cam_xmat[cid].copy().tolist(),  # 9, row-major
+                    "fovy": float(self.model.cam_fovy[cid]),
+                    "ee_pos": self.data.site_xpos[self._ee_site_id].copy().tolist(),
+                    "width": self._image_width,
+                    "height": self._image_height,
+                }
+                with self._buffer_lock:
+                    self._wrist_depth = depth
+                    self._wrist_meta = meta
+            except Exception as e:
+                print(f"[SimRunner] wrist depth render failed: {e}")
+
+    def get_wrist_rgbd(self) -> Optional[dict]:
+        """Latest wrist RGB + depth + camera pose/intrinsics + ee_site pose.
+
+        Returns None if there is no wrist_cam or nothing has been rendered yet.
+        Read-only snapshot for the `visual_reach` block; no GL touched here.
+        """
+        if self._wrist_cam_idx < 0:
+            return None
+        with self._buffer_lock:
+            rgb = self._frame_buffers.get(self._wrist_cam_idx)
+            depth = self._wrist_depth
+            meta = self._wrist_meta
+        if rgb is None or depth is None or meta is None:
+            return None
+        out = {"rgb": rgb, "depth": depth}
+        out.update(meta)
+        return out
 
     def _run(self) -> None:
         # GL contexts must be created on this thread.
@@ -297,6 +549,16 @@ class SimRunner:
                 if self._reset_objects_event.is_set():
                     self._do_reset_objects()
                     self._reset_objects_event.clear()
+                # Scene randomization (model-tester collector). Done on this
+                # thread, before stepping, so peg/hole_base land at the sampled
+                # pose without racing mj_step.
+                if self._randomize_request.is_set():
+                    with self._target_lock:
+                        self._randomize_apply(self._randomize_ranges)
+                    wall_start = time.monotonic()
+                    sim_start = self.data.time
+                    self._randomize_request.clear()
+                    self._randomize_done.set()
                 # Honor reset requests on the physics thread so we don't race
                 # mj_step on mjData. Resets arm + gripper + cube + velocities
                 # via the 'home' keyframe.
@@ -311,6 +573,7 @@ class SimRunner:
                     self._reset_done.set()
                 self._apply_targets()
                 mujoco.mj_step(self.model, self.data)
+                self._update_grasp()   # kinematic auto-grasp (hold peg when gripped)
 
                 if self._viewer is not None:
                     try:

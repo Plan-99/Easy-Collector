@@ -349,6 +349,12 @@ def _run_move_relative_ee(block, ctx, task_control):
             raise RuntimeError(
                 f"robot '{robot.get('name')}' returned empty EE pose — make sure IK is configured"
             )
+        # Inner tool (tool_inner arm): the EE pose carries the tool joint(s)
+        # after the 6 EE dims. If the block provides absolute tool values for
+        # this arm, write them in instead of preserving the current value — this
+        # is what lets move_relative_ee drive an integrated gripper alongside the
+        # EE delta (UI: the inner-gripper box next to dx..drz).
+        inner_tool_vals = tool_positions.get(str(robot['id'])) or tool_positions.get(robot['id'])
         target_ee = {}
         d = [float(v) for v in delta_vec]
         for ee_name, cur in current_ee.items():
@@ -358,6 +364,11 @@ def _run_move_relative_ee(block, ctx, task_control):
             new_pose = list(cur)
             for i in range(min(6, len(new_pose))):
                 new_pose[i] = float(cur[i]) + d[i]
+            if isinstance(inner_tool_vals, (list, tuple)):
+                for k, tv in enumerate(inner_tool_vals):
+                    j = 6 + k
+                    if j < len(new_pose):
+                        new_pose[j] = float(tv)
             target_ee[ee_name] = new_pose
         print(
             f"[MoveRelEE] arm robot={robot.get('id')} delta={delta_vec} "
@@ -1023,18 +1034,25 @@ def _visual_reach_mask(rgb, text_prompts, boxes, block):
     joined = ' '.join(text_prompts).lower() if text_prompts else ''
     colors_in = [c for c in _VR_COLORS if c in joined]
 
+    # 멀티 레퍼런스(여러 각도) — references=[{image,box}, ...]. 하위호환: 없으면
+    # 단일 exemplar_image/exemplar_box 를 1-원소로 취급.
+    references = block.get('references') or []
+    refers = [(r.get('image'), r.get('box')) for r in references
+              if isinstance(r, dict) and r.get('image') and r.get('box')]
     refer_b64 = block.get('exemplar_image')
     refer_box = block.get('exemplar_box')
-    if (refer_b64 and refer_box) or text_prompts:
+    if not refers and refer_b64 and refer_box:
+        refers = [(refer_b64, refer_box)]
+    if refers or text_prompts:
         from ...utils import yoloe_helper
         if not yoloe_helper.is_extension_installed():
             raise RuntimeError(
                 "Wrist View Reach 검출에는 YOLOE 확장이 필요합니다. "
                 "모듈 관리에서 'YOLOE Visual-Prompt Detection'을 설치하세요.")
-        # box exemplar takes precedence (it pins a specific instance); else text.
-        if refer_b64 and refer_box:
-            refer_rgb = _visual_reach_decode_rgb(refer_b64)
-            return yoloe_helper.detect_exemplar(rgb, refer_rgb, refer_box)
+        # box exemplar(s) take precedence (pins a specific instance); else text.
+        if refers:
+            decoded = [(_visual_reach_decode_rgb(img), box) for img, box in refers]
+            return yoloe_helper.detect_exemplar_multi(rgb, decoded)
         return yoloe_helper.detect_text(rgb, text_prompts)
 
     # No YOLOE prompt set → manual box union, else color threshold (legacy fallback).
@@ -1113,12 +1131,66 @@ def _mask_overlay_b64(mask):
     return img_b64, centroid
 
 
-def _emit_visual_reach_mask(socketio, sensor_id, mask):
+def _apply_stream_geometry(mask, crop, size):
+    """Crop+resize a full-res mask to match what the monitoring stream displays, so
+    the overlay aligns pixel-for-pixel. Mirrors ros2_bridge image_parser
+    fetch_image_with_config (crop cropped_area → resize img_size). No-op if unset."""
+    import numpy as np
+    m = np.asarray(mask).astype(bool)
+    if crop and len(crop) == 4:
+        H, W = m.shape[:2]
+        x1, y1, x2, y2 = [int(round(v)) for v in crop[:4]]
+        x1, x2 = max(0, min(x1, W)), max(0, min(x2, W))
+        y1, y2 = max(0, min(y1, H)), max(0, min(y2, H))
+        if x2 > x1 and y2 > y1:
+            m = m[y1:y2, x1:x2]
+    if size and len(size) == 2:
+        try:
+            import cv2
+            w, h = int(size[0]), int(size[1])
+            if w > 0 and h > 0 and m.size:
+                m = cv2.resize(m.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST) > 0
+        except Exception:
+            pass
+    return m
+
+
+def _wrist_stream_geometry(workspace, sensor_id):
+    """Resize (img_size) for the mask overlay so it matches the monitoring stream.
+    Crop is intentionally IGNORED — cropped_area is view-dependent, whereas img_size
+    is workspace-level in the UI (one value for the whole workspace), so any configured
+    entry applies. Default [640,480] mirrors the monitoring default. Returns
+    (None, size). Tutorial is 640x480 native → resize is a no-op."""
+    import json
+    default = [640, 480]
+    if not workspace:
+        return None, default
+    m = workspace.get('sensor_img_size')
+    if isinstance(m, str):
+        try:
+            m = json.loads(m)
+        except Exception:
+            m = {}
+    m = m or {}
+    sid = str(sensor_id)
+    if sid in m and m[sid]:
+        return None, m[sid]
+    if sensor_id in m and m[sensor_id]:
+        return None, m[sensor_id]
+    vals = [v for v in m.values() if v]   # img_size is workspace-level → any entry
+    return None, (vals[0] if vals else default)
+
+
+def _emit_visual_reach_mask(socketio, sensor_id, mask, crop=None, size=None):
     """Emit the detected target mask (transparent, mask-only) so the live monitoring
     view overlays it on the selected wrist sensor's stream (socket 'planner_wrist_mask',
-    payload {sensor_id, image:data-url}). Best-effort; never blocks the reach."""
+    payload {sensor_id, image:data-url}). `crop`/`size` apply the SAME crop+resize the
+    stream uses (sensor_cropped_area / sensor_img_size) so the overlay lines up.
+    Best-effort; never blocks the reach."""
     if socketio is None or sensor_id in (None, ''):
         return
+    if crop or size:
+        mask = _apply_stream_geometry(mask, crop, size)
     img_b64, _ = _mask_overlay_b64(mask)
     if img_b64:
         _emit(socketio, 'planner_wrist_mask', {
@@ -1146,12 +1218,27 @@ def _visual_reach_backproject(payload, mask, block, ee_pose=None):
     H, W = int(payload['height']), int(payload['width'])
     depth = np.frombuffer(base64.b64decode(payload['depth_f32_b64']), np.float32).reshape(H, W)
     m = np.asarray(mask).astype(bool)
-    valid = m & np.isfinite(depth) & (depth > 1e-3)
-    ys, xs = np.where(valid)
-    if len(xs) < 8:
-        return None
+    if int(m.sum()) < 8:
+        return None  # object not detected at all (caller distinguishes via mask px)
+    # Centroid from the MASK (object center) — robust to depth holes inside it.
+    ys, xs = np.where(m)
     u, v = float(xs.mean()), float(ys.mean())
-    z = float(np.median(depth[valid]))
+    # Depth: median of valid depth inside the mask. Real RealSense depth often has
+    # holes on the object (edges, dark/shiny/transparent, range) — if the mask is
+    # mostly holes, widen to a small window around the centroid before giving up.
+    md = depth[m]
+    vm = md[np.isfinite(md) & (md > 1e-3)]
+    if len(vm) >= 8:
+        z = float(np.median(vm))
+    else:
+        rad = 18
+        y0, y1 = max(0, int(v) - rad), min(H, int(v) + rad + 1)
+        x0, x1 = max(0, int(u) - rad), min(W, int(u) + rad + 1)
+        win = depth[y0:y1, x0:x1]
+        vw = win[np.isfinite(win) & (win > 1e-3)]
+        if len(vw) < 8:
+            return None  # detected, but no valid depth anywhere near it
+        z = float(np.median(vw))
     if payload.get('fx'):
         fx = float(payload['fx']); fy = float(payload.get('fy') or fx)
         cx = float(payload.get('cx') if payload.get('cx') is not None else (W - 1) / 2.0)
@@ -1197,6 +1284,7 @@ def _visual_reach_backproject(payload, mask, block, ee_pose=None):
         'ee_pos': ee_pos_out,
         'convention': conv,
         'cam_mode': cam_mode,
+        'mask_pixels': int(m.sum()),
     }
 
 
@@ -1219,6 +1307,10 @@ def _run_visual_reach(block, ctx, task_control):
     if workspace is None:
         raise RuntimeError(f"workspace_id={block.get('workspace_id')} not found")
     robots = (workspace.get('assembly') or {}).get('robots') or []
+
+    # Stream crop/resize for the selected wrist sensor — apply the SAME transform to
+    # the mask overlay so it lines up with the (cropped/resized) monitoring stream.
+    stream_crop, stream_size = _wrist_stream_geometry(workspace, block.get('sensor_id'))
 
     robot = agent = None
     for rb in robots:
@@ -1248,36 +1340,68 @@ def _run_visual_reach(block, ctx, task_control):
     #    service /ec_sensor_<id>/wrist_rgbd → the sim default.
     service_name = _resolve_rgbd_service(block)
     client = get_bridge_client()
-    resp = client.ros_proxy.CallService(pb.ROSServiceRequest(
-        service_type='std_srvs/srv/Trigger', service_name=service_name, request_json=''))
-    if not resp.success:
-        raise RuntimeError(f"wrist RGBD service '{service_name}' transport failure: {resp.response_json}")
-    outer = json.loads(resp.response_json)
-    payload = json.loads(outer.get('message') or '{}')
-    if not payload.get('ok'):
-        raise RuntimeError(f"wrist RGBD unavailable: {payload.get('error')}")
 
-    rgb = _visual_reach_decode_rgb(payload['rgb_jpeg_b64'])
-
-    # 3) target mask → centroid → robust depth → world XYZ (shared back-projection,
-    #    identical to the dialog's calibration readout — see _visual_reach_backproject).
-    mask = _visual_reach_mask(rgb, block.get('text_prompts') or [], block.get('boxes') or [], block)
-    # Show what SAM3 detected on the live wrist stream (overlay on the selected sensor).
-    try:
-        _emit_visual_reach_mask(ctx.get('socketio'), block.get('sensor_id'), mask)
-    except Exception as _e:
-        print(f"[visual_reach] mask overlay emit skipped: {_e}", flush=True)
-    ee_pose = None
     cam_mode = block.get('cam_pose_mode') or (
         'manual_ee' if block.get('cam_offset') is not None else 'service')
-    if cam_mode == 'manual_ee':
-        ee_poses = agent.get_ee_position() or {}
-        if not ee_poses:
-            raise RuntimeError("visual_reach manual pose: empty EE pose (IK not configured?)")
-        ee_pose = [float(v) for v in next(iter(ee_poses.values()))]
-    bp = _visual_reach_backproject(payload, mask, block, ee_pose=ee_pose)
+
+    # 검출은 일시적으로 실패할 수 있다 (sim 물리-렌더 starve 로 빈/오래된 프레임,
+    # YOLOE 매칭 순간 0px 등). 한 번 실패했다고 RuntimeError 를 던지면 커리큘럼
+    # 롤아웃이 그룹 전체를 abort 하고 첫 home 부터 재시작하므로(_run_group_once
+    # except → return), 같은 관찰 자세에서 RGB-D 를 **다시 캡처**해 몇 번 재시도한다.
+    # 재시도해도 안 되면(타겟이 진짜 뷰 밖) 비로소 raise.
+    attempts = max(1, int(block.get('detect_retries') or 3))
+    retry_sleep = float(block.get('detect_retry_sleep') or 0.4)
+    bp = None
+    mask_px = 0
+    payload = None
+    for attempt in range(attempts):
+        if task_control.get('stop'):
+            return
+        resp = client.ros_proxy.CallService(pb.ROSServiceRequest(
+            service_type='std_srvs/srv/Trigger', service_name=service_name, request_json=''))
+        if not resp.success:
+            raise RuntimeError(f"wrist RGBD service '{service_name}' transport failure: {resp.response_json}")
+        outer = json.loads(resp.response_json)
+        payload = json.loads(outer.get('message') or '{}')
+        if not payload.get('ok'):
+            raise RuntimeError(f"wrist RGBD unavailable: {payload.get('error')}")
+
+        rgb = _visual_reach_decode_rgb(payload['rgb_jpeg_b64'])
+
+        # 3) target mask → centroid → robust depth → world XYZ (shared back-projection,
+        #    identical to the dialog's calibration readout — see _visual_reach_backproject).
+        mask = _visual_reach_mask(rgb, block.get('text_prompts') or [], block.get('boxes') or [], block)
+        # Show what SAM3 detected on the live wrist stream (overlay on the selected sensor).
+        try:
+            _emit_visual_reach_mask(ctx.get('socketio'), block.get('sensor_id'), mask,
+                                    crop=stream_crop, size=stream_size)
+        except Exception as _e:
+            print(f"[visual_reach] mask overlay emit skipped: {_e}", flush=True)
+        ee_pose = None
+        if cam_mode == 'manual_ee':
+            ee_poses = agent.get_ee_position() or {}
+            if not ee_poses:
+                raise RuntimeError("visual_reach manual pose: empty EE pose (IK not configured?)")
+            ee_pose = [float(v) for v in next(iter(ee_poses.values()))]
+        mask_px = int(np.asarray(mask).astype(bool).sum())
+        bp = _visual_reach_backproject(payload, mask, block, ee_pose=ee_pose)
+        if bp is not None:
+            break
+        if attempt < attempts - 1:
+            print(f"[visual_reach] detect miss (mask_px={mask_px}) — re-capture "
+                  f"{attempt + 2}/{attempts}", flush=True)
+            time.sleep(retry_sleep)
     if bp is None:
-        raise RuntimeError("visual_reach: target not found in wrist view (no matching pixels with valid depth)")
+        if mask_px < 8:
+            raise RuntimeError(
+                f"visual_reach: 타겟을 검출하지 못했습니다 (YOLOE 매칭 0px, {attempts}회 재시도). 관찰 뷰가 타겟 지정(박스) "
+                "시점과 많이 달라졌을 수 있습니다 — observe_positions 를 박스를 친 자세와 비슷하게 "
+                "맞추거나, 현재 뷰에서 타겟 박스를 다시 지정하세요. (텍스트 프롬프트 모드는 뷰 변화에 더 강건합니다.)")
+        raise RuntimeError(
+            f"visual_reach: 타겟은 검출({mask_px}px)했으나 그 위치의 depth 가 모두 무효입니다 "
+            "(RealSense depth 구멍/측정 범위 밖). 카메라–타겟 거리(D405 권장 ~7cm 이상), 반사·투명 "
+            "표면, aligned_depth 정렬을 확인하세요.")
+    print(f"[visual_reach] mask_px={mask_px}", flush=True)
     target_xyz = np.array(bp['target_xyz'], dtype=float)
     u, v = bp['centroid']
     z = bp['depth']
@@ -1302,7 +1426,62 @@ def _run_visual_reach(block, ctx, task_control):
         'centroid': [u, v], 'depth': z, 'hover': hover,
     })
     agent.move_ee_to(target_ee, duration=duration)
-    _visual_reach_wait([agent], task_control, duration)
+    # Track the target while the reach move runs — re-detect ~2Hz and emit the mask
+    # overlay so the monitoring view follows the object for the block's duration.
+    _visual_reach_track_wait(agent, task_control, duration, ctx, block, service_name,
+                             stream_crop, stream_size)
+
+
+def _visual_reach_track_detect(client, service_name, block, sensor_id, socketio,
+                               crop=None, size=None):
+    """One tracking pass: fetch the wrist RGB, re-detect the target, emit the overlay."""
+    try:
+        import json as _json
+        from ...bridge.generated import robot_bridge_pb2 as pb
+        resp = client.ros_proxy.CallService(pb.ROSServiceRequest(
+            service_type='std_srvs/srv/Trigger', service_name=service_name, request_json=''))
+        if not resp.success:
+            return
+        payload = _json.loads(_json.loads(resp.response_json).get('message') or '{}')
+        if not payload.get('ok'):
+            return
+        rgb = _visual_reach_decode_rgb(payload['rgb_jpeg_b64'])
+        mask = _visual_reach_mask(rgb, block.get('text_prompts') or [], block.get('boxes') or [], block)
+        _emit_visual_reach_mask(socketio, sensor_id, mask, crop=crop, size=size)
+    except Exception as e:
+        print(f"[visual_reach] track pass skipped: {e}", flush=True)
+
+
+def _visual_reach_track_wait(agent, task_control, duration, ctx, block, service_name,
+                             crop=None, size=None):
+    """Wait for the reach move to finish while continuously re-detecting the target
+    and emitting the mask overlay (visual tracking during the block's execution).
+    Mirrors _visual_reach_wait's stop/timeout handling."""
+    from ...bridge.client import get_bridge_client
+    socketio = ctx.get('socketio')
+    sensor_id = block.get('sensor_id')
+    client = get_bridge_client()
+    timeout_at = time.time() + max(30.0, duration + 5.0)
+    next_detect = 0.0
+    while time.time() < timeout_at:
+        if task_control.get('stop'):
+            try:
+                agent.cancel_move_to()
+            except Exception:
+                pass
+            return
+        if not agent.is_moving:
+            _visual_reach_track_detect(client, service_name, block, sensor_id, socketio, crop, size)
+            return
+        now = time.time()
+        if now >= next_detect:
+            next_detect = now + 0.5
+            _visual_reach_track_detect(client, service_name, block, sensor_id, socketio, crop, size)
+        time.sleep(0.1)
+    try:
+        agent.cancel_move_to()
+    except Exception:
+        pass
 
 
 def _visual_reach_wait(agents, task_control, duration):

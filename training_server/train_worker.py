@@ -235,6 +235,12 @@ def train(
         print(f'[TRAIN] Loading pretrained weights from {load_model_path}...', flush=True)
         model_path = os.path.join(load_model_path, 'model.safetensors')
         state_dict = load_file(model_path, device='cuda')
+        # strict 로드(기본). ACT state_dict 는 카메라를 sensor id 로 키잉하지 않고
+        # (개수/순서 기반), 이 구성은 proprio 미사용(robot_state proj = (512,0)) 이라
+        # 워크스페이스 디바이스(robot/sensor id) 를 바꿔도 weight 키 불일치가 없다.
+        # 따라서 strict=True 가 정상 동작하며, 진짜 불일치(아키텍처/카메라 개수 변경
+        # 등)는 조용히 넘어가지 않고 즉시 드러난다. 불일치가 실제로 생기면 strict=False
+        # 로 덮지 말고 해당 체크포인트를 새 구성에 맞게 재학습/이전할 것.
         policy.load_state_dict(state_dict)
         print(f'[TRAIN] Pretrained weights loaded.', flush=True)
 

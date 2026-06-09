@@ -14,13 +14,28 @@
       :src="overlaySrc"
       style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0.6; pointer-events: none;"
     />
+    <!-- RGB↔depth toggle (replaces the old grad-cam button). Only shown when the
+         sensor publishes depth (depthTopic set). depthOn is owned by the parent
+         (v-model) so the choice persists on the workspace and is used for recording. -->
+    <q-btn
+      v-if="depthTopic"
+      round
+      dense
+      size="sm"
+      :icon="depthOn ? 'gradient' : 'image'"
+      :color="depthOn ? 'cyan' : 'grey-7'"
+      style="position: absolute; bottom: 8px; right: 8px; z-index: 1;"
+      @click.stop="$emit('update:depthOn', !depthOn)"
+    >
+      <q-tooltip>{{ depthOn ? $t('monitorRgbToggle') : $t('monitorDepthToggle') }}</q-tooltip>
+    </q-btn>
     <q-inner-loading :showing="props.loading || streamLoading">
     </q-inner-loading>
   </div>
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from 'vue';
+import { ref, watch, computed, onMounted, onUnmounted } from 'vue';
 import { useWebRTC } from 'src/composables/useWebRTC';
 
 const props = defineProps({
@@ -56,10 +71,31 @@ const props = defineProps({
     type: String,
     default: null,
   },
+  // Depth stream (RealSense use_depth). When depthOn, the effective topic switches
+  // from `topic` (color) to `depthTopic`. depthOn is controlled by the parent.
+  depthTopic: {
+    type: String,
+    default: '',
+  },
+  depthMsgType: {
+    type: String,
+    default: 'sensor_msgs/Image',
+  },
+  depthOn: {
+    type: Boolean,
+    default: false,
+  },
 });
+
+defineEmits(['update:depthOn']);
 
 const videoElement = ref(null);
 const { connect, disconnect, addConfig } = useWebRTC();
+
+// The stream source switches to the depth topic while depthOn is true.
+const effectiveTopic = computed(() => (props.depthOn && props.depthTopic) ? props.depthTopic : props.topic);
+const effectiveMsgType = computed(() => (props.depthOn && props.depthTopic) ? props.depthMsgType : props.msgType);
+
 let stream_id = '';
 // 컴포넌트 마운트 동안 단 하나의 active stream 만 유지. setupWebRTC 가
 // 여러 번 호출돼도 마지막 것만 살아남도록 generation 토큰으로 race 방어.
@@ -76,14 +112,14 @@ const streamLoading = ref(false);
 const pendingStream = ref(null);
 
 const setupWebRTC = () => {
-  if (!props.topic) return;
+  if (!effectiveTopic.value) return;
   const myGen = ++_setupGeneration;
   streamLoading.value = true;
-  connect(props.topic, {
+  connect(effectiveTopic.value, {
     resize: props.resize?.length ? props.resize : null,
     cropped_area: props.cropped_area?.length ? props.cropped_area : null,
     rotate: props.rotate,
-    msg_type: props.msgType,
+    msg_type: effectiveMsgType.value,
   }, (event) => {
     // race: 새 setup 이 시작된 뒤 늦게 도착한 track 무시.
     if (myGen !== _setupGeneration) return;
@@ -115,7 +151,7 @@ watch(() => props.loading, (newVal) => {
 // topic watcher — 같은 컴포넌트 인스턴스에서 topic 이 바뀌면 (예: WorkspacePage
 // 에서 :key 를 제거해 컴포넌트를 reuse 할 때) 새 stream 으로 연결. connect()
 // 내부에서 이전 PC 를 disconnect() 하므로 1 instance = 1 active PC.
-watch(() => props.topic, (newTopic, oldTopic) => {
+watch(effectiveTopic, (newTopic, oldTopic) => {
   if (!newTopic || newTopic === oldTopic) return;
   if (props.loading) return;
   setupWebRTC();

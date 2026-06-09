@@ -27,6 +27,11 @@ class RemoteAgent:
         self.joint_lower_bounds = robot.get('joint_lower_bounds')
         self.role = robot.get('role', 'single_arm')
         self.tool_inner = robot.get('tool_inner', False)
+        # tool_index: arm URDF 안에 임베디드된 tool(그리퍼) joint 의 인덱스.
+        # 안 읽으면 lerobot_io._compute_tool_qpos_indices 가 tool_inner=True 인데도
+        # tool_index 가 비어 그리퍼를 dataset action(relative_ee_pos)에서 누락시킨다
+        # → 학습된 정책에 그리퍼 채널이 없어 추론 시 그리퍼가 안 움직임.
+        self.tool_index = robot.get('tool_index') or []
         self.robot_type = robot['type']
         self.robot_company = robot['company']
         self.is_sim = robot.get('is_sim', False)

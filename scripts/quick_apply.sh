@@ -189,6 +189,8 @@ copy_file() {
 copy_tree "backend"
 copy_tree "frontend"
 copy_tree "ros2/ros2_bridge"
+# demo/ — event simulation demo catalog read by backend/api/routes/demo.py.
+copy_tree "demo"
 # In the repo `training_server/` lives at the root (so it can ship as its own
 # CI tar.gz), but at runtime it must appear under <project>/backend/training_server/
 # (matching where the launcher's installer downloads to).

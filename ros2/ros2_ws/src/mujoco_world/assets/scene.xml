@@ -123,6 +123,11 @@
                     <geom type="box" size="0.020 0.030 0.012" rgba="0.2 0.2 0.2 1" mass="0.1"
                           contype="0" conaffinity="0"/>
                     <site name="ee_site" pos="0.05 0 0" size="0.005" rgba="0 1 0 0.8"/>
+                    <!-- Wrist camera for the `visual_reach` planner block: forward-approach
+                         view that sees the workspace + gripper fingertips. Mounted on
+                         gripper_base (moves with the EE). Mirrors scene_peg.xml wrist_cam. -->
+                    <camera name="wrist_cam" pos="-0.025 0 0.045"
+                            xyaxes="0 -1 0  0.5 0 0.866" fovy="65"/>
 
                     <body name="finger_left" pos="0.030 0.018 0" gravcomp="1">
                       <joint name="gripper" type="slide" axis="0 1 0" range="0 0.04"

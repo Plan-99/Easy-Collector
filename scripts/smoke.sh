@@ -104,7 +104,8 @@ if [ "$QUICK" = "0" ]; then
         /api/teleoperators \
         /api/planners \
         /api/modules/installed \
-        /api/tutorial/status
+        /api/tutorial/status \
+        /api/demo/list
     do
         res=$(http_get "http://${BACKEND_HOST}:${BACKEND_PORT}${ep}")
         code=${res%%|*}

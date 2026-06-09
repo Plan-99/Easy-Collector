@@ -104,7 +104,8 @@ def create_sensor():
         settings = {
             'serial_number': serial_no,
             'ip_address': ip_address,
-            'device_index': device_index
+            'device_index': device_index,
+            'use_depth': bool(request.json.get('use_depth', False)),
         }
 
     SensorModel.create(
@@ -141,7 +142,8 @@ def update_sensor(id):
         sensor.settings = {
             'serial_number': serial_no,
             'ip_address': ip_address,
-            'device_index': device_index
+            'device_index': device_index,
+            'use_depth': bool(request.json.get('use_depth', False)),
         }
 
     sensor.save()

@@ -1,5 +1,6 @@
 from tqdm import tqdm
 import os
+import json
 from ...bridge.remote_env import RemoteEnv as Env
 from ...configs.global_configs import DATASET_DIR
 from .leader_teleoperation import Leader
@@ -22,6 +23,17 @@ def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
 
 def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors, task, language_instruction, socketio_instance, task_control, tele_type='leader', ros2_service='', iter=100000, hz=20, move_homepose_duration=5.0):
     agents = sorted(agents, key=lambda a: a.id)
+    # RealSense depth: a sensor whose workspace view is toggled to depth records the
+    # depth topic instead of color. sensor_depth_on is keyed by viewKey ("<sid>" or
+    # "<sid>_<n>"); match by sensor-id prefix. Done before Env so the subscription
+    # (read_topic) uses the depth stream.
+    _depth_on = (task.get('sensor_depth_on') or {}) if isinstance(task, dict) else {}
+    _depth_sids = {str(k).split('_')[0] for k, v in _depth_on.items() if v}
+    for _s in (sensors or []):
+        if _s.get('use_depth') and str(_s.get('id')) in _depth_sids and _s.get('depth_topic'):
+            print(f"[record] sensor {_s.get('id')} → depth topic {_s['depth_topic']}")
+            _s['read_topic'] = _s['depth_topic']
+            _s['read_topic_msg'] = 'sensor_msgs/Image'
     tutorial = any((s.get('settings') or {}).get('is_tutorial') for s in (sensors or []))
     env = Env(agents=agents, sensors=sensors, virtual_agents=(tele_type == 'vive_only'), tutorial=tutorial)
     dataset_dir = f"{DATASET_DIR}/{dataset_id}"
@@ -68,7 +80,13 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
             # NOTE: tutorial 이 아닌데도 호출하면 mujoco reset_world ROS service 가
             # 없어서 gRPC ROSProxy 가 ROS service 기본 timeout(=10초)을 다 채우고
             # 실패한다 → episode 시작마다 10초 dead time. tutorial 일 때만 호출.
-            if tutorial:
+            # motion_planning: the external planner owns scene setup — it snaps
+            # the arm home AND re-samples the objects (randomize) inside its own
+            # service. Calling reset_world here resets the freejoint objects back
+            # to the home keyframe, racing with / undoing the planner's randomize
+            # (peg ends back at home → the arm grasps empty → every episode fails).
+            # So skip our reset for motion_planning and let the planner do it.
+            if tutorial and tele_type != 'motion_planning':
                 try:
                     from ..routes.tutorial import reset_tutorial_world
                     reset_tutorial_world()
@@ -190,6 +208,12 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
             # 다음 sensor 첫 프레임 polling / joint state 검증 단계가 어차피 대기를
             # 강제하므로 redundant. 제거해서 record 시작 latency 단축.
             # --- motion_planning: ROS2 service 호출 (gRPC ROSProxy 경유) ---
+            # The actual planner call is DEFERRED until after env.reset() below:
+            # env.reset() resets the movable objects to the home keyframe, which
+            # would otherwise wipe the planner's randomize (peg snaps back home →
+            # arm grasps empty → every episode fails). Prepare the call here, fire
+            # it just before the recording loop.
+            _mp_service_starter = None
             if tele_type == 'motion_planning' and ros2_service:
                 service_result = {'done': False, 'success': None, 'message': ''}
                 try:
@@ -202,23 +226,37 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                                 service_name=ros2_service,
                                 request_json='',
                             ))
+                            # resp.success only means the gRPC call reached the
+                            # service. For a Trigger service the *task* outcome is
+                            # the Trigger response's own `success` field, carried
+                            # in response_json. A motion-planning episode is only
+                            # a real success (→ saved) when that inner success is
+                            # true; otherwise it is a ground-truth failure and the
+                            # outer loop re-tries without saving. This mirrors the
+                            # tutorial_collector (ground-truth-only datasets).
+                            inner_success = bool(resp.success)
+                            try:
+                                payload = json.loads(resp.response_json or '{}')
+                                if isinstance(payload, dict) and 'success' in payload:
+                                    inner_success = bool(payload['success'])
+                            except (ValueError, TypeError):
+                                pass
                             service_result['done'] = True
-                            service_result['success'] = resp.success
+                            service_result['success'] = inner_success
                             service_result['message'] = resp.response_json
-                            if resp.success:
+                            if inner_success:
                                 print(f'[NOTICE] ROS2 service "{ros2_service}" completed: {resp.response_json}')
                             else:
-                                print(f'[ERROR] ROS2 service "{ros2_service}" failed: {resp.response_json}')
+                                print(f'[ERROR] ROS2 service "{ros2_service}" ground-truth fail: {resp.response_json}')
                         except Exception as e:
                             service_result['done'] = True
                             service_result['success'] = False
                             service_result['message'] = str(e)
                             print(f'[ERROR] ROS2 service error: {e}')
 
-                    _th.Thread(target=_call_ros2_service, daemon=True).start()
-                    print(f'[NOTICE] ROS2 service "{ros2_service}" called, recording in parallel...')
+                    _mp_service_starter = lambda: _th.Thread(target=_call_ros2_service, daemon=True).start()
                 except Exception as e:
-                    print(f'[ERROR] Failed to call ROS2 service: {e}')
+                    print(f'[ERROR] Failed to prepare ROS2 service call: {e}')
                     task_control['stop'] = True
                     return
 
@@ -384,6 +422,13 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
             timesteps = [ts]
             succeed_flags = [1.0 if task_control.get('succeed') else 0.0]
 
+            # motion_planning: env.reset() above has reset the movable objects to
+            # home; NOW start the planner so its randomize is the last word on the
+            # scene. Recording proceeds in parallel with the planned motion.
+            if _mp_service_starter is not None:
+                _mp_service_starter()
+                print(f'[NOTICE] ROS2 service "{ros2_service}" called, recording in parallel...')
+
             # 에피소드 시작: vive origin 설정 및 teleop 스레드 시작
             if vive is not None:
                 vive.set_origin()
@@ -465,9 +510,15 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                     for agent in agents:
                         agent.moved_by_ui = False
 
-                # motion_planning: service 실패 시 중단
-                if tele_type == 'motion_planning' and service_result['done'] and not service_result['success']:
-                    print(f'[ERROR] ROS2 service failed at step {t+1}/{max_timesteps}: {service_result["message"]}')
+                # motion_planning: 서비스가 끝나면(성공이든 실패든) 녹화 종료. expert
+                # 모션 전체(서비스가 도는 동안의 프레임)를 담되, 끝난 뒤 max_timesteps
+                # (예: 600)까지 idle 프레임으로 채우지 않는다 — 그래야 데모가 실제
+                # grasp/insert 동작만 담고 success 토큰도 실제 완료 지점에 찍힌다.
+                if tele_type == 'motion_planning' and service_result['done']:
+                    if not service_result['success']:
+                        print(f'[ERROR] ROS2 service failed at step {t+1}/{max_timesteps}: {service_result["message"]}')
+                    else:
+                        print(f'[NOTICE] service done at step {t+1} — ending recording (motion captured)')
                     break
 
             # 에피소드 종료: teleop 스레드 정지 (다음 에피소드 origin 설정 전에 멈춤)
@@ -495,6 +546,16 @@ def record_episode(node, dataset_id, agents, move_homepose, assembly_id, sensors
                     continue
                 elif service_result['done'] and service_result['success']:
                     print(f'[NOTICE] ROS2 service completed successfully: {service_result["message"]}')
+                    # Expert demo succeeded (gt_ok) → stamp the success/done token
+                    # on the tail frames so the policy learns task completion.
+                    # Without this the DAgger episodes save with succeed=0 (no
+                    # success token), and the policy never learns when it's done.
+                    task_control['succeed'] = True
+                    n_done = min(len(succeed_flags), max(3, int(round(0.5 * hz))))
+                    for _i in range(len(succeed_flags) - n_done, len(succeed_flags)):
+                        if 0 <= _i < len(succeed_flags):
+                            succeed_flags[_i] = 1.0
+                    print(f'[NOTICE] success token stamped on last {n_done} frames')
                 elif not service_result['done']:
                     print(f'[WARNING] ROS2 service did not complete within timeout, restarting episode...')
                     continue

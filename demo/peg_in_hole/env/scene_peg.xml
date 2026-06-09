@@ -1,0 +1,244 @@
+<!--
+  EasyTrainer Tutorial World — Peg-in-Hole variant
+  =================================================
+  Identical 6DOF arm + gripper as assets/scene.xml. Cube/plate replaced with a
+  precision peg-in-hole task:
+    * peg        : 14×14×60 mm box, freejoint (graspable).
+    * hole_base  : flat plate + 4 walls forming an inner square slot
+                   (~18×18 mm, 4 mm tolerance). Freejoint so the whole base
+                   can be randomized as one rigid object each episode.
+
+  Success criterion (computed by callers, not enforced by MJCF):
+    * peg (x, y) within 3 mm of hole center,
+    * peg z within 2 mm of hole-base top,
+    * peg axis close to vertical (≤ 10°).
+
+  Bitmask conventions match scene.xml plus one extra:
+    16 : task base (hole_plate / hole_walls) — collides with floor + graspable +
+         finger + arm. Needed because hole_base is a freejoint body (so it can be
+         randomized) and must rest on the floor instead of free-falling.
+-->
+<mujoco model="easytrainer_tutorial_peg">
+  <compiler angle="radian" autolimits="true"/>
+
+  <option timestep="0.002" iterations="50" solver="Newton" tolerance="1e-8" gravity="0 0 -9.81"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="135" elevation="-25"/>
+  </visual>
+
+  <default>
+    <default class="arm_link">
+      <geom type="capsule" rgba="0.85 0.85 0.85 1" mass="0.5"
+            contype="8" conaffinity="3" friction="1.0 0.005 0.001"/>
+      <joint type="hinge" damping="2.0" armature="0.05" frictionloss="0.05"/>
+    </default>
+    <default class="arm_visual">
+      <geom rgba="0.85 0.85 0.85 1" mass="0.0" contype="0" conaffinity="0"/>
+    </default>
+    <default class="gripper_finger">
+      <geom type="box" size="0.010 0.008 0.024" rgba="0.2 0.2 0.2 1" mass="0.03"
+            contype="4" conaffinity="3" friction="2.0 0.10 0.005" condim="6"/>
+    </default>
+    <default class="hole_wall">
+      <geom type="box" rgba="0.85 0.80 0.20 1" mass="0.05"
+            contype="16" conaffinity="15" friction="1.0 0.005 0.001"/>
+    </default>
+  </default>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.5 0.7 0.9" rgb2="0.1 0.2 0.4" width="512" height="512"/>
+    <texture name="floor_tex" type="2d" builtin="checker" rgb1="0.2 0.3 0.4" rgb2="0.3 0.4 0.5" width="300" height="300"/>
+    <material name="floor_mat" texture="floor_tex" texrepeat="2 2" reflectance="0.1"/>
+    <material name="peg_mat" rgba="0.85 0.15 0.15 1"/>
+    <material name="marker_mat" rgba="0.95 0.55 0.10 1"/>
+    <material name="hole_base_mat" rgba="0.20 0.45 0.85 1" reflectance="0.05"/>
+    <material name="hole_wall_mat" rgba="0.85 0.80 0.20 1"/>
+  </asset>
+
+  <worldbody>
+    <light name="top_light" pos="0 0 2.0" dir="0 0 -1" diffuse="0.6 0.6 0.6" specular="0.1 0.1 0.1"/>
+    <light name="side_light" pos="0.8 0.8 1.5" dir="-0.5 -0.5 -1" diffuse="0.3 0.3 0.3"/>
+
+    <geom name="floor" type="plane" size="3 3 0.1" material="floor_mat"
+          contype="1" conaffinity="14" friction="1.0 0.005 0.001"/>
+
+    <!-- Robot arm: 6DOF chain on a small pedestal — identical to scene.xml -->
+    <body name="base" pos="0 0 0.05">
+      <geom type="cylinder" size="0.06 0.05" rgba="0.3 0.3 0.3 1" mass="2.0"
+            contype="0" conaffinity="0"/>
+
+      <body name="link1" pos="0 0 0.05" gravcomp="1">
+        <joint name="joint1" class="arm_link" axis="0 0 1" range="-3.14 3.14"/>
+        <geom class="arm_link" fromto="0 0 0  0 0 0.10" size="0.045"/>
+        <geom class="arm_visual" type="box" size="0.025 0.012 0.012" pos="0.045 0 0.05"
+              material="marker_mat"/>
+
+        <body name="link2" pos="0 0 0.10" gravcomp="1">
+          <joint name="joint2" class="arm_link" axis="0 -1 0" range="-1.57 1.57"/>
+          <geom class="arm_link" fromto="0 0 0  0.20 0 0" size="0.04"/>
+
+          <body name="link3" pos="0.20 0 0" gravcomp="1">
+            <joint name="joint3" class="arm_link" axis="0 -1 0" range="-2.40 0.50"/>
+            <geom class="arm_link" fromto="0 0 0  0.18 0 0" size="0.035"/>
+
+            <body name="link4" pos="0.18 0 0" gravcomp="1">
+              <joint name="joint4" class="arm_link" axis="1 0 0" range="-3.14 3.14"/>
+              <geom class="arm_link" fromto="0 0 0  0.08 0 0" size="0.030"/>
+              <geom class="arm_visual" type="box" size="0.040 0.034 0.004" pos="0.040 0 0.030"
+                    material="marker_mat"/>
+
+              <body name="link5" pos="0.08 0 0" gravcomp="1">
+                <joint name="joint5" class="arm_link" axis="0 -1 0" range="-1.40 1.40"/>
+                <geom class="arm_link" fromto="0 0 0  0.06 0 0" size="0.028"/>
+
+                <body name="link6" pos="0.06 0 0" gravcomp="1">
+                  <joint name="joint6" class="arm_link" axis="1 0 0" range="-3.14 3.14"/>
+                  <geom class="arm_visual" type="cylinder" size="0.025 0.020"
+                        pos="0.020 0 0" euler="0 1.5708 0" mass="0.2"/>
+
+                  <body name="gripper_base" pos="0.045 0 0" gravcomp="1">
+                    <geom type="box" size="0.020 0.030 0.012" rgba="0.2 0.2 0.2 1" mass="0.1"
+                          contype="0" conaffinity="0"/>
+                    <site name="ee_site" pos="0.05 0 0" size="0.005" rgba="0 1 0 0.8"/>
+
+                    <!--
+                      Wrist-mounted camera. Rigid child of gripper_base so it
+                      follows the EE pose. Pos: 2.5 cm behind the gripper box
+                      origin, 4.5 cm above (clears the gripper top). xyaxes
+                      yields a look-direction of (+x, 0, -0.5) ≈ forward and
+                      ~30° down toward where the fingers are reaching — the
+                      classic object-approach view.
+
+                      Why object-centric: round_0 failure mode was a visual
+                      XY-localization bottleneck (right pose, wrong xy). The
+                      old top_cam at z=0.85 m left the peg/hole as a few-pixel
+                      blob; the policy couldn't read sub-cm cues. The wrist
+                      view zooms with the gripper and stays close to the
+                      action footprint.
+                    -->
+                    <camera name="wrist_cam" pos="-0.025 0 0.045"
+                            xyaxes="0 -1 0  0.5 0 0.866" fovy="65"/>
+                    <!--
+                      Second wrist camera: mounted BESIDE the gripper (offset on
+                      +y, slightly separated but rigidly attached), looking back
+                      toward the gripper centerline / grasp footprint with a slight down
+                      tilt — a side profile of the peg being grasped. Complements
+                      wrist_cam's forward-approach view so the model can read the
+                      peg/hole geometry from two angles without a fixed top_cam.
+                    -->
+                    <camera name="wrist_cam_down" pos="0.045 0.07 0.04"
+                            xyaxes="-1 -0.07 0  0.05 -0.706 0.709" fovy="60"/>
+
+                    <!--
+                      Finger origins were y=±0.018 (matching the larger cube scene). The
+                      peg here is only 14 mm wide, so with finger half-thickness 8 mm the
+                      gap at gripper=0 was still 20 mm and the peg couldn't be grasped.
+                      Moving the origins to y=±0.010 lets gripper=0.005 close the inner
+                      faces onto the peg surface (0.010 + 0.005 − 0.008 = 0.007 = peg
+                      half-width).
+                    -->
+                    <body name="finger_left" pos="0.030 0.010 0" gravcomp="1">
+                      <joint name="gripper" type="slide" axis="0 1 0" range="0 0.04"
+                             damping="50" frictionloss="0.05"/>
+                      <geom class="gripper_finger"/>
+                    </body>
+                    <body name="finger_right" pos="0.030 -0.010 0" gravcomp="1">
+                      <joint name="gripper_mirror" type="slide" axis="0 -1 0" range="0 0.04"
+                             damping="50" frictionloss="0.05"/>
+                      <geom class="gripper_finger"/>
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+
+    <!-- ============== Peg-in-Hole task objects ====================== -->
+    <!-- peg: 14×14 mm cross-section, 60 mm tall. Half-sizes in MJCF. -->
+    <body name="peg" pos="0.30 0.10 0.035">
+      <freejoint name="peg_free"/>
+      <geom name="peg_geom" type="box" size="0.007 0.007 0.030" material="peg_mat"
+            contype="2" conaffinity="13" friction="1.0 0.05 0.005" condim="6" mass="0.04"/>
+    </body>
+
+    <!-- hole_base: rigid composite of a flat plate + 4 walls forming a square slot.
+         Inner opening ~18×18 mm (peg has 14×14 mm so 2 mm clearance per side =
+         4 mm tolerance). Whole thing is one freejoint so randomization moves it
+         as a single rigid body. -->
+    <body name="hole_base" pos="0.30 -0.10 0.005">
+      <freejoint name="hole_base_free"/>
+      <!-- Flat base plate: 80×80×10 mm, top at z = +0.005 in body frame -->
+      <geom name="hole_plate" type="box" size="0.040 0.040 0.005"
+            pos="0 0 0" material="hole_base_mat" mass="0.30"
+            contype="16" conaffinity="15" friction="1.0 0.005 0.001"/>
+      <!-- 4 walls forming a 18×18 mm square opening, 20 mm tall.
+           wall thickness 12 mm, outer footprint 42×42 mm, sits on top of plate. -->
+      <geom class="hole_wall" name="wall_xp" pos=" 0.015 0 0.015" size="0.006 0.021 0.010"
+            material="hole_wall_mat"/>
+      <geom class="hole_wall" name="wall_xn" pos="-0.015 0 0.015" size="0.006 0.021 0.010"
+            material="hole_wall_mat"/>
+      <geom class="hole_wall" name="wall_yp" pos="0  0.015 0.015" size="0.009 0.006 0.010"
+            material="hole_wall_mat"/>
+      <geom class="hole_wall" name="wall_yn" pos="0 -0.015 0.015" size="0.009 0.006 0.010"
+            material="hole_wall_mat"/>
+      <!-- Marker site at hole opening center (top of plate). Useful for cameras
+           and for the success check (we just look at peg-pos relative to this
+           body's frame). -->
+      <site name="hole_center" pos="0 0 0.025" size="0.003" rgba="0 1 0 0.9"/>
+    </body>
+
+    <!--
+      Object-centric world cameras.
+
+      Both are tightened to the peg/hole workspace (~25 cm × 25 cm centred
+      on x=0.30, y=0). Round_0 top_cam was at z=0.85 m and the work zone
+      only spanned ~25 % of the frame — too few pixels per cm for the
+      precision tail. These views give roughly 3× pixels-per-cm at the
+      hole opening.
+
+        - top_cam: pure straight-down overhead. No targetbody so the image
+          horizon stays stable as the peg moves through it (target-tracking
+          rotates the frame and confuses spatial cues).
+        - front_cam: side view from +X, aimed at the hole_base (the static
+          anchor for the task). Sees the peg traversing the workspace.
+    -->
+    <camera name="top_cam"   pos="0.30  0.00 0.40" fovy="45"/>
+    <camera name="front_cam" pos="0.55 -0.05 0.20" mode="targetbody" target="hole_base" fovy="42"/>
+  </worldbody>
+
+  <equality>
+    <joint joint1="gripper" joint2="gripper_mirror" polycoef="0 1 0 0 0"/>
+  </equality>
+
+  <actuator>
+    <position name="act_joint1" joint="joint1" kp="80"  kv="6"  ctrlrange="-3.14 3.14"/>
+    <position name="act_joint2" joint="joint2" kp="120" kv="10" ctrlrange="-1.57 1.57"/>
+    <position name="act_joint3" joint="joint3" kp="100" kv="8"  ctrlrange="-2.40 0.50"/>
+    <position name="act_joint4" joint="joint4" kp="60"  kv="5"  ctrlrange="-3.14 3.14"/>
+    <position name="act_joint5" joint="joint5" kp="50"  kv="4"  ctrlrange="-1.40 1.40"/>
+    <position name="act_joint6" joint="joint6" kp="40"  kv="3"  ctrlrange="-3.14 3.14"/>
+    <position name="act_gripper" joint="gripper" kp="400" kv="30" ctrlrange="0 0.04"/>
+  </actuator>
+
+  <!--
+    qpos layout for keyframe:
+      [6 arm joints][gripper * 2 (mirror)][peg 7 = xyz + quat][hole_base 7]
+    Home pose mirrors scene.xml (joints 2/3/5 angled so the EE hovers above
+    the work area). Peg starts upright in front of the robot; hole_base on
+    the opposite side. Both are placeholders — auto_collect / eval will call
+    /tutorial/randomize before each episode.
+  -->
+  <keyframe>
+    <key name="home"
+         qpos="0 1.35 -1.55 0 -1.30 0   0 0
+               0.30  0.10 0.035 1 0 0 0
+               0.30 -0.10 0.005 1 0 0 0"
+         ctrl="0 1.35 -1.55 0 -1.30 0   0"/>
+  </keyframe>
+</mujoco>

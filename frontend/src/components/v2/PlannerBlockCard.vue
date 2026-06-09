@@ -32,6 +32,20 @@
                     size="xs"
                 />
                 <q-space />
+                <!-- 단일 블록 실행 — 블록을 선택(테두리)하면 나타나는 초록 플레이 버튼.
+                     누르면 그 블록만 따로 실행 ('전체 실행' 아님). -->
+                <q-btn
+                    v-if="selected && !running"
+                    round
+                    dense
+                    size="sm"
+                    color="green"
+                    icon="play_arrow"
+                    class="q-mr-xs"
+                    @click.stop="$emit('run')"
+                >
+                    <q-tooltip>{{ $t('plannerRunThisBlock') }}</q-tooltip>
+                </q-btn>
                 <slot name="header-right" />
             </div>
             <!-- 제목 -->
@@ -90,6 +104,8 @@
 <script setup>
 import { computed } from 'vue';
 
+defineEmits(['run']);
+
 const props = defineProps({
     block: { type: Object, required: true },
     // backend `/api/planner/block_configs` 의 한 entry. 미지정 시 아이콘/색은 default.
@@ -106,6 +122,8 @@ const props = defineProps({
     width: { type: String, default: null },
     // 강조 상태. true 면 primary border + bg-blue-grey-9.
     active: { type: Boolean, default: false },
+    // 선택 상태 ("이 블록만 실행" 대상). true 면 초록 테두리 + 플레이 버튼 노출.
+    selected: { type: Boolean, default: false },
     // 강제 bg class — 미지정 시 active 에 따라 default.
     bgClass: { type: String, default: null },
     // 강제 stripe 색 — 미지정 시 type 별 기본.
@@ -126,6 +144,7 @@ const BLOCK_TYPE_COLORS = {
     timesleep: '#FF9800',
     sync: '#009688',
     query_pose: '#3F51B5',
+    visual_reach: '#E91E63',
 };
 
 const stripeColor = computed(() => props.stripeColor
@@ -160,9 +179,12 @@ const cardStyle = computed(() => ({
     flexShrink: 0,
     borderRadius: '6px',
     overflow: 'hidden',
-    border: props.active
-        ? '1px solid var(--q-primary)'
-        : '1px solid rgba(255,255,255,0.06)',
+    // 선택(초록) > 실행/드래그(primary) > 기본 순으로 테두리 우선순위.
+    border: props.selected
+        ? '2px solid #21BA45'
+        : props.active
+            ? '1px solid var(--q-primary)'
+            : '1px solid rgba(255,255,255,0.06)',
     transition: 'border-color 0.15s ease',
 }));
 
@@ -182,6 +204,9 @@ const defaultSubtitle = computed(() => {
             return `ID: ${b.sync_id || '—'}`;
         case 'query_pose':
             return b.service_name || '—';
+        case 'visual_reach':
+            return (b.text_prompts && b.text_prompts[0])
+                || (b.boxes && b.boxes.length ? 'box' : 'color');
         default:
             return '';
     }

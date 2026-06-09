@@ -26,7 +26,11 @@
                     :resize="viewportImgSize(vp.workspace, vp.viewKey, vp.sensor.id)"
                     :cropped_area="viewportCropArea(vp.workspace, vp.viewKey, vp.sensor.id)"
                     :rotate="viewportRotate(vp.workspace, vp.viewKey, vp.sensor.id)"
-                    :overlay-src="procStatus === 'testing' && inferenceVisionMapOn ? inferenceHeatmaps[`sensor_${vp.viewKey}`] : null"
+                    :overlay-src="wristMaskOverlays[`sensor_${vp.sensor.id}`] || (procStatus === 'testing' && inferenceVisionMapOn ? inferenceHeatmaps[`sensor_${vp.viewKey}`] : null)"
+                    :depth-topic="vp.sensor.use_depth ? (vp.sensor.depth_topic || '') : ''"
+                    depth-msg-type="sensor_msgs/Image"
+                    :depth-on="viewportDepthOn(vp.workspace, vp.viewKey, vp.sensor.id)"
+                    @update:depthOn="(val) => setViewportDepthOn(vp.workspace, vp.viewKey, vp.sensor, val)"
                 ></web-rtc-video>
                 <div class="full-height border-white bg-dark border-rounded flex flex-center" v-else>
                     <q-btn round flat icon="play_arrow" text-color="white" size="xl" @click="vp.sensor.handler.startSensor(vp.sensor)"></q-btn>
@@ -865,6 +869,25 @@ function viewportRotate(ws, viewKey, sensorId) {
     if (sensorId in d && d[sensorId] != null) return d[sensorId];
     return 0;
 }
+// RGB↔depth choice per view, persisted on the workspace (settings.sensors[view].depth_on)
+// via the same device_settings route the rotate/crop config uses.
+function viewportDepthOn(ws, viewKey, sensorId) {
+    const d = ws && ws.sensor_depth_on;
+    if (!d) return false;
+    if (viewKey in d) return !!d[viewKey];
+    if (sensorId in d) return !!d[sensorId];
+    return false;
+}
+function setViewportDepthOn(ws, viewKey, sensor, val) {
+    if (!ws) return;
+    ws.sensor_depth_on = { ...(ws.sensor_depth_on || {}), [viewKey]: !!val };
+    if (ws.id == null) return;
+    api.put(`/task/${ws.id}/device_settings`, {
+        device_type: 'sensors',
+        key: 'depth_on',
+        setting: { [viewKey]: !!val },
+    }).catch((e) => console.error('persist depth_on failed', e));
+}
 const selectedDatasetId = defineModel('selectedDatasetId', {
     type: [String, Number],
     default: null
@@ -1044,6 +1067,18 @@ const oodScoreDisplay = computed(() => {
 const inferenceVisionMapOn = ref(false);
 const inferenceVisionMapMethod = ref('attention');
 const inferenceHeatmaps = ref({}); // { 'sensor_<id>': data-url }
+// Wrist View Reach detection mask overlays, keyed by physical sensor: { 'sensor_<id>': data-url }.
+// Set on the 'planner_wrist_mask' socket event during the block's SAM3 detection step;
+// cleared when the next block starts or the run ends.
+const wristMaskOverlays = ref({});
+function _onWristMask(data) {
+    if (data && data.sensor_id != null && data.image) {
+        wristMaskOverlays.value = { ...wristMaskOverlays.value, [`sensor_${data.sensor_id}`]: data.image };
+    }
+}
+function _clearWristMasks() {
+    wristMaskOverlays.value = {};
+}
 const inferenceVisionMapMethodOptions = computed(() => [
     { label: t('visionMapAttention'), value: 'attention' },
     { label: t('visionMapGradcam'), value: 'gradcam' },
@@ -1192,6 +1227,10 @@ function startCorrectionRecording(cfg) {
     teleType.value = cfg.teleType || 'keyboard';
     collectionHz.value = Number(cfg.hz) || 20;
     languageInstruction.value = cfg.languageInstruction || '';
+    // motion_planning 교정: 외부 모션플래너 서비스(예: /tutorial/run_episode)를
+    // 받아 _doStartDataCollection 이 ros2_service 로 넘기게 한다. 없으면 record_episode
+    // 가 아무 서비스도 호출하지 않아 빈 교정 에피소드가 된다.
+    if (cfg.ros2Service) ros2Service.value = cfg.ros2Service;
     // 교정은 실패 직후 위치에서 시연이므로 home pose 이동 강제 off.
     moveHomposeInDataCollection.value = false;
     return _doStartDataCollection(teleType.value, {
@@ -1715,6 +1754,13 @@ onMounted(() => {
             inferenceHeatmaps.value = data.heatmaps;
         }
     });
+
+    // Wrist View Reach: overlay the detected SAM3 mask on the selected wrist sensor's
+    // live stream during the block's detection step. Named handlers so onUnmounted can
+    // remove ONLY ours (planner_block_start is also used by PlannerPage).
+    socket.on('planner_wrist_mask', _onWristMask);
+    socket.on('planner_block_start', _clearWristMasks);
+    socket.on('planner_run_done', _clearWristMasks);
 });
 
 onUnmounted(() => {
@@ -1728,6 +1774,9 @@ onUnmounted(() => {
     socket.off('episode_saved');
     socket.off('episode_thrown');
     socket.off('inference_vision_map');
+    socket.off('planner_wrist_mask', _onWristMask);
+    socket.off('planner_block_start', _clearWristMasks);
+    socket.off('planner_run_done', _clearWristMasks);
     removeSucceedKeyListener();
 });
 </script>

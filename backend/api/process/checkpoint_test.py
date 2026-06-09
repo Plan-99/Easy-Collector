@@ -624,7 +624,14 @@ def checkpoint_test(
                         for _a in _arms:
                             _st = obs_snap['robot_states'].get(_a.id) or obs_snap['robot_states'].get(str(_a.id))
                             if _st is not None and _st.get('qpos') is not None:
-                                _arm_qpos.append(np.array(_st['qpos'], dtype=np.float32))
+                                _q = np.array(_st['qpos'], dtype=np.float32)
+                                # inner gripper(tool_inner+tool_index)는 arm qpos 에서 제외
+                                # — 학습 _build_obs_state 와 동일(tool 은 아래 tool_pose 로 따로).
+                                _ti = set(int(i) for i in (getattr(_a, 'tool_index', None) or [])) \
+                                    if getattr(_a, 'tool_inner', False) else set()
+                                if _ti:
+                                    _q = np.array([v for j, v in enumerate(_q) if j not in _ti], dtype=np.float32)
+                                _arm_qpos.append(_q)
                         if _arm_qpos:
                             _parts.append(np.concatenate(_arm_qpos))
                     elif _key == 'qvel':
@@ -652,6 +659,20 @@ def checkpoint_test(
                     _t_qpos = _a.get_joint_states()
                     if _t_qpos:
                         _parts.append(np.array(_t_qpos, dtype=np.float32))
+                # inner gripper(tool_inner+tool_index, arm URDF 임베디드): arm 의 qpos
+                # 에서 tool 인덱스 값을 tool_pose 로 추가 — 학습 _build_obs_state 가
+                # tool_qpos_indices 로 항상 추가하는 것과 대칭. 없으면 추론 state 가
+                # 학습보다 작아 state projection 에서 shape mismatch (1x0 vs 1x512).
+                for _a in _arms:
+                    _ti = (getattr(_a, 'tool_index', None) or []) if getattr(_a, 'tool_inner', False) else []
+                    if not _ti:
+                        continue
+                    _st = obs_snap['robot_states'].get(_a.id) or obs_snap['robot_states'].get(str(_a.id))
+                    if _st is not None and _st.get('qpos') is not None:
+                        _q = np.array(_st['qpos'], dtype=np.float32)
+                        _tv = [float(_q[i]) for i in _ti if 0 <= int(i) < len(_q)]
+                        if _tv:
+                            _parts.append(np.array(_tv, dtype=np.float32))
                 _qpos_np = np.concatenate(_parts) if _parts else np.zeros(0, dtype=np.float32)
                 _qpos_t = torch.from_numpy(_qpos_np).float().cuda().unsqueeze(0)
                 _policy_input = {'observation.state': _qpos_t}

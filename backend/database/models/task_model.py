@@ -24,6 +24,7 @@ class Task(SoftDeleteModel):
         'sensor_img_size',
         'sensor_cropped_area',
         'sensor_rotate',
+        'sensor_depth_on',
         'sensor_sam3'
     ]
 
@@ -194,6 +195,23 @@ class Task(SoftDeleteModel):
         return rotation
 
     @property
+    def sensor_depth_on_computed(self):
+        # Per-view RGB↔depth choice for use_depth sensors (stored in
+        # settings.sensors[view|sid].depth_on via the device_settings route).
+        out = {}
+        sensors_settings = self._settings.get('sensors', {})
+        for sid, vkey in self._enumerate_view_keys():
+            sid_str = str(sid)
+            stored = (
+                sensors_settings.get(vkey, {}).get('depth_on')
+                if vkey in sensors_settings else None
+            )
+            if stored is None and sid_str in sensors_settings:
+                stored = sensors_settings.get(sid_str, {}).get('depth_on')
+            out[vkey] = bool(stored)
+        return out
+
+    @property
     def sensor_sam3_computed(self):
         # SAM3 per-view segmentation config. Default = disabled / no-op so
         # the rest of the pipeline can read this dict unconditionally.
@@ -227,6 +245,7 @@ class Task(SoftDeleteModel):
         data['sensor_img_size'] = self.sensor_img_size_computed
         data['sensor_cropped_area'] = self.sensor_cropped_area_computed
         data['sensor_rotate'] = self.sensor_rotate_computed
+        data['sensor_depth_on'] = self.sensor_depth_on_computed
         data['sensor_sam3'] = self.sensor_sam3_computed
         data['sensor_ids'] = self._sensor_ids
         data['settings'] = self._settings
