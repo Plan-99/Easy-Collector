@@ -1487,16 +1487,11 @@ const monitorVisibleViewKeys = computed(() => {
         if (!group) continue;
         const block = group.blocks?.[blockIdx];
         if (!block || block.type !== 'checkpoint') continue;
-        const cp = checkpoints.value.find(c => c.id === block.checkpoint_id);
-        if (!cp) continue;
-        // /api/checkpoints 응답이 axios 경로에선 ``task`` 객체를 생략하고
-        // ``task_id`` 만 보낼 때가 있어, availableWorkspaces 에서 task 를 다시
-        // 조회해 sensor_ids 를 얻는다.
-        let cpSids = cp.task?.sensor_ids;
-        if (!cpSids || cpSids.length === 0) {
-            const task = availableWorkspaces.value.find(w => w.id === cp.task_id);
-            cpSids = task?.sensor_ids || [];
-        }
+        // 체크포인트의 워크스페이스 = 블록의 workspace_id. 그 워크스페이스의
+        // sensor_ids 로 visual reach 카메라 후보를 정한다. (checkpoints 글로벌
+        // 로드를 없앴으므로 cp 룩업 대신 블록의 workspace_id 를 직접 쓴다.)
+        const task = availableWorkspaces.value.find(w => w.id === block.workspace_id);
+        const cpSids = task?.sensor_ids || [];
         if (!cpSids.length) continue;
         anyRunningCheckpoint = true;
         const wsId = block.workspace_id;
@@ -1779,9 +1774,16 @@ function groupTitle(group) {
 // --- Checkpoints ---
 const checkpoints = ref([]);
 
-function listCheckpoints() {
+// 특정 워크스페이스(taskId)의 finished 체크포인트만 조회 — 블록 다이얼로그의
+// 체크포인트 피커/선택 전용. 글로벌 조회 대신 다이얼로그 워크스페이스 단위로
+// 좁혀, 응답을 작게 유지하고 불필요한 전체 로드(+동시요청 시 응답 깨짐)를 피한다.
+function listCheckpoints(taskId) {
+    if (taskId == null) {
+        checkpoints.value = [];
+        return Promise.resolve();
+    }
     return api.get('/checkpoints', {
-        params: { where: 'status,=,finished', order: 'created_at DESC', light: 1 }
+        params: { where: 'status,=,finished', task_id: taskId, order: 'created_at DESC', light: 1 }
     }).then((response) => {
         checkpoints.value = response.data.checkpoints || [];
     }).catch((error) => {
@@ -2168,6 +2170,13 @@ watch(() => blockForm.value.workspace_id, () => {
         blockForm.value.sensor_id = null;
     }
 });
+
+// 블록 폼의 워크스페이스가 정해지면 그 워크스페이스의 finished 체크포인트만 조회.
+// (체크포인트 피커/선택/저장은 모두 이 워크스페이스 것만 쓰므로 글로벌 조회 불필요.)
+// immediate: 폼이 이미 workspace_id 를 들고 열릴 때(편집)도 즉시 로드.
+watch(() => blockForm.value.workspace_id, (wsId) => {
+    listCheckpoints(wsId);
+}, { immediate: true });
 // Selected camera → carry its RGB-D source. Explicit settings.rgbd_service wins
 // (sim / custom); otherwise a real use_depth RealSense exposes the bridge-provided
 // /ec_sensor_<id>/wrist_rgbd Trigger (color + aligned depth + intrinsics).
@@ -2879,7 +2888,8 @@ onUnmounted(() => {
 onMounted(async () => {
     pageLoading.value = true;
     loadBlockConfigs();
-    listCheckpoints();
+    // 체크포인트는 글로벌로 미리 받지 않는다 — 블록 다이얼로그의 workspace_id 가
+    // 정해질 때 그 워크스페이스 것만 조회한다(아래 watch).
     listPlanners();
     await listAvailableWorkspaces();
     await new Promise(resolve => setTimeout(resolve, 2000));

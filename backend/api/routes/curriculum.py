@@ -569,6 +569,102 @@ def reset_stage(id):
     return {'status': 'success', 'message': 'Stage reset'}, 200
 
 
+@curriculum_bp.route('/checkpoint_group/<id>/:revert_stage', methods=['POST'])
+def revert_stage(id):
+    """현재(최신) 스테이지를 삭제하고 이전 스테이지로 복귀 — 승급(_graduate_group)의
+    역연산.
+
+      1) 그룹 체크포인트를 부모(load_model_id)로 되돌린다. 승급 시 새 cp 는
+         load_model_id=직전 cp 로 만들어지므로, 현재 cp 의 부모가 곧 이전 스테이지의
+         체크포인트다.
+      2) 플래너 블록의 checkpoint_id 도 같은 매핑으로 되돌린다.
+      3) 현재 스테이지(+데이터셋/롤아웃결과)와 승급으로 생긴(이제 미참조) 체크포인트를
+         삭제한다.
+      4) 그룹 status=collecting, 이전 스테이지를 active 로.
+
+    최초(index 0) 스테이지면 복귀할 이전 스테이지가 없어 거부.
+    """
+    group = CheckpointGroupModel.find(id)
+    if not group:
+        return {'status': 'error', 'message': 'Group not found'}, 404
+
+    # 롤아웃/학습 진행 중엔 거부 — 먼저 멈춰야 한다.
+    proc_name = _rollout_process_name(group.curriculum_id)
+    if proc_name in current_app.pm.processes:
+        return {'status': 'error', 'message': 'Stop the rollout before reverting'}, 409
+    if group.status == CheckpointGroupModel.STATUS_TRAINING:
+        return {'status': 'error', 'message': 'Cannot revert while training'}, 409
+
+    cur = group.current_stage
+    if cur is None or (cur.index or 0) <= 0:
+        return {'status': 'error', 'message': 'No previous stage to revert to'}, 400
+
+    # 현재 그룹 체크포인트 → 부모(load_model_id) 매핑 (str(current) → parent).
+    cur_cp_ids = group._get_json_field('checkpoint_ids') or []
+    mapping = {}
+    orphan_ids = []  # 승급으로 생긴 현재 cp — revert 후 미참조 → soft-delete.
+    for cp in cur_cp_ids:
+        ck = CheckpointModel.find(cp)
+        parent = getattr(ck, 'load_model_id', None) if ck else None
+        if parent is not None:
+            mapping[str(cp)] = parent
+            orphan_ids.append(cp)
+    if not mapping:
+        return {'status': 'error',
+                'message': '복귀할 이전 체크포인트(load_model_id)를 찾을 수 없습니다'}, 400
+
+    # 1) 그룹 체크포인트/설정 되돌리기.
+    new_ids = [mapping.get(str(cp), cp) for cp in cur_cp_ids]
+    cs = group._get_json_field('checkpoint_settings') or {}
+    new_cs = {}
+    if isinstance(cs, dict):
+        for cp in cur_cp_ids:
+            conf = cs.get(str(cp))
+            if conf is None:
+                conf = cs.get(cp)
+            if conf is not None:
+                new_cs[str(mapping.get(str(cp), cp))] = conf
+    group.checkpoint_ids = new_ids
+    group.checkpoint_settings = new_cs
+    group.status = CheckpointGroupModel.STATUS_COLLECTING
+    group.training_map = {}
+    group.save()
+
+    # 2) 플래너 블록 checkpoint_id 되돌리기 (current → parent). curriculum_train 의
+    #    교체 헬퍼 재사용. 순환 import 회피 위해 함수 내 import.
+    from ..process.curriculum_train import _replace_planner_checkpoints
+    curriculum = CurriculumModel.find(group.curriculum_id)
+    planner = curriculum.planner if curriculum else None
+    if planner is not None:
+        plans = planner._get_json_field('plans') or []
+        _replace_planner_checkpoints((plans, planner), mapping)
+
+    # 3) 현재 스테이지 + 데이터셋 + 롤아웃 결과 삭제.
+    _delete_dataset_rows(cur.datasets)
+    for res in RolloutResultModel.all_active().where(RolloutResultModel.stage_id == cur.id):
+        res.delete_instance()
+    cur.delete_instance()
+
+    # 승급으로 생긴 체크포인트(이제 어디서도 참조 안 함) soft-delete — 이전 cp 로
+    #    되돌렸으므로 현재 cp 는 버린다.
+    for cp in orphan_ids:
+        ck = CheckpointModel.find(cp)
+        if ck:
+            try:
+                ck.delete_instance()
+            except Exception as e:
+                print(f'[curriculum] revert: checkpoint {cp} delete failed: {e}')
+
+    # 4) 이전 스테이지가 현재가 됨 — active 로 보장.
+    prev = group.current_stage
+    if prev is not None:
+        prev.status = StageModel.STATUS_ACTIVE
+        prev.save()
+
+    return {'status': 'success', 'message': 'Reverted to previous stage',
+            'stage_index': prev.index if prev else None}, 200
+
+
 # ── Rollout 시작 / 정지 / 상태 ─────────────────────────────────────────────
 
 @curriculum_bp.route('/curriculum/<id>/:start_rollout', methods=['POST'])

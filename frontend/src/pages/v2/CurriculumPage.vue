@@ -267,6 +267,15 @@
                 :disable="isRunning || !dashSelectedStage(dg)"
                 @click="askStageReset(dg)"
               />
+              <!-- 승급(스테이지 2개 이상)된 경우에만 — 현재 스테이지 삭제 + 이전 복귀. -->
+              <q-btn
+                v-if="(dg.stages || []).length > 1"
+                outline dense color="negative" icon="undo"
+                class="q-ml-sm"
+                :label="t('currRevertStage')"
+                :disable="isRunning"
+                @click="askRevertStage(dg)"
+              />
             </div>
 
             <div class="row q-col-gutter-md">
@@ -689,6 +698,24 @@
         <q-card-actions align="right" class="q-pa-md">
           <q-btn flat :label="t('no')" color="grey-4" v-close-popup />
           <q-btn unelevated color="orange" text-color="dark" :label="t('yes')" v-close-popup @click="resetStage" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
+    <!-- 이전 스테이지로 복귀 확인 — 현재(최신) 스테이지 삭제 + 체크포인트를 이전으로
+         되돌림(승급으로 생긴 체크포인트는 폐기). 되돌릴 수 없으니 확인을 받는다. -->
+    <q-dialog v-model="showRevertConfirm">
+      <q-card dark class="bg-secondary text-white" style="min-width: 400px">
+        <q-card-section class="row items-center bg-dark">
+          <q-icon name="undo" color="negative" class="q-mr-sm" />
+          <div class="text-h6">{{ t('currRevertStage') }}</div>
+        </q-card-section>
+        <q-card-section class="text-body">
+          {{ t('currRevertStageConfirmMsg') }}
+        </q-card-section>
+        <q-card-actions align="right" class="q-pa-md">
+          <q-btn flat :label="t('no')" color="grey-4" v-close-popup />
+          <q-btn unelevated color="negative" :label="t('yes')" :loading="reverting" @click="revertStage" />
         </q-card-actions>
       </q-card>
     </q-dialog>
@@ -1302,9 +1329,11 @@ function ensureDefaultServerUrl () {
     })
 }
 
-async function loadBlockDatasets (cpId) {
-  const cp = checkpoints.value.find((c) => c.id === cpId)
-  const taskId = cp && cp.task_id
+async function loadBlockDatasets (taskId) {
+  // taskId 는 블록의 workspace_id 를 그대로 받는다. (예전엔 checkpoints.value 에서
+  // cp 를 찾아 task_id 를 얻었는데, checkpoints 로드가 비동기 + 'finished' 필터라
+  // 비어 있으면 taskId==null 로 조기 return 되어 /datasets 호출이 아예 안 일어났다.
+  // 블록이 이미 workspace_id 를 들고 있으므로 그걸 직접 쓴다.)
   blockDatasets.value = []
   if (taskId == null) return
   const { data } = await api.get('/datasets', { params: { task_id: taskId } })
@@ -1499,6 +1528,34 @@ async function resetStage () {
   Notify.create({ type: 'positive', message: t('currStageResetDone') })
 }
 
+// ── 이전 스테이지로 복귀 ─────────────────────────────────────────────────────────
+const revertTarget = ref(null)        // 복귀 대상 group id
+const showRevertConfirm = ref(false)
+const reverting = ref(false)
+function askRevertStage (dg) {
+  revertTarget.value = dg.checkpoint_group_id
+  showRevertConfirm.value = true
+}
+async function revertStage () {
+  const gid = revertTarget.value
+  if (gid == null || reverting.value) return
+  reverting.value = true
+  try {
+    await api.post(`/checkpoint_group/${gid}/:revert_stage`)
+    showRevertConfirm.value = false
+    // 복귀는 체크포인트·플래너 블록·스테이지를 모두 바꾸므로 포괄 리로드.
+    await loadPlanners()
+    loadPlannerBlocks()
+    loadCheckpoints()
+    await loadCurriculum(curriculum.value.id)
+    Notify.create({ type: 'positive', message: t('currRevertStageDone') })
+  } catch (e) {
+    Notify.create({ type: 'negative', message: e?.response?.data?.message || t('currRevertStageFailed') })
+  } finally {
+    reverting.value = false
+  }
+}
+
 // ── group policy 탭 ────────────────────────────────────────────────────────────
 watch(policyGroupId, () => {
   const m = (policyGroup.value && policyGroup.value.mission) || {}
@@ -1532,8 +1589,9 @@ function openBlockDialog (blk) {
     blockForm.trainingForm = buildTrainingForm(blockPolicyTypeFor(blk.checkpoint_id), conf.train_settings || {})
     blockForm.serverUrl = (conf.train_settings || {}).server_url || ''
     if (!blockForm.serverUrl) ensureDefaultServerUrl()
-    // 해당 체크포인트 워크스페이스의 데이터셋만 로드(에피소드 개수 라벨용).
-    loadBlockDatasets(blk.checkpoint_id)
+    // 해당 블록 워크스페이스의 데이터셋만 로드(base 데이터셋 후보). 블록의
+    // workspace_id 를 직접 넘긴다 — checkpoints 로드 여부와 무관하게 호출되도록.
+    loadBlockDatasets(blk.workspace_id)
     // 판정 조건 정책(체크포인트별): 최초 길이 제한 + 길이 제한 rate + 성공 임계값.
     blockForm.initial_max_steps = conf.initial_max_steps != null ? conf.initial_max_steps : 600
     blockForm.length_limit_rate = conf.length_limit_rate != null ? conf.length_limit_rate : 1.5

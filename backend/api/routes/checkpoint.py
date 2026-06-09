@@ -76,10 +76,31 @@ def get_checkpoints():
 
     rows = list(q)
 
-    # light=1: task/policy/load_model 확장 없이 컬럼만 (셀렉트 채우기 전용, 빠름).
+    # light=1: 드롭다운/셀렉트 채우기 전용 — 최소 필드만 반환한다.
+    #
+    # 예전엔 컬럼 전체(_to_dict_shallow)를 담았는데, train_settings(최대 ~16KB)
+    # 와 dataset_info(커리큘럼 cp 는 데이터셋 다수 참조) 때문에 응답이 37KB+ 로
+    # 커졌다. 학습 중 잦은 socketio emit + 페이지 진입 시 동시 요청과 겹치면
+    # Werkzeug dev 서버가 큰 응답을 깨뜨려(write() before start_response → 클라
+    # 이언트 JSON 파싱 실패) checkpoints 리스트가 빈 채로 들어온다(플래너 블록
+    # 설정의 체크포인트 리스트가 안 뜨던 원인). 드롭다운에 필요한 필드만 추려
+    # 응답을 수 KB 로 줄인다. 상세는 /checkpoint/<id> 로 개별 조회.
     light = request.args.get('light') in ('1', 'true', 'True')
     if light:
-        checkpoints = [c._to_dict_shallow() for c in rows]
+        checkpoints = []
+        for c in rows:
+            ts = c._get_json_field('train_settings') or {}
+            checkpoints.append({
+                'id': c.id,
+                'name': c.name,
+                'task_id': c.task_id,
+                'policy_id': c.policy_id,
+                'status': c.status,
+                'load_model_id': c.load_model_id,
+                # planner 가 train_settings.has_succeed 만 읽으므로 그것만 남긴다.
+                'train_settings': {'has_succeed': bool(ts.get('has_succeed'))}
+                if isinstance(ts, dict) else {'has_succeed': False},
+            })
     else:
         checkpoints = _serialize_checkpoints_full(rows)
     return {
