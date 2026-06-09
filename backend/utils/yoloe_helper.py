@@ -94,6 +94,21 @@ def detect_exemplar(target_rgb: np.ndarray, refer_rgb: np.ndarray, box,
     return r.detect_exemplar(target_rgb, refer_rgb, box, conf=conf)
 
 
+def detect_exemplar_multi(target_rgb: np.ndarray, refers, conf: float = 0.25) -> np.ndarray:
+    """Multi-reference cross-view detect: average per-reference VPEs (여러 각도
+    레퍼런스) for view-robust detection. ``refers`` = [(refer_rgb, box), ...].
+    Raises if YOLOE not installed. Older extension w/o multi → single-exemplar fallback."""
+    r = _load_runner()
+    if r is None or not is_extension_installed():
+        raise RuntimeError('YOLOE extension is not installed')
+    refers = [(rr, bb) for (rr, bb) in (refers or []) if rr is not None and bb is not None]
+    if hasattr(r, 'detect_exemplar_multi'):
+        return r.detect_exemplar_multi(target_rgb, refers, conf=conf)
+    if not refers:
+        return np.zeros(target_rgb.shape[:2], bool)
+    return r.detect_exemplar(target_rgb, refers[0][0], refers[0][1], conf=conf)
+
+
 def detect_text(target_rgb: np.ndarray, texts, conf: float = 0.15) -> np.ndarray:
     """Open-vocabulary text-prompt detect via YOLOE. Raises if not installed."""
     r = _load_runner()

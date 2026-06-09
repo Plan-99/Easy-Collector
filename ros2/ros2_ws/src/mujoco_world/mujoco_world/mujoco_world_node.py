@@ -17,23 +17,38 @@ Multi-group (dual_arm_assembly_test): ONE physics sim, N topic namespaces.
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 
 import cv2
+import numpy as np
 import rclpy
 from ament_index_python.packages import get_package_share_directory
 from cv_bridge import CvBridge
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import CompressedImage, JointState
+from std_msgs.msg import String
 from std_srvs.srv import Empty, Trigger
 
+from . import task_success
 from .sim_runner import SimRunner
 
 
 DEFAULT_JOINT_NAMES = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"]
-DEFAULT_CAMERA_NAMES = ["top_cam", "front_cam"]
+# wrist_cam added for the `visual_reach` planner block: it is published live (so the
+# block's settings dialog can stream it) and its depth is rendered for 3D targeting.
+DEFAULT_CAMERA_NAMES = ["top_cam", "front_cam", "wrist_cam"]
+
+# Default per-object sampling ranges for the peg-in-hole benchmark, used by the
+# /tutorial/randomize service when no `randomize_ranges` param is supplied.
+# Mirrors tutorial_pegtask.launch.py so the model-tester collector gets scene
+# diversity. Keys are freejoint body names; ranges are metres (yaw radians).
+DEFAULT_RANDOMIZE_RANGES = {
+    "peg": {"x": [0.25, 0.40], "y": [-0.05, 0.10]},
+    "hole_base": {"x": [0.25, 0.40], "y": [-0.15, -0.05], "yaw": [-0.3, 0.3]},
+}
 
 
 class _Group:
@@ -71,6 +86,9 @@ class MuJoCoWorldNode(Node):
         # 기본 True — X11 auth가 잡혀 있으면 호스트에 native MuJoCo 창이 뜬다.
         # 실패해도 SimRunner._run의 try/except가 헤드리스로 폴백하므로 안전.
         self.declare_parameter("show_viewer", True)
+        # Per-object sampling ranges for /tutorial/randomize (JSON). Empty -> the
+        # packaged DEFAULT_RANDOMIZE_RANGES (peg-in-hole) above.
+        self.declare_parameter("randomize_ranges", "")
 
         scene_xml = self.get_parameter("scene_xml").value
         if not scene_xml:
@@ -79,6 +97,15 @@ class MuJoCoWorldNode(Node):
             )
         if not os.path.isfile(scene_xml):
             raise FileNotFoundError(f"MuJoCo scene XML not found: {scene_xml}")
+
+        # Ground-truth task identity (peg / cube) for the success service, plus
+        # the randomize sampling ranges. Both feed the model-tester data pipeline.
+        self._scene_id = task_success.scene_id_from_path(scene_xml)
+        rr_raw = self.get_parameter("randomize_ranges").value
+        try:
+            self._randomize_ranges = json.loads(rr_raw) if rr_raw else dict(DEFAULT_RANDOMIZE_RANGES)
+        except (json.JSONDecodeError, TypeError):
+            self._randomize_ranges = dict(DEFAULT_RANDOMIZE_RANGES)
 
         # reset_prefix is where reset/reset_world services live; for a
         # single-group world it equals the group prefix (unchanged behavior).
@@ -165,6 +192,21 @@ class MuJoCoWorldNode(Node):
             Empty, f"{self._reset_prefix}/reset_world", self._on_reset_world)
         self.create_service(
             Trigger, f"{self._reset_prefix}/reset", self._on_reset)
+        # Model-tester data pipeline: randomize re-samples peg/hole_base poses +
+        # snaps the arm home; check_success runs the ground-truth pose check.
+        self.create_service(
+            Trigger, f"{self._reset_prefix}/randomize", self._on_randomize)
+        # Peg-only re-place (x,y within ±0.05 of home, hole fixed). The standalone
+        # peg-watchdog calls this when it detects the peg has tipped over.
+        self.create_service(
+            Trigger, f"{self._reset_prefix}/randomize_peg", self._on_randomize_peg)
+        self.create_service(
+            Trigger, f"{self._reset_prefix}/check_success", self._on_check_success)
+        # visual_reach: return latest wrist RGB-D + camera pose/intrinsics + ee_site
+        # pose as JSON in the Trigger response message (backend reaches this via the
+        # gRPC ROSProxy.CallService bridge).
+        self.create_service(
+            Trigger, f"{self._reset_prefix}/wrist_rgbd", self._on_wrist_rgbd)
 
         # --- Timers -----------------------------------------------------
         state_period = 1.0 / max(1.0, float(self.get_parameter("state_publish_hz").value))
@@ -172,6 +214,11 @@ class MuJoCoWorldNode(Node):
 
         self.create_timer(state_period, self._publish_joint_states)
         self.create_timer(image_period, self._publish_camera_images)
+        # Movable-object pose stream consumed by tutorial_planner_node (it waits
+        # for peg/hole_base poses before planning). JSON {body: [x,y,z,qw,qx,qy,qz]}.
+        self._object_poses_pub = self.create_publisher(
+            String, f"{self._reset_prefix}/object_poses_json", reliable_qos)
+        self.create_timer(state_period, self._publish_object_poses)
 
         self.get_logger().info(
             "MuJoCo world up. "
@@ -235,6 +282,94 @@ class MuJoCoWorldNode(Node):
             self.get_logger().error(response.message)
         return response
 
+    def _on_randomize(self, request: Trigger.Request, response: Trigger.Response) -> Trigger.Response:
+        """Re-sample peg/hole_base poses and snap the arm home. Returns the
+        sampled world poses under the ``sampled`` key so the planner can use
+        them as authoritative without waiting for an object-pose topic."""
+        try:
+            sampled = self._sim.randomize_objects(self._randomize_ranges)
+            response.success = True
+            response.message = json.dumps({
+                "scene_id": self._scene_id,
+                "sampled": sampled,
+            })
+        except Exception as e:
+            response.success = False
+            response.message = f"randomize failed: {e}"
+            self.get_logger().error(response.message)
+        return response
+
+    def _on_randomize_peg(self, request: Trigger.Request, response: Trigger.Response) -> Trigger.Response:
+        """Re-place only the peg (x,y within ±0.05 of home), hole stays fixed."""
+        try:
+            sampled = self._sim.randomize_peg(0.05)
+            response.success = True
+            response.message = json.dumps({"scene_id": self._scene_id, "sampled": sampled})
+        except Exception as e:
+            response.success = False
+            response.message = f"randomize_peg failed: {e}"
+            self.get_logger().error(response.message)
+        return response
+
+    def _on_check_success(self, request: Trigger.Request, response: Trigger.Response) -> Trigger.Response:
+        """Ground-truth success check over the current object poses. The collector
+        keeps an episode only when ``success`` is true; the evaluator counts these
+        across trials. Result JSON is returned in the message."""
+        try:
+            poses = self._sim.get_object_poses()
+            success, metrics = task_success.check_success(self._scene_id, poses)
+            response.success = bool(success)
+            response.message = json.dumps({
+                "success": bool(success),
+                "scene_id": self._scene_id,
+                "metrics": metrics,
+                "poses": poses,
+            })
+        except Exception as e:
+            response.success = False
+            response.message = json.dumps({"success": False, "error": str(e)})
+            self.get_logger().error(f"check_success failed: {e}")
+        return response
+
+    def _on_wrist_rgbd(self, request: Trigger.Request, response: Trigger.Response) -> Trigger.Response:
+        try:
+            data = self._sim.get_wrist_rgbd()
+            if data is None:
+                response.success = False
+                response.message = json.dumps({"ok": False, "error": "wrist rgbd not available"})
+                return response
+            rgb = cv2.cvtColor(data["rgb"], cv2.COLOR_RGB2BGR)
+            ok, jpg = cv2.imencode(".jpg", rgb, [cv2.IMWRITE_JPEG_QUALITY, 90])
+            depth = np.ascontiguousarray(data["depth"], dtype=np.float32)
+            payload = {
+                "ok": True,
+                "rgb_jpeg_b64": base64.b64encode(jpg.tobytes()).decode("ascii") if ok else None,
+                "depth_f32_b64": base64.b64encode(depth.tobytes()).decode("ascii"),
+                "height": int(data["height"]), "width": int(data["width"]),
+                "cam_pos": data["cam_pos"], "cam_mat": data["cam_mat"],
+                "fovy": data["fovy"], "ee_pos": data["ee_pos"],
+            }
+            response.success = True
+            response.message = json.dumps(payload)
+        except Exception as e:
+            response.success = False
+            response.message = json.dumps({"ok": False, "error": str(e)})
+            self.get_logger().error(f"wrist_rgbd failed: {e}")
+        return response
+
+    def _on_joint_command(self, msg: JointState) -> None:
+        if not msg.position:
+            return
+        # Map by name when names are provided; otherwise positional.
+        positions: dict[str, float] = {}
+        if msg.name:
+            for n, p in zip(msg.name, msg.position):
+                positions[n] = float(p)
+        else:
+            for n, p in zip(self._joint_names, msg.position):
+                positions[n] = float(p)
+        self._sim.set_targets(positions)
+
     def _on_reset_world(self, request, response):
         try:
             self._sim.reset_objects()
@@ -254,6 +389,17 @@ class MuJoCoWorldNode(Node):
             msg.velocity = [float(velocities[i]) for i in g.joint_indices]
             msg.effort = []
             g.joint_pub.publish(msg)
+
+    def _publish_object_poses(self) -> None:
+        try:
+            poses = self._sim.get_object_poses()
+        except Exception:
+            return
+        if not poses:
+            return
+        msg = String()
+        msg.data = json.dumps(poses)
+        self._object_poses_pub.publish(msg)
 
     def _publish_camera_images(self) -> None:
         # SimRunner 스레드가 비동기로 갱신한 캐시를 그대로 가져와 publish.

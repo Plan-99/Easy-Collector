@@ -75,7 +75,7 @@ BLOCK_CONFIGS = {
         # 없이 EE 기준 대략적 카메라 마운트를 사람이 입력). manual_ee 시 cam_offset[x,y,z]
         # (EE 프레임, m) + cam_pitch/cam_yaw/cam_roll(deg)로 카메라 pose를 EE FK와 합성.
         'keys': ['workspace_id', 'sensor_id', 'rgbd_service', 'target_mode', 'text_prompts', 'boxes',
-                 'exemplar_image', 'exemplar_box',
+                 'exemplar_image', 'exemplar_box', 'references',
                  'target_color', 'observe_positions', 'hover', 'duration', 'settle_sec',
                  'cam_pose_mode', 'cam_offset', 'cam_pitch', 'cam_yaw', 'cam_roll',
                  'cam_convention', 'name'],
@@ -115,6 +115,7 @@ def test_wrist_reach():
     # Carry the camera-pose params so the readout uses the SAME geometry as a real run.
     block = {
         'target_color': body.get('target_color'),
+        'references': body.get('references'),           # 멀티 레퍼런스(여러 각도) [{image,box},...]
         'exemplar_image': body.get('exemplar_image'),  # box-defined visual exemplar (refer frame)
         'exemplar_box': body.get('exemplar_box'),
         'cam_pose_mode': body.get('cam_pose_mode'),
@@ -765,10 +766,25 @@ def start_planner_run(id):
         return {'status': 'error', 'message': 'Planner has no groups to run'}, 400
 
     body = request.json or {}
-    group_id = body.get('group_id')  # None → 전체 재생, 값 있으면 해당 그룹만
+    group_id = body.get('group_id')    # None → 전체 재생, 값 있으면 해당 그룹만
+    block_id = body.get('block_id')    # 값 있으면 그 블록 하나만 실행 ("이 블록만 실행")
 
     # 실행할 그룹들을 결정.
-    if group_id is None:
+    if block_id is not None:
+        # 단일 블록 실행 — 어느 그룹에 있든 그 블록 하나만 담은 합성 그룹을 만든다.
+        found = None
+        for g in plans:
+            for b in (g.get('blocks') or []):
+                if b.get('id') == block_id:
+                    found = (g, b)
+                    break
+            if found:
+                break
+        if not found:
+            return {'status': 'error', 'message': f'Block {block_id} not found'}, 404
+        src_group, blk = found
+        run_groups = [{**src_group, 'blocks': [blk]}]
+    elif group_id is None:
         run_groups = [g for g in plans if g.get('blocks')]
     else:
         run_groups = [g for g in plans if g.get('id') == group_id]

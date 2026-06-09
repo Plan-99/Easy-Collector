@@ -53,6 +53,11 @@ def _build_ctx(entity_kind: str, entity_id: int, settings: dict) -> dict:
     if entity_kind == 'sensor':
         ctx['sensor_id'] = entity_id
         ctx['namespace'] = f'ec_sensor_{entity_id}'
+        # RealSense depth: settings.use_depth → ros2 launch flags (lowercase strings).
+        # When off, enable_depth:=false keeps the original color-only behaviour.
+        _ud = 'true' if (settings or {}).get('use_depth') else 'false'
+        ctx['use_depth'] = _ud
+        ctx['align_depth'] = _ud
     else:
         ctx['robot_id'] = entity_id
         ctx['namespace'] = f'ec_robot_{entity_id}'
@@ -186,6 +191,7 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
         """
         self.node = node
         self.processes = {}  # name -> subprocess.Popen
+        self._rgbd_providers = {}  # process_id -> WristRgbdProvider (use_depth sensors)
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
@@ -426,9 +432,24 @@ class DriverServiceServicer(pb_grpc.DriverServiceServicer):
         if proc is None:
             return pb.DriverStatus(success=False, message='Failed to start sensor process')
 
+        # use_depth RealSense → advertise /ec_sensor_<id>/wrist_rgbd for the planner
+        # Wrist View Reach block (real-camera RGB-D source, calibration-free pose).
+        if settings.get('use_depth'):
+            try:
+                old = self._rgbd_providers.pop(process_id, None)
+                if old is not None:
+                    old.destroy()
+                from .wrist_rgbd_provider import WristRgbdProvider
+                self._rgbd_providers[process_id] = WristRgbdProvider(self.node, sensor_id)
+            except Exception as e:
+                self.node.get_logger().error(f'[WristRgbd] provider start failed: {e}')
+
         return pb.DriverStatus(success=True, message='Sensor driver started', pid=proc.pid)
 
     def StopSensorDriver(self, request, context):
+        prov = self._rgbd_providers.pop(request.name, None)
+        if prov is not None:
+            prov.destroy()
         self._stop(request.name)
         return pb.StatusResponse(success=True, message='Stopped')
 

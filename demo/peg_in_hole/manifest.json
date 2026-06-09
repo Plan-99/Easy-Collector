@@ -1,0 +1,32 @@
+{
+  "id": "peg_in_hole",
+  "name": "Peg-in-Hole 정밀 삽입",
+  "name_en": "Peg-in-Hole Insertion",
+  "description": "빨간 peg를 노란 hole에 삽입하는 정밀 조작 데모. 모델 토너먼트 벤치마크와 동일한 MuJoCo 환경(scene_peg.xml)을 사용한다. wrist 2-cam 셋업.",
+  "description_en": "Precision insertion of a red peg into a yellow hole. Uses the same MuJoCo environment (scene_peg.xml) as the model-tournament benchmark. Wrist 2-cam setup.",
+  "task_language": "insert the red peg into the yellow hole",
+  "topic_prefix": "/tutorial",
+  "cameras": ["wrist_cam", "wrist_cam_down"],
+  "workspace_name": "peg_in_hole_sim",
+  "launch": {
+    "process_id": "demo_sim",
+    "package": "mujoco_world",
+    "launch_file": "demo_pegtask.launch.py",
+    "args": {
+      "show_viewer": "true"
+    }
+  },
+  "collector": {
+    "ros2_executable": "tutorial_collector",
+    "source": "collect/tutorial_collector_node.py",
+    "default_episodes": 100,
+    "cameras": "wrist_cam,wrist_cam_down",
+    "output_dir": "/opt/easytrainer/training_data/raw_episodes"
+  },
+  "services": {
+    "randomize": "/tutorial/randomize",
+    "run_episode": "/tutorial/run_episode",
+    "check_success": "/tutorial/check_success",
+    "reset_world": "/tutorial/reset_world"
+  }
+}

@@ -29,6 +29,7 @@ from .planner_run import (
     _run_replay_episode,
     _run_timesleep,
     _run_query_pose,
+    _run_visual_reach,
     _run_sync,
     _preload_checkpoints,
     _compute_sync_barriers,
@@ -83,6 +84,27 @@ def _sample_delta(spec, success_rate=0.0):
         mag = success_rate * r + o
         out.append(random.uniform(-mag, mag) if mag > 0 else 0.0)
     return out
+
+
+def _prev_stage_success_rate(group, stage):
+    """현재 stage 직전(index-1) stage 의 **최종** 성공률 (없으면 0.0).
+
+    노이즈 강도(일반화 난이도)는 직전 stage 의 성공률로 정한다 — 직전 stage 가
+    잘 됐을수록 이번 stage 의 peg 위치 랜덤 범위를 넓혀 난이도를 올린다.
+    현재 stage 의 실시간 성공률을 쓰면 한 stage 안에서 성공이 쌓일수록 노이즈가
+    점점 커지는 버그가 되므로, **현재 stage 동안 불변인 직전 stage 값**을 쓴다.
+    """
+    cur_idx = stage.index if stage.index is not None else 0
+    prev = None
+    for s in group.stages:  # all_active + index 오름차순
+        si = s.index if s.index is not None else -1
+        if si == cur_idx - 1 and s.id != stage.id:
+            prev = s  # 같은 index 가 여럿이면 가장 최근(뒤) 것
+    if prev is None:
+        return 0.0
+    sc = prev.success_count or 0
+    fc = prev.failure_count or 0
+    return sc / (sc + fc) if (sc + fc) > 0 else 0.0
 
 
 def _apply_noise_to_plan(groups, block_specs):
@@ -248,16 +270,23 @@ def _run_checkpoint_recorded(block, ctx, task_control, group_id):
         except Exception:
             print(f"[curriculum] checkpoint_test failed: {traceback.format_exc()}")
 
-    thread = threading.Thread(target=_runner, name=f"curric_ckpt_{cp_id}", daemon=True)
-    thread.start()
-
     success = False
     user_stopped_block = False
     socketio = ctx.get('socketio')
     last_emit_step = -1
     block_id = block.get('id')
+
+    # 즉시 DAgger 모드: 체크포인트 진입 즉시 모델 실행을 건너뛰고 교정(expert
+    # 데모 수집)으로 직행한다. 모델이 아직 매우 약해 어차피 100% 실패하므로 모델
+    # 롤아웃 시간을 낭비하지 않고 바로 expert 데모를 모은다. 직전 wv 블록이 arm 을
+    # 타겟 위로 옮겨놓았으므로 expert(run_grasp/run_insert)가 그 자리에서 시작.
+    force_dagger = bool(task_control.get('force_dagger'))
+    thread = None
+    if not force_dagger:
+        thread = threading.Thread(target=_runner, name=f"curric_ckpt_{cp_id}", daemon=True)
+        thread.start()
     try:
-        while True:
+        while not force_dagger:
             if task_control['stop']:
                 break
             # 사용자가 Monitor 다이얼로그에서 Stop 을 누르면 ``:stop_current_block``
@@ -290,7 +319,8 @@ def _run_checkpoint_recorded(block, ctx, task_control, group_id):
             time.sleep(0.1)
     finally:
         sub_control['stop'] = True
-        thread.join(timeout=15)
+        if thread is not None:
+            thread.join(timeout=15)
 
     # 실패 (max_steps OR 사용자 Stop) 이면 프론트에 "교정?" 다이얼로그를 띄울
     # 수 있도록 알린다. dagger 데이터셋 id, stage_id, workspace_id 까지 같이
@@ -317,9 +347,15 @@ def _run_checkpoint_recorded(block, ctx, task_control, group_id):
             'stage_id': stage_id,
             'dagger_dataset_id': dagger_ds_id,
             'workspace_id': block.get('workspace_id'),
+            # 블록별 교정 expert 서비스 (예: cp_grasp→/tutorial/run_grasp,
+            # cp_insert→/tutorial/run_insert). 프론트가 motion_planning 교정 시
+            # 이 값을 ros2_service 로 자동 선택해 grasp/insert 데이터가 각자
+            # 체크포인트의 dagger 데이터셋에 따로 쌓이게 한다.
+            'correction_service': block.get('correction_service'),
             'max_steps': max_steps,
             'final_step': int(record.get('steps') or 0),
-            'reason': 'user_stop' if user_stopped_block else 'max_steps',
+            'reason': ('forced_dagger' if force_dagger
+                       else 'user_stop' if user_stopped_block else 'max_steps'),
         })
 
     steps = int(record.get('steps') or 0)
@@ -374,12 +410,24 @@ def _run_checkpoint_recorded(block, ctx, task_control, group_id):
             # task_control['correction_decisions'][block_id] 가 set 될 때까지 대기.
             # 0.5s 간격 polling — task_control['stop'] 체크 같이.
             decisions = task_control.setdefault('correction_decisions', {})
+            # resume_after_failure 가 "지금 이 블록의 결정을 기다리는 중"인지 알 수
+            # 있도록 마커 노출. 이중 클라이언트의 stale/중복 신호를 라우트에서 걸러낸다.
+            task_control['awaiting_correction'] = block_id
             while block_id not in decisions:
                 if task_control['stop']:
+                    task_control['awaiting_correction'] = None
                     print(f"[curriculum] [{group_id}] pause aborted by stop")
                     return
                 time.sleep(0.5)
+            # 첫 신호 도착 후 짧은 grace — 이중 클라이언트에서 교정을 안 몬 쪽이 쏜
+            # 기본 'fallback' 이 정상 'next' 보다 먼저 도착해도, grace 동안 들어온
+            # 'next' 가 'fallback' 을 이긴다(라우트의 non-override 규칙과 짝). 단일
+            # 클라이언트면 추가 신호가 없어 grace 만 잠깐 기다리고 그대로 진행.
+            _grace_end = time.time() + 1.5
+            while time.time() < _grace_end and not task_control['stop']:
+                time.sleep(0.1)
             action = decisions.pop(block_id, 'fallback')
+            task_control['awaiting_correction'] = None
             print(f"[curriculum] [{group_id}] user decision: {action!r}")
             if action == 'fallback':
                 _thread_local.jump_to_block_id = fb_id
@@ -396,6 +444,10 @@ _MOTION_HANDLERS = {
     'replay_episode': _run_replay_episode,
     'timesleep': _run_timesleep,
     'query_pose': _run_query_pose,
+    # Wrist View Reach: move to an observe pose, locate the target in the wrist
+    # RGB-D, and reach to it. Same planner-block handler the Planner page uses —
+    # a curriculum group can include it just like any other motion block.
+    'visual_reach': _run_visual_reach,
 }
 
 
@@ -474,6 +526,25 @@ def _run_group_once(group, ctx, task_control):
             error = str(e)
             print(f"[curriculum] [{group_id}] block '{block.get('name')}' failed: {traceback.format_exc()}")
             _emit(socketio, 'planner_block_end', {**block_summary, 'status': status, 'error': error})
+            # visual_reach 검출 실패 = peg 가 관찰 뷰 밖(예: 직전 사이클이 insert 후
+            # put_peg 복원 전에 중단돼 peg 가 hole 에 고아로 남음)일 가능성이 크다.
+            # 그대로 두면 다음 iteration wv1 도 또 0px → 무한 cascade 로 막힌다.
+            # randomize_peg 로 peg 를 home±0.05(랜덤·직립)에 되돌려 자가복구한다.
+            # 매 에피소드 리셋이 아니라 **검출 실패 시에만** 호출하고, 랜덤 위치라
+            # 데이터 다양성도 유지된다(plan 의 put_peg 정상복원과 충돌하지 않음).
+            if block.get('type') == 'visual_reach':
+                _recover_peg(block, group_id)
+            # 비-checkpoint 블록(visual_reach 등)이 throw 했을 때, fallback_block_id 가
+            # 지정돼 있으면 그룹 전체를 abort(→ 바깥 루프가 첫 home 부터 재시작)하지
+            # 않고 fallback 블록으로 점프해 복구한다. 체크포인트 실패의 fallback 점프와
+            # 동일한 의미. fallback 이 없거나 이 그룹 plan 에 없으면 종전대로 abort.
+            fb_id = block.get('fallback_block_id')
+            fb_index = id_to_index.get(fb_id) if fb_id else None
+            if fb_index is not None:
+                print(f"[curriculum] [{group_id}] block '{block.get('name')}' "
+                      f"→ fallback block_id={fb_id} (index {fb_index})")
+                index = fb_index
+                continue
             return
         _emit(socketio, 'planner_block_end', {**block_summary, 'status': status, 'error': error})
 
@@ -734,9 +805,11 @@ def _build_targeting(target_group_ids, plans):
         criteria = stage._get_json_field('success_criteria') or {}
         if isinstance(criteria, dict):
             criteria_by_block.update(criteria)
-        succ = stage.success_count or 0
-        fail = stage.failure_count or 0
-        sr = succ / (succ + fail) if (succ + fail) > 0 else 0.0
+        # 노이즈 강도는 **직전 stage 의 성공률**로 고정 (현재 stage 의 실시간
+        # 성공률을 쓰면 한 stage 안에서 성공할수록 노이즈가 커지는 버그). 최종
+        # 노이즈 = success_rate × rate(spec) + offset 이므로, spec 의 rate 가 사용자의
+        # "이전 stage 성공률 × N%" 에서 N% 에 해당한다.
+        sr = _prev_stage_success_rate(group, stage)
         block_noise = group._get_json_field('block_noise') or {}
         if isinstance(block_noise, dict):
             for bid, spec in block_noise.items():
@@ -781,15 +854,77 @@ def _any_target_group_training(target_group_ids):
     return False
 
 
+def _detect_scene_reset_service(plans):
+    """visual_reach 블록의 rgbd_service 로 sim 컨텍스트를 감지해 scene reset
+    서비스를 고른다. /tutorial/wrist_rgbd → /tutorial/reset.
+
+    DAgger 롤아웃은 매 iteration 마다 씬을 알려진(관찰 뷰 안) 초기 상태로
+    되돌려야 한다 — 안 그러면 직전 iteration 이 peg 를 hole 에 넣어버려(또는
+    교정이 집어 든 채로) 다음 wv1 이 peg 를 못 찾고 막힌다. reset(Trigger)은
+    arm 을 home keyframe 으로, peg/hole 을 기본 위치로 스냅한다."""
+    for g in (plans or []):
+        for b in (g.get('blocks') or []):
+            if b.get('type') == 'visual_reach':
+                svc = (b.get('rgbd_service') or '').strip()
+                if svc.startswith('/tutorial'):
+                    return '/tutorial/reset'
+                prefix = svc.rsplit('/', 1)[0] if '/' in svc else ''
+                if prefix:
+                    return f'{prefix}/reset'
+    return None
+
+
+def _reset_scene(reset_service):
+    """씬 reset 서비스를 gRPC ROSProxy 로 호출. 실패는 무시(비-sim 환경)."""
+    if not reset_service:
+        return
+    try:
+        from ...bridge.client import get_bridge_client
+        from ...bridge.generated import robot_bridge_pb2 as pb
+        client = get_bridge_client()
+        client.ros_proxy.CallService(pb.ROSServiceRequest(
+            service_type='std_srvs/srv/Trigger', service_name=reset_service,
+            request_json=''))
+    except Exception as e:
+        print(f"[curriculum] scene reset ({reset_service}) skipped: {e}", flush=True)
+
+
+def _recover_peg(block, group_id):
+    """visual_reach 검출 실패 시 peg 를 home±0.05(랜덤·직립)로 되돌린다.
+
+    sim 의 ``<prefix>/randomize_peg`` (Trigger) 를 gRPC ROSProxy 로 호출. prefix 는
+    블록의 ``rgbd_service`` 에서 유추(/tutorial/wrist_rgbd → /tutorial). 실패는 무시.
+    (peg 가 hole 에 고아로 남아 wv1 이 영구 0px 가 되는 cascade 방지용 자가복구.)"""
+    svc = (block.get('rgbd_service') or '/tutorial/wrist_rgbd').strip()
+    prefix = svc.rsplit('/', 1)[0] if '/' in svc else '/tutorial'
+    service_name = f'{prefix}/randomize_peg'
+    try:
+        from ...bridge.client import get_bridge_client
+        from ...bridge.generated import robot_bridge_pb2 as pb
+        client = get_bridge_client()
+        resp = client.ros_proxy.CallService(pb.ROSServiceRequest(
+            service_type='std_srvs/srv/Trigger', service_name=service_name,
+            request_json=''))
+        print(f"[curriculum] [{group_id}] visual_reach 실패 → {service_name} "
+              f"(peg 자가복구, success={getattr(resp, 'success', '?')})", flush=True)
+    except Exception as e:
+        print(f"[curriculum] [{group_id}] peg recover ({service_name}) skipped: {e}", flush=True)
+
+
 # ── 엔트리포인트 ───────────────────────────────────────────────────────────
 
 def curriculum_rollout(curriculum_id, target_group_ids, repeat_count, app,
-                       socketio_instance, task_control):
+                       socketio_instance, task_control, force_dagger=False):
     """ProcessManager function task 엔트리.
 
     target_group_ids: CheckpointGroup.id 리스트 (타겟 체크포인트 그룹).
     repeat_count: 롤아웃 반복 횟수 (<=0 이면 무한, stop 까지).
+    force_dagger: True 면 체크포인트 진입 즉시 모델 실행을 건너뛰고 교정(expert
+        데모 수집) 단계로 직행 — 약한 모델 부트스트랩용 즉시 DAgger 수집 모드.
     """
+    # 체크포인트 실행부(_run_checkpoint_block)가 task_control 채널로 읽는다.
+    if force_dagger:
+        task_control['force_dagger'] = True
     from ...database.models.curriculum_model import Curriculum as CurriculumModel
     from ...database.models.checkpoint_group_model import CheckpointGroup as CheckpointGroupModel
     from ...database.models.rollout_model import Rollout as RolloutModel
@@ -812,7 +947,11 @@ def curriculum_rollout(curriculum_id, target_group_ids, repeat_count, app,
     # 워크스페이스/preload 는 전체 플랜 기준으로 한 번만(졸업 후 새 체크포인트는 lazy load).
     all_blocks = [b for g in plans for b in (g.get('blocks') or [])]
     workspaces = _load_workspaces_for_blocks(all_blocks)
-    preloaded = _preload_checkpoints(plans, socketio_instance)
+    # force_dagger 모드는 체크포인트 모델을 **실행하지 않는다**(진입 즉시 expert 교정).
+    # 그런데도 모든 정책을 GPU 에 프리로드하면 8GB GPU 를 YOLOE(visual_reach 검출)·
+    # sim 렌더·(곧) 학습과 나눠 써서 CUDA 세그폴트(Ultralytics)로 백엔드가 죽는다.
+    # force_dagger 면 프리로드를 건너뛰어 GPU 압박을 줄인다(모델은 어차피 안 씀).
+    preloaded = {} if force_dagger else _preload_checkpoints(plans, socketio_instance)
 
     ctx = {
         'app': app,
@@ -882,6 +1021,9 @@ def curriculum_rollout(curriculum_id, target_group_ids, repeat_count, app,
             ctx['target_block_by_group'] = tg['target_block_by_plan_group']
             ctx['ckpt_group_id_by_plan_group'] = tg['ckpt_group_id_by_plan_group']
 
+            # iteration 사이 씬 리셋 안 함 — 플래너의 복원 블록(put_peg 등)이 peg 를
+            # 되돌리므로 환경이 연속으로 흐른다. peg 가 넘어진 경우에만 standalone
+            # peg-watchdog 가 randomize_peg(±0.05, hole 고정) 로 복구한다.
             noised_groups = _apply_noise_to_plan(run_plan_groups, tg['block_specs'])
             rollout = RolloutModel.create(
                 curriculum_id=curriculum_id,

@@ -162,6 +162,9 @@ const sensorForm = ref([
     { key: 'serial_no', label: t('serialNUmber'), value: '', default: '', type: 'text', show: (form) => getFormSensorInfo(form) && getFormSensorInfo(form).custom_fields && getFormSensorInfo(form).custom_fields.includes('serial_number') },
     { key: 'ip_address', label: t('ipAddress'), value: '', default: '192.168.50.10', type: 'text', show: (form) => getFormSensorInfo(form) && getFormSensorInfo(form).custom_fields && getFormSensorInfo(form).custom_fields.includes('ip_address') },
     { key: 'device_index', label: t('deviceIndex'), value: 0, default: 0, type: 'number', show: (form) => getFormSensorInfo(form) && getFormSensorInfo(form).custom_fields && getFormSensorInfo(form).custom_fields.includes('device_index') },
+    // RealSense depth: publish the depth stream alongside color when on (enables
+    // the monitoring RGB↔depth toggle + the planner Wrist View Reach block).
+    { key: 'use_depth', label: t('sensorUseDepth'), value: false, default: false, type: 'checkbox', show: (form) => String((form.find((e) => e.key === 'type') || {}).value || '').includes('realsense') },
     // Custom sensor fields
     { key: 'read_topic', label: t('customSensorReadTopic'), value: '', default: '', type: 'text', show: isCustomSensor },
     { key: 'read_topic_msg', label: t('customSensorReadTopicMsgType'), value: 'sensor_msgs/CompressedImage', default: 'sensor_msgs/CompressedImage', type: 'select',

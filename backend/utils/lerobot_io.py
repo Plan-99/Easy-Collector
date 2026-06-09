@@ -171,12 +171,23 @@ def _compute_tool_qpos_indices(agents):
         if role == 'tool':
             # 전체 joint 가 tool
             tool_indices.extend(range(offset, offset + n))
-        elif tool_inner and tool_index_local:
-            for ti in tool_index_local:
-                if 0 <= int(ti) < n:
-                    tool_indices.append(offset + int(ti))
+        else:
+            # 1) 설정된 tool_index (inner gripper, URDF 임베디드)
+            if tool_inner and tool_index_local:
+                for ti in tool_index_local:
+                    if 0 <= int(ti) < n:
+                        tool_indices.append(offset + int(ti))
+            # 2) 이름 기반 폴백 — tool_index 가 누락/오설정돼도 joint 이름에
+            #    'gripper'/'tool' 이 있으면 인덱스(5/6/7 무관)로 잡는다. 이게 없으면
+            #    relative_ee_pos/ee_delta 학습 시 그리퍼가 action 에서 통째로
+            #    빠져(모델에 그리퍼 채널 없음) 추론에서 그리퍼가 안 움직인다.
+            for i, jn in enumerate(joint_names):
+                nl = (jn or '').lower()
+                if 'gripper' in nl or 'tool' in nl:
+                    tool_indices.append(offset + i)
         offset += n
-    return tool_indices
+    # 중복 제거 + 정렬 (이름 기반과 tool_index 가 같은 dim 을 잡을 수 있음)
+    return sorted(set(tool_indices))
 
 
 def build_features(agents, sensors, task, action_key="joint"):

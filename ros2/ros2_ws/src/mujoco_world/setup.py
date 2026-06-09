@@ -42,6 +42,12 @@ setup(
     entry_points={
         'console_scripts': [
             'mujoco_world_node = mujoco_world.mujoco_world_node:main',
+            # Model-tester / demo data pipeline (peg-in-hole benchmark):
+            'tutorial_planner_node = mujoco_world.tutorial_planner_node:main',
+            'tutorial_collector_node = mujoco_world.tutorial_collector_node:main',
+            'tutorial_eval_bridge = mujoco_world.tutorial_eval_bridge:main',
+            # Standalone peg-watchdog (run separately; not in the demo launch):
+            'peg_watchdog_node = mujoco_world.peg_watchdog_node:main',
         ],
     },
 )

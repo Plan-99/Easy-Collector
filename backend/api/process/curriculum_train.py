@@ -197,7 +197,30 @@ def _enqueue_training(curriculum, group, stage, socketio_instance, app=None):
         train_settings = conf.get('train_settings') or {}
         if not isinstance(train_settings, dict):
             train_settings = {}
-        server_url = train_settings.get('server_url', '')
+        # checkpoint_settings 가 이 cp_id 의 conf 를 안 가질 수 있다(스테이지마다 새
+        # checkpoint id 가 생기는데 설정 키가 안 따라온 경우). 그러면 같은 그룹의 다른
+        # checkpoint conf 로 폴백해 num_epochs 등 학습 파라미터가 비지 않게 한다.
+        if not train_settings:
+            for _v in cp_settings.values():
+                _ts = (_v or {}).get('train_settings')
+                if isinstance(_ts, dict) and _ts:
+                    train_settings = dict(_ts)
+                    break
+        # num_epochs 가 비었으면(설정 키가 새 cp id 를 못 따라와 폴백조차 못 잡은
+        # 경우 등) 언더트레이닝 됨 — 합리적 기본값으로 floor. 명시값이 있으면 존중.
+        if not train_settings.get('num_epochs'):
+            train_settings = {**train_settings, 'num_epochs': 5000}
+        server_url = train_settings.get('server_url', '') or ''
+        # server_url 이 비면 로컬 training_server(127.0.0.1:5100) 가 떠 있을 때 기본값
+        # 으로 채운다 — 안 그러면 enqueue 가 스킵돼 자동 학습이 영영 안 걸린다.
+        if not server_url:
+            import socket
+            try:
+                with socket.create_connection(('127.0.0.1', 5100), timeout=0.5):
+                    server_url = 'http://localhost:5100'
+                    train_settings = {**train_settings, 'server_url': server_url}
+            except OSError:
+                pass
         callback_url = train_settings.get('callback_url', '')
 
         training_datasets = _training_datasets_for_checkpoint(group, cp_id)

@@ -22,7 +22,9 @@ class Sensor(SoftDeleteModel):
         'read_topic',
         'read_topic_msg',
         'resolution',
-        'process_id'
+        'process_id',
+        'use_depth',
+        'depth_topic',
     ]
 
     name = CharField(null=True)
@@ -108,3 +110,17 @@ class Sensor(SoftDeleteModel):
     @property
     def process_id(self):
         return f'sensor_{self.id}'
+
+    @property
+    def use_depth(self):
+        """RealSense-only: when true, the driver launches with depth + aligned
+        depth enabled, and a depth topic is published alongside color."""
+        return bool(self._settings.get('use_depth', False))
+
+    @property
+    def depth_topic(self):
+        """Aligned depth-to-color image (sensor_msgs/Image, 16-bit mm). Only
+        meaningful when use_depth is true. Mirrors the read_topic namespacing."""
+        if self.type != 'custom':
+            return f'/ec_sensor_{self.id}/camera/aligned_depth_to_color/image_raw'
+        return self._settings.get('depth_topic', '')

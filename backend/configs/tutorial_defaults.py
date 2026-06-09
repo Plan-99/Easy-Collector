@@ -84,6 +84,21 @@ TUTORIAL_SENSORS = [
             'resolution': [640, 480],
         },
     },
+    {
+        # Wrist depth camera (gripper-mounted) for the `visual_reach` planner block.
+        # RGB is streamed live; depth is fetched on demand via /tutorial/wrist_rgbd.
+        'name': 'tutorial_wrist_cam',
+        'type': 'custom',
+        'settings': {
+            'is_tutorial': True,
+            'tutorial_camera_slug': 'wrist_cam',
+            'read_topic': f'{TUTORIAL_TOPIC_PREFIX}/wrist_cam/image_raw/compressed',
+            'read_topic_msg': 'sensor_msgs/CompressedImage',
+            'resolution': [640, 480],
+            'has_depth': True,
+            'rgbd_service': f'{TUTORIAL_TOPIC_PREFIX}/wrist_rgbd',
+        },
+    },
 ]
 
 

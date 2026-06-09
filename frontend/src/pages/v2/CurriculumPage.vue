@@ -208,6 +208,12 @@
             <q-input v-model.number="repeatCount" type="number" :label="t('currRepeat')" outlined dense dark bg-color="dark" />
           </div>
           <div class="col-auto">
+            <!-- 즉시 DAgger 수집: 체크포인트 진입 즉시 expert 데모 수집(모델 실행 skip). -->
+            <q-toggle v-model="forceDagger" color="amber" :label="t('currForceDagger')" dense dark>
+              <q-tooltip>{{ t('currForceDaggerHint') }}</q-tooltip>
+            </q-toggle>
+          </div>
+          <div class="col-auto">
             <q-btn color="green" icon="play_arrow" :label="t('currStart')" :disable="isRunning || !targetGroupIds.length || !allDevicesOn" @click="startRollout" />
           </div>
           <div class="col-auto">
@@ -362,7 +368,7 @@
                       <tr v-for="entry in noiseBlocks(dg)" :key="`noise-${entry.blockId}`">
                         <td class="text-left">{{ entry.label }}</td>
                         <td v-for="axis in NOISE_AXES" :key="`cell-${entry.blockId}-${axis}`">
-                          {{ formatNoiseRange(entry.spec, axis, dashSelectedStage(dg)?.success_rate || 0) }}
+                          {{ formatNoiseRange(entry.spec, axis, prevStageSuccessRate(dg)) }}
                         </td>
                       </tr>
                     </tbody>
@@ -753,6 +759,14 @@
             type="number"
             :min="1"
           />
+          <q-input
+            v-if="correctionTeleType === 'motion_planning'"
+            v-model="correctionRos2Service"
+            dense outlined dark bg-color="dark"
+            :label="t('ros2ServiceName')"
+            :placeholder="t('ros2ServiceNamePlaceholder')"
+            :hint="t('ros2ServiceNameHint')"
+          />
         </q-card-section>
         <q-card-actions align="right" class="q-pa-md">
           <q-btn flat :label="t('cancel')" color="grey-4" :disable="correctionBusy" v-close-popup />
@@ -988,8 +1002,10 @@ const showCorrectionTeleop = ref(false)
 const lastFailure = ref(null)
 const correctionLanguageInstruction = ref('')
 const correctionTeleType = ref('leader')
-const correctionHz = ref(20)
+const correctionHz = ref(8)
 const correctionBusy = ref(false)
+// motion_planning 교정 시 호출할 외부 모션플래너 ROS2 서비스 (예: /tutorial/run_episode).
+const correctionRos2Service = ref('/tutorial/run_episode')
 
 const correctionTeleOptions = computed(() => ([
     { label: 'Leader', value: 'leader' },
@@ -1002,10 +1018,24 @@ const correctionTeleOptions = computed(() => ([
 
 function onCurriculumCheckpointFailed (payload) {
     if (!payload) return
+    console.error(`[DIAG] checkpointFailed block=${payload.block_id} reason=${payload.reason} svc=${payload.correction_service} dagger_ds=${payload.dagger_dataset_id}`)
     lastFailure.value = payload
-    // 자동으로 Monitor 다이얼로그도 열어서 사용자가 카메라/로봇 상태 보면서
-    // 결정할 수 있게.
+    // 블록별 교정 expert 서비스 자동 선택. cp_grasp 는 /tutorial/run_grasp,
+    // cp_insert 는 /tutorial/run_insert 처럼 블록에 지정된 correction_service 가
+    // 있으면 motion_planning 교정 서비스로 미리 채운다(없으면 직전 값 유지).
+    if (payload.correction_service) {
+        correctionRos2Service.value = payload.correction_service
+    }
     showMonitor.value = true
+    // 즉시 DAgger(force_dagger) 모드: 모든 체크포인트가 진입 즉시 교정 대상이므로
+    // "교정하시겠습니까?" 확인 다이얼로그는 불필요 — 곧장 motion_planning expert
+    // 교정을 자동 시작한다. (백엔드가 reason='forced_dagger' 로 표시)
+    if (payload.reason === 'forced_dagger' && payload.correction_service) {
+        correctionTeleType.value = 'motion_planning'
+        submitCorrection()
+        return
+    }
+    // 일반(모델 실행) 모드: 사용자가 카메라/로봇 보고 교정 여부를 결정.
     showCorrectionConfirm.value = true
 }
 // 백엔드 롤아웃 재개 신호 전송. action='fallback' 이면 fallback 블록으로 점프,
@@ -1102,6 +1132,13 @@ async function submitCorrection () {
         _pendingCorrectionAction = 'fallback'   // 사용자가 버튼 안 누르고 외부로
                                                 // 종료될 경우의 안전 기본값.
         correctionMode.value = true
+        // _pendingCorrectionDatasetId 를 startCorrectionRecording **이전에** 세팅한다.
+        // motion_planning expert(iter=1, 자동)는 매우 빨라서, 이 값을 await 뒤에
+        // 세팅하면 그 사이 도착한 episode_saved 가 null 가드(onEpisodeSaved)에 걸려
+        // 누락되고, _pendingCorrectionAction 이 'next' 로 안 바뀐 채 'fallback' 기본값
+        // 으로 남는다. 그러면 onStopProcess 가 'fallback' 을 보내 cp_grasp 교정이
+        // 정상 저장됐는데도 fallback 블록(첫 home)으로 점프하는 레이스가 생긴다.
+        _pendingCorrectionDatasetId = f.dagger_dataset_id
         // MonitoringWindow 의 selectedDatasetId 가 교정 dataset 을 가리키도록
         // 동기화 (Done/Throw/Stop 시 dataset API 가 올바른 id 로 호출되게).
         monitorDatasetId.value = f.dagger_dataset_id
@@ -1118,18 +1155,20 @@ async function submitCorrection () {
         await monitorWindowRef.value.startCorrectionRecording({
             datasetId: f.dagger_dataset_id,
             teleType: correctionTeleType.value,
-            hz: Number(correctionHz.value) || 20,
+            hz: Number(correctionHz.value) || 8,
             languageInstruction: correctionLanguageInstruction.value || '',
+            ros2Service: correctionTeleType.value === 'motion_planning' ? correctionRos2Service.value : '',
             taskOverride,
         })
-        _pendingCorrectionDatasetId = f.dagger_dataset_id
         Notify.create({ type: 'positive', message: t('currCorrectionStart') })
     } catch (e) {
         console.error('start_collection failed:', e)
         Notify.create({ type: 'negative', message: e?.response?.data?.message || 'Failed' })
         // rollback — record_episode 가 시작되지 않았으므로 correctionMode 도 꺼야
-        // MonitoringWindow 바닥의 record 바가 어색하게 남지 않는다.
+        // MonitoringWindow 바닥의 record 바가 어색하게 남지 않는다. 미리 세팅한
+        // _pendingCorrectionDatasetId 도 되돌려 stale stop_process 오인식을 막는다.
         correctionMode.value = false
+        _pendingCorrectionDatasetId = null
     } finally {
         correctionBusy.value = false
     }
@@ -1157,6 +1196,7 @@ async function onCorrectionStop () {
 // 사용자가 누른 버튼에 따라 resume 신호 송신 + UI 정리. 백엔드 pm 은 process
 // 이름 그대로 emit (id='record_episode', dataset_id suffix 없음).
 function onStopProcess (data) {
+    console.error(`[DIAG] onStopProcess id=${data?.id} action=${_pendingCorrectionAction} ds=${_pendingCorrectionDatasetId} cm=${correctionMode.value}`)
     if (!_pendingCorrectionDatasetId) return
     if (data?.id !== 'record_episode') return
     const action = _pendingCorrectionAction
@@ -1182,11 +1222,29 @@ function onStopProcess (data) {
 // 빠져나가도록 (iter=1) 의도했지만, 안전망으로 명시적으로 stop_collection 도
 // 호출. 저장이 끝난 뒤(또는 throw 처리 직후) 호출하므로 데이터 손실 없이
 // outer 루프의 다음 iteration 시작을 막아 stop_process 가 곧 emit 된다.
-function onEpisodeFinished () {
-    if (!correctionMode.value || !_pendingCorrectionDatasetId) return
+function _stopCorrectionCollection () {
     api.post(`/dataset/${_pendingCorrectionDatasetId}/:stop_collection`).catch((e) => {
         console.error('[curriculum] stop_collection after episode finished failed:', e)
     })
+}
+// 교정 에피소드가 저장됨(성공) → 'next' 로 재개해 **다음 블록**으로 전진한다.
+// 그래야 cp_grasp 교정 후 fallback(home 으로 되돌아가 cp_grasp 무한반복)이 아니라
+// 다음 wv2 → cp_insert 로 진행한다. motion_planning 교정은 iter=1 자동종료라 완료
+// 버튼 클릭 없이 여기서 결정된다(수동 텔레옵의 완료 버튼과도 의미가 일치).
+function onEpisodeSaved () {
+    console.error(`[DIAG] onEpisodeSaved cm=${correctionMode.value} ds=${_pendingCorrectionDatasetId}`)
+    if (!correctionMode.value || !_pendingCorrectionDatasetId) return
+    _pendingCorrectionAction = 'next'
+    _stopCorrectionCollection()
+}
+// 교정 에피소드가 버려짐(expert 실패/사용자 버리기) → 'fallback' 으로 fallback 블록
+// 으로 점프(체크포인트 재시도). cp_insert 의 fallback 은 맨 처음 home 으로 지정돼 있어
+// insert 실패 시 home→wv1→cp_grasp→… 한 바퀴 돌며 cp_insert tight 루프를 피한다.
+function onEpisodeThrown () {
+    console.error(`[DIAG] onEpisodeThrown cm=${correctionMode.value} ds=${_pendingCorrectionDatasetId}`)
+    if (!correctionMode.value || !_pendingCorrectionDatasetId) return
+    _pendingCorrectionAction = 'fallback'
+    _stopCorrectionCollection()
 }
 
 // blockTypeColor / BLOCK_TYPE_COLORS 는 Monitor 헤더 chip 을 PlannerBlockCard
@@ -1194,6 +1252,9 @@ function onEpisodeFinished () {
 
 const targetGroupIds = ref([])
 const repeatCount = ref(10)
+// 즉시 DAgger 수집 모드 — 체크포인트 진입 즉시 모델 실행을 건너뛰고 expert
+// 데모(교정)를 수집한다. 약한 모델 부트스트랩 단계의 기본값(on).
+const forceDagger = ref(true)
 const isRunning = ref(false)
 
 // 대시보드(우측): /:dashboard 응답 groups[]. dashStage = 그룹별 선택된 stage index.
@@ -1688,6 +1749,15 @@ function dashSelectedStage (dg) {
   const idx = dashStage[dg.checkpoint_group_id]
   return (dg.stages || []).find((s) => s.index === idx) || (dg.stages || [])[dg.stages.length - 1] || null
 }
+// 노이즈 강도는 **직전 stage** 의 성공률로 정해진다 (현재 stage 의 실시간 성공률이
+// 아님 — backend _prev_stage_success_rate 와 동일). 선택된 stage 의 index-1 stage
+// 성공률을 반환, 없으면(첫 stage) 0.
+function prevStageSuccessRate (dg) {
+  const cur = dashSelectedStage(dg)
+  if (!cur) return 0
+  const prev = (dg.stages || []).find((s) => s.index === (cur.index - 1))
+  return prev ? (prev.success_rate || 0) : 0
+}
 function stageLabels (dg) {
   return (dg.stages || []).map((s) => `S${s.index}`)
 }
@@ -1760,6 +1830,7 @@ async function startRollout () {
   await api.post(`/curriculum/${curriculum.value.id}/:start_rollout`, {
     target_group_ids: targetGroupIds.value,
     repeat_count: repeatCount.value,
+    force_dagger: forceDagger.value,
   })
   isRunning.value = true
   Notify.create({ type: 'positive', message: t('currStart') })
@@ -1837,8 +1908,8 @@ onMounted(async () => {
   // 저장/폐기 직후 명시적으로 stop_collection 호출 — iter=1 만으로 부족한
   // 케이스(payload 누락 등)의 안전망. outer 루프의 다음 iteration 시작을 막아
   // record_episode 가 곧 종료되고 stop_process 가 emit 된다.
-  socket.on('episode_saved', onEpisodeFinished)
-  socket.on('episode_thrown', onEpisodeFinished)
+  socket.on('episode_saved', onEpisodeSaved)
+  socket.on('episode_thrown', onEpisodeThrown)
 })
 
 onUnmounted(() => {
@@ -1851,7 +1922,7 @@ onUnmounted(() => {
   socket.off('curriculum_rollout_end', onCurriculumRolloutEnd)
   socket.off('curriculum_saving_episode', onCurriculumSavingEpisode)
   socket.off('stop_process', onStopProcess)
-  socket.off('episode_saved', onEpisodeFinished)
-  socket.off('episode_thrown', onEpisodeFinished)
+  socket.off('episode_saved', onEpisodeSaved)
+  socket.off('episode_thrown', onEpisodeThrown)
 })
 </script>

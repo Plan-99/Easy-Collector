@@ -1965,15 +1965,25 @@ def get_norm_stats(dataset_dir, num_episodes, action_key='qaction', use_relative
     _arange = action_q99 - action_q01
     action_q99 = action_q01 + torch.clamp(_arange, min=1e-2)
 
-    qpos_min = all_qpos_data.min(dim=0)[0]
-    qpos_max = all_qpos_data.max(dim=0)[0]
-    qpos_mean = all_qpos_data.mean(dim=0)
-    qpos_std = all_qpos_data.std(dim=0)
-    qpos_std = torch.clip(qpos_std, 1e-2, np.inf)
-    qpos_q01 = torch.quantile(all_qpos_data.float(), 0.01, dim=0)
-    qpos_q99 = torch.quantile(all_qpos_data.float(), 0.99, dim=0)
-    _qrange = qpos_q99 - qpos_q01
-    qpos_q99 = qpos_q01 + torch.clamp(_qrange, min=1e-2)
+    # No-proprio training (obs_state_keys=[], e.g. relative_ee_pos with
+    # wrist-only views) yields a 0-column state tensor. std()/quantile() then
+    # crash ("quantile() input tensor must be non-empty"). The policy has no
+    # state input in that case, so emit empty (0,) stats instead of computing
+    # them. (obs_state_keys only auto-defaults to ['qpos'] when it is None, not
+    # when it is an explicit empty list — so [] reaches here as a real choice.)
+    if all_qpos_data.numel() == 0 or all_qpos_data.shape[1] == 0:
+        _empty = torch.zeros(0)
+        qpos_min = qpos_max = qpos_mean = qpos_std = qpos_q01 = qpos_q99 = _empty
+    else:
+        qpos_min = all_qpos_data.min(dim=0)[0]
+        qpos_max = all_qpos_data.max(dim=0)[0]
+        qpos_mean = all_qpos_data.mean(dim=0)
+        qpos_std = all_qpos_data.std(dim=0)
+        qpos_std = torch.clip(qpos_std, 1e-2, np.inf)
+        qpos_q01 = torch.quantile(all_qpos_data.float(), 0.01, dim=0)
+        qpos_q99 = torch.quantile(all_qpos_data.float(), 0.99, dim=0)
+        _qrange = qpos_q99 - qpos_q01
+        qpos_q99 = qpos_q01 + torch.clamp(_qrange, min=1e-2)
 
     stats = {
         "action": {

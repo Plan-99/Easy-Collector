@@ -115,7 +115,8 @@ def _create_stage_datasets_for(stage, group, blocks):
                 block_id=blk['block_id'],
                 role=role,
             )
-            os.makedirs(os.path.join(DATASET_DIR, str(ds.id)), exist_ok=True)
+            # 빈 폴더를 미리 만들지 않는다 — record_episode 가 첫 에피소드 기록 시
+            # 생성하므로(불필요한 빈 폴더 방지). 초기화 직후 datasets 디렉터리가 깨끗.
 
 
 def _create_stage_datasets(stage, group):
@@ -687,6 +688,9 @@ def start_rollout(id):
     except (TypeError, ValueError):
         repeat_count = 1
 
+    # 즉시 DAgger 모드 — 체크포인트 진입 즉시 expert 데모 수집 (모델 실행 skip).
+    force_dagger = bool(data.get('force_dagger', False))
+
     # Phase 3 엔진 — lazy import 로 순환참조/미구현 시점 회피.
     from ..process.curriculum_rollout import curriculum_rollout
 
@@ -701,6 +705,7 @@ def start_rollout(id):
         repeat_count=repeat_count,
         app=current_app._get_current_object(),
         socketio_instance=current_app.pm.socketio,
+        force_dagger=force_dagger,
     )
     return {'status': 'success', 'message': 'Rollout started'}, 200
 
@@ -792,7 +797,23 @@ def resume_after_failure(id):
         return {'status': 'error', 'message': 'block_id required'}, 400
     if action not in ('fallback', 'abort', 'next'):
         return {'status': 'error', 'message': f'invalid action {action!r}'}, 400
-    obj.setdefault('correction_decisions', {})[block_id] = action
+    # 이중 클라이언트(런처 + 별도 브라우저 등)가 같은 record_episode 종료 이벤트에
+    # 반응해 각자 resume 신호를 쏘면, 교정을 안 몬 쪽이 기본값 'fallback' 을 보내
+    # 정상 'next' 를 가로채 첫 home 블록으로 점프시키는 버그가 있었다. 두 겹 가드:
+    #  (1) awaiting-match: 롤아웃이 지금 이 block_id 의 결정을 기다리는 중이 아니면
+    #      stale(이미 소비됐거나 다른 블록) → 무시. 소비 후 늦게 온 신호 차단.
+    #  (2) non-override: 이미 명시적 결정(next/abort)이 들어왔으면 'fallback' 으로
+    #      덮어쓰지 않는다. 반대로 'fallback' 위에 'next' 는 덮을 수 있다.
+    awaiting = obj.get('awaiting_correction')
+    if awaiting != block_id:
+        return {'status': 'success',
+                'message': f'ignored stale signal (not awaiting {block_id!r}, awaiting={awaiting!r})'}, 200
+    decisions = obj.setdefault('correction_decisions', {})
+    existing = decisions.get(block_id)
+    if existing in ('next', 'abort') and action == 'fallback':
+        return {'status': 'success',
+                'message': f'kept {existing!r}, ignored stale fallback'}, 200
+    decisions[block_id] = action
     return {'status': 'success', 'message': f'resume signal sent ({action})'}, 200
 
 
@@ -961,7 +982,18 @@ def reset_curriculum(id):
 
     proc_name = _rollout_process_name(curriculum.id)
     if proc_name in current_app.pm.processes:
-        return {'status': 'error', 'message': 'Stop the rollout before resetting'}, 409
+        # 롤아웃이 도는 중이면 409 로 막지 말고 **먼저 정지**한다 — "데이터 초기화"가
+        # 항상 동작하도록. 협력적 stop 신호 후 프로세스가 실제로 정리될 때까지 대기.
+        import time as _t
+        current_app.pm.stop_function(proc_name, wait_timeout=10)
+        for _ in range(20):
+            if proc_name not in current_app.pm.processes:
+                break
+            _t.sleep(0.5)
+        if proc_name in current_app.pm.processes:
+            return {'status': 'error',
+                    'message': '롤아웃이 정지되지 않아 초기화할 수 없습니다. 잠시 후 다시 시도하세요.'}, 409
+        curriculum.status = CurriculumModel.STATUS_STOPPED
 
     # 롤아웃/결과 삭제.
     for rollout in RolloutModel.all_active().where(RolloutModel.curriculum_id == curriculum.id):

@@ -532,6 +532,26 @@ def _run_training(job_id, job_dir, ckpt_out_dir, config):
             jobs[job_id]['status'] = 'failed'
             jobs[job_id]['error'] = str(e)
         _append_log(job_id, 'error', f'[ERROR] {e}')
+    finally:
+        # 학습 종료(성공/실패/중지) 후 업로드된 데이터셋 번들 + job dir 삭제.
+        # 안 지우면 graduate 마다 ancestor 체인 전체를 다시 복사한 merged_* 합본이
+        # 누적돼 디스크가 O(N^2) 로 찬다 (예: merged_ckpt_33 = 240G). 번들은 다음
+        # 학습 때 backend 가 항상 다시 tar→업로드(기존 것 rmtree 후 교체)하므로
+        # 삭제해도 안전. 원본 데이터셋(/opt/easytrainer/datasets)은 건드리지 않음.
+        try:
+            machine_id = (config or {}).get('machine_id')
+            ds_ids = (config or {}).get('dataset_ids') or []
+            if machine_id and ds_ids:
+                bundle_dir = os.path.realpath(os.path.join(DATASETS_DIR, str(machine_id), str(ds_ids[0])))
+                root = os.path.realpath(DATASETS_DIR)
+                if bundle_dir.startswith(root + os.sep) and os.path.isdir(bundle_dir):
+                    shutil.rmtree(bundle_dir, ignore_errors=True)
+                    _append_log(job_id, 'stdout', f'[cleanup] removed training bundle {ds_ids[0]}')
+                    print(f'[cleanup] removed training bundle {bundle_dir}', flush=True)
+            if os.path.isdir(job_dir):
+                shutil.rmtree(job_dir, ignore_errors=True)
+        except Exception as _ce:
+            print(f'[cleanup] bundle cleanup failed for {job_id}: {_ce}', flush=True)
 
 
 if __name__ == '__main__':

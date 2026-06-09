@@ -136,16 +136,33 @@ class _SharedTopicSubscriber:
             # Raw Image — JPEG 인코딩이 불가피하지만 토픽 당 한 번만 일어남.
             h_, w_ = msg.height, msg.width
             encoding = msg.encoding
-            np_arr = np.frombuffer(msg.data, np.uint8)
-            if encoding in ('rgb8', 'bgr8'):
-                cv_image = np_arr.reshape((h_, w_, 3))
-                if encoding == 'rgb8':
-                    cv_image = cv2.cvtColor(cv_image, cv2.COLOR_RGB2BGR)
-            elif encoding == 'mono8':
-                cv_image = np_arr.reshape((h_, w_))
-                cv_image = cv2.cvtColor(cv_image, cv2.COLOR_GRAY2BGR)
+            if encoding in ('16UC1', 'mono16'):
+                # Depth (16-bit, mm). Colorize for viewing: percentile-normalize the
+                # valid range → JET colormap; no-reading (0) pixels stay black.
+                dt = '>u2' if getattr(msg, 'is_bigendian', 0) else '<u2'
+                depth = np.frombuffer(msg.data, dt).reshape((h_, w_))
+                valid = depth[depth > 0]
+                if valid.size:
+                    lo = float(np.percentile(valid, 2))
+                    hi = float(np.percentile(valid, 98))
+                else:
+                    lo, hi = 0.0, 1.0
+                if hi <= lo:
+                    hi = lo + 1.0
+                norm = np.clip((depth.astype(np.float32) - lo) / (hi - lo), 0.0, 1.0)
+                cv_image = cv2.applyColorMap((norm * 255).astype(np.uint8), cv2.COLORMAP_JET)
+                cv_image[depth == 0] = 0
             else:
-                cv_image = np_arr.reshape((h_, w_, 3))
+                np_arr = np.frombuffer(msg.data, np.uint8)
+                if encoding in ('rgb8', 'bgr8'):
+                    cv_image = np_arr.reshape((h_, w_, 3))
+                    if encoding == 'rgb8':
+                        cv_image = cv2.cvtColor(cv_image, cv2.COLOR_RGB2BGR)
+                elif encoding == 'mono8':
+                    cv_image = np_arr.reshape((h_, w_))
+                    cv_image = cv2.cvtColor(cv_image, cv2.COLOR_GRAY2BGR)
+                else:
+                    cv_image = np_arr.reshape((h_, w_, 3))
 
             if cv_image is None or cv_image.size == 0:
                 return

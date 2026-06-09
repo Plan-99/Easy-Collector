@@ -31,6 +31,19 @@
           flat
           dense
           round
+          icon="view_in_ar"
+          :color="demo.runningDemoId ? 'primary' : 'white'"
+          class="q-mr-xs"
+          :aria-label="$t('simActivationTitle')"
+          @click="showSim = true"
+        >
+          <q-tooltip>{{ $t('simActivationTitle') }}</q-tooltip>
+        </q-btn>
+
+        <q-btn
+          flat
+          dense
+          round
           icon="memory"
           color="white"
           class="q-mr-xs"
@@ -138,17 +151,20 @@
 
     <PipelineGuideDialog v-model="showPipelineGuide" />
     <GpuManagerDialog v-model="showGpu" />
+    <SimActivationDialog v-model="showSim" />
   </q-layout>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { Notify } from 'quasar'
 import { useI18n } from 'vue-i18n'
 import EssentialLink from 'components/v2/EssentialLink.vue'
 import PipelineGuideDialog from 'components/v2/PipelineGuideDialog.vue'
 import GpuManagerDialog from 'components/v2/GpuManagerDialog.vue'
+import SimActivationDialog from 'components/v2/SimActivationDialog.vue'
 import { useTutorialStore } from 'src/stores/tutorialStore.js'
+import { useDemoStore } from 'src/stores/demoStore.js'
 import { setLocale } from 'src/boot/i18n'
 
 const { t, locale } = useI18n()
@@ -226,7 +242,15 @@ const linksList = computed(() => [
 const leftDrawerOpen = ref(false)
 const showPipelineGuide = ref(false)
 const showGpu = ref(false)
+const showSim = ref(false)
 const tutorial = useTutorialStore()
+const demo = useDemoStore()
+
+onMounted(() => {
+  // Reflect a demo sim that's already running (e.g. after a page reload) in the
+  // top-bar button color without waiting for the dialog to be opened.
+  demo.refreshStatus()
+})
 
 function toggleLeftDrawer () {
   leftDrawerOpen.value = !leftDrawerOpen.value

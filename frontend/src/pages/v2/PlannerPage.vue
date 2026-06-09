@@ -213,20 +213,8 @@
                                 <div v-if="runStatusByGroup[group.id]" class="text-caption text-grey-5 q-mr-sm ellipsis" style="max-width: 360px;">
                                     {{ runStatusByGroup[group.id] }}
                                 </div>
-                                <q-btn
-                                    v-if="!isRunning"
-                                    size="sm"
-                                    flat
-                                    round
-                                    color="positive"
-                                    icon="play_arrow"
-                                    :disable="!(group.blocks || []).length"
-                                    @click.stop="startRun(group.id)"
-                                >
-                                    <q-tooltip>{{ $t('plannerRunGroup') }}</q-tooltip>
-                                </q-btn>
                                 <q-spinner
-                                    v-else-if="groupRunningSet.has(group.id)"
+                                    v-if="isRunning && groupRunningSet.has(group.id)"
                                     color="primary"
                                     size="xs"
                                 />
@@ -260,15 +248,18 @@
                                     :key="block.id"
                                     :block="block"
                                     :block-config="blockConfigs[block.type]"
-                                    :running="runningByGroup[group.id] === index"
+                                    :running="runningByGroup[group.id] === block.id"
                                     :result="blockResultsByGroup[group.id]?.[block.id]"
                                     :progress="blockProgressById[block.id]"
                                     :workspace-name="getWorkspaceName(block.workspace_id)"
-                                    :active="isDragOver(group.id, index) || runningByGroup[group.id] === index"
+                                    :active="isDragOver(group.id, index) || runningByGroup[group.id] === block.id"
+                                    :selected="selectedBlockId === block.id"
                                     width="160px"
                                     class="q-mr-xs"
-                                    :style="{ cursor: isRunning ? 'default' : 'grab' }"
+                                    :style="{ cursor: isRunning ? 'default' : 'pointer' }"
                                     :draggable="!isRunning"
+                                    @click="selectBlock(block)"
+                                    @run="startRun(null, block.id)"
                                     @dragstart="onDragStart(group.id, index, $event)"
                                     @dragover.prevent="onDragOver(group.id, index, $event)"
                                     @drop="onDrop(group.id, index)"
@@ -584,16 +575,24 @@
                                         />
                                     </div>
                                     <div class="row q-gutter-sm">
+                                        <!-- 각 joint 값은 직접 편집 가능한 입력. "현재 자세 적용"
+                                             버튼이 채워주기도 하지만, 여기서 직접 미세조정/수정도 된다. -->
                                         <div
                                             v-for="(jointName, jIdx) in (robot.joint_names || [])"
                                             :key="jIdx"
-                                            class="border-rounded border-primary q-px-md q-py-xs text-center"
+                                            class="border-rounded border-primary q-px-sm q-py-xs text-center"
                                             style="min-width: 100px;"
                                         >
                                             <div class="text-caption text-grey-5">{{ jointName }}</div>
-                                            <div class="text-subtitle1 text-primary">
-                                                {{ typeof blockForm.positions[robot.id][jIdx] === 'number' ? blockForm.positions[robot.id][jIdx].toFixed(4) : '0' }}
-                                            </div>
+                                            <q-input
+                                                v-model.number="blockForm.positions[robot.id][jIdx]"
+                                                type="number"
+                                                step="0.001"
+                                                dense
+                                                dark
+                                                borderless
+                                                input-class="text-subtitle1 text-primary text-center"
+                                            />
                                         </div>
                                     </div>
                                 </div>
@@ -688,6 +687,34 @@
                                                 hide-bottom-space
                                                 v-model.number="blockForm.deltas[robot.id][idx]"
                                                 :label="label"
+                                                type="number"
+                                                step="0.01"
+                                            ></q-input>
+                                        </div>
+                                    </div>
+                                </div>
+                                <!-- Inner tool (arm with tool_inner): gripper absolute joint
+                                     value(s) alongside the EE delta. Same orange box as a
+                                     separate tool robot for a consistent look. -->
+                                <div
+                                    v-if="!isToolRobot(robot) && hasInnerTool(robot) && Array.isArray(blockForm.tool_positions[robot.id])"
+                                    class="border-rounded q-pa-md q-mt-sm"
+                                    style="border: 1px solid #FF8F00; background: #1a1a1a;"
+                                >
+                                    <div class="text-caption text-grey-5 q-mb-sm">
+                                        {{ $t('plannerToolAbsoluteHint') }}
+                                    </div>
+                                    <div class="row q-col-gutter-sm">
+                                        <div
+                                            v-for="(jointName, k) in innerToolJointNames(robot)"
+                                            :key="k"
+                                            class="col-4"
+                                        >
+                                            <q-input
+                                                dense outlined dark bg-color="dark"
+                                                hide-bottom-space
+                                                v-model.number="blockForm.tool_positions[robot.id][k]"
+                                                :label="jointName"
                                                 type="number"
                                                 step="0.01"
                                             ></q-input>
@@ -1070,7 +1097,7 @@
                         ></q-select>
                         <div v-if="visualReachStreamTopic" class="q-mb-sm">
                             <div class="vr-stream-wrap border-rounded overflow-hidden" ref="vrWrapEl"
-                                :class="{ 'vr-drag-on': blockForm.target_mode === 'box' }"
+                                :class="{ 'vr-drag-on': blockForm.target_mode === 'box' && vrAddMode }"
                                 @mousedown.prevent="onVrDown" @mousemove="onVrMove"
                                 @mouseup="onVrUp" @mouseleave="onVrUp">
                                 <WebRtcVideo :topic="visualReachStreamTopic" :sensor-id="blockForm.sensor_id || 0"
@@ -1086,18 +1113,38 @@
                             :label="$t('plannerVisualReachTargetMode')"
                             map-options emit-value
                         ></q-select>
-                        <!-- 1) box mode: drag on the stream -->
+                        <!-- 1) box mode: 여러 각도 레퍼런스 추가(드래그) → 썸네일 + X 삭제 -->
                         <div v-if="visualReachStreamTopic && blockForm.target_mode === 'box'" class="q-mb-md">
-                            <div class="text-caption text-grey-5 row items-center">
-                                <q-icon name="crop_free" size="16px" class="q-mr-xs" />
-                                {{ $t('plannerVisualReachBoxGuide') }}
+                            <div class="row items-center q-gutter-sm">
+                                <q-btn dense :outline="!vrAddMode"
+                                    :color="vrAddMode ? 'amber' : 'primary'"
+                                    :icon="vrAddMode ? 'crop_free' : 'add'"
+                                    :label="vrAddMode ? $t('plannerVisualReachRefDragNow') : $t('plannerVisualReachRefAdd')"
+                                    :loading="visualReachDetecting && vrAddMode"
+                                    @click="vrAddMode = !vrAddMode" />
                                 <q-space />
-                                <span v-if="blockForm.exemplar_box" class="text-green q-mr-sm">
-                                    ● {{ $t('plannerVisualReachTargetSet') }}
+                                <span class="text-caption text-grey-6">
+                                    {{ $t('plannerVisualReachRefCount', { n: blockForm.references.length }) }}
                                 </span>
-                                <q-btn v-if="blockForm.exemplar_box" dense flat size="sm" color="grey-5"
-                                    icon="clear" :label="$t('plannerVisualReachTargetClear')" @click="clearExemplar" />
-                                <q-spinner v-if="visualReachDetecting" color="primary" size="16px" class="q-ml-sm" />
+                            </div>
+                            <div class="text-caption text-grey-5 q-mt-xs">{{ $t('plannerVisualReachBoxGuide') }}</div>
+                            <!-- reference thumbnails -->
+                            <div v-if="blockForm.references.length" class="row q-gutter-sm q-mt-sm">
+                                <div v-for="(ref, i) in blockForm.references" :key="i" class="vr-ref-thumb">
+                                    <img :src="ref.thumb || ('data:image/jpeg;base64,' + ref.image)" />
+                                    <q-btn round dense size="xs" color="negative" icon="close"
+                                        class="vr-ref-x" @click="removeReference(i)" />
+                                </div>
+                            </div>
+                            <!-- detect/track (multi-ref) -->
+                            <div v-if="blockForm.references.length" class="row items-center q-gutter-sm q-mt-sm">
+                                <q-btn dense :outline="!visualReachTracking"
+                                    :color="visualReachTracking ? 'red' : 'primary'"
+                                    :icon="visualReachTracking ? 'stop' : 'center_focus_strong'"
+                                    :loading="visualReachDetecting && !visualReachTracking && !vrAddMode"
+                                    :label="visualReachTracking ? $t('plannerVisualReachTrackStop') : $t('plannerVisualReachTestDetect')"
+                                    @click="toggleWristTrack" />
+                                <span class="text-caption text-grey-6">{{ $t('plannerVisualReachBoxDetectHint') }}</span>
                             </div>
                         </div>
                         <!-- 2) text mode: prompt input + detect button -->
@@ -1116,7 +1163,10 @@
                                     :label="visualReachTracking ? $t('plannerVisualReachTrackStop') : $t('plannerVisualReachTestDetect')"
                                     @click="toggleWristTrack" />
                             </div>
-                            <span v-if="visualReachDetectInfo" class="text-caption"
+                        </div>
+                        <!-- shared detect result (both modes) -->
+                        <div v-if="visualReachStreamTopic && visualReachDetectInfo" class="q-mb-xs">
+                            <span class="text-caption"
                                 :class="visualReachDetectInfo.detected ? 'text-green' : 'text-orange'">
                                 {{ (visualReachDetectInfo.detected && visualReachDetectInfo.centroid)
                                     ? $t('plannerVisualReachDetected', { px: visualReachDetectInfo.mask_pixels, u: Math.round(visualReachDetectInfo.centroid[0]), v: Math.round(visualReachDetectInfo.centroid[1]) })
@@ -1481,11 +1531,11 @@ const monitorVisibleViewKeys = computed(() => {
     const out = new Set();
     let anyRunningCheckpoint = false;
     for (const groupId of Object.keys(runningByGroup)) {
-        const blockIdx = runningByGroup[groupId];
-        if (blockIdx == null) continue;
+        const runningBid = runningByGroup[groupId];
+        if (runningBid == null) continue;
         const group = plans.value.find(g => g.id === groupId);
         if (!group) continue;
-        const block = group.blocks?.[blockIdx];
+        const block = group.blocks?.find(b => b.id === runningBid);
         if (!block || block.type !== 'checkpoint') continue;
         // 체크포인트의 워크스페이스 = 블록의 workspace_id. 그 워크스페이스의
         // sensor_ids 로 visual reach 카메라 후보를 정한다. (checkpoints 글로벌
@@ -1898,7 +1948,8 @@ const blockForm = ref({
     text_prompt: '',           // UI 단일 입력 → 저장 시 text_prompts:[…] 로 변환
     box_x1: null, box_y1: null, box_x2: null, box_y2: null,
     target_mode: 'box',                          // 'box'(드래그 exemplar) | 'text'(텍스트 프롬프트) — 둘 다 YOLOE
-    exemplar_image: null, exemplar_box: null,   // 드래그 박스 exemplar (YOLOE cross-view)
+    exemplar_image: null, exemplar_box: null,   // (legacy) 단일 드래그 박스 exemplar
+    references: [],                              // 멀티 레퍼런스(여러 각도) [{image,box}, ...]
     text_prompts: [], boxes: [], target_color: null, observe_positions: {},
 });
 
@@ -1988,8 +2039,9 @@ const visualReachMaskOverlay = ref(null);
 const visualReachDetecting = ref(false);
 const visualReachTracking = ref(false);
 const visualReachDetectInfo = ref(null);
-// --- drag-to-draw box exemplar (YOLOE cross-view) ---
+// --- drag-to-draw box exemplar (YOLOE cross-view, 멀티 레퍼런스) ---
 const vrWrapEl = ref(null);
+const vrAddMode = ref(false);   // "레퍼런스 추가" 활성 시에만 스트림 드래그로 박스
 const vrDrag = ref(false);
 const vrDragRect = ref({ x: 0, y: 0, w: 0, h: 0 });
 let _vrStart = null;
@@ -2002,8 +2054,8 @@ function _vrXY(e) {
     return { x: e.clientX - r.left, y: e.clientY - r.top, W: r.width, H: r.height };
 }
 function onVrDown(e) {
-    // dragging only defines a target in box mode (text mode uses the prompt).
-    if (blockForm.value.target_mode !== 'box') return;
+    // dragging only defines a target in box mode while "레퍼런스 추가" is active.
+    if (blockForm.value.target_mode !== 'box' || !vrAddMode.value) return;
     if (blockForm.value.sensor_id == null) return;
     stopWristTrack();
     const p = _vrXY(e); _vrStart = p; vrDrag.value = true;
@@ -2028,9 +2080,9 @@ function onVrUp() {
     defineExemplar([r.x / wrap.width, r.y / wrap.height,
                     (r.x + r.w) / wrap.width, (r.y + r.h) / wrap.height]);
 }
-function clearExemplar() {
-    blockForm.value.exemplar_image = null;
-    blockForm.value.exemplar_box = null;
+// 레퍼런스 썸네일 X 버튼 — 해당 레퍼런스 제거.
+function removeReference(i) {
+    blockForm.value.references.splice(i, 1);
     visualReachMaskOverlay.value = null;
     visualReachDetectInfo.value = null;
 }
@@ -2038,11 +2090,33 @@ function clearExemplar() {
 // stale box/text result never bleeds across modes.
 watch(() => blockForm.value.target_mode, () => {
     stopWristTrack();
+    vrAddMode.value = false;
+    blockForm.value.references = [];
     blockForm.value.exemplar_image = null;
     blockForm.value.exemplar_box = null;
     visualReachMaskOverlay.value = null;
     visualReachDetectInfo.value = null;
 });
+// 박스 영역만 잘라 작은 썸네일 data-URL 생성(표시 전용). 검출용 full image+box 는 유지.
+function _cropBoxToDataUrl(b64Jpeg, box) {
+    return new Promise((resolve) => {
+        try {
+            const img = new Image();
+            img.onload = () => {
+                const x1 = Math.max(0, Math.min(box[0], box[2]));
+                const y1 = Math.max(0, Math.min(box[1], box[3]));
+                const w = Math.max(1, Math.abs(box[2] - box[0]));
+                const h = Math.max(1, Math.abs(box[3] - box[1]));
+                const c = document.createElement('canvas');
+                c.width = w; c.height = h;
+                c.getContext('2d').drawImage(img, x1, y1, w, h, 0, 0, w, h);
+                resolve(c.toDataURL('image/jpeg', 0.85));
+            };
+            img.onerror = () => resolve(null);
+            img.src = 'data:image/jpeg;base64,' + b64Jpeg;
+        } catch { resolve(null); }
+    });
+}
 // DEFINE: drag box → backend captures the refer frame + box (YOLOE validates) →
 // store on the block so the target is re-found in later (changed) views.
 async function defineExemplar(boxNorm) {
@@ -2054,10 +2128,15 @@ async function defineExemplar(boxNorm) {
             rgbd_service: blockForm.value.rgbd_service,
             box_norm: boxNorm,
         });
-        blockForm.value.exemplar_image = res.data.exemplar_image;
-        blockForm.value.exemplar_box = res.data.exemplar_box;
+        // 캡처된 (이미지+박스)를 멀티 레퍼런스 리스트에 추가(여러 각도 누적).
+        // thumb = 박스 크롭(표시 전용), image = 검출용 full refer frame.
+        const thumb = await _cropBoxToDataUrl(res.data.exemplar_image, res.data.exemplar_box);
+        blockForm.value.references.push({
+            image: res.data.exemplar_image,
+            box: res.data.exemplar_box,
+            thumb,
+        });
         visualReachMaskOverlay.value = res.data.image || null;
-        // feedback via the green "타겟 지정됨" chip + toast (the detect-info span needs a centroid)
         visualReachDetectInfo.value = null;
         Notify.create({
             color: res.data.detected ? 'positive' : 'warning',
@@ -2107,6 +2186,7 @@ function _doWristDetect(silent) {
         rgbd_service: blockForm.value.rgbd_service,
         text_prompts: isText && tp ? [tp] : [],
         boxes: [],
+        references: isText ? [] : (blockForm.value.references || []),
         exemplar_image: isText ? null : blockForm.value.exemplar_image,
         exemplar_box: isText ? null : blockForm.value.exemplar_box,
         target_color: blockForm.value.target_color,
@@ -2242,7 +2322,7 @@ function openBlockForm(group) {
         text_prompt: '',
         box_x1: null, box_y1: null, box_x2: null, box_y2: null,
         target_mode: 'box',
-        exemplar_image: null, exemplar_box: null,
+        exemplar_image: null, exemplar_box: null, references: [],
         text_prompts: [], boxes: [], target_color: null, observe_positions: {},
         // wrist-view-reach camera pose (no-calibration manual mount).
         // Defaults = tutorial MuJoCo wrist_cam mount (verified manual≡FK in sim);
@@ -2297,9 +2377,14 @@ function openEditBlockForm(group, block, index) {
         box_y2: block.boxes?.[0]?.[3] ?? null,
         text_prompts: block.text_prompts ? [...block.text_prompts] : [],
         boxes: block.boxes ? JSON.parse(JSON.stringify(block.boxes)) : [],
-        target_mode: block.target_mode || (block.exemplar_box ? 'box' : (block.text_prompts && block.text_prompts[0] ? 'text' : 'box')),
+        target_mode: block.target_mode || ((block.references?.length || block.exemplar_box) ? 'box' : (block.text_prompts && block.text_prompts[0] ? 'text' : 'box')),
         exemplar_image: block.exemplar_image ?? null,
         exemplar_box: block.exemplar_box ? [...block.exemplar_box] : null,
+        // 멀티 레퍼런스 로드 — 없으면 legacy 단일 exemplar 를 1-원소로 변환(하위호환).
+        references: Array.isArray(block.references) && block.references.length
+            ? JSON.parse(JSON.stringify(block.references))
+            : (block.exemplar_image && block.exemplar_box
+                ? [{ image: block.exemplar_image, box: [...block.exemplar_box] }] : []),
         target_color: block.target_color ?? null,
         observe_positions: block.observe_positions ? JSON.parse(JSON.stringify(block.observe_positions)) : {},
         // wrist-view-reach camera pose — unfold cam_offset[] back into x/y/z inputs
@@ -2393,10 +2478,62 @@ watch(() => blockForm.value.workspace_id, (newId, oldId) => {
             } else {
                 deltas[robot.id] = [0, 0, 0, 0, 0, 0];
             }
+            // arm 에 통합된 inner 그리퍼는 tool_positions 슬롯도 함께 만든다.
+            if (hasInnerTool(robot)) {
+                const tdim = robot.tool_index.length;
+                const tprior = existingTools[robot.id];
+                toolPositions[robot.id] = (Array.isArray(tprior) && tprior.length === tdim)
+                    ? [...tprior] : Array(tdim).fill(0);
+            }
         }
     });
     blockForm.value.deltas = deltas;
     blockForm.value.tool_positions = toolPositions;
+});
+
+// 블록 타입 변경 시 디바이스 슬롯 초기화.
+// 워크스페이스가 1개라 openBlockForm 이 type 선택 *전에* workspace_id 를 자동
+// 설정하면, 위의 workspace_id watch 들은 그 시점 type 이 아직 null 이라 early
+// return 한다. 이후 사용자가 타입을 고르면 workspace_id 는 안 바뀌어 watch 가
+// 다시 발화하지 않아 positions/deltas 가 비어 입력칸이 아예 안 뜨던 버그를 막는다.
+// 편집 모드(openEditBlockForm)는 이미 값이 로드돼 있으므로 건드리지 않는다.
+watch(() => blockForm.value.type, (newType) => {
+    const wsId = blockForm.value.workspace_id;
+    if (!wsId || editingBlockIndex.value !== null) return;
+    const robots = getWorkspaceRobots(wsId);
+    if (newType === 'joint_position') {
+        const positions = {};
+        robots.forEach(robot => {
+            const dim = robot.joint_names?.length || robot.joint_dim || 6;
+            const prior = blockForm.value.positions?.[robot.id];
+            positions[robot.id] = (Array.isArray(prior) && prior.length === dim)
+                ? [...prior] : Array(dim).fill(0);
+        });
+        blockForm.value.positions = positions;
+    } else if (newType === 'move_relative_ee') {
+        const deltas = {};
+        const toolPositions = {};
+        robots.forEach(robot => {
+            if (isToolRobot(robot)) {
+                const dim = robot.joint_names?.length || robot.joint_dim || 1;
+                const prior = blockForm.value.tool_positions?.[robot.id];
+                toolPositions[robot.id] = (Array.isArray(prior) && prior.length === dim)
+                    ? [...prior] : Array(dim).fill(0);
+            } else {
+                const prior = blockForm.value.deltas?.[robot.id];
+                deltas[robot.id] = (Array.isArray(prior) && prior.length === 6)
+                    ? [...prior] : [0, 0, 0, 0, 0, 0];
+                if (hasInnerTool(robot)) {
+                    const tdim = robot.tool_index.length;
+                    const tprior = blockForm.value.tool_positions?.[robot.id];
+                    toolPositions[robot.id] = (Array.isArray(tprior) && tprior.length === tdim)
+                        ? [...tprior] : Array(tdim).fill(0);
+                }
+            }
+        });
+        blockForm.value.deltas = deltas;
+        blockForm.value.tool_positions = toolPositions;
+    }
 });
 
 // replay_episode: 워크스페이스 바뀌면 dataset 목록 lazy-load.
@@ -2420,6 +2557,19 @@ function isToolRobot(robot) {
     // ik_solver 가 명시적으로 falsy/null 이면 IK 없는 agent → tool 로 간주
     if (Object.prototype.hasOwnProperty.call(robot, 'ik_solver') && !robot.ik_solver) return true;
     return false;
+}
+
+// 통합(inner) 그리퍼를 가진 arm — 별도 tool robot 없이 tool_index 관절(예: gripper)이
+// arm 안에 들어 있는 경우. move_relative_ee 에서 EE delta 옆에 그리퍼 절대값 입력을 띄운다.
+function hasInnerTool(robot) {
+    return !!(robot && robot.tool_inner
+        && Array.isArray(robot.tool_index) && robot.tool_index.length > 0);
+}
+// inner tool 관절들의 표시 이름 (joint_names[tool_index]).
+function innerToolJointNames(robot) {
+    if (!hasInnerTool(robot)) return [];
+    const names = robot.joint_names || [];
+    return robot.tool_index.map((i) => names[i] || `j${i}`);
 }
 
 function applyCurrentPos(robot) {
@@ -2591,15 +2741,22 @@ function onDragEnd() {
 const isRunning = ref(false);
 const repeatActive = ref(false);
 const currentIterationByGroup = reactive({});
-const runningByGroup = reactive({});  // groupId -> currently running block index
+const runningByGroup = reactive({});  // groupId -> currently running block_id
 const runStatusByGroup = reactive({});  // groupId -> status text
 const blockResultsByGroup = reactive({});  // groupId -> { blockId: 'finished'|'stopped'|'error' }
 // blockId -> { step, max_steps } — 체크포인트 블록의 실시간 step 진행도.
 // planner_block_progress 이벤트로 갱신, planner_block_end 에서 정리.
 const blockProgressById = reactive({});
 const groupRunningSet = ref(new Set());  // groupIds currently mid-run
+// "이 블록만 실행" 선택 대상 — 블록을 클릭하면 set, 초록 플레이 버튼이 이 블록만 실행.
+const selectedBlockId = ref(null);
 
 // blockResultIcon / blockResultColor 는 PlannerBlockCard 내부에서 처리.
+
+function selectBlock(block) {
+    if (isRunning.value) return;
+    selectedBlockId.value = (selectedBlockId.value === block.id) ? null : block.id;
+}
 
 function resetRunState() {
     Object.keys(runningByGroup).forEach(k => delete runningByGroup[k]);
@@ -2609,12 +2766,13 @@ function resetRunState() {
     groupRunningSet.value = new Set();
 }
 
-function startRun(groupId) {
+function startRun(groupId, blockId = null) {
     if (!selectedPlannerId.value) return;
     resetRunState();
     api.post(`/planner/${selectedPlannerId.value}/:start_run`, {
         repeat_count: repeatActive.value ? 0 : 1,
         group_id: groupId,
+        block_id: blockId,
     }).then((res) => {
         isRunning.value = true;
         const ids = res.data?.group_ids || [];
@@ -2773,7 +2931,9 @@ function onPlannerBlockProgress(payload) {
 function onPlannerBlockStart(payload) {
     const gid = payload?.group_id;
     if (!gid) return;
-    runningByGroup[gid] = payload?.index ?? null;
+    // 실행 중 블록을 block_id 로 추적한다(index 아님). 단일 블록 실행처럼 백엔드가
+    // 합성 그룹(블록 1개, index 0)으로 돌려도 스피너가 *실제 실행 블록* 에 뜨도록.
+    runningByGroup[gid] = payload?.block_id ?? null;
     // 새 블록 시작 — 이전 진행도 정리.
     if (payload?.block_id) delete blockProgressById[payload.block_id];
     let text = t('plannerRunningStatusDetail', {
@@ -2922,5 +3082,27 @@ onMounted(async () => {
   background: rgba(76, 175, 80, 0.18);
   pointer-events: none;
   z-index: 5;
+}
+/* 멀티 레퍼런스 썸네일 */
+.vr-ref-thumb {
+  position: relative;
+  width: 84px;
+  height: 64px;
+  border: 1px solid #555;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #1a1a1a;
+}
+.vr-ref-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.vr-ref-x {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 2;
 }
 </style>

@@ -126,6 +126,40 @@ def detect_exemplar(target_rgb: np.ndarray, refer_rgb: np.ndarray, box,
     return _result_to_mask(res[0], H, W)
 
 
+def detect_exemplar_multi(target_rgb: np.ndarray, refers, conf: float = 0.25) -> np.ndarray:
+    """Multi-reference box exemplar: detect with EACH reference via the proven
+    single visual-prompt path (`detect_exemplar`) and OR (union) the masks —
+    "여러 각도 중 하나라도 맞으면 검출".
+
+    `refers` = [(refer_rgb, box), ...] where box is [x1,y1,x2,y2] in that refer
+    image's pixels.
+
+    이전 구현은 per-reference VPE 를 평균(get_vpe → mean → set_classes)했는데,
+    이는 레퍼런스 생성/검증에 쓰는 visual-prompt 경로(YOLOEVPSegPredictor)와
+    메커니즘이 달라 같은 뷰에서도 conf 를 못 넘겨 "검출 안됨"이 났다. 여기서는
+    검증과 **동일한 경로**를 레퍼런스마다 돌리고 합집합 → 한 각도라도 맞으면 검출
+    되고(생성-검출 일관성), 여러 각도라 뷰 변화에 강건하다."""
+    refers = [(r, b) for (r, b) in (refers or []) if r is not None and b is not None]
+    H, W = target_rgb.shape[:2]
+    if not refers:
+        return np.zeros((H, W), bool)
+    # first-match 단축: 레퍼런스를 순서대로 검출, **처음 맞는 것에서 즉시 반환**.
+    # 추론 시간이 레퍼런스 수에 안 묶임(최선 1회). 하나라도 맞으면 검출되므로
+    # 뷰 변화 강건성은 유지(맞는 각도가 나올 때까지만 시도).
+    for i, (refer_rgb, box) in enumerate(refers):
+        try:
+            m = detect_exemplar(target_rgb, refer_rgb, box, conf=conf)
+        except Exception:
+            continue
+        if m is not None and getattr(m, 'shape', None) == (H, W) and m.any():
+            try:
+                print(f"[yoloe] multi-ref detect: matched on ref {i+1}/{len(refers)}", flush=True)
+            except Exception:
+                pass
+            return m
+    return np.zeros((H, W), bool)
+
+
 def detect_text(target_rgb: np.ndarray, texts, conf: float = 0.15) -> np.ndarray:
     """Open-vocabulary text prompt: detect the named object(s) in `target_rgb`
     using YOLOE's text-prompt mode (CLIP text embeddings). Returns the best
