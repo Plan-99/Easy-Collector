@@ -454,6 +454,38 @@
                             </div>
                         </q-card>
 
+                        <!-- GPU 예상 사용량 / 남은 GPU 메모리 -->
+                        <q-card class="bg-dark q-pa-md q-mb-md border-rounded">
+                            <div class="row items-center q-gutter-x-sm">
+                                <q-icon name="memory" color="deep-orange" size="sm" />
+                                <div class="text-subtitle2">{{ $t('trainGpuEstimateTitle') }}</div>
+                                <q-space />
+                                <q-btn flat dense round size="sm" icon="refresh" :loading="gpuEstimate.loading" @click="refreshGpuEstimate" />
+                            </div>
+                            <div class="row items-center q-gutter-x-xl q-mt-sm">
+                                <div>
+                                    <div class="text-caption text-grey-5">{{ $t('trainGpuEstimated') }}</div>
+                                    <div class="text-h6">~{{ gpuEstimate.estimated_mib ?? '—' }} MiB</div>
+                                </div>
+                                <div>
+                                    <div class="text-caption text-grey-5">{{ $t('trainGpuFree') }}</div>
+                                    <div class="text-h6">
+                                        <!-- 학습 서버 연결이 확인되기 전엔 남은 GPU 를 표시하지 않는다 (- / -). -->
+                                        <!-- 표시값은 진행 중인 학습 예약량을 차감한 available_mib (새 학습이 실제 쓸 수 있는 자리). -->
+                                        <span v-if="serverStatus !== 'connected'" class="text-grey-5">- / -</span>
+                                        <span v-else-if="gpuEstimate.available_mib != null">{{ gpuEstimate.available_mib }} / {{ gpuEstimate.total_mib }} MiB</span>
+                                        <span v-else class="text-grey-5 text-body2">{{ $t('trainGpuUnknown') }}</span>
+                                    </div>
+                                </div>
+                                <q-space />
+                                <!-- 여유/대기 칩도 연결 확인 후에만 (남은 GPU 를 알 때만 의미 있음). -->
+                                <template v-if="serverStatus === 'connected'">
+                                    <q-chip v-if="gpuEstimate.fits === true" color="positive" text-color="white" icon="check_circle" dense>{{ $t('trainGpuFits') }}</q-chip>
+                                    <q-chip v-else-if="gpuEstimate.fits === false" color="orange" text-color="white" icon="schedule" dense>{{ $t('trainGpuWillQueue') }}</q-chip>
+                                </template>
+                            </div>
+                        </q-card>
+
                         <q-form class="q-col-gutter-md row">
                             <div class="col-12">
                                 <q-input dense outlined v-model="newCheckpointName" :label="$t('trainCheckpointName')"
@@ -574,7 +606,7 @@
                 </q-card-actions>
             </q-card>
         </q-dialog>
-        <TrainingDialog v-model="showTrainingDialog" :checkpoint="watchingCheckpoint" :isTraining="watchingIsTraining" @hide="unwatchCheckpoint" @cpRemoved="queuePanel?.refresh()" />
+        <TrainingDialog v-model="showTrainingDialog" :checkpoint="watchingCheckpoint" :isTraining="watchingIsTraining" :detail-loading="watchingDetailLoading" @hide="unwatchCheckpoint" @cpRemoved="queuePanel?.refresh()" />
     </q-page>
 </template>
 
@@ -675,15 +707,68 @@ function checkServerHealth() {
             serverStatus.value = 'connected';
             serverGpuAvailable.value = res.data.server?.gpu_available || false;
             Notify.create({ color: 'positive', message: t('trainServerConnected') });
+            // 연결되면 학습 서버 남은 GPU(예상 사용량 카드)도 즉시 갱신.
+            refreshGpuEstimate();
         })
         .catch(() => {
             serverStatus.value = 'error';
             serverGpuAvailable.value = false;
             Notify.create({ color: 'negative', message: t('trainServerCannotConnect') });
+            // 연결 실패 시에도 카드의 남은 GPU 를 최신(측정 불가)으로 반영.
+            refreshGpuEstimate();
         });
 }
 
 const policyTypes = Object.keys(POLICY_CONFIGS);
+
+// ── GPU 예상 사용량 / 학습서버 GPU 여유 ────────────────────────────────────
+// 현재 파라미터로 학습 시 예상 VRAM 과 대상 서버의 남은 VRAM 을 보여준다.
+// 예상 > 여유면 곧바로 동시 실행되지 않고 대기열에서 순차 실행됨을 안내.
+const gpuEstimate = ref({ estimated_mib: null, free_mib: null, total_mib: null, available_mib: null, running_count: 0, fits: null, loading: false });
+let gpuEstimateTimer = null;
+function refreshGpuEstimate() {
+    const policyType = policyForm.value?.type;
+    if (!policyType) return;
+    const train_settings = {};
+    if (trainingForm.value) {
+        for (const key in trainingForm.value) train_settings[key] = trainingForm.value[key].value;
+    }
+    gpuEstimate.value.loading = true;
+    api.post('/train/gpu-estimate', {
+        policy_type: policyType,
+        train_settings,
+        server_url: remoteServerUrl.value,
+    })
+        .then((res) => {
+            const d = res.data || {};
+            gpuEstimate.value = {
+                estimated_mib: d.estimated_mib ?? null,
+                free_mib: d.free_mib ?? null,
+                total_mib: d.total_mib ?? null,
+                available_mib: d.available_mib ?? d.free_mib ?? null,
+                running_count: d.running_count ?? 0,
+                fits: d.fits ?? null,
+                loading: false,
+            };
+        })
+        .catch(() => {
+            gpuEstimate.value.loading = false;
+        });
+}
+function scheduleGpuEstimate() {
+    if (gpuEstimateTimer) clearTimeout(gpuEstimateTimer);
+    gpuEstimateTimer = setTimeout(refreshGpuEstimate, 400);
+}
+// 파라미터/서버/정책 변화 시 디바운스 재계산.
+watch(
+    () => [trainingForm.value, remoteServerUrl.value, policyForm.value?.type],
+    scheduleGpuEstimate,
+    { deep: true },
+);
+// step 3(학습 파라미터)에 들어오면 즉시 1회 계산.
+watch(step, (s) => {
+    if (s === 3) refreshGpuEstimate();
+});
 
 const { socket } = useSocket();
 
@@ -895,7 +980,8 @@ watch(selectedPolicy, (newVal) => {
 // --- Methods for Step 1 ---
 function listDatasets() {
     api.get('/datasets').then((response) => {
-        availableDatasets.value = response.data.datasets.filter(dataset => dataset.task_id == selectedWorkspaceId.value) || [];
+        // 응답이 일시적으로 비거나 깨져도(동시 요청 시 dev 서버) 크래시하지 않도록 방어.
+        availableDatasets.value = (response.data?.datasets || []).filter(dataset => dataset.task_id == selectedWorkspaceId.value);
     }).catch((error) => {
         console.error('Error fetching datasets:', error);
         Notify.create({ color: 'negative', message: t('trainLoadDatasetsFailed') });
@@ -912,17 +998,21 @@ function listCheckpoints() {
             order: 'created_at DESC'
         }
     }).then(response => {
-        checkpoints.value = response.data.checkpoints.map(c => {
+        checkpoints.value = (response.data?.checkpoints || []).map(c => {
             const policy = policies.value.find(p => p.id === c.policy_id);
             return {...c, policy: policy || c.policy};
         })
+    }).catch((error) => {
+        console.error('Error fetching checkpoints:', error);
     });
 }
 
 function listPolicies() {
     return api.get('/policies').then(response => {
-        policies.value = response.data.policies.filter(policy => policy.is_vla !== 1) || [];
-    })
+        policies.value = (response.data?.policies || []).filter(policy => policy.is_vla !== 1);
+    }).catch((error) => {
+        console.error('Error fetching policies:', error);
+    });
 }
 
 function handleCheckpointClear() {
@@ -1121,6 +1211,7 @@ function getTrainingPayload() {
 
 const showTrainingDialog = ref(false);
 const watchingCheckpoint = ref(null);
+const watchingDetailLoading = ref(false);
 const queuePanel = ref(null);
 
 function createCheckpoint() {
@@ -1184,35 +1275,47 @@ const watchingIsTraining = computed(() => {
     return watchingCheckpoint.value?.status === 'running';
 });
 
-function watchCheckpoint(checkpoint) {
+async function watchCheckpoint(checkpoint) {
+    // 큐 스냅샷은 경량(id/name/status)만 담는다. 다이얼로그를 즉시 열고(경량 정보로
+    // 헤더·상태 표시), 상세는 백그라운드로 조회해 채운다 — 조회 중엔 다이얼로그
+    // 내부에 스피너가 뜬다(detailLoading).
     watchingCheckpoint.value = checkpoint;
     showTrainingDialog.value = true;
+    watchingDetailLoading.value = true;
+    try {
+        const res = await api.get(`/checkpoint/${checkpoint.id}`);
+        if (res?.data?.checkpoint) watchingCheckpoint.value = res.data.checkpoint;
+    } catch {
+        // 조회 실패 — 경량 정보로 유지
+    } finally {
+        watchingDetailLoading.value = false;
+    }
 }
 
-// 큐 패널의 snapshot이 갱신될 때, 다이얼로그가 열려 있는 체크포인트의 fresh
-// dict로 watchingCheckpoint를 동기화. status가 queued→running→finished 등으로
-// 바뀌어도 다이얼로그 UI(progress/그래프 영역)와 버튼 라벨이 즉시 따라간다.
-// 종료 상태에서 active 큐에 없으면 백엔드에 직접 GET해서 최신 status 반영.
+// 큐 패널의 (경량) snapshot이 갱신될 때, 다이얼로그가 열린 체크포인트의 status가
+// 바뀌었으면(queued→running→finished 등) 상세를 다시 조회해 다이얼로그를 최신
+// full dict로 갱신한다. status가 그대로면 재조회하지 않는다(불필요한 요청 방지).
 watch(
     () => queuePanel.value?.queue,
     async (queue) => {
         if (!queue || !watchingCheckpoint.value) return;
         const id = watchingCheckpoint.value.id;
-        const fresh =
-            (queue.running && queue.running.id === id && queue.running) ||
+        const curStatus = watchingCheckpoint.value.status;
+        const light =
+            (queue.running_list || []).find((c) => c.id === id) ||
             (queue.queued || []).find((c) => c.id === id) ||
             (queue.recent || []).find((c) => c.id === id);
-        if (fresh) {
-            watchingCheckpoint.value = fresh;
-            return;
+        const liveStatus = light?.status;
+        if (liveStatus) {
+            if (liveStatus === curStatus) return; // 변화 없음
+        } else {
+            // 큐에서 사라짐 — 이미 종료 상태로 알고 있으면 더 조회 안 함.
+            if (['finished', 'failed', 'canceled'].includes(curStatus)) return;
         }
-        // active/recent 어디에도 없는데 다이얼로그는 열려 있는 상황 — 종료된 지
-        // 오래되어 recent에서 밀려난 케이스. 직접 fetch해서 status를 갱신.
+        // status 변화/큐 이탈 → 상세 재조회로 다이얼로그 갱신.
         try {
             const res = await api.get(`/checkpoint/${id}`);
-            if (res?.data?.checkpoint) {
-                watchingCheckpoint.value = res.data.checkpoint;
-            }
+            if (res?.data?.checkpoint) watchingCheckpoint.value = res.data.checkpoint;
         } catch {
             // 삭제된 경우 등 — 다이얼로그는 그대로 두고 사용자가 닫게 한다.
         }

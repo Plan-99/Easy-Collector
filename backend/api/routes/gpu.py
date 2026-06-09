@@ -14,9 +14,89 @@ SAM3 overlay. Planner runs are separate subprocesses and still auto-load lazily
 import os
 import subprocess
 
+import requests
 from flask import Blueprint
 
 gpu_bp = Blueprint('gpu', __name__)
+
+
+def _easytrainer_training_jobs():
+    """로컬 training_server(5100)에서 진행 중인 학습 job 들을 조회.
+
+    Returns list of {'checkpoint_id', 'gpu_mib'} for status in (starting/training).
+    GPU 관리 다이얼로그가 nvidia-smi 의 '[Not Found]'(별도 PID namespace 라 컨테
+    이너 /proc 에서 해석 불가) 프로세스를 EasyTrainer 학습으로 라벨링하는 데 쓴다.
+    """
+    port = os.environ.get('TRAINING_SERVER_PORT', '5100')
+    try:
+        resp = requests.get(f'http://localhost:{port}/api/train/jobs', timeout=3)
+        if resp.status_code != 200:
+            return []
+        jobs = (resp.json() or {}).get('jobs', [])
+    except (requests.exceptions.RequestException, ValueError, TypeError):
+        return []
+    out = []
+    for j in jobs:
+        if j.get('status') not in ('training', 'starting'):
+            continue
+        cp = j.get('checkpoint_id')
+        if cp is None:
+            # job_id 형식 '<mid>_ckpt_<cpid>' 에서 보조 추출.
+            jid = j.get('job_id') or ''
+            if '_ckpt_' in jid:
+                try:
+                    cp = int(jid.split('_ckpt_')[-1])
+                except (TypeError, ValueError):
+                    cp = None
+        out.append({'checkpoint_id': cp, 'gpu_mib': j.get('gpu_mib')})
+    return out
+
+
+def _label_easytrainer_processes(processes):
+    """name 이 해석 안 된 GPU 프로세스를, 진행 중인 EasyTrainer 학습 job 의 GPU
+    메모리(gpu_mib)와 used_memory 로 근접 매칭해 라벨링한다. (호스트/컨테이너 PID
+    namespace 가 달라 pid 매칭이 안 되므로 메모리로 매칭.)
+    """
+    jobs = _easytrainer_training_jobs()
+    if not jobs:
+        return
+    UNRESOLVED = ('unknown', '', '-', '[Not Found]', '[Insufficient Permissions]')
+    unresolved = [p for p in processes if p.get('name') in UNRESOLVED]
+    if not unresolved:
+        return
+
+    # 1) gpu_mib 가 있는 job 부터 메모리 근접 매칭(그리디, job 1회 사용).
+    remaining_jobs = list(jobs)
+    for p in unresolved:
+        mem = p.get('mem_mb') or 0
+        best, best_d = None, None
+        for j in remaining_jobs:
+            g = j.get('gpu_mib')
+            if g is None:
+                continue
+            d = abs(int(g) - int(mem))
+            if best is None or d < best_d:
+                best, best_d = j, d
+        # 허용 오차: 25% 또는 1500MiB 중 큰 값(reserved vs nvidia-smi used 차이 흡수).
+        tol = max(1500, int(mem * 0.25))
+        if best is not None and best_d is not None and best_d <= tol:
+            cp = best.get('checkpoint_id')
+            p['name'] = f'EasyTrainer 학습 · cp{cp}' if cp is not None else 'EasyTrainer 학습'
+            p['easytrainer'] = True
+            p['checkpoint_id'] = cp
+            remaining_jobs.remove(best)
+
+    # 2) 아직 라벨 안 된 unresolved 가 있고 남은 학습 job 도 있으면 EasyTrainer
+    #    학습으로 라벨. 단 메모리로 확정하지 못한 경우엔 cp 번호를 단정하면 오귀속
+    #    위험이 있으므로, 남은 학습이 정확히 1개일 때만 cp 를 붙이고 그 외엔 일반
+    #    라벨만 단다. (학습 직후 epoch 로그 전이라 gpu_mib 가 아직 없는 케이스.)
+    still = [p for p in unresolved if not p.get('easytrainer')]
+    if still and remaining_jobs:
+        only_cp = remaining_jobs[0].get('checkpoint_id') if len(remaining_jobs) == 1 else None
+        for p in still:
+            p['name'] = f'EasyTrainer 학습 · cp{only_cp}' if only_cp is not None else 'EasyTrainer 학습'
+            p['easytrainer'] = True
+            p['checkpoint_id'] = only_cp
 
 # Registry of large models the UI can manage. Each entry maps to a backend helper
 # module exposing is_extension_installed / is_model_loaded / preload_model /
@@ -102,7 +182,10 @@ def gpu_status():
             name = p[1]
             if name in ('', '-', '[Not Found]', '[Insufficient Permissions]'):
                 name = _proc_name(pid) or 'unknown'
-            processes.append({'pid': pid, 'name': name, 'mem_mb': _int(p[2])})
+            processes.append({'pid': pid, 'name': name, 'mem_mb': _int(p[2]),
+                              'easytrainer': False, 'checkpoint_id': None})
+        # 해석 안 된 프로세스를 진행 중인 EasyTrainer 학습 job 과 매칭해 라벨링.
+        _label_easytrainer_processes(processes)
     except Exception:
         available = False
 

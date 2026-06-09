@@ -33,6 +33,26 @@ REMOTE_DEFAULT_URL = 'http://easytrainer.training_server.com'
 LOCAL_DEFAULT_URL = 'http://localhost:5100'
 
 
+def probe_gpu_free_mib(server_url):
+    """학습 서버(server_url)의 GPU 여유 VRAM(MiB)을 조회. 동시 학습 admission 용.
+
+    Returns int(free MiB) on success, or None if 측정 불가(서버 도달 실패 / CPU /
+    구버전 서버). None 이면 호출 측은 '용량을 모른다'로 간주해 보수적으로(직렬)
+    처리해야 한다.
+    """
+    url = _normalize_url(server_url)
+    if not url:
+        return None
+    try:
+        resp = requests.get(f'{url}/api/health', timeout=5)
+        if resp.status_code != 200:
+            return None
+        free = (resp.json() or {}).get('gpu_mem_free_mib')
+        return int(free) if free is not None else None
+    except (requests.exceptions.RequestException, ValueError, TypeError):
+        return None
+
+
 @remote_train_bp.route('/remote-train/default-url', methods=['GET'])
 def remote_train_default_url():
     """Decide the default training-server URL for the frontend.
@@ -90,28 +110,67 @@ def train_queue_enqueue():
     }, 200
 
 
+def _server_stop_job(checkpoint_id, server_url=None):
+    """training_server 에 떠 있는 학습 job 에 stop 요청 전송.
+
+    job_id 포맷은 runner / resume_polling 과 동일(``{machine_id[:8]}_ckpt_<id>``).
+    ``server_url`` 미지정 시 checkpoint.train_settings 에서 읽는다.
+    Returns True if a stop request was delivered (네트워크 도달 기준; 404 도 True).
+    """
+    from ...utils.machine_id import machine_id as _mid
+    ckpt = CheckpointModel.find(int(checkpoint_id))
+    if ckpt is None:
+        return False
+    if not server_url:
+        ts = ckpt._get_json_field('train_settings') or {}
+        server_url = _normalize_url(ts.get('server_url', ''))
+    if not server_url:
+        return False
+    job_id = f'{_mid()[:8]}_ckpt_{checkpoint_id}'
+    try:
+        requests.post(f'{server_url}/api/train/stop/{job_id}', timeout=10)
+        return True
+    except requests.exceptions.RequestException as e:
+        print(f'[train stop] server stop failed for cp{checkpoint_id}: {e}')
+        return False
+
+
 @remote_train_bp.route('/train/queue/<int:checkpoint_id>', methods=['DELETE'])
 def train_queue_cancel(checkpoint_id):
     """큐에서 제거 또는 실행 중이면 stop 신호.
 
     응답의 'result':
       - 'canceled': 큐 대기 중이었음, 즉시 status=canceled
-      - 'stopping': 실행 중이었음, stop 신호 전달 (실제 종료는 스케줄러가 처리)
+      - 'stopping': 실행 중이었음, stop 신호 전달 (실제 종료는 스케줄러/poller가 처리)
       - 'not_found': 존재하지 않거나 이미 종료된 상태
     """
     scheduler = current_app.training_scheduler
     result = scheduler.cancel(int(checkpoint_id))
 
-    # 'not_found'는 두 가지 경우:
+    # 'not_found'는 세 가지 경우:
     #   (a) 정말로 row가 없음 — 진짜 404
-    #   (b) row는 있는데 이미 finished/failed/canceled 상태 — 사용자가 dialog
-    #       에서 "cancel" 누른 의도는 보통 "이 항목을 큐 패널에서 치우자"이므로
-    #       idempotent하게 soft-delete + disk 정리 후 200으로 응답한다.
+    #   (b) row는 있고 status='running' 인데 이 scheduler 인스턴스가 소유한
+    #       (_current_id) job 이 아님 — backend 재시작 후 resume_polling 이
+    #       인계받은 job. scheduler.cancel 은 signal 수단이 없어 not_found 를
+    #       돌려준다. 이 경우 **직접 training_server 에 stop 을 보내고 row 는
+    #       soft-delete 하지 않는다** — resume_polling 이 서버 status
+    #       'stopped'→'canceled' 로 마감하고, 그 전까지 row 가 살아있어야
+    #       _any_external_running 가드가 다음 큐의 새치기 시작을 막는다.
+    #       (예전 버그: 여기서 곧장 soft-delete → 서버엔 stop 안 가고, 가드가
+    #        풀려 큐의 다음 학습이 동시에 시작됨.)
+    #   (c) row는 있는데 이미 finished/failed/canceled — 사용자가 dialog 에서
+    #       "cancel" 누른 의도는 "이 항목을 패널에서 치우자"이므로 idempotent
+    #       하게 soft-delete + disk 정리.
     if result == 'not_found':
         from ...database.models.checkpoint_model import Checkpoint as CheckpointModel
         ckpt = CheckpointModel.find(int(checkpoint_id))
         if ckpt is None:
             return {'status': 'error', 'result': 'not_found'}, 404
+        if ckpt.status == CheckpointModel.STATUS_RUNNING and ckpt.deleted_at is None:
+            sent = _server_stop_job(int(checkpoint_id))
+            return {'status': 'success',
+                    'result': 'stopping' if sent else 'stop_unreachable',
+                    'checkpoint_id': checkpoint_id}, 200
         try:
             ckpt.delete_instance()
         except Exception as e:
@@ -142,9 +201,144 @@ def train_queue_cancel(checkpoint_id):
 
 @remote_train_bp.route('/train/queue', methods=['GET'])
 def train_queue_list():
-    """현재 큐 스냅샷. {running, queued[], recent[]}."""
+    """현재 큐 스냅샷. {running, running_list[], queued[], recent[]}."""
     scheduler = current_app.training_scheduler
     return {'status': 'success', **scheduler.snapshot()}, 200
+
+
+@remote_train_bp.route('/train/save', methods=['POST'])
+def train_save():
+    """학습 중인 체크포인트를 '조기 종료 + best 저장'. training server 의
+    /api/train/save/<job_id> 로 프록시 — worker 가 SIGUSR1 을 받아 final
+    validation 후 best checkpoint 를 저장하고 정상 종료(exit 0)한다.
+
+    Stop(중지=kill+버리기)과 달리 프로세스를 죽이지 않으므로 결과가 보존되고,
+    worker 가 exit 0 으로 끝나면 기존 완료 파이프라인(status=finished → 다운로드
+    → DB 등록)이 그대로 동작한다 — scheduler/runner 변경 불필요."""
+    from ...utils.machine_id import machine_id as _machine_id_fn
+    data = request.json or {}
+    checkpoint_id = data.get('checkpoint_id')
+    if checkpoint_id is None:
+        return {'status': 'error', 'message': 'checkpoint_id required'}, 400
+    server_url = _normalize_url(data.get('server_url', ''))
+    if not server_url:
+        # 미지정 시 checkpoint.train_settings 에서 조회 (중지 경로와 동일하게
+        # 프론트가 server_url 을 몰라도 동작).
+        ckpt = CheckpointModel.find(int(checkpoint_id))
+        if ckpt is not None:
+            ts = ckpt._get_json_field('train_settings') or {}
+            server_url = _normalize_url(ts.get('server_url', ''))
+    if not server_url:
+        return {'status': 'error', 'message': 'server_url not found for checkpoint'}, 400
+
+    # job_id 규칙은 runner(run_training_job)/resume_polling 과 동일해야 한다.
+    job_id = f'{_machine_id_fn()[:8]}_ckpt_{int(checkpoint_id)}'
+    try:
+        resp = requests.post(f'{server_url}/api/train/save/{job_id}', timeout=10)
+    except requests.exceptions.RequestException as e:
+        return {'status': 'error', 'message': f'training server unreachable: {e}'}, 502
+    if resp.status_code != 200:
+        return {'status': 'error', 'message': f'HTTP {resp.status_code}: {resp.text}'}, 502
+    return {
+        'status': 'success',
+        'message': 'Save requested — training will finish and save the best checkpoint',
+    }, 200
+
+
+@remote_train_bp.route('/train/gpu-estimate', methods=['POST'])
+def train_gpu_estimate():
+    """주어진 학습 파라미터의 예상 GPU 사용량 + 대상 서버의 '새 학습이 들어갈
+    자리'를 반환. 진행 중인 학습들이 (램프업 포함) 차지할 VRAM 을 반영하므로
+    스케줄러의 실제 동시 실행 admission 과 일치한다.
+
+    Body: { policy_type, train_settings, server_url? }
+    Resp: { estimated_mib, free_mib, total_mib, available_mib, running_count, fits }
+      - free_mib/total_mib : server_url GPU 의 raw 여유/전체 (측정 불가 시 null).
+      - available_mib      : 새 학습이 쓸 수 있는 실제 여유 =
+                             min(free, total − Σ(진행중 job 예약량)). 진행중 job
+                             예약량 = max(보고된 gpu_mib, 예상 사용량) — 램프업 중
+                             아직 메모리를 다 안 잡았어도 예상치로 미리 차감.
+      - fits               : 진행중 학습이 없으면(단독) 항상 True(스케줄러가 무조건
+                             1개는 실행). 있으면 available ≥ max(예상, min_free) 여부.
+    """
+    from ..gpu_estimate import estimate_gpu_mib, estimate_gpu_mib_for_checkpoint
+    data = request.json or {}
+    policy_type = data.get('policy_type')
+    train_settings = data.get('train_settings') or {}
+    server_url = _normalize_url(data.get('server_url', '')) or LOCAL_DEFAULT_URL
+
+    estimated = estimate_gpu_mib(policy_type, train_settings)
+
+    free_mib = None
+    total_mib = None
+    try:
+        resp = requests.get(f'{server_url}/api/health', timeout=5)
+        if resp.status_code == 200:
+            body = resp.json() or {}
+            free_mib = body.get('gpu_mem_free_mib')
+            total_mib = body.get('gpu_mem_total_mib')
+    except (requests.exceptions.RequestException, ValueError, TypeError):
+        pass
+
+    # 진행 중인 학습들이 차지(예약)할 VRAM 합산. 각 job 예약량 = max(실제 보고된
+    # gpu_mib, 예상 사용량). 램프업 중엔 실제 < 예상이므로 예상치로 미리 차감해
+    # "여유 충분이라더니 큐에 쌓임" 불일치를 막는다.
+    running_reserved = 0
+    running_count = 0
+    try:
+        jresp = requests.get(f'{server_url}/api/train/jobs', timeout=5)
+        if jresp.status_code == 200:
+            for j in (jresp.json() or {}).get('jobs', []):
+                if j.get('status') not in ('training', 'starting'):
+                    continue
+                running_count += 1
+                cp_id = j.get('checkpoint_id')
+                if cp_id is None and '_ckpt_' in (j.get('job_id') or ''):
+                    try:
+                        cp_id = int(j['job_id'].split('_ckpt_')[-1])
+                    except (TypeError, ValueError):
+                        cp_id = None
+                est = 0
+                if cp_id is not None:
+                    ck = CheckpointModel.find(int(cp_id))
+                    if ck is not None:
+                        est = estimate_gpu_mib_for_checkpoint(ck) or 0
+                running_reserved += max(int(j.get('gpu_mib') or 0), int(est))
+    except (requests.exceptions.RequestException, ValueError, TypeError):
+        pass
+
+    # 스케줄러와 동일한 min_free floor (EC_TRAIN_MIN_FREE_MIB).
+    try:
+        min_free = int(os.environ.get('EC_TRAIN_MIN_FREE_MIB', '4000') or 4000)
+    except (TypeError, ValueError):
+        min_free = 4000
+
+    available_mib = None
+    fits = None
+    if total_mib is not None:
+        avail = int(total_mib) - running_reserved
+        if free_mib is not None:
+            avail = min(int(free_mib), avail)  # raw free 로 상한 (보수적)
+        available_mib = max(0, avail)
+        if running_count == 0:
+            # 단독 학습 — 스케줄러가 running_count==0 이면 무조건 실행.
+            fits = True
+        else:
+            fits = available_mib >= max(int(estimated), min_free)
+    elif free_mib is not None:
+        # total 없으면(구버전 서버) raw free 폴백.
+        available_mib = int(free_mib)
+        fits = int(estimated) <= int(free_mib)
+
+    return {
+        'status': 'success',
+        'estimated_mib': estimated,
+        'free_mib': free_mib,
+        'total_mib': total_mib,
+        'available_mib': available_mib,
+        'running_count': running_count,
+        'fits': fits,
+    }, 200
 
 
 # ---------------------------------------------------------------------------
@@ -164,14 +358,15 @@ def remote_train_stop_legacy():
     snap = scheduler.snapshot()
     running = snap.get('running')
     if running and running.get('id') is not None:
-        scheduler.cancel(int(running['id']))
-        # legacy: 진행 중이던 체크포인트 row도 soft-delete.
-        ckpt = CheckpointModel.find(int(running['id']))
-        if ckpt is not None:
-            try:
-                ckpt.delete_instance()
-            except Exception:
-                pass
+        rid = int(running['id'])
+        result = scheduler.cancel(rid)
+        # scheduler 가 소유하지 않은 running(resume_polling 인계분)은 cancel 이
+        # 'not_found' 를 돌려준다 — 직접 서버 stop 을 보낸다. row 는 soft-delete
+        # 하지 않고 poller 가 마감하도록 둔다 (가드 유지).
+        if result == 'not_found':
+            ckpt = CheckpointModel.find(rid)
+            if ckpt is not None and ckpt.status == CheckpointModel.STATUS_RUNNING:
+                _server_stop_job(rid)
     return {'status': 'success', 'message': 'Stop signal sent (legacy alias)'}, 200
 
 
@@ -624,7 +819,7 @@ def _resume_polling(checkpoint_id, server_url, socketio_instance):
 
     machine_id = _mid()
     job_id = f'{machine_id[:8]}_ckpt_{checkpoint_id}'
-    log_id = PROCESS_ID
+    log_id = f'{PROCESS_ID}_{checkpoint_id}'  # 체크포인트별 로그 네임스페이스
     last_log_cursor = 0
     last_progress = -1.0
     print(f'[resume_polling] cp{checkpoint_id} job={job_id} server={server_url}')
@@ -636,6 +831,14 @@ def _resume_polling(checkpoint_id, server_url, socketio_instance):
                 ck.status = status
                 ck.finished_at = datetime.datetime.now()
                 ck.save()
+                # canceled(사용자 중지)는 흔적 없이 사라지게 — scheduler 의
+                # worker-end 경로와 동일하게 soft-delete. (안 하면 status=canceled
+                # row 가 checkpoint 목록에 남는다.)
+                if status == 'canceled':
+                    try:
+                        ck.delete_instance()
+                    except Exception as e:
+                        print(f'[resume_polling] cp{checkpoint_id} soft-delete on cancel failed: {e}')
         except Exception as e:
             print(f'[resume_polling] cp{checkpoint_id} finalize {status} failed: {e}')
         try:
@@ -771,7 +974,9 @@ def run_training_job(checkpoint, server_url, callback_url,
     machine_id = _machine_id_fn()
     checkpoint_id = checkpoint.id
     job_id = f'{machine_id[:8]}_ckpt_{checkpoint_id}'
-    log_id = PROCESS_ID
+    # 로그/진행률은 체크포인트별 id 로 emit — 동시 학습 시 TrainingDialog 의
+    # 진행바·로그·loss 차트가 섞이지 않도록 네임스페이스를 분리한다.
+    log_id = f'{PROCESS_ID}_{checkpoint_id}'
 
     try:
         config = _build_train_config(checkpoint)

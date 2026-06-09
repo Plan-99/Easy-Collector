@@ -28,7 +28,7 @@ from .routes.remote_train import remote_train_bp
 from .routes.tutorial import tutorial_bp
 from .routes.dual_arm_test import dual_arm_test_bp
 from .routes.dual_arm_assembly_test import dual_arm_assembly_test_bp
-from .routes.remote_train import run_training_job
+from .routes.remote_train import run_training_job, probe_gpu_free_mib
 from .routes.planner import planner_bp
 from .routes.curriculum import curriculum_bp
 from .routes.module import module_bp
@@ -87,7 +87,9 @@ topic_watcher = TopicWatcher(socketio, bridge_client)
 
 # Training scheduler — 학습 큐의 단일 진실원천. main()에서 start().
 # Runner는 routes.remote_train.run_training_job — pure 실행자.
-training_scheduler = TrainingScheduler(socketio, runner_fn=run_training_job)
+# gpu_probe_fn 으로 학습 서버 GPU 여유를 보고 GPU 가 남으면 동시 학습을 admit.
+training_scheduler = TrainingScheduler(
+    socketio, runner_fn=run_training_job, gpu_probe_fn=probe_gpu_free_mib)
 app.training_scheduler = training_scheduler
 
 app.register_blueprint(sensor_bp, url_prefix='/api')
@@ -364,7 +366,12 @@ def main():
 
         # Training scheduler 시작 — 학습 큐 워커. enqueue 시 자동으로 깨어남.
         training_scheduler.start()
-        print("TrainingScheduler started (single worker, FIFO queue)")
+        print(
+            "TrainingScheduler started "
+            f"(max_concurrent={training_scheduler._max_concurrent}, "
+            f"min_free_mib={training_scheduler._min_free_mib}, "
+            f"warmup_sec={training_scheduler._warmup_sec})"
+        )
 
         # 재시작 직전에 학습 중이던 체크포인트들에 대해 polling 재개. backend
         # 가 죽었다 깨어나도 training_server 의 학습 결과를 놓치지 않게.

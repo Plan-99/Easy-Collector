@@ -64,7 +64,15 @@ jobs_lock = threading.Lock()
 
 @app.route('/api/health', methods=['GET'])
 def health():
-    return jsonify({'status': 'ok', 'gpu_available': _check_gpu()}), 200
+    free_mib, total_mib = _gpu_mem()
+    return jsonify({
+        'status': 'ok',
+        'gpu_available': _check_gpu(),
+        # 동시 학습 admission 용 — backend scheduler 가 server_url 의 GPU 여유를
+        # 보고 다음 학습을 동시에 띄울지(큐에 둘지) 결정한다. 측정 불가 시 null.
+        'gpu_mem_free_mib': free_mib,
+        'gpu_mem_total_mib': total_mib,
+    }), 200
 
 
 def _safe_id(value: str) -> str:
@@ -317,6 +325,33 @@ def stop_training(job_id):
     return jsonify({'status': 'success', 'message': 'Training stopped'}), 200
 
 
+@app.route('/api/train/save/<job_id>', methods=['POST'])
+def save_training(job_id):
+    """저장(조기 종료) — worker 에 SIGUSR1 송신. worker 는 현재까지의 best
+    checkpoint 를 저장하고 정상 종료(exit 0)한다. stop 과 달리 프로세스를 죽이지
+    않으므로 학습 결과가 보존되고, 이후 status=finished → 다운로드 파이프라인이
+    그대로 동작한다. SIGUSR1 은 worker 메인 프로세스에만 보낸다 (DataLoader
+    worker 들은 process group 이지만 특정 pid 송신이라 영향 없음)."""
+    with jobs_lock:
+        job = jobs.get(job_id)
+    if not job:
+        return jsonify({'status': 'error', 'message': 'Job not found'}), 404
+
+    process = job.get('process')
+    if not (process and process.poll() is None):
+        return jsonify({'status': 'error', 'message': 'No active training process'}), 410
+
+    try:
+        os.kill(process.pid, signal.SIGUSR1)
+    except ProcessLookupError:
+        return jsonify({'status': 'error', 'message': 'Process not running'}), 410
+
+    return jsonify({
+        'status': 'success',
+        'message': 'Save (early-finish) signal sent — worker will save best and finish',
+    }), 200
+
+
 @app.route('/api/train/logs/<job_id>', methods=['GET'])
 def get_logs(job_id):
     """Return new log lines with index >= since."""
@@ -362,6 +397,8 @@ def list_jobs():
                 'job_id': jid,
                 'status': job['status'],
                 'progress': job.get('progress', 0),
+                'checkpoint_id': job.get('checkpoint_id'),
+                'gpu_mib': job.get('gpu_mib'),
             })
     return jsonify({'status': 'success', 'jobs': result}), 200
 
@@ -372,6 +409,21 @@ def _check_gpu():
         return torch.cuda.is_available()
     except Exception:
         return False
+
+
+def _gpu_mem():
+    """(free_mib, total_mib) for the active CUDA device — driver-level free,
+    즉 이 서버가 띄운 학습 subprocess 들 + 다른 사용자 점유까지 모두 반영한
+    실제 여유 VRAM. 측정 불가/CPU 환경이면 (None, None).
+    """
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return None, None
+        free, total = torch.cuda.mem_get_info()
+        return int(free // (1024 * 1024)), int(total // (1024 * 1024))
+    except Exception:
+        return None, None
 
 
 def _run_training(job_id, job_dir, ckpt_out_dir, config):
@@ -448,6 +500,10 @@ def _run_training(job_id, job_dir, ckpt_out_dir, config):
                     progress = log_json.get('epoch', 0) / max(log_json.get('total_epoch', 1), 1)
                     with jobs_lock:
                         jobs[job_id]['progress'] = progress
+                        # worker 가 보고한 GPU 메모리(MiB) — GPU 관리 다이얼로그가
+                        # nvidia-smi 프로세스를 체크포인트와 매칭하는 데 사용.
+                        if 'gpu_mib' in log_json:
+                            jobs[job_id]['gpu_mib'] = log_json.get('gpu_mib')
                 except Exception:
                     pass
 

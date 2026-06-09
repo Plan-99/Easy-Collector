@@ -1312,7 +1312,7 @@ def _build_obs_state(df, obs_state_keys, tool_qpos_indices=None, eepos_ee_dim=0)
 
 
 class EpisodicDataset(torch.utils.data.Dataset):
-    def __init__(self, episode_ids, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone='resnet18', n_obs_steps=1, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None, augment=False, wrist_sensor_ids=None, image_resolution=None):
+    def __init__(self, episode_ids, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone='resnet18', n_obs_steps=1, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None, augment=False, wrist_sensor_ids=None, image_resolution=None, frame_indexed=False):
         super(EpisodicDataset).__init__()
         self.episode_ids = episode_ids
         self.dataset_dir = dataset_dir
@@ -1375,9 +1375,41 @@ class EpisodicDataset(torch.utils.data.Dataset):
         tasks = _read_jsonl(os.path.join(dataset_dir, TASKS_PATH))
         self._task_map = {t.get("task_index"): t.get("task", "") for t in tasks}
 
+        # frame-indexed 모드: step 기반 학습용. None 이면 episode-indexed(기존
+        # 동작: __len__=episode 수, __getitem__ 이 episode당 랜덤 window 1개 샘플).
+        # 아래 __getitem__(0) 은 map 이 아직 None 이라 episode-indexed 경로로 동작.
+        self._frame_index_map = None
         self.__getitem__(0) # initialize self.info
+        if frame_indexed:
+            self._build_frame_index_map()
+
+    def _build_frame_index_map(self):
+        """모든 episode 의 모든 유효 start_ts 를 (ep_id, start_ts) 로 펼친 맵.
+
+        frame-indexed 모드에서 __len__/__getitem__ 이 이걸 사용 → 한 번의 전체
+        순회가 데이터셋의 모든 window 를 정확히 1회씩 커버(stride 1). step 기반
+        학습용. 유효 start_ts 범위는 __getitem__ 의 random window 선택과 동일하게
+        맞춘다 (현재 동작: episode_len 끝까지, 부족분은 마지막 frame replicate-pad).
+        """
+        index_map = []
+        for ep_id in self.episode_ids:
+            ep = self._load_episode_parquet(ep_id)
+            episode_len = ep["episode_len"]
+            if episode_len <= self.n_obs_steps:
+                valid_starts = [max(0, episode_len - 1)]
+            else:
+                valid_starts = range(self.n_obs_steps - 1, episode_len)
+            for ts in valid_starts:
+                index_map.append((ep_id, int(ts)))
+        self._frame_index_map = index_map
+        print(
+            f'[EpisodicDataset] frame-indexed: {len(index_map)} windows '
+            f'from {len(self.episode_ids)} episodes', flush=True,
+        )
 
     def __len__(self):
+        if self._frame_index_map is not None:
+            return len(self._frame_index_map)
         return len(self.episode_ids)
 
     def _load_episode_parquet(self, episode_id):
@@ -1478,7 +1510,13 @@ class EpisodicDataset(torch.utils.data.Dataset):
         return result
 
     def __getitem__(self, index):
-        episode_id = self.episode_ids[index]
+        # frame-indexed 모드면 (ep_id, start_ts) 를 맵에서 직접 — 랜덤 window
+        # 선택을 건너뛰고 결정적으로 사용. 아니면 기존 episode-indexed 동작.
+        if self._frame_index_map is not None:
+            episode_id, _forced_start_ts = self._frame_index_map[index]
+        else:
+            episode_id = self.episode_ids[index]
+            _forced_start_ts = None
         ep = self._load_episode_parquet(episode_id)
 
         episode_len = ep["episode_len"]
@@ -1500,7 +1538,9 @@ class EpisodicDataset(torch.utils.data.Dataset):
         # chunk[0] 자리에 에피소드 후반(succeed=1 라벨이 사는 자리)이 절대 안 들어가
         # 학습 분포가 비뚤어진다 (추론 시 chunk[0]→0, chunk[end]→1 패턴 발생). 끝
         # frame 까지 풀고 부족한 부분은 마지막 frame 으로 replicate-pad 한다.
-        if episode_len <= self.n_obs_steps:
+        if _forced_start_ts is not None:
+            start_ts = _forced_start_ts
+        elif episode_len <= self.n_obs_steps:
             start_ts = max(0, episode_len - 1)
         else:
             start_ts = int(np.random.choice(np.arange(self.n_obs_steps - 1, episode_len)))
@@ -2166,7 +2206,7 @@ class FullScanDataset(EpisodicDataset):
         return item
 
 
-def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_train, batch_size_val, chunk_size, vision_backbone='resnet18', num_workers=1, n_obs_steps=1, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None, wrist_sensor_ids=None, image_resolution=None):
+def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_train, batch_size_val, chunk_size, vision_backbone='resnet18', num_workers=1, n_obs_steps=1, action_key='qaction', use_relative_trajectory=False, obs_state_keys=None, wrist_sensor_ids=None, image_resolution=None, frame_indexed=True):
     if obs_state_keys is None:
         obs_state_keys = ['qpos']
     print(f'\nData from: {dataset_dir}\n')
@@ -2209,8 +2249,11 @@ def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_tra
     # construct dataset and dataloader.
     # train: augment=True (RandomResizedCrop+Rotate+ColorJitter), wrist cams get
     # ColorJitter-only (audit-doc bug #31). val/eval: augment=False.
-    train_dataset = EpisodicDataset(train_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys, augment=True, wrist_sensor_ids=_wrist_set, image_resolution=image_resolution)
-    val_dataset = EpisodicDataset(val_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys, augment=False, wrist_sensor_ids=_wrist_set, image_resolution=image_resolution)
+    # frame_indexed=True (step 기반 학습): dataset 길이 = 전체 window 수, 한 바퀴가
+    # 모든 window 를 stride 1 로 정확히 1회씩 커버. train_worker 가 cycle() 로 무한
+    # 순회하며 num_steps 만큼 돈다.
+    train_dataset = EpisodicDataset(train_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys, augment=True, wrist_sensor_ids=_wrist_set, image_resolution=image_resolution, frame_indexed=frame_indexed)
+    val_dataset = EpisodicDataset(val_indices, dataset_dir, sensor_ids, norm_stats, chunk_size, policy_type, vision_backbone, n_obs_steps=n_obs_steps, action_key=action_key, use_relative_trajectory=use_relative_trajectory, obs_state_keys=obs_state_keys, augment=False, wrist_sensor_ids=_wrist_set, image_resolution=image_resolution, frame_indexed=frame_indexed)
 
     # Per-episode sampling weights sidecar (written by the backend when
     # multiple datasets with non-uniform weights are merged). Absent file ⇒
@@ -2224,7 +2267,13 @@ def load_data(dataset_dir, policy_type, num_episodes, sensor_ids, batch_size_tra
             # Align with train_indices (post split + skipped_episodes filter).
             # Each train_indices[i] is the original episode index in the merged
             # dataset, which matches the position in ep_weights_all.
-            per_sample = [float(ep_weights_all[int(ei)]) for ei in train_indices]
+            # frame-indexed 면 dataset 인덱스가 window 단위이므로, 각 window 의
+            # 가중치 = 그 window 가 속한 episode 의 가중치로 펼쳐 sampler 길이를 맞춘다.
+            if train_dataset._frame_index_map is not None:
+                per_sample = [float(ep_weights_all[int(ep_id)])
+                              for (ep_id, _ts) in train_dataset._frame_index_map]
+            else:
+                per_sample = [float(ep_weights_all[int(ei)]) for ei in train_indices]
             if any(w <= 0 for w in per_sample):
                 raise ValueError('non-positive weight found')
             train_sampler = WeightedRandomSampler(

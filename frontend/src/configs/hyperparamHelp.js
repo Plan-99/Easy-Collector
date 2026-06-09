@@ -1047,16 +1047,29 @@ export const HYPERPARAM_HELP = {
   // ============================================================
   // Common training config — shared across policies
   // ============================================================
-  'Common.num_epochs': {
+  'Common.num_steps': {
     ko: {
-      title: '에폭 수 (num_epochs)',
-      easy: '전체 데이터를 몇 번 반복해서 학습할지. 작은 데이터셋이면 많이(500~1500), 큰 데이터셋이면 적게(200 이하) 돌리는 게 보통이에요.',
-      expert: '전체 데이터셋 반복 횟수. 작은 데이터셋이면 500~1500, 큰 데이터셋이면 200 이하부터 시작.\n\nValidation loss가 plateau면 일찍 중단해도 됩니다.',
+      title: '스텝 수 (num_steps)',
+      easy: '총 몇 번 가중치를 업데이트할지(=optimizer step). 데이터를 무한 순회하며 이 횟수만큼 학습해요. 작은 데이터셋이면 5천~2만, 큰 데이터셋이면 더 크게.',
+      expert: '총 optimizer update 수. 데이터셋을 frame 단위로 cycle()하며 num_steps 만큼 학습.\n\nValidation loss가 plateau면 "저장" 버튼으로 그 시점 best를 남기고 일찍 끝낼 수 있습니다.',
     },
     en: {
-      title: 'Number of Epochs',
-      easy: 'How many times to loop over the dataset. Small dataset → many epochs (500-1500); large dataset → fewer (≤ 200).',
-      expert: 'Number of passes over the full dataset. 500-1500 for small datasets; start at ≤ 200 for large ones.\n\nStopping early once validation plateaus is fine.',
+      title: 'Number of Steps',
+      easy: 'Total number of weight updates (optimizer steps). Training cycles through the data and runs this many steps. ~5k-20k for small datasets, more for large ones.',
+      expert: 'Total optimizer updates. The dataset is cycled at frame granularity for num_steps.\n\nIf validation plateaus, the "Save" button keeps the best-so-far and finishes early.',
+    },
+  },
+
+  'Common.val_freq': {
+    ko: {
+      title: '검증 주기 (val_freq)',
+      easy: '몇 스텝마다 validation을 돌릴지. 작으면 자주 확인하지만 느려지고, 크면 빠르지만 best 시점을 놓칠 수 있어요. 기본 200.',
+      expert: 'validation + best-checkpoint 판정 주기(step). 매 step validation은 낭비라 주기적으로만 수행.\n\n작은 데이터셋/짧은 학습은 50~100, 큰 학습은 200~1000.',
+    },
+    en: {
+      title: 'Validation Frequency (steps)',
+      easy: 'How many steps between validation runs. Smaller = more frequent checks but slower; larger = faster but may miss the best point. Default 200.',
+      expert: 'Validation + best-checkpoint cadence (in steps). Validating every step is wasteful, so it runs periodically.\n\n50-100 for small/short runs, 200-1000 for large ones.',
     },
   },
 

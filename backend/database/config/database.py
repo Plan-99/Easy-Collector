@@ -33,6 +33,9 @@ else:
 db = SqliteDatabase(DB_PATH, pragmas={
     'journal_mode': 'wal',
     'foreign_keys': 1,
+    # 동시 쓰기(스케줄러 동시 학습 finalize + flask 요청 + resume_polling 등)에서
+    # 즉시 'database is locked' 로 실패하지 않고 최대 5초 대기 후 재시도하도록.
+    'busy_timeout': 5000,
 })
 
 

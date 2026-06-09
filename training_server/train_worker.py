@@ -43,6 +43,34 @@ from lerobot.datasets.feature_utils import dataset_to_policy_features
 from lerobot.configs.types import FeatureType
 from safetensors.torch import load_file
 
+import signal
+
+# 저장(조기 종료) — training server 가 SIGUSR1 로 알린다. handler 는 flag 만 세팅하고
+# 실제 저장은 train loop 가 flag 를 보고 정상 종료 경로(final validation → best
+# checkpoint 저장 → exit 0)로 처리. stop(SIGTERM kill)과 달리 프로세스를 안 죽이고
+# 그때까지의 best 를 정식 체크포인트로 남긴다.
+_early_finish_requested = False
+
+
+def _handle_early_finish(signum, frame):
+    global _early_finish_requested
+    _early_finish_requested = True
+    print('[TRAIN] Early-finish (save) signal received — will run final '
+          'validation, save best checkpoint, and finish.', flush=True)
+
+
+def cycle(iterable):
+    """무한 순환 iterator. itertools.cycle 은 첫 순회를 전부 메모리에 캐싱하므로
+    DataLoader 엔 못 씀 — 소진 시 iter() 를 새로 만든다. persistent_workers=True 면
+    worker 가 살아있어 재생성 비용은 거의 없음."""
+    iterator = iter(iterable)
+    while True:
+        try:
+            yield next(iterator)
+        except StopIteration:
+            iterator = iter(iterable)
+            yield next(iterator)
+
 
 def train(
     train_dataloader,
@@ -76,7 +104,15 @@ def train(
 
     set_seed(seed)
 
-    num_epochs = train_settings.pop('num_epochs')
+    # Step 기반 학습: num_steps = 총 optimizer update 수. 구버전 호환 — num_steps
+    # 가 없으면 옛 num_epochs 값을 그대로 step 수로 사용. val_freq = 몇 step 마다
+    # validation 할지(매 step validation 은 낭비).
+    num_steps = train_settings.pop('num_steps', None)
+    _legacy_num_epochs = train_settings.pop('num_epochs', None)
+    if num_steps is None:
+        num_steps = _legacy_num_epochs if _legacy_num_epochs is not None else 20000
+    num_steps = int(num_steps)
+    val_freq = int(train_settings.pop('val_freq', 200) or 200)
     train_settings.pop('batch_size', None)
     train_settings.pop('num_workers', None)
     train_settings.pop('action_type', None)
@@ -336,8 +372,8 @@ def train(
     sched_name = str(getattr(cfg, 'scheduler_name', '') or '').lower()
 
     if decay_steps <= 0 and sched_name == 'cosine':
-        est_steps_per_epoch = max(1, len(train_dataloader) // max(1, grad_accum_steps))
-        decay_steps = max(warmup_steps + 1, num_epochs * est_steps_per_epoch)
+        # step 기반: cosine decay 를 전체 학습 step(num_steps) 에 맞춘다.
+        decay_steps = max(warmup_steps + 1, num_steps)
 
     def _lr_lambda(step: int) -> float:
         if warmup_steps > 0 and step < warmup_steps:
@@ -368,12 +404,12 @@ def train(
 
     total_train_batches = len(train_dataloader)
     total_val_batches = len(val_dataloader)
-    print(f'[TRAIN] Starting training: {num_epochs} epochs, {total_train_batches} train batches, '
+    print(f'[TRAIN] Starting training: {num_steps} steps, val every {val_freq} steps, '
           f'{total_val_batches} val batches × {val_n_passes} pass(es), '
           f'smooth_window={val_smooth_window}', flush=True)
 
     best_state_dict_cpu = None
-    best_epoch = -1
+    best_step = -1
 
     def _swap_in_ema():
         if not use_ema:
@@ -394,105 +430,146 @@ def train(
                 if n in backup:
                     p.data.copy_(backup[n])
 
-    start_time = time.time()
-    for epoch in range(num_epochs):
-        # --- Validation ---
+    grad_clip_norm = float(getattr(cfg, 'optimizer_grad_clip_norm', 0.0) or 0.0)
+    trainable_params = [p for p in policy.parameters() if p.requires_grad]
+
+    # empty_cache 빈도 — validation 마다 비우면 메모리가 매번 출렁이고 cudaMalloc
+    # 재획득 overhead 도 큼. 매 validation 이 아니라 N 회마다 1번만 비운다(0.1배).
+    _empty_cache_every = int(os.environ.get('EC_EMPTY_CACHE_EVERY', '10') or 10)
+    _val_call_count = 0
+
+    def _run_validation(step_done):
+        """val_dataloader 전체 1회 평가 → val_loss 반환. best 면 best_state_dict_cpu
+        갱신. EMA 가중치로 평가하고, 끝나면 학습 모드로 복원(캐시는 가끔만 비움)."""
+        nonlocal best_state_dict_cpu, best_step, min_val_loss, min_smoothed_val, _val_call_count
         live_backup = _swap_in_ema()  # validate against EMA weights
-        with torch.inference_mode():
-            val_loss_sum = 0.0
-            val_batch_count = 0
-            for pass_idx in range(max(val_n_passes, 1)):
-                for batch_idx, data in enumerate(val_dataloader):
-                    with torch.autocast('cuda', dtype=amp_dtype, enabled=use_amp):
-                        loss, _ = forward_pass(data, policy, norm_stats=stats, preprocessor=preprocessor)
-                    val_loss_sum += loss.item()
-                    val_batch_count += 1
-                    if pass_idx == 0 and (
-                        (batch_idx + 1) % max(1, total_val_batches // 5) == 0
-                        or batch_idx == total_val_batches - 1
-                    ):
-                        print(f'  [VAL] epoch {epoch}/{num_epochs} pass {pass_idx+1}/{val_n_passes} '
-                              f'batch {batch_idx+1}/{total_val_batches} loss={loss.item():.4f}', flush=True)
+        try:
+            with torch.inference_mode():
+                val_loss_sum = 0.0
+                val_batch_count = 0
+                for pass_idx in range(max(val_n_passes, 1)):
+                    for batch_idx, data in enumerate(val_dataloader):
+                        with torch.autocast('cuda', dtype=amp_dtype, enabled=use_amp):
+                            loss, _ = forward_pass(data, policy, norm_stats=stats, preprocessor=preprocessor)
+                        val_loss_sum += loss.item()
+                        val_batch_count += 1
+                cur_val_loss = val_loss_sum / max(val_batch_count, 1)
+                validation_history.append(cur_val_loss)
+                recent_val_losses.append(cur_val_loss)
 
-            epoch_val_loss = val_loss_sum / max(val_batch_count, 1)
-            validation_history.append(epoch_val_loss)
-            recent_val_losses.append(epoch_val_loss)
-
-            # Smoothed best detection (window=1 → raw min, preserves ACT/Diffusion behavior).
-            is_best = False
-            if len(recent_val_losses) >= val_smooth_window:
-                smoothed = sum(recent_val_losses[-val_smooth_window:]) / val_smooth_window
-                if smoothed < min_smoothed_val:
-                    min_smoothed_val = smoothed
-                    min_val_loss = smoothed
-                    best_epoch = epoch
+                # Smoothed best detection (window=1 → raw min, preserves ACT/Diffusion behavior).
+                is_best = False
+                if len(recent_val_losses) >= val_smooth_window:
+                    smoothed = sum(recent_val_losses[-val_smooth_window:]) / val_smooth_window
+                    if smoothed < min_smoothed_val:
+                        min_smoothed_val = smoothed
+                        min_val_loss = smoothed
+                        best_step = step_done
+                        is_best = True
+                elif cur_val_loss < min_val_loss:
+                    min_val_loss = cur_val_loss
+                    best_step = step_done
                     is_best = True
-            elif epoch_val_loss < min_val_loss:
-                min_val_loss = epoch_val_loss
-                best_epoch = epoch
-                is_best = True
 
-            if is_best:
-                # Snapshot EMA-loaded weights (currently in policy due to _swap_in_ema).
-                # Filter by requires_grad to capture both LoRA adapters AND full-FT modules.
-                if use_peft:
-                    trainable_names = {n for n, p in policy.named_parameters() if p.requires_grad}
-                    src = {k: v for k, v in policy.state_dict().items() if k in trainable_names}
-                else:
-                    src = policy.state_dict()
-                best_state_dict_cpu = {k: v.detach().to('cpu', copy=True) for k, v in src.items()}
+                if is_best:
+                    # Snapshot EMA-loaded weights (currently in policy due to _swap_in_ema).
+                    # Filter by requires_grad to capture both LoRA adapters AND full-FT modules.
+                    if use_peft:
+                        trainable_names = {n for n, p in policy.named_parameters() if p.requires_grad}
+                        src = {k: v for k, v in policy.state_dict().items() if k in trainable_names}
+                    else:
+                        src = policy.state_dict()
+                    best_state_dict_cpu = {k: v.detach().to('cpu', copy=True) for k, v in src.items()}
+        finally:
+            _restore_live(live_backup)
+            policy.train()
+            # 매 validation 이 아니라 N 회마다 한 번만 캐시 정리 (빈도 0.1배).
+            _val_call_count += 1
+            if _empty_cache_every > 0 and (_val_call_count % _empty_cache_every == 0):
+                torch.cuda.empty_cache()
+        return cur_val_loss
 
-        _restore_live(live_backup)
-        live_backup = None
-        torch.cuda.empty_cache()
+    # 학습 전 baseline validation (step 0 기준점).
+    start_time = time.time()
+    _baseline_val = _run_validation(0)
+    print(f'  [VAL] step 0/{num_steps} (baseline) val_loss={_baseline_val:.4f}', flush=True)
 
-        # --- Training ---
-        policy.train()
-        epoch_start = time.time()
-        optimizer.zero_grad()
-        grad_clip_norm = float(getattr(cfg, 'optimizer_grad_clip_norm', 0.0) or 0.0)
-        trainable_params = [p for p in policy.parameters() if p.requires_grad]
-        for batch_idx, data in enumerate(train_dataloader):
+    dl_iter = cycle(train_dataloader)
+    policy.train()
+    optimizer.zero_grad()
+    _running_loss = 0.0
+    _running_count = 0
+    _last_log_time = time.time()
+    _last_log_step = 0
+    # 실제로 완주한 step 수. 정상 종료면 num_steps, 조기 종료면 break 시점.
+    steps_completed = num_steps
+
+    for step in range(num_steps):
+        # 저장(조기 종료) 요청 시: 마지막 validation 한 번 더 → 직전 step 까지의
+        # best 확정 후 loop 탈출 → 아래 정상 저장 경로로.
+        if _early_finish_requested:
+            print(f'[TRAIN] Early finish at step {step}/{num_steps} — '
+                  f'final validation then saving best.', flush=True)
+            steps_completed = step
+            _run_validation(step)
+            break
+
+        # 한 optimizer update — grad_accum_steps 만큼 forward/backward 누적.
+        _step_loss_sum = 0.0
+        for _accum in range(grad_accum_steps):
+            data = next(dl_iter)
             with torch.autocast('cuda', dtype=amp_dtype, enabled=use_amp):
                 loss, _ = forward_pass(data, policy, norm_stats=stats, preprocessor=preprocessor)
-
+            _step_loss_sum += loss.item()
             if grad_accum_steps > 1:
                 loss = loss / grad_accum_steps
             loss.backward()
 
-            if (batch_idx + 1) % grad_accum_steps == 0 or (batch_idx + 1) == total_train_batches:
-                if grad_clip_norm > 0:
-                    torch.nn.utils.clip_grad_norm_(trainable_params, grad_clip_norm)
-                optimizer.step()
-                scheduler.step()
-                optimizer.zero_grad()
-                # EMA update per optimizer step.
-                if use_ema:
-                    with torch.no_grad():
-                        for n, p in policy.named_parameters():
-                            if n in ema_state:
-                                ema_state[n].mul_(ema_decay).add_(p.data, alpha=1.0 - ema_decay)
+        if grad_clip_norm > 0:
+            torch.nn.utils.clip_grad_norm_(trainable_params, grad_clip_norm)
+        optimizer.step()
+        scheduler.step()
+        optimizer.zero_grad()
+        if use_ema:
+            with torch.no_grad():
+                for n, p in policy.named_parameters():
+                    if n in ema_state:
+                        ema_state[n].mul_(ema_decay).add_(p.data, alpha=1.0 - ema_decay)
 
-            train_history.append({
-                'loss': loss.item() * (grad_accum_steps if grad_accum_steps > 1 else 1),
-                'lr': optimizer.param_groups[0]['lr'],
-            })
+        _step_loss = _step_loss_sum / max(grad_accum_steps, 1)
+        _cur_lr = optimizer.param_groups[0]['lr']
+        train_history.append({'loss': _step_loss, 'lr': _cur_lr})
+        _running_loss += _step_loss
+        _running_count += 1
 
-            if (batch_idx + 1) % max(1, total_train_batches // 5) == 0 or batch_idx == total_train_batches - 1:
-                elapsed = time.time() - epoch_start
-                batches_per_sec = (batch_idx + 1) / elapsed if elapsed > 0 else 0
-                print(f'  [BATCH] epoch {epoch}/{num_epochs} batch {batch_idx+1}/{total_train_batches} '
-                      f'loss={train_history[-1]["loss"]:.4f} lr={train_history[-1]["lr"]:.2e} '
-                      f'({batches_per_sec:.2f} batch/s)', flush=True)
-
-        epoch_summary = compute_dict_mean(train_history[(batch_idx+1)*epoch:(batch_idx+1)*(epoch+1)])
-        train_time_sec = time.time() - start_time
-        train_log = {
-            'epoch': epoch, 'total_epoch': num_epochs,
-            'val_loss': epoch_val_loss, 'train_loss': epoch_summary["loss"],
-            'train_time_sec': train_time_sec,
-        }
-        print(f"[TRAIN_LOG] {json.dumps(train_log)}", flush=True)
+        step_done = step + 1
+        if (step_done % val_freq == 0) or (step_done == num_steps):
+            val_loss = _run_validation(step_done)
+            train_loss_mean = _running_loss / max(_running_count, 1)
+            _running_loss = 0.0
+            _running_count = 0
+            _now = time.time()
+            _steps_per_sec = (step_done - _last_log_step) / max(_now - _last_log_time, 1e-6)
+            _last_log_time = _now
+            _last_log_step = step_done
+            # epoch/total_epoch 키 유지 — training_server/app.py 의 progress 파서가
+            # 이 키 비율로 progress 계산. step 의미로 재사용(UI 호환).
+            train_log = {
+                'epoch': step_done, 'total_epoch': num_steps,
+                'step': step_done, 'total_step': num_steps,
+                'val_loss': val_loss, 'train_loss': train_loss_mean,
+                'train_time_sec': _now - start_time,
+            }
+            # 이 worker 가 잡은 GPU 메모리(MiB) — 서버가 job 별로 기록해 GPU 관리
+            # 다이얼로그에서 nvidia-smi 프로세스를 체크포인트와 매칭하는 데 쓴다.
+            try:
+                if torch.cuda.is_available():
+                    train_log['gpu_mib'] = int(torch.cuda.memory_reserved() / (1024 * 1024))
+            except Exception:
+                pass
+            print(f"[TRAIN_LOG] {json.dumps(train_log)}", flush=True)
+            print(f'  [STEP] {step_done}/{num_steps} train_loss={train_loss_mean:.4f} '
+                  f'val_loss={val_loss:.4f} lr={_cur_lr:.2e} ({_steps_per_sec:.2f} step/s)', flush=True)
 
     # Save best checkpoint.
     ckpt_dir = checkpoint_dir
@@ -546,12 +623,21 @@ def train(
     preprocessor.save_pretrained(ckpt_dir, config_filename=f"{POLICY_PREPROCESSOR_DEFAULT_NAME}.json")
     postprocessor.save_pretrained(ckpt_dir, config_filename=f"{POLICY_POSTPROCESSOR_DEFAULT_NAME}.json")
 
-    print(f'Training finished:\nSeed {seed}, val loss {min_val_loss:.6f} at epoch {best_epoch}')
-    return best_epoch, min_val_loss
+    _finish_kind = 'early-finish' if _early_finish_requested else 'completed'
+    print(f'Training {_finish_kind} ({steps_completed}/{num_steps} steps):\n'
+          f'Seed {seed}, val loss {min_val_loss:.6f} at step {best_step}', flush=True)
+    return best_step, min_val_loss
 
 
 def main(args):
     """Load config from JSON and run training."""
+    # 저장(조기 종료) 시그널 등록 — training server 의 /api/train/save 가 이 worker
+    # 메인 프로세스에 SIGUSR1 을 보낸다. train loop 가 flag 를 보고 best 저장 후 종료.
+    try:
+        signal.signal(signal.SIGUSR1, _handle_early_finish)
+    except (ValueError, OSError) as e:
+        print(f'[TRAIN][WARN] SIGUSR1 handler registration failed: {e}', flush=True)
+
     job_dir = args.job_dir
     checkpoint_dir = args.checkpoint_dir
 

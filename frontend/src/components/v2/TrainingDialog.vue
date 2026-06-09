@@ -8,19 +8,26 @@
       </q-card-section>
       <q-separator color="white"></q-separator>
       <q-card-section>
-        <checkpoint-info :checkpoint="props.checkpoint" />
+        <!-- 큐 버튼으로 열면 경량 정보(id/name/status)만 들고 즉시 열리고, 상세는
+             백그라운드로 조회된다. 조회 중엔 스피너 — checkpoint-info 는 policy 등
+             전체 필드를 참조하므로 상세 로딩 후에만 렌더. -->
+        <div v-if="props.detailLoading" class="flex flex-center q-py-xl">
+            <q-spinner color="primary" size="2.5em" />
+        </div>
+        <checkpoint-info v-else :checkpoint="props.checkpoint" />
       </q-card-section>
       <q-card-section>
-        <div class="text-center">
-            <q-btn color="negative" :label="$t('trainStopBtn')" @click="stopTraining" v-if="isTraining" />
+        <div class="text-center q-gutter-x-sm">
+            <q-btn color="positive" :label="$t('trainSaveBtn')" icon="save" @click="saveTraining" :loading="saving" v-if="isTraining" />
+            <q-btn color="negative" :label="$t('trainStopBtn')" icon="stop" @click="stopTraining" :loading="stopping" v-if="isTraining" />
             <q-btn :color="terminalColor" :label="terminalLabel" @click="$emit('update:modelValue', false)" v-else-if="isTerminal" />
-            <q-btn color="primary" :label="$t('trainCancelBtn')" @click="cancelTraing" v-else />
+            <q-btn color="primary" :label="$t('trainCancelBtn')" @click="cancelTraing" :loading="canceling" v-else />
         </div>
       </q-card-section>
 
       <q-card-section class="q-pt-none" v-if="props.isTraining || isFailed">
         <div v-if="isFailed" class="text-negative q-mb-sm">{{ $t('trainFailed') }}</div>
-        <process-console v-if="isFailed" process="train_task" style="height: 240px;" />
+        <process-console v-if="isFailed" :process="logId" style="height: 240px;" />
       </q-card-section>
 
       <q-card-section class="q-pt-none" v-if="props.isTraining">
@@ -39,7 +46,7 @@
 
           <div class="row q-col-gutter-x-md">
             <div class="col-6">
-              <process-console process="train_task" style="height: 400px;" />
+              <process-console :process="logId" style="height: 400px;" />
             </div>
             <div class="col-6">
               <Line class="bg-dark" :data="data" :options="options" />
@@ -86,10 +93,19 @@ const props = defineProps({
   isTraining: {
     type: Boolean,
     default: false
+  },
+  // 큐 스냅샷이 경량이라 상세를 백그라운드로 조회하는 동안 true — 내부 로딩 표시.
+  detailLoading: {
+    type: Boolean,
+    default: false
   }
 });
 
 const { socket } = useSocket();
+
+// 로그/진행률은 체크포인트별 id(`train_task_<id>`)로 emit/버퍼링된다 — 동시 학습
+// 시 이 다이얼로그가 자기 체크포인트 것만 보도록 필터/구독 키로 사용한다.
+const logId = computed(() => `train_task_${props.checkpoint?.id ?? ''}`);
 
 // 종료 상태(finished/failed/canceled)에서는 다이얼로그가 남아 있고 닫기 전용
 // 버튼만 노출 — 결과를 확인한 뒤 사용자가 직접 닫는다.
@@ -143,6 +159,16 @@ watch(() => props.isTraining, (newVal) => {
     }
 });
 
+// 다이얼로그가 다른 체크포인트로 바뀌면(같은 인스턴스 재사용) 진행바·loss 차트를
+// 초기화 — 이전 체크포인트의 라이브 데이터가 남아 섞이지 않게.
+watch(() => props.checkpoint?.id, () => {
+    trainingProgress.value = 0;
+    train_sec.value = 0;
+    data.value.labels = [];
+    data.value.datasets[0].data = [];
+    data.value.datasets[1].data = [];
+});
+
 
 function addLoss(epoch, trainLoss, valLoss) {
     if (data.value.labels.length > 50) {
@@ -176,7 +202,7 @@ function formatTime(seconds) {
 }
 
 const onLogTrainTask = (logData) => {
-    if (logData.id === 'train_task') {
+    if (logData.id === logId.value) {
         if (logData.message.includes('[TRAIN_LOG]')) {
           const trainLogStr = logData.message.replace('[TRAIN_LOG] ', '');
           const trainLogJson = JSON.parse(trainLogStr);
@@ -188,29 +214,59 @@ const onLogTrainTask = (logData) => {
 };
 // const { trainingProgress, data, options } = useTraining();
 
+const saving = ref(false);
+
+async function saveTraining() {
+    if (!props.isTraining || saving.value) return;
+    // 저장 = '조기 종료 + best 저장'. worker 가 SIGUSR1 을 받아 final validation
+    // 후 best checkpoint 를 저장하고 정상 종료 → 기존 완료 파이프라인이 다운로드.
+    // 프로세스를 죽이는 '중지'와 달리 학습 결과가 보존된다.
+    saving.value = true;
+    try {
+        await api.post('/train/save', { checkpoint_id: props.checkpoint.id });
+        Notify.create({ color: 'positive', message: t('trainSaveRequested') });
+        emit('update:modelValue', false);
+    } catch (error) {
+        Notify.create({ color: 'negative', message: t('trainSaveFailed', { error }) });
+    } finally {
+        saving.value = false;
+    }
+}
+
+const stopping = ref(false);
+
 async function stopTraining() {
-    if (!props.isTraining) return;
+    if (!props.isTraining || stopping.value) return;
     // 새 큐 라우트: DELETE /api/train/queue/<id> — 실행 중이면 stop 신호.
     // 백엔드는 'stopping' 응답 후 runner가 빠져나오면 status=canceled로 마감.
     // 다이얼로그는 즉시 닫고 큐 패널이 변화 추적하도록 한다.
+    stopping.value = true;
     try {
         await api.delete(`/train/queue/${props.checkpoint.id}`);
         emit('update:modelValue', false);
         emit('cpRemoved', props.checkpoint.id);
     } catch (error) {
         Notify.create({ color: 'negative', message: t('trainStopFailed', { error }) });
+    } finally {
+        stopping.value = false;
     }
 }
 
-function cancelTraing() {
-    if (props.isTraining) return;
+const canceling = ref(false);
+
+async function cancelTraing() {
+    if (props.isTraining || canceling.value) return;
     // 새 큐 라우트: DELETE /api/train/queue/<id> — 큐 대기 중이면 즉시 canceled.
-    api.delete(`/train/queue/${props.checkpoint.id}`).then(() => {
+    canceling.value = true;
+    try {
+        await api.delete(`/train/queue/${props.checkpoint.id}`);
         emit('update:modelValue', false);
         emit('cpRemoved', props.checkpoint.id);
-    }).catch((error) => {
+    } catch (error) {
         Notify.create({ color: 'negative', message: t('trainCancelFailed', { error }) });
-    })
+    } finally {
+        canceling.value = false;
+    }
 }
 
 onMounted(() => {

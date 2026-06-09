@@ -100,7 +100,16 @@
           <tbody>
             <tr v-for="p in processes" :key="p.pid">
               <td>{{ p.pid }}</td>
-              <td>{{ p.name }}</td>
+              <td>
+                <q-icon
+                  v-if="p.easytrainer"
+                  name="model_training"
+                  color="deep-orange"
+                  size="xs"
+                  class="q-mr-xs"
+                />
+                <span :class="p.easytrainer ? 'text-deep-orange' : ''">{{ p.name }}</span>
+              </td>
               <td class="text-right">{{ p.mem_mb }} MiB</td>
             </tr>
           </tbody>
