@@ -16,6 +16,8 @@
    - 키 추가 시 [src/i18n/ko-KR/index.js](src/i18n/ko-KR/index.js)와 [src/i18n/en-US/index.js](src/i18n/en-US/index.js)를 **동시에** 1:1로 갱신한다.
 3. **프론트엔드 기능 추가/변경 후에는 Playwright UI 테스트**(`.claude/skills/playwright-skill`)로 검증하고, 캡처는 Read로 직접 확인한다.
 4. **ESLint/Prettier 준수**: 세미콜론 없음, 작은따옴표, print width 100. (pre-commit이 잡지만 작성 시 의식할 것)
+5. **데이터 로딩엔 inner-loading.** API를 호출해 그 결과로 영역(목록/카드/패널/다이얼로그 내용)을 채우는 곳은 요청 진행 중 `q-inner-loading`(또는 스피너)을 띄운다. → [§7](#7-로딩-상태--중복-클릭-방지-필수)
+6. **백엔드로 보내는 버튼엔 `:loading`.** 저장/삭제/시작/중지/제출 등 백엔드 요청을 트리거하는 버튼은 요청 동안 `:loading`으로 두어 **중복 클릭을 막는다.** → [§7](#7-로딩-상태--중복-클릭-방지-필수)
 
 ---
 
@@ -237,7 +239,70 @@ const sensorForm = ref([
 
 ---
 
-## 7. 알림 / 사용자 피드백
+## 7. 로딩 상태 / 중복 클릭 방지 (필수)
+
+API 응답을 기다리는 동안 사용자가 빈 화면을 보거나 같은 요청을 두 번 보내지 않도록, 아래 두 가지는 **무조건** 지킨다.
+
+### 7-1. 데이터 로딩 → inner-loading
+
+API를 호출해 그 결과로 영역을 채우는 곳(목록·카드·패널·다이얼로그 내용 등)은 **요청이 도는 동안 그 영역에 `q-inner-loading`(또는 스피너)** 을 띄운다. 끝나면 내용이 채워진다.
+
+```vue
+<template>
+  <q-card class="bg-secondary relative-position">  <!-- inner-loading 기준 부모 -->
+    <q-inner-loading :showing="loading" color="primary" />
+    <div v-if="!loading"> … API 결과로 채워지는 내용 … </div>
+  </q-card>
+</template>
+
+<script setup>
+const loading = ref(false)
+async function load() {
+  loading.value = true
+  try {
+    const res = await api.get('/items')
+    items.value = res.data?.items || []
+  } finally {
+    loading.value = false
+  }
+}
+</script>
+```
+
+- `q-inner-loading`은 `position: relative`(= `relative-position` 클래스)인 부모 안에서 오버레이된다.
+- **다이얼로그를 즉시 열고 내용만 나중에 채우는 경우**(예: 큐 스냅샷은 경량 `{id,name,status}`만 담고 상세는 `/checkpoint/<id>`로 따로 조회): 다이얼로그는 바로 열고, 상세 조회 동안 **내용 영역에만** 스피너를 둔다. 전체 필드를 참조하는 자식 컴포넌트는 로딩 중 렌더하지 않도록 `v-if="!loading"`로 가드한다 — 경량 객체의 누락 필드 참조 에러 방지.
+- 단순 비차단 새로고침(폴링 등)은 inner-loading 없이 조용히 갱신해도 된다. **사용자가 결과를 기다리는 첫 로드/명시적 조회**에 적용.
+
+### 7-2. 액션 버튼 → `:loading` (중복 클릭 방지)
+
+백엔드로 요청을 보내는 버튼(저장·삭제·시작·중지·제출 등)은 **요청 동안 `:loading`** 을 건다. `q-btn`은 `:loading`이면 자동으로 비활성화되어 **중복 클릭이 막힌다.**
+
+```vue
+<q-btn :label="$t('save')" :loading="saving" @click="save" />
+
+<script setup>
+const saving = ref(false)
+async function save() {
+  if (saving.value) return            // 추가 안전장치
+  saving.value = true
+  try {
+    await api.post('/items', form.value)
+    Notify.create({ type: 'positive', message: t('saveSuccess') })
+  } catch (e) {
+    Notify.create({ type: 'negative', message: e?.response?.data?.message || t('saveFailed') })
+  } finally {
+    saving.value = false
+  }
+}
+</script>
+```
+
+- 버튼마다 자기 로딩 ref(`saving`/`deleting`/`starting`…)를 둔다. 한 화면에 액션이 여러 개면 각각 분리(서로의 로딩이 섞이지 않게).
+- `finally`에서 **반드시** 해제한다(에러가 나도 버튼이 영구 비활성화되지 않게).
+
+---
+
+## 8. 알림 / 사용자 피드백
 
 `Notify` (Quasar plugin, 이미 등록됨)을 사용한다. 직접 토스트 UI를 만들지 않는다.
 
@@ -255,7 +320,7 @@ Notify.create({ type: 'info', message: t('xxxInfo'), timeout: 2500 })
 
 ---
 
-## 8. 아이콘 / 이미지
+## 9. 아이콘 / 이미지
 
 - 아이콘은 Material Icons 이름 문자열 (`icon="add"`, `name="edit"`, `name="close"`, `name="school"` …).
 - 엔티티 이미지는 `/images/{type}.png` 규약, 폴백은 `/images/custom_sensor.png` 류.
@@ -263,7 +328,7 @@ Notify.create({ type: 'info', message: t('xxxInfo'), timeout: 2500 })
 
 ---
 
-## 9. 네비게이션 추가 체크리스트
+## 10. 네비게이션 추가 체크리스트
 
 새 페이지를 추가할 때:
 1. [src/pages/v2/](src/pages/v2/)에 `XxxPage.vue` 생성 (위 골격 준수).
@@ -274,13 +339,15 @@ Notify.create({ type: 'info', message: t('xxxInfo'), timeout: 2500 })
 
 ---
 
-## 10. 빠른 체크리스트 (PR 전)
+## 11. 빠른 체크리스트 (PR 전)
 
 - [ ] `<style>` 블록 / 커스텀 CSS 없음
 - [ ] 모든 텍스트가 `$t()` / `t()` (ko·en 동시 추가)
 - [ ] 색은 브랜드 클래스(`text-primary`, `bg-secondary`, `bg-dark` …)로만
 - [ ] 카드/폼/알림이 기존 페이지와 동일한 패턴
 - [ ] 공용 컴포넌트(FormDialog/TutorialHint/BottomTerminal 등) 재사용
+- [ ] **데이터를 API로 채우는 영역에 로딩 중 inner-loading/스피너 (§7-1)**
+- [ ] **백엔드로 보내는 모든 버튼에 `:loading` — 중복 클릭 방지 (§7-2)**
 - [ ] ESLint 통과 (세미콜론 없음, 작은따옴표, width 100)
 - [ ] Playwright UI 테스트 + 캡처 확인 완료
 - [ ] 코드 수정 후 `bash scripts/quick_apply.sh ./ /opt/easytrainer/project`로 런타임 반영
