@@ -31,3 +31,11 @@ dist/
 # Auto-generated module manifests staged for Docker build
 ros2/_modules_staging/*.json
 backend/_modules_staging/*.json
+
+# runtime-installed module extensions (source lives in modules/extensions/)
+/backend/extensions/
+# training_server synced into backend/ at runtime (source lives in /training_server)
+/backend/training_server/
+# harness / tooling scratch
+.claude/scheduled_tasks.lock
+.claude/skills/playwright-skill/.temp-execution-*.js
