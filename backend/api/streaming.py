@@ -12,7 +12,7 @@ import traceback
 import uuid
 import time
 
-from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack, RTCConfiguration, RTCIceServer
+from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack, RTCConfiguration
 from aiohttp import web
 import aiohttp_cors
 from av import VideoFrame
@@ -51,6 +51,13 @@ class _TopicFrameSource:
         self._frame_seq = 0          # 마지막 frame 의 단조 시퀀스 (track 측 cache 비교용)
         self._refs = 0
         self._running = True
+        # gRPC SubscribeImage 의 stream_id 는 **이 source 인스턴스마다 고유**해야 한다.
+        # ros2 StreamingService 는 stream_id 를 키로 구독 lifecycle(refcount)을 관리하는데,
+        # 고정 'src-<topic>' 를 쓰면 view churn 으로 옛 stream 종료와 새 stream 시작이
+        # 겹칠 때 같은 키가 충돌 → 해제가 한 번만 먹혀 refcount 가 누수된다. 그러면
+        # ros2 쪽 _SharedTopicSubscriber 가 영영 파괴/재생성되지 않아, sim 재시작 등으로
+        # publisher 가 바뀌면 stale 구독이 재매칭하지 못한 채 0 프레임만 내보낸다.
+        self._stream_id = f'src-{topic}-{uuid.uuid4().hex[:8]}'
         self._thread = threading.Thread(target=self._loop, name=f'src-{topic}', daemon=True)
         self._thread.start()
 
@@ -60,7 +67,7 @@ class _TopicFrameSource:
             request = pb.SubscribeImageRequest(
                 topic=self.topic,
                 msg_type=self.msg_type,
-                stream_id=f'src-{self.topic}',
+                stream_id=self._stream_id,
             )
             for image_frame in self._grpc_stub.SubscribeImage(request):
                 if not self._running:
@@ -220,8 +227,9 @@ async def offer(request):
     if grpc_stub is None:
         return web.json_response({"error": "gRPC streaming not available"}, status=500)
 
-    ice_servers = [RTCIceServer(urls="stun:stun.l.google.com:19302")]
-    pc = RTCPeerConnection(RTCConfiguration(iceServers=ice_servers))
+    # localhost 연결 — 외부 STUN 불필요. host candidate 만 gather 하면 IPv6 STUN
+    # ~5s 타임아웃 지연 없이 즉시 연결된다 (프론트 useWebRTC.js 와 동일 정책).
+    pc = RTCPeerConnection(RTCConfiguration(iceServers=[]))
     pcs.add(pc)
 
     stream_id = str(uuid.uuid4())
@@ -270,8 +278,8 @@ async def sim_offer(request):
         return web.json_response({"error": "Simulation not running"}, status=400)
 
     params = await request.json()
-    ice_servers = [RTCIceServer(urls="stun:stun.l.google.com:19302")]
-    pc = RTCPeerConnection(RTCConfiguration(iceServers=ice_servers))
+    # localhost 연결 — 외부 STUN 불필요 (offer() 와 동일 정책).
+    pc = RTCPeerConnection(RTCConfiguration(iceServers=[]))
     pcs.add(pc)
 
     @pc.on("connectionstatechange")

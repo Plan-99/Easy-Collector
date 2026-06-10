@@ -591,10 +591,11 @@
           </div>
         </div>
       </div>
-      <!-- Stop / progress bar. 모든 블록 타입에서 노출. 동작은:
-             - checkpoint: per-block stop 신호 → max_steps 초과와 동일 처리,
-                           교정 dialog 가 자동 노출
-             - 그 외 (모션 블록): 즉시 전체 롤아웃 중지 (교정 dialog 없음)
+      <!-- 하단 컨트롤 바. 버튼 2종:
+             - 전체 종료(currStopAll): 블록 타입과 무관하게 항상 파이프라인 전체를
+               종료(:stop_rollout). 체크포인트 추론 중에도 누르면 파이프라인 종료.
+             - 실패처리(currHandleFailure): 체크포인트 추론 중에만 노출. per-block
+               stop(:stop_current_block) → 교정 dialog 트리거.
            progress bar 는 step 정보가 있는 checkpoint 일 때만. -->
       <q-separator v-if="runningBlock" dark />
       <div v-if="runningBlock" class="bg-dark q-pa-md">
@@ -620,12 +621,23 @@
           <div v-else class="col text-caption text-grey-4">
             {{ t('currStopNonCpHint') }}
           </div>
+          <!-- 실패처리 — 체크포인트 추론 중에만. 교정 dialog 트리거. -->
+          <q-btn
+            v-if="runningBlock.type === 'checkpoint'"
+            color="amber"
+            text-color="dark"
+            icon="report_problem"
+            :label="t('currHandleFailure')"
+            :loading="handleFailureBusy"
+            @click="onHandleFailure"
+          />
+          <!-- 전체 종료 — 항상 노출. 파이프라인 전체 종료. -->
           <q-btn
             color="red"
             icon="stop"
-            :label="runningBlock.type === 'checkpoint' ? t('currStopBlock') : t('currStopRollout')"
-            :loading="stopBlockBusy"
-            @click="onStopCurrentBlock"
+            :label="t('currStopAll')"
+            :loading="stopAllBusy"
+            @click="onStopAll"
           />
         </div>
       </div>
@@ -664,6 +676,39 @@
           <q-space />
           <q-btn flat :label="t('currCorrectionNo')" color="grey-4" @click="dismissCorrection" />
           <q-btn unelevated color="amber" text-color="dark" :label="t('currCorrectionYes')" @click="startCorrection" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
+    <!-- Rewind(되감기) — "교정 시작" 후 진입. ←/→ (키보드/버튼) 로 체크포인트가
+         실행한 과거 step 으로 로봇 팔을 되감고, 원하는 지점에서 교정을 시작한다.
+         롤아웃은 백엔드에서 pause 유지 중. -->
+    <q-dialog v-model="showRewind" persistent>
+      <q-card dark class="bg-secondary text-white" style="min-width: 420px">
+        <q-card-section class="row items-center bg-dark">
+          <q-icon name="history" color="amber" class="q-mr-sm" />
+          <div class="text-h6">{{ t('currRewindTitle') }}</div>
+          <q-space />
+          <q-btn flat round dense icon="close" :disable="rewindBusy" @click="backToCorrectionConfirm" />
+        </q-card-section>
+        <q-card-section class="column items-center q-gutter-y-md">
+          <div class="text-caption text-grey-4 text-center">{{ t('currRewindDesc') }}</div>
+          <div class="row items-center justify-center q-gutter-x-lg">
+            <q-btn round color="amber" text-color="dark" icon="chevron_left"
+                   :disable="rewindBusy || rewindStep <= 0" @click="rewindBy(-1)" />
+            <div class="text-center" style="min-width: 120px">
+              <div class="text-h5">{{ rewindStep }} / {{ rewindTotal > 0 ? rewindTotal - 1 : 0 }}</div>
+              <div class="text-caption text-grey-5">{{ t('currRewindStepLabel') }}</div>
+            </div>
+            <q-btn round color="amber" text-color="dark" icon="chevron_right"
+                   :disable="rewindBusy || rewindStep >= (rewindTotal > 0 ? rewindTotal - 1 : 0)" @click="rewindBy(1)" />
+          </div>
+          <q-linear-progress v-if="rewindBusy" indeterminate color="amber" class="full-width" />
+        </q-card-section>
+        <q-card-actions align="right" class="q-pa-md">
+          <q-btn flat :label="t('currRewindBack')" color="grey-4" :disable="rewindBusy" @click="backToCorrectionConfirm" />
+          <q-btn unelevated color="amber" text-color="dark" icon="school"
+                 :label="t('currRewindStartHere')" :disable="rewindBusy" @click="proceedToCorrectionTeleop" />
         </q-card-actions>
       </q-card>
     </q-dialog>
@@ -880,7 +925,8 @@ const monitorFocused = ref({})
 const monitorDatasetId = ref(null)
 const monitorCheckpointId = ref(null)
 const monitorEpisode = ref({})
-const stopBlockBusy = ref(false)
+const handleFailureBusy = ref(false)   // 실패처리 버튼 busy
+const stopAllBusy = ref(false)         // 전체 종료 버튼 busy
 
 // 현재 실행 중인 block 객체 — id 로 plannerBlocks 에서 찾는다.
 const runningBlock = computed(() => {
@@ -963,30 +1009,36 @@ const runningProgress = computed(() => {
     }
 })
 
-async function onStopCurrentBlock () {
+// 실패처리 — 체크포인트 추론 중에만 노출되는 버튼. per-block stop 신호를 보내
+// 백엔드가 curriculum_checkpoint_failed 이벤트를 emit → 교정 dialog 가 자동 노출.
+// (파이프라인 전체를 종료하지 않는다 — 해당 블록만 실패 처리.)
+async function onHandleFailure () {
     if (!curriculum.value) return
-    const blk = runningBlock.value
-    stopBlockBusy.value = true
+    handleFailureBusy.value = true
     try {
-        if (blk?.type === 'checkpoint') {
-            // checkpoint: per-block stop → 백엔드가 curriculum_checkpoint_failed
-            // 이벤트를 emit → 교정 dialog 자동 노출.
-            await api.post(`/curriculum/${curriculum.value.id}/:stop_current_block`)
-            Notify.create({ type: 'warning', message: t('currStopBlock') })
-        } else {
-            // 그 외 모션 블록: 교정 dialog 가 의미 없으므로 즉시 전체 롤아웃 중지.
-            await api.post(`/curriculum/${curriculum.value.id}/:stop_rollout`)
-            isRunning.value = false
-            // Monitor 도 같이 닫는다 (FAB 가 v-if=isRunning 으로 사라지지만,
-            // 다이얼로그도 명시적으로 정리).
-            showMonitor.value = false
-            Notify.create({ type: 'warning', message: t('currStopRollout') })
-        }
+        await api.post(`/curriculum/${curriculum.value.id}/:stop_current_block`)
+        Notify.create({ type: 'warning', message: t('currHandleFailure') })
     } catch (e) {
-        console.error('stop request failed:', e)
+        console.error('handle-failure request failed:', e)
         Notify.create({ type: 'negative', message: e?.response?.data?.message || 'Stop failed' })
     } finally {
-        stopBlockBusy.value = false
+        handleFailureBusy.value = false
+    }
+}
+
+// 전체 종료 — 블록 타입과 무관하게 항상 파이프라인 전체를 종료. 체크포인트 추론
+// 중에도 누르면 즉시 :stop_rollout 으로 파이프라인을 끝낸다 (교정 dialog 아님).
+async function onStopAll () {
+    if (!curriculum.value) return
+    stopAllBusy.value = true
+    try {
+        await stopRollout()
+        Notify.create({ type: 'warning', message: t('currStopAll') })
+    } catch (e) {
+        console.error('stop-all request failed:', e)
+        Notify.create({ type: 'negative', message: e?.response?.data?.message || 'Stop failed' })
+    } finally {
+        stopAllBusy.value = false
     }
 }
 
@@ -1000,6 +1052,14 @@ const correctionHz = ref(8)
 const correctionBusy = ref(false)
 // motion_planning 교정 시 호출할 외부 모션플래너 ROS2 서비스 (예: /tutorial/run_episode).
 const correctionRos2Service = ref('/tutorial/run_episode')
+
+// Rewind(되감기): "교정 시작" → 곧장 레코딩이 아니라, 체크포인트가 실행한 과거
+// step 으로 ←/→ 화살표(키보드/버튼)로 팔을 되감는 모드를 먼저 연다. 원하는 시점까지
+// 되감은 뒤 거기서부터 교정을 시작한다 (v1: 로봇 팔만 되돌림).
+const showRewind = ref(false)
+const rewindStep = ref(0)       // 현재 되감긴 절대 step
+const rewindTotal = ref(0)      // 체크포인트가 실행한 전체 step 수
+const rewindBusy = ref(false)   // seek 진행 중 — 화살표/시작 버튼 disable
 
 const correctionTeleOptions = computed(() => ([
     { label: 'Leader', value: 'leader' },
@@ -1065,6 +1125,7 @@ async function closeCorrectionConfirm () {
 // 신호는 불필요. Monitor / dialog 도 같이 정리.
 async function stopCurriculumFromFailure () {
     showCorrectionConfirm.value = false
+    closeRewind()
     lastFailure.value = null
     try {
         if (curriculum.value) {
@@ -1079,10 +1140,93 @@ async function stopCurriculumFromFailure () {
 }
 function startCorrection () {
     showCorrectionConfirm.value = false
-    // teleop 설정 다이얼로그 열기. 롤아웃은 백엔드에서 pause 유지 중 (resume 신호
-    // 안 보냈으므로). 사용자가 teleop 마치고 record_episode 종료할 때 resume.
+    // 곧장 teleop 설정으로 가지 않고 rewind(되감기) 모드를 먼저 연다. 롤아웃은
+    // 백엔드에서 pause 유지 중 — ←/→ 로 과거 step 으로 팔을 되감을 수 있고, 원하는
+    // 지점에서 "이 지점에서 교정 시작" 을 누르면 teleop 설정으로 넘어간다.
     correctionLanguageInstruction.value = monitorWorkspace.value?.name || ''
+    rewindTotal.value = Number(lastFailure.value?.final_step) || 0
+    rewindStep.value = rewindTotal.value > 0 ? rewindTotal.value - 1 : 0
+    rewindBusy.value = false
+    showRewind.value = true
+    window.addEventListener('keydown', onRewindKey)
+}
+
+// rewind 다이얼로그를 닫고 키보드 핸들러 해제 (공통 정리).
+function closeRewind () {
+    showRewind.value = false
+    rewindBusy.value = false
+    window.removeEventListener('keydown', onRewindKey)
+}
+
+// ←/→ 화살표 키 핸들러 — 다이얼로그가 열린 동안만 등록. 1 step 씩 이동.
+function onRewindKey (e) {
+    if (!showRewind.value) return
+    if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        rewindBy(-1)
+    } else if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        rewindBy(1)
+    }
+}
+
+// delta(±1) 만큼 절대 step 을 이동시키고 백엔드에 seek 요청. busy 동안은 무시해
+// move 명령 폭주를 막는다 (백엔드가 응답 emit 으로 busy 해제).
+async function rewindBy (delta) {
+    if (rewindBusy.value) return
+    const f = lastFailure.value
+    if (!curriculum.value || !f?.block_id) return
+    const max = rewindTotal.value > 0 ? rewindTotal.value - 1 : 0
+    const next = Math.min(max, Math.max(0, rewindStep.value + delta))
+    if (next === rewindStep.value) return
+    rewindStep.value = next
+    rewindBusy.value = true
+    try {
+        await api.post(`/curriculum/${curriculum.value.id}/:rewind_seek`, {
+            block_id: f.block_id,
+            step: next,
+        })
+        // 백엔드가 curriculum_rewind_position 을 emit 하면 onRewindPosition 에서
+        // busy 를 해제한다. 응답이 유실돼도 멈추지 않도록 폴백 타임아웃.
+        setTimeout(() => { rewindBusy.value = false }, 3000)
+    } catch (e) {
+        console.error('rewind_seek failed:', e)
+        Notify.create({ type: 'negative', message: e?.response?.data?.message || 'Rewind failed' })
+        rewindBusy.value = false
+    }
+}
+
+// 백엔드 pause 진입 시 — 전체 step 수 동기화 (final_step 과 일치하지만 권위값).
+function onCurriculumRewindReady (payload) {
+    if (!payload) return
+    if (lastFailure.value && payload.block_id !== lastFailure.value.block_id) return
+    const total = Number(payload.total_steps) || 0
+    if (total > 0) {
+        rewindTotal.value = total
+        if (rewindStep.value > total - 1) rewindStep.value = total - 1
+    }
+}
+
+// 백엔드가 실제 되감기를 마치면(팔 이동 완료) 현재 step 을 반영하고 busy 해제.
+function onCurriculumRewindPosition (payload) {
+    if (!payload) return
+    if (lastFailure.value && payload.block_id !== lastFailure.value.block_id) return
+    if (payload.step != null) rewindStep.value = Number(payload.step)
+    if (payload.total_steps != null) rewindTotal.value = Number(payload.total_steps)
+    rewindBusy.value = false
+}
+
+// "이 지점에서 교정 시작" — rewind 닫고 기존 teleop 설정 흐름으로 위임.
+function proceedToCorrectionTeleop () {
+    closeRewind()
     showCorrectionTeleop.value = true
+}
+
+// "뒤로"/X — rewind 닫고 실패 confirm(중지/건너뛰기/교정) 다이얼로그로 복귀.
+// 롤아웃은 여전히 pause 상태이므로 사용자가 다른 선택을 할 수 있다.
+function backToCorrectionConfirm () {
+    closeRewind()
+    showCorrectionConfirm.value = true
 }
 
 // record_episode (correction) 가 진행 중일 때 MonitoringWindow 의 바텀
@@ -1638,9 +1782,16 @@ function openBlockDialog (blk) {
   blockForm.targetGroupId = null
   blockForm.splitName = ''
   if (blk.type === 'checkpoint') {
+    // 그룹 찾기: cp 멤버십 우선, 없으면 이 블록의 설정(block_id 키)을 가진 그룹.
+    // 플래너에서 cp 를 그룹 비멤버로 바꿔도 블록 설정을 찾을 수 있게.
     const g = groupOfCheckpoint(blk.checkpoint_id)
+      || groups.value.find((gr) => (gr.checkpoint_settings || {})[blk.id] != null)
+      || null
     const cs = (g && g.checkpoint_settings) || {}
-    const conf = cs[blk.checkpoint_id] || cs[String(blk.checkpoint_id)] || {}
+    // 모든 블록 설정은 **블록 단위**(키=block_id)로 저장된다. 플래너에서 블록의
+    // 체크포인트를 바꿔도 block_id 는 그대로라 설정이 유지된다. 구버전(cp 키)
+    // 데이터는 폴백으로 읽는다(마이그레이션 전 호환).
+    const conf = cs[blk.id] || cs[String(blk.id)] || cs[blk.checkpoint_id] || cs[String(blk.checkpoint_id)] || {}
     blockForm.base_dataset_ids = conf.base_dataset_ids || []
     // TrainPage step3 와 동일하게 정책 타입 기반 trainingForm 구성 + 저장값 시드.
     blockForm.trainingForm = buildTrainingForm(blockPolicyTypeFor(blk.checkpoint_id), conf.train_settings || {})
@@ -1649,7 +1800,7 @@ function openBlockDialog (blk) {
     // 해당 블록 워크스페이스의 데이터셋만 로드(base 데이터셋 후보). 블록의
     // workspace_id 를 직접 넘긴다 — checkpoints 로드 여부와 무관하게 호출되도록.
     loadBlockDatasets(blk.workspace_id)
-    // 판정 조건 정책(체크포인트별): 최초 길이 제한 + 길이 제한 rate + 성공 임계값.
+    // 판정 조건 정책(블록 단위): 최초 길이 제한 + 길이 제한 rate + 성공 임계값.
     blockForm.initial_max_steps = conf.initial_max_steps != null ? conf.initial_max_steps : 600
     blockForm.length_limit_rate = conf.length_limit_rate != null ? conf.length_limit_rate : 1.5
     blockForm.success_threshold = conf.success_threshold != null ? conf.success_threshold : 0.5
@@ -1841,6 +1992,7 @@ async function stopRollout () {
   showMonitor.value = false
   showCorrectionConfirm.value = false
   showCorrectionTeleop.value = false
+  closeRewind()
 }
 
 // 백엔드가 정상 종료 (curriculum_rollout_end) 를 알리면 즉시 UI 정리. 3s 폴링
@@ -1850,6 +2002,7 @@ function onCurriculumRolloutEnd () {
   showMonitor.value = false
   showCorrectionConfirm.value = false
   showCorrectionTeleop.value = false
+  closeRewind()
 }
 
 async function refreshStatus () {
@@ -1895,6 +2048,9 @@ onMounted(async () => {
   socket.on('planner_block_end', onPlannerBlockEnd)
   // 체크포인트 실패 → Monitor + Correction confirm 자동 노출.
   socket.on('curriculum_checkpoint_failed', onCurriculumCheckpointFailed)
+  // Rewind(되감기) — pause 진입(전체 step 수) / 되감기 완료(현재 step) 동기화.
+  socket.on('curriculum_rewind_ready', onCurriculumRewindReady)
+  socket.on('curriculum_rewind_position', onCurriculumRewindPosition)
   // 롤아웃 정상/이상 종료 → FAB + dialog 즉시 정리.
   socket.on('curriculum_rollout_end', onCurriculumRolloutEnd)
   // _judge_and_store 의 sync 인코딩 동안 "저장 중" 배너 노출.
@@ -1911,10 +2067,13 @@ onMounted(async () => {
 onUnmounted(() => {
   if (statusTimer) clearInterval(statusTimer)
   window.removeEventListener('keydown', _guardMonitorKeys, true)
+  window.removeEventListener('keydown', onRewindKey)
   socket.off('planner_block_start', onPlannerBlockStart)
   socket.off('planner_block_progress', onPlannerBlockProgress)
   socket.off('planner_block_end', onPlannerBlockEnd)
   socket.off('curriculum_checkpoint_failed', onCurriculumCheckpointFailed)
+  socket.off('curriculum_rewind_ready', onCurriculumRewindReady)
+  socket.off('curriculum_rewind_position', onCurriculumRewindPosition)
   socket.off('curriculum_rollout_end', onCurriculumRolloutEnd)
   socket.off('curriculum_saving_episode', onCurriculumSavingEpisode)
   socket.off('stop_process', onStopProcess)

@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "entries": {
+    "79a93d4a2f8f50b95f852280616242fee1855dc99a3c75211917f55e72e95fae": {
+      "last_emitted_at_ms": 1781089701294,
+      "message": "Use parallel execution for independent tasks. Use run_in_background for long operations (npm install, builds, tests)."
+    },
+    "445ed27a3872b681d98190bae61ccb84954e1bc4e140df5370be958dee776b3a": {
+      "last_emitted_at_ms": 1781089695549,
+      "message": "Verify changes work after editing. Test functionality before marking complete."
+    },
+    "466399dafa2d20f60587180bad0a07358eb7f2bce724df0ff682f038ad33f5ad": {
+      "last_emitted_at_ms": 1781089075163,
+      "message": "Read multiple files in parallel when possible for faster analysis."
+    },
+    "8a3f6491e19063efab6932d82f7b25cce5f5ba28eb403936e189c0c0fc9f29de": {
+      "last_emitted_at_ms": 1781087193308,
+      "message": "Spawning agent: Explore (inherit) | Task: Find dual-arm sim camera setup"
+    }
+  },
+  "updated_at": "2026-06-10T11:08:21.294Z"
+}

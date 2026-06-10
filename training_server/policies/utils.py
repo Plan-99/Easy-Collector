@@ -1574,7 +1574,15 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
         if any_has_succeed:
             if ep["succeed"] is not None:
-                succeed = ep["succeed"][start_ts:actual_end].reshape(-1, 1)
+                # done(성공) 라벨을 chunk 위치별로 두면 (succeed[start_ts:actual_end])
+                # 모델이 "chunk 앞칸=낮음 / 뒷칸=높음" 을 위치만 보고 외운다 → 추론 시
+                # 0→1 톱니 + 재추론마다 0 으로 리셋, chunk[0] 에선 절대 안 뜸. succeed 는
+                # 본질적으로 "지금 관측이 성공 상태인가" 라 chunk 위치와 무관해야 한다.
+                # → start_ts(현재 관측 시점)의 succeed 한 값을 chunk 전체에 broadcast.
+                # 모든 칸이 같은 값이라 위치가 단서가 못 되고, 모델은 관측(이미지)만으로
+                # 0/1 을 판단. temporal ensemble 로 여러 칸이 섞여도 값이 동일해 깨끗.
+                succeed_now = float(ep["succeed"][start_ts])
+                succeed = np.full((action.shape[0], 1), succeed_now, dtype=np.float32)
             else:
                 succeed = np.zeros((action.shape[0], 1), dtype=np.float32)
             action = np.concatenate([action, succeed], axis=1)
@@ -2091,7 +2099,15 @@ class FullScanDataset(EpisodicDataset):
 
         if any_has_succeed:
             if ep["succeed"] is not None:
-                succeed = ep["succeed"][start_ts:actual_end].reshape(-1, 1)
+                # done(성공) 라벨을 chunk 위치별로 두면 (succeed[start_ts:actual_end])
+                # 모델이 "chunk 앞칸=낮음 / 뒷칸=높음" 을 위치만 보고 외운다 → 추론 시
+                # 0→1 톱니 + 재추론마다 0 으로 리셋, chunk[0] 에선 절대 안 뜸. succeed 는
+                # 본질적으로 "지금 관측이 성공 상태인가" 라 chunk 위치와 무관해야 한다.
+                # → start_ts(현재 관측 시점)의 succeed 한 값을 chunk 전체에 broadcast.
+                # 모든 칸이 같은 값이라 위치가 단서가 못 되고, 모델은 관측(이미지)만으로
+                # 0/1 을 판단. temporal ensemble 로 여러 칸이 섞여도 값이 동일해 깨끗.
+                succeed_now = float(ep["succeed"][start_ts])
+                succeed = np.full((action.shape[0], 1), succeed_now, dtype=np.float32)
             else:
                 succeed = np.zeros((action.shape[0], 1), dtype=np.float32)
             action = np.concatenate([action, succeed], axis=1)

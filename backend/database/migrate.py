@@ -180,6 +180,26 @@ def _migrate_curriculum_block_keying():
             if not cp2b:
                 continue
             for group in cur.checkpoint_groups:
+                # 0) checkpoint_settings 를 {cp_id: conf} → {block_id: conf} 로 re-key.
+                #    설정도 블록 단위로 옮긴다(같은 cp 여러 블록이면 첫 블록). 이미
+                #    block_id 키(비정수)면 그대로 둔다 — idempotent.
+                cs = group._get_json_field('checkpoint_settings') or {}
+                new_cs, cs_changed = {}, False
+                for k, v in cs.items():
+                    try:
+                        cp = int(k)
+                    except (TypeError, ValueError):
+                        new_cs[k] = v  # 이미 block_id
+                        continue
+                    bid = cp2b.get(cp)
+                    if bid and str(bid) not in new_cs:
+                        new_cs[str(bid)] = v
+                        cs_changed = True
+                    else:
+                        new_cs[k] = v
+                if cs_changed:
+                    group.checkpoint_settings = new_cs
+                    group.save()
                 for stage in group.stages:
                     # 1) datasets backfill
                     for ds in stage.datasets:

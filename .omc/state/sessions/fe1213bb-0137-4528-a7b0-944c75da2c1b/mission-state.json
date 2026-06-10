@@ -1,0 +1,129 @@
+{
+  "updatedAt": "2026-06-10T09:57:36.624Z",
+  "missions": [
+    {
+      "id": "session:fe1213bb-0137-4528-a7b0-944c75da2c1b:none",
+      "source": "session",
+      "name": "none",
+      "objective": "Session mission",
+      "createdAt": "2026-06-10T05:22:59.677Z",
+      "updatedAt": "2026-06-10T09:57:36.624Z",
+      "status": "done",
+      "workerCount": 7,
+      "taskCounts": {
+        "total": 7,
+        "pending": 0,
+        "blocked": 0,
+        "inProgress": 0,
+        "completed": 7,
+        "failed": 0
+      },
+      "agents": [
+        {
+          "name": "Explore:a0f2f32",
+          "role": "Explore",
+          "ownership": "a0f2f32f1f5fd38b9",
+          "status": "done",
+          "currentStep": null,
+          "latestUpdate": "completed",
+          "completedSummary": null,
+          "updatedAt": "2026-06-10T05:24:51.386Z"
+        },
+        {
+          "name": "Explore:a69a157",
+          "role": "Explore",
+          "ownership": "a69a1574f6cfb1892",
+          "status": "done",
+          "currentStep": null,
+          "latestUpdate": "completed",
+          "completedSummary": null,
+          "updatedAt": "2026-06-10T05:24:27.320Z"
+        },
+        {
+          "name": "Explore:a56e3a7",
+          "role": "Explore",
+          "ownership": "a56e3a7e833b9e7bd",
+          "status": "done",
+          "currentStep": null,
+          "latestUpdate": "completed",
+          "completedSummary": null,
+          "updatedAt": "2026-06-10T06:23:34.881Z"
+        },
+        {
+          "name": "Explore:a6caf7b",
+          "role": "Explore",
+          "ownership": "a6caf7bc17ef61a34",
+          "status": "done",
+          "currentStep": null,
+          "latestUpdate": "completed",
+          "completedSummary": null,
+          "updatedAt": "2026-06-10T06:24:12.711Z"
+        },
+        {
+          "name": "Explore:a3189a1",
+          "role": "Explore",
+          "ownership": "a3189a13f9f7b108c",
+          "status": "done",
+          "currentStep": null,
+          "latestUpdate": "completed",
+          "completedSummary": null,
+          "updatedAt": "2026-06-10T09:21:46.112Z"
+        },
+        {
+          "name": "Explore:a77d438",
+          "role": "Explore",
+          "ownership": "a77d4381ec73c94b1",
+          "status": "done",
+          "currentStep": null,
+          "latestUpdate": "completed",
+          "completedSummary": null,
+          "updatedAt": "2026-06-10T09:45:01.325Z"
+        },
+        {
+          "name": "Explore:a4678a0",
+          "role": "Explore",
+          "ownership": "a4678a016d81da332",
+          "status": "done",
+          "currentStep": null,
+          "latestUpdate": "completed",
+          "completedSummary": null,
+          "updatedAt": "2026-06-10T09:57:36.624Z"
+        }
+      ],
+      "timeline": [
+        {
+          "id": "session-start:a77d4381ec73c94b1:2026-06-10T09:43:43.982Z",
+          "at": "2026-06-10T09:43:43.982Z",
+          "kind": "update",
+          "agent": "Explore:a77d438",
+          "detail": "started Explore:a77d438",
+          "sourceKey": "session-start:a77d4381ec73c94b1"
+        },
+        {
+          "id": "session-stop:a77d4381ec73c94b1:2026-06-10T09:45:01.325Z",
+          "at": "2026-06-10T09:45:01.325Z",
+          "kind": "completion",
+          "agent": "Explore:a77d438",
+          "detail": "completed",
+          "sourceKey": "session-stop:a77d4381ec73c94b1"
+        },
+        {
+          "id": "session-start:a4678a016d81da332:2026-06-10T09:55:45.284Z",
+          "at": "2026-06-10T09:55:45.284Z",
+          "kind": "update",
+          "agent": "Explore:a4678a0",
+          "detail": "started Explore:a4678a0",
+          "sourceKey": "session-start:a4678a016d81da332"
+        },
+        {
+          "id": "session-stop:a4678a016d81da332:2026-06-10T09:57:36.624Z",
+          "at": "2026-06-10T09:57:36.624Z",
+          "kind": "completion",
+          "agent": "Explore:a4678a0",
+          "detail": "completed",
+          "sourceKey": "session-stop:a4678a016d81da332"
+        }
+      ]
+    }
+  ]
+}

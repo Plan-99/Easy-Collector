@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"cd /tmp && python3 -c \\\"import py_compile,sys; [py_compile.compile(f, doraise=True) for f in ['/home/airlab/Easy-Collector/backend/api/process/curriculum_rollout.py','/home/airlab/Easy-Col...",
+  "error": "Exit code 1\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n  File \"<string>\", line 1, in <listcomp>\n  File \"/usr/lib/python3.10/py_compile.py\", line 172, in compile\n    importlib._bootstrap_external._write_atomic(cfile, bytecode, mode)\n  File \"<frozen importlib._bootstrap_external>\", line 191, in _write_atomic\nPermissionError: [Errno 13] Permission denied: '/home/airlab/Easy-Collector/backend/api/process/__pycache__/curriculum_rollout.cpython-310.pyc.128648827165200'",
+  "timestamp": "2026-06-10T05:32:54.581Z",
+  "retry_count": 2
+}

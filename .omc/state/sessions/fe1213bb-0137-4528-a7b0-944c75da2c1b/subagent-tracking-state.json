@@ -1,0 +1,71 @@
+{
+  "agents": [
+    {
+      "agent_id": "a0f2f32f1f5fd38b9",
+      "agent_type": "Explore",
+      "started_at": "2026-06-10T05:22:59.677Z",
+      "parent_mode": "none",
+      "status": "completed",
+      "completed_at": "2026-06-10T05:24:51.386Z",
+      "duration_ms": 111709
+    },
+    {
+      "agent_id": "a69a1574f6cfb1892",
+      "agent_type": "Explore",
+      "started_at": "2026-06-10T05:23:08.211Z",
+      "parent_mode": "none",
+      "status": "completed",
+      "completed_at": "2026-06-10T05:24:27.320Z",
+      "duration_ms": 79109
+    },
+    {
+      "agent_id": "a56e3a7e833b9e7bd",
+      "agent_type": "Explore",
+      "started_at": "2026-06-10T06:22:11.857Z",
+      "parent_mode": "none",
+      "status": "completed",
+      "completed_at": "2026-06-10T06:23:34.881Z",
+      "duration_ms": 83024
+    },
+    {
+      "agent_id": "a6caf7bc17ef61a34",
+      "agent_type": "Explore",
+      "started_at": "2026-06-10T06:22:20.400Z",
+      "parent_mode": "none",
+      "status": "completed",
+      "completed_at": "2026-06-10T06:24:12.711Z",
+      "duration_ms": 112311
+    },
+    {
+      "agent_id": "a3189a13f9f7b108c",
+      "agent_type": "Explore",
+      "started_at": "2026-06-10T09:20:05.634Z",
+      "parent_mode": "none",
+      "status": "completed",
+      "completed_at": "2026-06-10T09:21:46.112Z",
+      "duration_ms": 100478
+    },
+    {
+      "agent_id": "a77d4381ec73c94b1",
+      "agent_type": "Explore",
+      "started_at": "2026-06-10T09:43:43.982Z",
+      "parent_mode": "none",
+      "status": "completed",
+      "completed_at": "2026-06-10T09:45:01.325Z",
+      "duration_ms": 77343
+    },
+    {
+      "agent_id": "a4678a016d81da332",
+      "agent_type": "Explore",
+      "started_at": "2026-06-10T09:55:45.284Z",
+      "parent_mode": "none",
+      "status": "completed",
+      "completed_at": "2026-06-10T09:57:36.624Z",
+      "duration_ms": 111340
+    }
+  ],
+  "total_spawned": 7,
+  "total_completed": 7,
+  "total_failed": 0,
+  "last_updated": "2026-06-10T09:57:36.725Z"
+}

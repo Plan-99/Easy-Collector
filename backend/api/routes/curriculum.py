@@ -63,6 +63,44 @@ def _planner_checkpoint_ids(planner):
     return out
 
 
+def _reconcile_group_membership(curriculum):
+    """플래너에서 블록의 체크포인트를 바꾸면 그 새 cp 가 그룹의 checkpoint_ids 에
+    없어(그룹 멤버십은 별도 스냅샷) 그룹·블록 설정을 못 찾는 문제를 막는다.
+
+    각 체크포인트 블록의 **현재** checkpoint_id 를 그 블록을 소유한 그룹의
+    checkpoint_ids 에 반영한다(추가만; 제거는 안 함 — 안전). 소유 그룹 판정:
+      1) block_id 가 그룹의 checkpoint_settings(블록 단위 설정)에 있으면 그 그룹
+      2) 없으면 그 cp 가 이미 멤버인 그룹
+    설정은 block_id 키라 그대로 유지되고, 새 cp 가 멤버가 되어 dialog/save/학습이
+    그 블록을 다시 인식한다. 커리큘럼 GET 시 호출 — idempotent(드리프트 때만 save).
+    """
+    from ..routes.planner import _ensure_plans_loaded
+    planner = curriculum.planner if curriculum else None
+    if planner is None:
+        return
+    plans = _ensure_plans_loaded(planner) or []
+    groups = list(curriculum.checkpoint_groups)
+    for grp in plans:
+        for blk in grp.get('blocks') or []:
+            if blk.get('type') != 'checkpoint':
+                continue
+            cid, bid = blk.get('checkpoint_id'), blk.get('id')
+            if cid is None or bid is None:
+                continue
+            owner = next((g for g in groups
+                          if str(bid) in (g._get_json_field('checkpoint_settings') or {})), None)
+            if owner is None:
+                owner = next((g for g in groups
+                              if cid in (g._get_json_field('checkpoint_ids') or [])), None)
+            if owner is None:
+                continue
+            ids = owner._get_json_field('checkpoint_ids') or []
+            if cid not in ids:
+                ids.append(cid)
+                owner.checkpoint_ids = ids
+                owner.save()
+
+
 # ── 내부 헬퍼 ──────────────────────────────────────────────────────────────
 
 def _group_checkpoint_blocks(curriculum, group):
@@ -151,6 +189,8 @@ def get_curriculum(id):
     curriculum = CurriculumModel.find(id)
     if not curriculum:
         return {'status': 'error', 'message': 'Curriculum not found'}, 404
+    # 플래너에서 바뀐 블록 체크포인트를 그룹 멤버십에 반영(블록 설정 유지).
+    _reconcile_group_membership(curriculum)
     return {'status': 'success', 'curriculum': curriculum.to_dict()}, 200
 
 
@@ -292,9 +332,12 @@ def set_checkpoint_settings(id):
     group = _group_of_checkpoint(curriculum, cp_id)
     if group is None:
         return {'status': 'error', 'message': 'Checkpoint not in any group'}, 404
-    # checkpoint_settings 는 학습(그룹/cp 단위) config — cp 키 유지.
+    # checkpoint_settings 는 **블록 단위**(키=block_id) — 같은 cp 가 여러 블록에
+    # 있어도 블록마다 따로, 플래너에서 cp 를 바꿔도 블록 설정이 유지된다. block_id
+    # 미제공(구버전 클라이언트)이면 cp 키로 폴백.
     settings = group._get_json_field('checkpoint_settings') or {}
-    settings[str(cp_id)] = {
+    settings_key = str(block_id) if block_id else str(cp_id)
+    settings[settings_key] = {
         'base_dataset_ids': data.get('base_dataset_ids', []),
         'train_settings': data.get('train_settings', {}),
         'initial_max_steps': data.get('initial_max_steps', 600),
@@ -348,11 +391,18 @@ def assign_checkpoint(id):
     if src and src.id == dst.id:
         return {'status': 'success', 'message': 'No-op'}, 200
 
-    moved_setting = None
+    # checkpoint_settings 는 block_id 키 — cp 가 쓰는 블록들의 설정을 함께 옮긴다
+    # (구버전 cp 키도 폴백 이동).
+    moved_settings = {}
     if src:
         s_ids = src._get_json_field('checkpoint_ids') or []
         s_set = src._get_json_field('checkpoint_settings') or {}
-        moved_setting = s_set.pop(str(cp_id), None)
+        block_keys = [str(b['block_id']) for b in _group_checkpoint_blocks(curriculum, src)
+                      if b['checkpoint_id'] == cp_id]
+        for key in block_keys + [str(cp_id)]:
+            v = s_set.pop(key, None)
+            if v is not None:
+                moved_settings[key] = v
         src.checkpoint_ids = [c for c in s_ids if c != cp_id]
         src.checkpoint_settings = s_set
         src.save()
@@ -361,9 +411,9 @@ def assign_checkpoint(id):
     if cp_id not in d_ids:
         d_ids.append(cp_id)
     dst.checkpoint_ids = d_ids
-    if moved_setting is not None:
+    if moved_settings:
         d_set = dst._get_json_field('checkpoint_settings') or {}
-        d_set[str(cp_id)] = moved_setting
+        d_set.update(moved_settings)
         dst.checkpoint_settings = d_set
     dst.save()
     _sync_group_stages(dst)
@@ -387,7 +437,14 @@ def split_checkpoint(id):
 
     s_ids = src._get_json_field('checkpoint_ids') or []
     s_set = src._get_json_field('checkpoint_settings') or {}
-    moved_setting = s_set.pop(str(cp_id), None)
+    # block_id 키 설정 이동(구버전 cp 키 폴백).
+    block_keys = [str(b['block_id']) for b in _group_checkpoint_blocks(curriculum, src)
+                  if b['checkpoint_id'] == cp_id]
+    moved_settings = {}
+    for key in block_keys + [str(cp_id)]:
+        v = s_set.pop(key, None)
+        if v is not None:
+            moved_settings[key] = v
     src.checkpoint_ids = [c for c in s_ids if c != cp_id]
     src.checkpoint_settings = s_set
     src.save()
@@ -398,7 +455,7 @@ def split_checkpoint(id):
         color=_next_group_color(curriculum),
         checkpoint_ids=[cp_id],
         motion_block_ids=[],
-        checkpoint_settings={str(cp_id): moved_setting} if moved_setting else {},
+        checkpoint_settings=moved_settings,
         block_noise={},
         mission=src._get_json_field('mission') or dict(DEFAULT_MISSION),
     )
@@ -612,19 +669,13 @@ def revert_stage(id):
         return {'status': 'error',
                 'message': '복귀할 이전 체크포인트(load_model_id)를 찾을 수 없습니다'}, 400
 
-    # 1) 그룹 체크포인트/설정 되돌리기.
+    # 1) 그룹 체크포인트 되돌리기. checkpoint_settings 는 block_id 키이고 플래너
+    #    블록의 block_id 는 revert 후에도 그대로(cp 만 부모로 교체)라 재키잉 불필요 —
+    #    그대로 이어간다.
     new_ids = [mapping.get(str(cp), cp) for cp in cur_cp_ids]
     cs = group._get_json_field('checkpoint_settings') or {}
-    new_cs = {}
-    if isinstance(cs, dict):
-        for cp in cur_cp_ids:
-            conf = cs.get(str(cp))
-            if conf is None:
-                conf = cs.get(cp)
-            if conf is not None:
-                new_cs[str(mapping.get(str(cp), cp))] = conf
     group.checkpoint_ids = new_ids
-    group.checkpoint_settings = new_cs
+    group.checkpoint_settings = dict(cs) if isinstance(cs, dict) else {}
     group.status = CheckpointGroupModel.STATUS_COLLECTING
     group.training_map = {}
     group.save()
@@ -837,6 +888,45 @@ def stop_current_block(id):
         return {'status': 'error', 'message': 'Internal: no task_control'}, 500
     obj['stop_current_block'] = True
     return {'status': 'success', 'message': 'Block stop requested'}, 200
+
+
+@curriculum_bp.route('/curriculum/<id>/:rewind_seek', methods=['POST'])
+def rewind_seek(id):
+    """체크포인트 실패로 pause 된 롤아웃에서 로봇 팔을 과거 step 으로 되감는다.
+
+    body: { block_id: str, step: int }
+      - step: 되감을 절대 step 인덱스. curriculum_rollout 의 pause 루프가
+        timesteps[step] 의 관절 qpos 로 각 agent 를 move_to 한다 (v1: 팔만).
+
+    :resume_after_failure / :stop_current_block 과 동일하게 task_control(obj)
+    채널로 신호를 전달한다. 지금 이 block_id 의 결정을 기다리는 중(awaiting)이
+    아니면 stale 로 보고 무시한다.
+    """
+    curriculum = CurriculumModel.find(id)
+    if not curriculum:
+        return {'status': 'error', 'message': 'Curriculum not found'}, 404
+    proc_name = _rollout_process_name(curriculum.id)
+    proc = current_app.pm.processes.get(proc_name)
+    if proc is None:
+        return {'status': 'error', 'message': 'Rollout not running'}, 409
+    obj = proc.get('obj') if isinstance(proc, dict) else None
+    if obj is None:
+        return {'status': 'error', 'message': 'Internal: no task_control'}, 500
+    body = request.json or {}
+    block_id = body.get('block_id')
+    step = body.get('step')
+    if not block_id:
+        return {'status': 'error', 'message': 'block_id required'}, 400
+    try:
+        step = int(step)
+    except (TypeError, ValueError):
+        return {'status': 'error', 'message': 'step must be an integer'}, 400
+    awaiting = obj.get('awaiting_correction')
+    if awaiting != block_id:
+        return {'status': 'success',
+                'message': f'ignored stale rewind (not awaiting {block_id!r}, awaiting={awaiting!r})'}, 200
+    obj['rewind_seek'] = step
+    return {'status': 'success', 'message': f'rewind seek to {step}'}, 200
 
 
 @curriculum_bp.route('/curriculum/<id>/:rollout_status', methods=['GET'])

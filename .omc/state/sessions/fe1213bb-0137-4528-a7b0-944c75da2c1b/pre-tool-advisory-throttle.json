@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "entries": {
+    "4f7a67fba0a8473e9883d9e8dffbb2d72e00a4a1eeb4fa80cb14213b167dc90f": {
+      "last_emitted_at_ms": 1781086698958,
+      "message": "Mark todos in_progress BEFORE starting, completed IMMEDIATELY after finishing."
+    },
+    "79a93d4a2f8f50b95f852280616242fee1855dc99a3c75211917f55e72e95fae": {
+      "last_emitted_at_ms": 1781086681034,
+      "message": "Use parallel execution for independent tasks. Use run_in_background for long operations (npm install, builds, tests)."
+    },
+    "445ed27a3872b681d98190bae61ccb84954e1bc4e140df5370be958dee776b3a": {
+      "last_emitted_at_ms": 1781086545357,
+      "message": "Verify changes work after editing. Test functionality before marking complete."
+    },
+    "466399dafa2d20f60587180bad0a07358eb7f2bce724df0ff682f038ad33f5ad": {
+      "last_emitted_at_ms": 1781086493863,
+      "message": "Read multiple files in parallel when possible for faster analysis."
+    },
+    "aadf9f9632c10f522195cc1bd8e523ff489af71261d1aa88c1e0510fa9a06739": {
+      "last_emitted_at_ms": 1781085345216,
+      "message": "Spawning agent: Explore (inherit) | Task: Map checkpoint_settings consumers for block-keyed migration"
+    },
+    "af141ad2af6ce552209f36dcb4f06d889787f0e19d298fd87aec176dab92d7bf": {
+      "last_emitted_at_ms": 1781084623923,
+      "message": "Spawning agent: Explore (inherit) | Task: Trace planner checkpoint change resetting curriculum block settings"
+    },
+    "f93a33fb72e26f8186151f5ea89ac9394826ca7373ce7373a368137c86557c4d": {
+      "last_emitted_at_ms": 1781083205570,
+      "message": "Spawning agent: Explore (inherit) | Task: Find actual training data/chunk path"
+    }
+  },
+  "updated_at": "2026-06-10T10:18:18.958Z"
+}

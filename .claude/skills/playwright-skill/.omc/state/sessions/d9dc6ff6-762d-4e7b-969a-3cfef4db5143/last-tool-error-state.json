@@ -1,0 +1,7 @@
+{
+  "tool_name": "Read",
+  "tool_input_preview": "{\"file_path\":\"/home/airlab/Easy-Collector/.claude/skills/playwright-skill\"}",
+  "error": "EISDIR: illegal operation on a directory, read '/home/airlab/Easy-Collector/.claude/skills/playwright-skill'",
+  "timestamp": "2026-06-10T11:22:41.730Z",
+  "retry_count": 1
+}

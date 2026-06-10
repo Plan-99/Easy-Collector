@@ -132,7 +132,9 @@ def _escalate_criteria(group, stage):
     blocks = _group_checkpoint_blocks(curriculum, group) if curriculum else []
     for b in blocks:
         bid, cp_id = b['block_id'], b['checkpoint_id']
-        conf = cp_settings.get(str(cp_id)) or cp_settings.get(cp_id) or {}
+        # checkpoint_settings 는 **블록 단위**(키=block_id). 구버전(cp 키) 데이터는
+        # 마이그레이션이 재키잉하지만, 아직 안 돈 경우를 위해 cp 키도 폴백.
+        conf = cp_settings.get(str(bid)) or cp_settings.get(str(cp_id)) or cp_settings.get(cp_id) or {}
         rate = conf.get('length_limit_rate')
         threshold = conf.get('success_threshold')
         cur = dict(out.get(bid) or {})
@@ -191,8 +193,12 @@ def _enqueue_training(curriculum, group, stage, socketio_instance, app=None):
         old = CheckpointModel.find(cp_id)
         if not old:
             continue
-        # 체크포인트별 base 데이터셋 + training 파라미터.
-        conf = cp_settings.get(str(cp_id)) or cp_settings.get(cp_id) or {}
+        # 설정은 **블록 단위**(키=block_id). 같은 cp 가 여러 블록이면 seen_cp 덕에
+        # plan 순서상 **첫 블록**의 설정을 쓴다(base 데이터셋/train_settings 모두).
+        # 학습은 cp 단위 1회지만 데이터는 _training_datasets_for_checkpoint 가 그 cp 의
+        # 모든 블록·stage 데이터를 모은다. 구버전 cp 키 데이터는 폴백.
+        bid = b['block_id']
+        conf = cp_settings.get(str(bid)) or cp_settings.get(str(cp_id)) or cp_settings.get(cp_id) or {}
         base_ids = conf.get('base_dataset_ids') or []
         train_settings = conf.get('train_settings') or {}
         if not isinstance(train_settings, dict):
@@ -407,22 +413,15 @@ def _graduate_group(curriculum_id, group, completed_stage, mapping, plan_ctx, so
     # mapping: {str(old): new}. 교체된 새 id 목록.
     new_ids = [mapping.get(str(cp), cp) for cp in old_ids]
 
-    # 체크포인트별 설정 키 old→new 이전.
+    # 설정·판정조건은 **블록 단위**(키=block_id)다. 졸업 시 플래너 블록의
+    # checkpoint_id 만 old→new 로 바뀌고 **block_id 는 그대로**라(_replace_planner_checkpoints),
+    # 키를 옮길 필요 없이 그대로 이어진다.
     cs = fresh._get_json_field('checkpoint_settings') or {}
-    new_cs = {}
-    for cp in old_ids:
-        conf = cs.get(str(cp)) or cs.get(cp)
-        if conf is not None:
-            new_cs[str(mapping.get(str(cp), cp))] = conf
+    new_cs = dict(cs) if isinstance(cs, dict) else {}
 
-    # 판정 조건 승급(완료 stage 기준).
+    # 판정 조건 승급(완료 stage 기준) — 이미 block_id 키. 재키잉 불필요.
     next_criteria = _escalate_criteria(fresh, completed_stage) if completed_stage else {}
-    # criteria 키도 old→new 이전.
-    migrated_criteria = {}
-    for cp in old_ids:
-        c = (next_criteria.get(str(cp)) or next_criteria.get(cp)) if isinstance(next_criteria, dict) else None
-        if c is not None:
-            migrated_criteria[str(mapping.get(str(cp), cp))] = c
+    migrated_criteria = dict(next_criteria) if isinstance(next_criteria, dict) else {}
 
     fresh.checkpoint_ids = new_ids
     fresh.checkpoint_settings = new_cs

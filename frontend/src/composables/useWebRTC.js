@@ -80,9 +80,10 @@ async function _acquire (topic, config, onTrack) {
         return { pc: entry.pc, stream_id: entry.streamId, key }
     }
 
-    const pc = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-    })
+    // 같은 호스트(localhost) 연결이라 외부 STUN 불필요. 외부 STUN 을 두면 백엔드
+    // aiortc 가 IPv6 로 resolve 된 stun.l.google.com 에 ~5s 타임아웃 후에야 host
+    // candidate 로 폴백해 카메라가 5초 늦게 뜬다. host candidate 만 쓰면 즉시 연결.
+    const pc = new RTCPeerConnection({ iceServers: [] })
     entry = {
         pc, track: null, stream: null, streamId: null,
         refCount: 1, pending: [onTrack], key, params: { topic, config },

@@ -12,9 +12,9 @@ export function useSimWebRTC() {
   const connect = async (onTrack, fps = 30) => {
     disconnect()
 
-    const peerConnection = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-    })
+    // 같은 호스트(localhost) 연결 — 외부 STUN 불필요. host candidate 만 쓰면
+    // IPv6 STUN ~5s 지연 없이 즉시 연결된다. (useWebRTC.js 와 동일 이유)
+    const peerConnection = new RTCPeerConnection({ iceServers: [] })
     pc.value = peerConnection
 
     peerConnection.addTransceiver('video', { direction: 'recvonly' })

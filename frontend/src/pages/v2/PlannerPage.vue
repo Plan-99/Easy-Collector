@@ -574,25 +574,29 @@
                                             @click="applyCurrentPos(robot)"
                                         />
                                     </div>
-                                    <div class="row q-gutter-sm">
+                                    <div class="row">
                                         <!-- 각 joint 값은 직접 편집 가능한 입력. "현재 자세 적용"
-                                             버튼이 채워주기도 하지만, 여기서 직접 미세조정/수정도 된다. -->
+                                             버튼이 채워주기도 하지만, 여기서 직접 미세조정/수정도 된다.
+                                             한 줄에 7개씩 배치(1/7 폭), 그 이상은 다음 줄로 래핑. -->
                                         <div
                                             v-for="(jointName, jIdx) in (robot.joint_names || [])"
                                             :key="jIdx"
-                                            class="border-rounded border-primary q-px-sm q-py-xs text-center"
-                                            style="min-width: 100px;"
+                                            class="q-pa-xs"
+                                            style="width: 14.2857%;"
                                         >
-                                            <div class="text-caption text-grey-5">{{ jointName }}</div>
-                                            <q-input
-                                                v-model.number="blockForm.positions[robot.id][jIdx]"
-                                                type="number"
-                                                step="0.001"
-                                                dense
-                                                dark
-                                                borderless
-                                                input-class="text-subtitle1 text-primary text-center"
-                                            />
+                                            <div class="border-rounded border-primary q-px-xs q-py-xs text-center">
+                                                <div class="text-caption text-grey-5 ellipsis">{{ jointName }}</div>
+                                                <q-input
+                                                    :model-value="round4(blockForm.positions[robot.id][jIdx])"
+                                                    @update:model-value="(v) => blockForm.positions[robot.id][jIdx] = (v === '' || v === null ? null : Number(v))"
+                                                    type="number"
+                                                    step="0.001"
+                                                    dense
+                                                    dark
+                                                    borderless
+                                                    input-class="text-body2 text-primary text-center"
+                                                />
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -1813,6 +1817,14 @@ function getSensorName(sensorId) {
 function getWorkspaceRobots(workspaceId) {
     const ws = availableWorkspaces.value.find(w => w.id === workspaceId);
     return ws?.assembly?.robots || [];
+}
+
+// joint 값 표시는 소수점 4자리까지만. 저장된 자세는 풀 정밀도로 들고 있지만
+// 화면엔 반올림해 보여준다(편집 시엔 입력값을 그대로 다시 저장).
+function round4(v) {
+    if (v === null || v === undefined || v === '') return v;
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.round(n * 10000) / 10000 : v;
 }
 
 function groupTitle(group) {

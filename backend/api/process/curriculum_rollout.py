@@ -193,6 +193,38 @@ def _checkpoint_action_key(checkpoint, policy):
     return _ACTION_KEY_ALIAS.get(raw, 'joint')
 
 
+def _rewind_to_step(timesteps, agents, k, duration=0.4):
+    """되감기(rewind): ``timesteps[k]`` 의 관절 qpos 로 각 agent 를 보간 이동.
+
+    v1 범위 — **로봇 팔(관절)만** 되돌린다. 시뮬 물체(free joint) 상태는 건드리지
+    않으므로 교정은 "현재 물체 상태 + 되감은 팔 위치"에서 시작한다. move_to 는 비동기
+    보간이라 여기서 is_moving 폴링으로 정착까지 대기한 뒤 리턴한다.
+    """
+    if not timesteps or k < 0 or k >= len(timesteps):
+        return
+    ts = timesteps[k]
+    robot_states = (getattr(ts, 'observation', None) or {}).get('robot_states') or {}
+    moved = []
+    for agent in agents:
+        st = robot_states.get(agent.id)
+        if st is None:
+            st = robot_states.get(str(agent.id))
+        if not st or st.get('qpos') is None:
+            continue
+        try:
+            agent.move_to(list(st['qpos']), duration=duration)
+            moved.append(agent)
+        except Exception as e:
+            print(f"[curriculum] rewind move_to failed (agent {agent.id}): {e}")
+    # 보간 정착 대기 — is_moving(_move_deadline 기반, **property**) 가 모두 끝날
+    # 때까지. planner_run 과 동일하게 괄호 없이 속성으로 접근한다.
+    _settle_end = time.time() + duration + 0.3
+    while time.time() < _settle_end:
+        if not any(a.is_moving for a in moved):
+            break
+        time.sleep(0.02)
+
+
 def _run_checkpoint_recorded(block, ctx, task_control, group_id):
     """체크포인트 블록을 녹화하며 실행하고, 성공/실패 + 녹화 버퍼를 ctx 에 적재.
 
@@ -413,12 +445,48 @@ def _run_checkpoint_recorded(block, ctx, task_control, group_id):
             # resume_after_failure 가 "지금 이 블록의 결정을 기다리는 중"인지 알 수
             # 있도록 마커 노출. 이중 클라이언트의 stale/중복 신호를 라우트에서 걸러낸다.
             task_control['awaiting_correction'] = block_id
+            # Rewind(되감기): 실패 자세에서 사용자가 ←/→ 로 체크포인트가 실행한 과거
+            # step 으로 팔을 되감을 수 있게 한다. 프론트가 절대 step K 를 :rewind_seek
+            # 로 보내면 여기서 timesteps[K] 의 qpos 로 각 agent 를 move_to 한다. 교정
+            # 레코딩은 forceNoHomepose 라 되감은 자세에서 그대로 시작된다.
+            rewind_total = len(timesteps)
+            task_control['rewind_step'] = max(0, rewind_total - 1)
+            _emit(socketio, 'curriculum_rewind_ready', {
+                'curriculum_id': ctx.get('curriculum_id'),
+                'group_id': group_id,
+                'block_id': block_id,
+                'total_steps': rewind_total,
+            })
             while block_id not in decisions:
                 if task_control['stop']:
                     task_control['awaiting_correction'] = None
+                    task_control.pop('rewind_seek', None)
+                    task_control.pop('rewind_step', None)
                     print(f"[curriculum] [{group_id}] pause aborted by stop")
                     return
-                time.sleep(0.5)
+                seek = task_control.pop('rewind_seek', None)
+                if seek is not None and rewind_total > 0:
+                    # 되감기 처리 중 어떤 오류가 나도 pause 를 유지해야 한다. 예외가
+                    # 밖으로 새면 _dispatch_block 이 블록 실패로 보고 fallback 으로
+                    # 떨어뜨려, 화살표 한 번에 롤아웃이 망가진다 → 반드시 가둔다.
+                    try:
+                        try:
+                            k = max(0, min(int(seek), rewind_total - 1))
+                        except (TypeError, ValueError):
+                            k = task_control.get('rewind_step', rewind_total - 1)
+                        _rewind_to_step(timesteps, agents, k)
+                        task_control['rewind_step'] = k
+                        _emit(socketio, 'curriculum_rewind_position', {
+                            'curriculum_id': ctx.get('curriculum_id'),
+                            'group_id': group_id,
+                            'block_id': block_id,
+                            'step': k,
+                            'total_steps': rewind_total,
+                        })
+                    except Exception:
+                        print(f"[curriculum] [{group_id}] rewind seek failed: {traceback.format_exc()}")
+                    continue
+                time.sleep(0.1)
             # 첫 신호 도착 후 짧은 grace — 이중 클라이언트에서 교정을 안 몬 쪽이 쏜
             # 기본 'fallback' 이 정상 'next' 보다 먼저 도착해도, grace 동안 들어온
             # 'next' 가 'fallback' 을 이긴다(라우트의 non-override 규칙과 짝). 단일
@@ -428,6 +496,8 @@ def _run_checkpoint_recorded(block, ctx, task_control, group_id):
                 time.sleep(0.1)
             action = decisions.pop(block_id, 'fallback')
             task_control['awaiting_correction'] = None
+            task_control.pop('rewind_seek', None)
+            task_control.pop('rewind_step', None)
             print(f"[curriculum] [{group_id}] user decision: {action!r}")
             if action == 'fallback':
                 _thread_local.jump_to_block_id = fb_id
