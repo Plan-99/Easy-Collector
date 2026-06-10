@@ -1,7 +1,7 @@
 <template>
   <q-page class="q-pt-md q-pr-md full-height column">
     <!-- Header card (PlannerPage-style): mascot + title/desc + planner select -->
-    <div class="border-rounded bg-secondary q-pa-md q-mb-md row items-center no-wrap">
+    <div class="border-rounded bg-secondary q-pa-md q-mb-md row no-wrap">
       <q-img src="images/robot1.png" style="width: 100px" class="q-mr-xl" />
       <div class="col">
         <div class="row items-center q-mb-sm">
@@ -206,12 +206,6 @@
           </div>
           <div class="col-6 col-md-2">
             <q-input v-model.number="repeatCount" type="number" :label="t('currRepeat')" outlined dense dark bg-color="dark" />
-          </div>
-          <div class="col-auto">
-            <!-- 즉시 DAgger 수집: 체크포인트 진입 즉시 expert 데모 수집(모델 실행 skip). -->
-            <q-toggle v-model="forceDagger" color="amber" :label="t('currForceDagger')" dense dark>
-              <q-tooltip>{{ t('currForceDaggerHint') }}</q-tooltip>
-            </q-toggle>
           </div>
           <div class="col-auto">
             <q-btn color="green" icon="play_arrow" :label="t('currStart')" :disable="isRunning || !targetGroupIds.length || !allDevicesOn" @click="startRollout" />
@@ -1253,8 +1247,10 @@ function onEpisodeThrown () {
 const targetGroupIds = ref([])
 const repeatCount = ref(10)
 // 즉시 DAgger 수집 모드 — 체크포인트 진입 즉시 모델 실행을 건너뛰고 expert
-// 데모(교정)를 수집한다. 약한 모델 부트스트랩 단계의 기본값(on).
-const forceDagger = ref(true)
+// 데모(교정)를 수집한다. 기본값은 off — 먼저 모델 롤아웃으로 평가하고,
+// 실패한 체크포인트에서만 교정 dialog 를 띄운다.
+// UI 토글은 제거했고(요청), force_dagger 는 이 고정값으로 백엔드에 전달된다.
+const forceDagger = ref(false)
 const isRunning = ref(false)
 
 // 대시보드(우측): /:dashboard 응답 groups[]. dashStage = 그룹별 선택된 stage index.

@@ -1,0 +1,20 @@
+{
+  "id": "dual_arm_plank",
+  "env": "dual_arm_plank",
+  "name": "양팔 널빤지 들기",
+  "name_en": "Dual-Arm Plank Lift",
+  "description": "두 팔이 각자 워크스페이스로 분리된 채(어셈블리 미결합) 손잡이 달린 긴 널빤지에 동시에 접근하는 데모. 팔마다 손목캠 2개(왼팔 cam/cam_2, 오른팔 cam_3/cam_4). 플래너 'Dual-Arm Plank Reach'에서 home → wrist_view_reach 두 플랜을 '전체 실행'으로 동시에 돌린다.",
+  "description_en": "Two arms in SEPARATE workspaces (not assembled) reach a handled plank simultaneously. Two wrist cams per arm (left cam/cam_2, right cam_3/cam_4). The 'Dual-Arm Plank Reach' planner runs the two home -> wrist_view_reach plans in parallel via Run All.",
+  "task_language": "reach both plank handles with both arms",
+  "topic_prefix": "/da_plank_left",
+  "cameras": ["left_wrist_cam", "left_wrist_cam2", "right_wrist_cam", "right_wrist_cam2"],
+  "workspaces": ["dual_arm_plank_left", "dual_arm_plank_right"],
+  "launch": {
+    "process_id": "dual_arm_plank_test_sim",
+    "package": "mujoco_world",
+    "launch_file": "dual_arm_plank_world.launch.py",
+    "args": {
+      "show_viewer": "true"
+    }
+  }
+}

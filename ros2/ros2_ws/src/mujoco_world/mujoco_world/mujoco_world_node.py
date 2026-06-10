@@ -54,10 +54,16 @@ DEFAULT_RANDOMIZE_RANGES = {
 class _Group:
     """A single ROS topic namespace exposing a subset of the shared sim."""
 
-    def __init__(self, prefix: str, joint_names: list, cameras: list):
+    def __init__(self, prefix: str, joint_names: list, cameras: list,
+                 wrist_cam: str = "", ee_site: str = ""):
         self.prefix = prefix.rstrip("/")
         self.joint_names = list(joint_names)
         self.cameras = list(cameras)
+        # Optional per-group wrist RGB-D source for the `visual_reach` block:
+        # `wrist_cam` is rendered with depth and paired with this arm's `ee_site`,
+        # served at /<prefix>/wrist_rgbd. Empty -> this group exposes no wrist_rgbd.
+        self.wrist_cam = (wrist_cam or "").strip()
+        self.ee_site = (ee_site or "").strip()
         # Filled in once the SimRunner exists (indices into the sim's union order).
         self.joint_indices: list = []
         self.camera_indices: list = []
@@ -131,6 +137,15 @@ class MuJoCoWorldNode(Node):
                 if c not in union_cameras:
                     union_cameras.append(c)
 
+        # Per-arm wrist RGB-D sources for the `visual_reach` block: each group may
+        # declare a (wrist_cam, ee_site) pair. SimRunner renders depth for each and
+        # snapshots that arm's ee_site pose. Empty -> SimRunner's single-arm default
+        # ("wrist_cam"/"ee_site") so tutorial mode is unchanged.
+        wrist_specs: list = []
+        for g in self._groups:
+            if g.wrist_cam and g.wrist_cam not in [w[0] for w in wrist_specs]:
+                wrist_specs.append((g.wrist_cam, g.ee_site))
+
         # --- Sim engine -------------------------------------------------
         self.get_logger().info(
             f"Loading MuJoCo scene: {scene_xml} (show_viewer={show_viewer}); "
@@ -145,6 +160,7 @@ class MuJoCoWorldNode(Node):
             realtime_factor=rt_factor,
             show_viewer=show_viewer,
             image_publish_hz=float(self.get_parameter("image_publish_hz").value),
+            wrist_specs=wrist_specs or None,
         )
         self._sim_joint_names = self._sim.joint_names
         self._sim_camera_names = self._sim.camera_names
@@ -204,9 +220,19 @@ class MuJoCoWorldNode(Node):
             Trigger, f"{self._reset_prefix}/check_success", self._on_check_success)
         # visual_reach: return latest wrist RGB-D + camera pose/intrinsics + ee_site
         # pose as JSON in the Trigger response message (backend reaches this via the
-        # gRPC ROSProxy.CallService bridge).
+        # gRPC ROSProxy.CallService bridge). The reset-prefix service serves the
+        # default (first) wrist cam — tutorial/single-arm behavior unchanged.
         self.create_service(
-            Trigger, f"{self._reset_prefix}/wrist_rgbd", self._on_wrist_rgbd)
+            Trigger, f"{self._reset_prefix}/wrist_rgbd",
+            self._make_wrist_rgbd_cb(None))
+        # Per-arm services so a dual-arm world exposes each side's wrist RGB-D under
+        # its own topic prefix (e.g. /da_asm_left/wrist_rgbd). Only for groups that
+        # declared a wrist_cam.
+        for g in self._groups:
+            if g.wrist_cam and g.prefix != self._reset_prefix:
+                self.create_service(
+                    Trigger, f"{g.prefix}/wrist_rgbd",
+                    self._make_wrist_rgbd_cb(g.wrist_cam))
 
         # --- Timers -----------------------------------------------------
         state_period = 1.0 / max(1.0, float(self.get_parameter("state_publish_hz").value))
@@ -244,6 +270,8 @@ class MuJoCoWorldNode(Node):
                     prefix=spec["topic_prefix"],
                     joint_names=spec.get("joint_names", []),
                     cameras=spec.get("cameras", []),
+                    wrist_cam=spec.get("wrist_cam", ""),
+                    ee_site=spec.get("ee_site", ""),
                 ))
             if not groups:
                 raise ValueError("'groups' parsed to an empty list")
@@ -331,9 +359,15 @@ class MuJoCoWorldNode(Node):
             self.get_logger().error(f"check_success failed: {e}")
         return response
 
-    def _on_wrist_rgbd(self, request: Trigger.Request, response: Trigger.Response) -> Trigger.Response:
+    def _make_wrist_rgbd_cb(self, cam_name):
+        def _cb(request: Trigger.Request, response: Trigger.Response) -> Trigger.Response:
+            return self._on_wrist_rgbd(request, response, cam_name)
+        return _cb
+
+    def _on_wrist_rgbd(self, request: Trigger.Request, response: Trigger.Response,
+                       cam_name=None) -> Trigger.Response:
         try:
-            data = self._sim.get_wrist_rgbd()
+            data = self._sim.get_wrist_rgbd(cam_name)
             if data is None:
                 response.success = False
                 response.message = json.dumps({"ok": False, "error": "wrist rgbd not available"})

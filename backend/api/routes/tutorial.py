@@ -19,7 +19,9 @@ from flask import Blueprint, jsonify, request
 
 from ...bridge.client import get_bridge_client
 from ...bridge.generated import robot_bridge_pb2 as pb
+from ...configs.sim_devices import SIM_ENV_BINDINGS
 from ...configs.tutorial_defaults import (
+    SIM_ARM_2,
     TUTORIAL_AGENT_NAME,
     TUTORIAL_LAUNCH_FILE,
     TUTORIAL_LAUNCH_PACKAGE,
@@ -69,6 +71,115 @@ def _find_tutorial_robot():
     return None
 
 
+def _find_robot_by_sim_slug(slug: str):
+    """Find a canonical sim robot row by its `sim_device_slug` (rename-safe)."""
+    candidates = RobotModel.select().where(
+        RobotModel.hide == False,  # noqa: E712
+        RobotModel.deleted_at.is_null(),
+        RobotModel.type == 'custom',
+    )
+    for row in candidates:
+        if _settings_dict(row).get('sim_device_slug') == slug:
+            return row
+    return None
+
+
+def _find_sensor_by_sim_slug(slug: str):
+    """Find a canonical sim camera row by its `sim_device_slug` (rename-safe)."""
+    candidates = SensorModel.select().where(
+        SensorModel.hide == False,  # noqa: E712
+        SensorModel.deleted_at.is_null(),
+    )
+    for row in candidates:
+        if _settings_dict(row).get('sim_device_slug') == slug:
+            return row
+    return None
+
+
+def repoint_sim_devices(env_id):
+    """주어진 시뮬 환경의 바인딩(SIM_ENV_BINDINGS)을 표준 디바이스로 갈아끼운다.
+
+    각 표준 디바이스(slug)의 settings 를 그 환경 설정으로 **완전히 교체**한다
+    (sim_device_slug / is_sim 은 강제 유지). 환경 전환 시 옛 키가 남지 않도록
+    merge 가 아닌 replace.
+
+    반환: ({robot_slug: RobotModel}, {camera_slug: SensorModel}) — 워크스페이스
+    리포인트/플래너 블록 remap 에 쓰도록 실제 행을 돌려준다.
+    알 수 없는 env 면 ({}, {})."""
+    binding = SIM_ENV_BINDINGS.get(env_id)
+    if not binding:
+        return {}, {}
+    robots = {}
+    for slug, settings in (binding.get('robots') or {}).items():
+        row = _find_robot_by_sim_slug(slug)
+        if row is None:
+            continue
+        s = dict(settings)
+        s['sim_device_slug'] = slug
+        s['is_sim'] = True
+        row.settings = json.dumps(s)
+        row.save()
+        robots[slug] = row
+    cameras = {}
+    for slug, settings in (binding.get('cameras') or {}).items():
+        row = _find_sensor_by_sim_slug(slug)
+        if row is None:
+            continue
+        s = dict(settings)
+        s['sim_device_slug'] = slug
+        s['is_sim'] = True
+        row.settings = json.dumps(s)
+        row.save()
+        cameras[slug] = row
+    return robots, cameras
+
+
+def find_sim_devices(env_id):
+    """주어진 환경 바인딩에 속한 표준 디바이스 행들을 **수정 없이** 조회만 한다.
+    (startup 시 assembly/workspace 만 구성하고 토픽 리포인트는 활성화 때만 하려고
+    repoint 와 분리.) 반환: ({robot_slug: RobotModel}, {camera_slug: SensorModel})."""
+    binding = SIM_ENV_BINDINGS.get(env_id)
+    if not binding:
+        return {}, {}
+    robots = {}
+    for slug in (binding.get('robots') or {}):
+        row = _find_robot_by_sim_slug(slug)
+        if row is not None:
+            robots[slug] = row
+    cameras = {}
+    for slug in (binding.get('cameras') or {}):
+        row = _find_sensor_by_sim_slug(slug)
+        if row is not None:
+            cameras[slug] = row
+    return robots, cameras
+
+
+def _ensure_sim_arm_2():
+    """두 번째 표준 sim 암(sim_arm_2)을 시드. 단일팔이며 양팔 시뮬 환경에서
+    오른팔로 쓰인다(환경 활성화 시 토픽 리포인트). Idempotent — 매 부팅 호출 안전.
+    설치 시 로봇 페이지에 sim_arm 과 함께 보이도록 startup 에 시드한다."""
+    slug = SIM_ARM_2['settings']['sim_device_slug']
+    row = _find_robot_by_sim_slug(slug)
+    if row is None:
+        row = RobotModel.create(
+            name=SIM_ARM_2['name'],
+            type=SIM_ARM_2['type'],
+            settings=json.dumps(SIM_ARM_2['settings']),
+            homepose=json.dumps(SIM_ARM_2['homepose']),
+        )
+    else:
+        current = _settings_dict(row)
+        # 토픽/IK 등은 환경 활성화가 리포인트하므로 여기선 머지만(사용자 편집 보존).
+        for k, v in SIM_ARM_2['settings'].items():
+            current.setdefault(k, v)
+        current['sim_device_slug'] = slug
+        current['is_sim'] = True
+        row.settings = json.dumps(current)
+        row.name = SIM_ARM_2['name']
+        row.save()
+    return row
+
+
 def _find_tutorial_sensors():
     """Return all rows flagged as tutorial sensors (rename-safe)."""
     candidates = SensorModel.select().where(
@@ -102,10 +213,12 @@ def _ensure_tutorial_rows():
     Stale tutorial sensor rows (e.g. legacy `tutorial_camera` from before the
     top/front split) are soft-hidden so they no longer pollute the UI list.
     """
-    robot = _find_tutorial_robot()
+    # 표준 로봇 sim_arm 존재 보장. sim_device_slug 로 찾고(환경 바인딩이 토픽/
+    # is_tutorial 을 바꿔도 안정적 — 데모 활성화 후에도 같은 행을 찾는다), 없으면
+    # 레거시 tutorial_arm(is_tutorial) 을 마이그레이션, 그래도 없으면 생성.
+    # 실제 토픽/IK/is_tutorial 바인딩은 아래 repoint_sim_devices('tutorial') 가 적용.
+    robot = _find_robot_by_sim_slug('arm') or _find_tutorial_robot()
     if robot is None:
-        # Robot.role is a getter-only @property; for custom robots it falls
-        # back to settings['role'], which is what we set below.
         robot = RobotModel.create(
             name=TUTORIAL_ROBOT['name'],
             type=TUTORIAL_ROBOT['type'],
@@ -113,27 +226,13 @@ def _ensure_tutorial_rows():
             homepose=json.dumps(TUTORIAL_ROBOT['homepose']),
         )
     else:
+        # 표준 이름/슬러그로 마이그레이션 (tutorial_arm → sim_arm). ID 보존 →
+        # 기존 워크스페이스/데이터셋/커리큘럼 참조가 깨지지 않는다.
         current = _settings_dict(robot)
-        # Authoritative keys: 단일 진실원천(tutorial_defaults.py)이 항상 이김.
-        # is_sim은 record_episode의 home pose 이동 분기를 결정. read_topic 등
-        # ROS 토픽 매핑은 비어있으면 useRobot 의 topicStore.isPublished('') 가
-        # 항상 false 라 "토픽 OFF" 로 잘못 표시된다 — sim 토픽 이름이 바뀌어도
-        # 자동 복구되도록 항상 default 로 덮어쓴다.
-        AUTHORITATIVE_KEYS = (
-            'is_sim', 'is_tutorial', 'role',
-            'read_topic', 'read_topic_msg',
-            'write_type', 'write_topic', 'write_topic_msg',
-            'joint_names', 'joint_lower_bounds', 'joint_upper_bounds',
-            'tool_index', 'tool_inner', 'interpolation',
-            'urdf_path', 'urdf_package_dir', 'ik_setting',
-        )
-        for k in AUTHORITATIVE_KEYS:
-            if k in TUTORIAL_ROBOT['settings']:
-                current[k] = TUTORIAL_ROBOT['settings'][k]
-        # 그 외 새로 추가된 default 키는 머지(기존 사용자 편집 보존)
-        for k, v in TUTORIAL_ROBOT['settings'].items():
-            current.setdefault(k, v)
+        current['sim_device_slug'] = 'arm'
+        current.setdefault('is_sim', True)
         robot.settings = json.dumps(current)
+        robot.name = TUTORIAL_ROBOT['name']
         robot.save()
 
     # Hide stale tutorial_arm-named rows that don't carry the is_tutorial flag
@@ -150,11 +249,17 @@ def _ensure_tutorial_rows():
         row.hide = True
         row.save()
 
+    # 두 번째 표준 sim 암(sim_arm_2)도 설치 시 함께 시드 — 로봇 페이지에 노출.
+    _ensure_sim_arm_2()
+
+    # 표준 카메라 cam/cam_2/cam_3 존재 보장. sim_device_slug 로 찾고(안정적), 없으면
+    # 레거시 tutorial_camera_slug 로 마이그레이션, 그래도 없으면 생성. 토픽 바인딩은
+    # 아래 repoint('tutorial') 가 적용.
     sensors = []
-    expected_slugs = {s['settings']['tutorial_camera_slug'] for s in TUTORIAL_SENSORS}
     for spec in TUTORIAL_SENSORS:
-        slug = spec['settings']['tutorial_camera_slug']
-        row = _find_tutorial_sensor_by_slug(slug)
+        slug = spec['settings']['sim_device_slug']
+        tut_slug = spec['settings']['tutorial_camera_slug']
+        row = _find_sensor_by_sim_slug(slug) or _find_tutorial_sensor_by_slug(tut_slug)
         if row is None:
             row = SensorModel.create(
                 name=spec['name'],
@@ -163,25 +268,45 @@ def _ensure_tutorial_rows():
             )
         else:
             current = _settings_dict(row)
-            # Authoritative keys: 현재 default를 항상 반영 (토픽 이름 등)
-            current['read_topic'] = spec['settings']['read_topic']
-            current['read_topic_msg'] = spec['settings']['read_topic_msg']
-            current['tutorial_camera_slug'] = slug
-            current['is_tutorial'] = True
-            # 그 외 새로 추가된 default 키는 머지
-            for k, v in spec['settings'].items():
-                current.setdefault(k, v)
+            current['sim_device_slug'] = slug
             row.settings = json.dumps(current)
+            # 표준 이름으로 마이그레이션 (tutorial_top_cam → cam 등). ID 보존.
+            row.name = spec['name']
             row.save()
         sensors.append(row)
 
-    # Hide legacy tutorial sensors that don't match any current slug
-    # (e.g. the old single `tutorial_camera` row).
+    # 레거시 sensor 정리 — sim_device_slug 가 없는 옛 tutorial 카메라(top/front
+    # 분리 전 단일 `tutorial_camera` 등)는 숨긴다. 표준 카메라는 slug 가 있어 안전.
     for row in _find_tutorial_sensors():
-        slug = _settings_dict(row).get('tutorial_camera_slug')
-        if slug not in expected_slugs:
+        if not _settings_dict(row).get('sim_device_slug'):
             row.hide = True
             row.save()
+
+    # 레거시 sim 디바이스 정리 — 이제 모든 시뮬 환경이 표준 디바이스(sim_arm/
+    # sim_arm_2/cam*)를 공유(repoint)하므로 환경 전용 행이 필요 없다:
+    #   - demo_sim_device : 데모 전용 sim_arm / sim_wrist_cam*
+    #   - sim_test_env    : dual_arm_test_robot, dual_arm_assembly_left/right + 그 카메라
+    # 표준 디바이스에는 이 마커가 없어 영향 없음.
+    for RowModel in (RobotModel, SensorModel):
+        for row in RowModel.select().where(
+            RowModel.hide == False,  # noqa: E712
+            RowModel.deleted_at.is_null(),
+        ):
+            s = _settings_dict(row)
+            if s.get('demo_sim_device') or s.get('sim_test_env'):
+                row.hide = True
+                row.save()
+
+    # 은퇴한 dual_arm_test(14관절 단일로봇) 워크스페이스 soft-delete — 두 단일팔
+    # 방식(dual_arm_assembly_test)으로 대체됐다. dual_arm_assembly_test 워크스페이스는
+    # canonical 시딩이 표준 디바이스로 리포인트해 유지하므로 건드리지 않는다.
+    for ws in TaskModel.select().where(TaskModel.deleted_at.is_null()):
+        if _settings_dict(ws).get('sim_test_env') == 'dual_arm_test':
+            ws.delete_instance()  # SoftDeleteModel → deleted_at 세팅(soft)
+
+    # 표준 디바이스에 tutorial 바인딩 적용(토픽/IK/is_tutorial 복원). 데모 등 다른
+    # 환경을 쓴 뒤에도 tutorial 시딩 시 항상 tutorial 토픽/동작으로 되돌린다.
+    repoint_sim_devices('tutorial')
 
     assembly = _ensure_tutorial_assembly(robot)
     workspace = _ensure_tutorial_workspace(assembly, robot, sensors)

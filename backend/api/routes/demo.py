@@ -218,49 +218,18 @@ def _ensure_sim_assembly(robot):
 
 
 def _ensure_sim_rows():
-    """Idempotently create the demo-sim robot/sensors/assembly. Returns
-    (robot, sensors, assembly). Mirrors tutorial.py's _ensure_tutorial_rows but
-    flags every row is_sim=True / is_tutorial=False."""
-    robot = _find_sim_robot()
-    if robot is None:
-        robot = RobotModel.create(
-            name=SIM_ROBOT['name'],
-            type=SIM_ROBOT['type'],
-            settings=json.dumps(SIM_ROBOT['settings']),
-            homepose=json.dumps(SIM_ROBOT['homepose']),
-        )
-    else:
-        # Keep topics/IK in sync with the single source (sim_defaults), but
-        # always force is_tutorial off — that is the whole point of this set.
-        current = _settings_dict(robot)
-        for k, v in SIM_ROBOT['settings'].items():
-            current[k] = v
-        current['is_tutorial'] = False
-        current['is_sim'] = True
-        robot.settings = json.dumps(current)
-        robot.save()
+    """표준 sim 디바이스(sim_arm + cam/cam_2)를 peg_in_hole 바인딩으로 리포인트해
+    반환. (robot, sensors, assembly).
 
-    sensors = []
-    for spec in SIM_SENSORS:
-        slug = spec['settings']['sim_camera_slug']
-        row = _find_sim_sensor_by_slug(slug)
-        if row is None:
-            row = SensorModel.create(
-                name=spec['name'],
-                type=spec['type'],
-                settings=json.dumps(spec['settings']),
-            )
-        else:
-            current = _settings_dict(row)
-            for k, v in spec['settings'].items():
-                current[k] = v
-            current['is_tutorial'] = False
-            current['is_sim'] = True
-            row.settings = json.dumps(current)
-            row.save()
-        sensors.append(row)
-
-    assembly = _ensure_sim_assembly(robot)
+    예전엔 데모 전용 sim_arm / sim_wrist_cam* 행을 따로 시드했지만, 이제 모든 시뮬
+    환경이 표준 디바이스 1세트를 공유하고 활성화 시 토픽/설정만 갈아끼운다
+    (repoint_sim_devices). is_tutorial=False 로 리포인트되므로 record_episode 의
+    env.reset 이 peg 를 매 에피소드 홈으로 스냅하지 않는다(플래너 복원 보존)."""
+    from .tutorial import repoint_sim_devices
+    robots, cameras = repoint_sim_devices('peg_in_hole')
+    robot = robots.get('arm')
+    sensors = [cameras[k] for k in ('cam', 'cam_2') if k in cameras]
+    assembly = _ensure_sim_assembly(robot) if robot is not None else None
     return robot, sensors, assembly
 
 
@@ -469,21 +438,30 @@ def demo_start():
     if not result.success:
         return jsonify({'status': 'error', 'message': result.message}), 500
 
-    # Sim 활성화 = 데모 전용 디바이스(is_sim, NOT is_tutorial) 보장 + 데모
-    # 워크스페이스를 그 디바이스로 교체. 실패해도 sim 자체는 떴으므로 치명적이지
-    # 않게 처리(메시지에 경고만 실어 반환).
+    # Sim 활성화 = 데모 디바이스 바인딩(repoint) + 데모 워크스페이스 구성. 실패해도
+    # sim 자체는 떴으므로 치명적이지 않게 처리(메시지에 경고만 실어 반환).
+    #
+    # 환경별 분기: manifest 의 `env` 가 멀티-워크스페이스 데모(dual_arm_plank 등)면
+    # 그 환경 전용 시더로 표준 디바이스를 리포인트 + 워크스페이스 2개를 구성한다.
+    # 그 외(기본 peg_in_hole 류 단일팔)는 기존 단일 워크스페이스 리포인트 경로.
     sim_warning = None
     sim_devices = None
+    env = manifest.get('env')
     try:
-        robot, sensors, assembly = _ensure_sim_rows()
-        ws = _repoint_workspace_to_sim(
-            manifest.get('workspace_name'), robot, sensors, assembly)
-        sim_devices = {
-            'robot_id': robot.id,
-            'sensor_ids': [s.id for s in sensors],
-            'assembly_id': assembly.id,
-            'workspace_id': ws.id if ws else None,
-        }
+        if env == 'dual_arm_plank':
+            from .dual_arm_plank import ensure_plank_rows
+            workspaces = ensure_plank_rows(apply_binding=True)
+            sim_devices = {'workspace_ids': [w.id for w in workspaces]}
+        else:
+            robot, sensors, assembly = _ensure_sim_rows()
+            ws = _repoint_workspace_to_sim(
+                manifest.get('workspace_name'), robot, sensors, assembly)
+            sim_devices = {
+                'robot_id': robot.id,
+                'sensor_ids': [s.id for s in sensors],
+                'assembly_id': assembly.id,
+                'workspace_id': ws.id if ws else None,
+            }
     except Exception as e:
         sim_warning = f'sim device seeding failed: {e}'
 

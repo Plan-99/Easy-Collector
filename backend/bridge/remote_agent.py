@@ -89,7 +89,17 @@ class RemoteAgent:
         self._move_deadline = 0.0  # monotonic seconds
 
         # gRPC로 Agent 생성
+        # ROS2-side AgentService.CreateAgent 는 robot_id 가 이미 등록돼 있으면 기존
+        # agent 를 그대로 반환한다(설정 미갱신). ros2 bridge 는 backend 재시작과
+        # 무관하게 살아있으므로, 이전 시뮬 환경(예: tutorial)에서 만든 agent 가 옛
+        # write_topic 으로 남아 새 환경(예: dual_arm_plank)의 joint_command 를 엉뚱한
+        # 토픽으로 publish 하는 문제가 있었다. 새 RemoteAgent 는 항상 현재 robot 설정
+        # 으로 ROS2 agent 를 재구성해야 하므로 CreateAgent 전에 먼저 파기한다.
         client = get_bridge_client()
+        try:
+            client.agent.DestroyAgent(pb.AgentId(id=robot['id']))
+        except Exception:
+            pass
         result = client.agent.CreateAgent(
             pb.RobotConfig(robot_json=json.dumps(robot))
         )

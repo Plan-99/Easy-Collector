@@ -579,8 +579,8 @@ def revert_stage(id):
          load_model_id=직전 cp 로 만들어지므로, 현재 cp 의 부모가 곧 이전 스테이지의
          체크포인트다.
       2) 플래너 블록의 checkpoint_id 도 같은 매핑으로 되돌린다.
-      3) 현재 스테이지(+데이터셋/롤아웃결과)와 승급으로 생긴(이제 미참조) 체크포인트를
-         삭제한다.
+      3) 현재 스테이지(+데이터셋/롤아웃결과)를 삭제한다. (승급으로 생긴 체크포인트는
+         보존 — 더 이상 삭제하지 않는다.)
       4) 그룹 status=collecting, 이전 스테이지를 active 로.
 
     최초(index 0) 스테이지면 복귀할 이전 스테이지가 없어 거부.
@@ -603,13 +603,11 @@ def revert_stage(id):
     # 현재 그룹 체크포인트 → 부모(load_model_id) 매핑 (str(current) → parent).
     cur_cp_ids = group._get_json_field('checkpoint_ids') or []
     mapping = {}
-    orphan_ids = []  # 승급으로 생긴 현재 cp — revert 후 미참조 → soft-delete.
     for cp in cur_cp_ids:
         ck = CheckpointModel.find(cp)
         parent = getattr(ck, 'load_model_id', None) if ck else None
         if parent is not None:
             mapping[str(cp)] = parent
-            orphan_ids.append(cp)
     if not mapping:
         return {'status': 'error',
                 'message': '복귀할 이전 체크포인트(load_model_id)를 찾을 수 없습니다'}, 400
@@ -646,15 +644,10 @@ def revert_stage(id):
         res.delete_instance()
     cur.delete_instance()
 
-    # 승급으로 생긴 체크포인트(이제 어디서도 참조 안 함) soft-delete — 이전 cp 로
-    #    되돌렸으므로 현재 cp 는 버린다.
-    for cp in orphan_ids:
-        ck = CheckpointModel.find(cp)
-        if ck:
-            try:
-                ck.delete_instance()
-            except Exception as e:
-                print(f'[curriculum] revert: checkpoint {cp} delete failed: {e}')
+    # NOTE: 승급으로 생긴 체크포인트는 더 이상 삭제하지 않는다(과거엔 미참조라며
+    # soft-delete 했다). 되돌린 뒤 그룹/플래너가 부모 cp 를 가리키더라도 학습 결과
+    # 자체는 보존돼야 사용자가 잃지 않는다 — 그래프엔 load_model_id 계보로 계속
+    # 남고, 필요하면 다른 워크스페이스/스테이지의 base 로 재사용할 수 있다.
 
     # 4) 이전 스테이지가 현재가 됨 — active 로 보장.
     prev = group.current_stage

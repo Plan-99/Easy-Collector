@@ -250,11 +250,41 @@ def _ensure_workspace(spec, robots_by_slug, sensors):
     return workspace
 
 
-def ensure_rows(spec):
+def ensure_rows(spec, apply_binding=False):
     """Idempotently seed robot/sensor/assembly/workspace rows for a SPEC.
 
     Returns (robots_by_slug, sensors, assembly, workspace).
-    """
+
+    canonical 모드 (spec['canonical_env'] 지정 시): 환경 전용 로봇/센서를 새로 시드하지
+    않고 표준 디바이스(sim_arm/sim_arm_2/cam/cam_2)를 그 환경 바인딩으로 쓴다.
+    spec['canonical_robots']/['canonical_cameras'] 가 SPEC slug → 표준 slug 매핑.
+
+    apply_binding: True 면 표준 디바이스의 토픽/설정을 이 환경으로 **리포인트**
+    한다(환경 활성화 :start). False(기본)면 디바이스를 조회만 하고 assembly/workspace
+    만 구성한다 — startup 시딩이 표준 디바이스의 기본(tutorial) 바인딩을 덮어쓰지
+    않도록."""
+    canonical_env = spec.get('canonical_env')
+    if canonical_env:
+        from .tutorial import repoint_sim_devices, find_sim_devices
+        if apply_binding:
+            robots_c, cameras_c = repoint_sim_devices(canonical_env)
+        else:
+            robots_c, cameras_c = find_sim_devices(canonical_env)
+        robots_by_slug = {
+            spec_slug: robots_c[can_slug]
+            for spec_slug, can_slug in spec['canonical_robots'].items()
+            if can_slug in robots_c
+        }
+        sensors = []
+        for cam_spec in spec['sensors']:
+            can = spec['canonical_cameras'].get(cam_spec['settings']['sim_test_slug'])
+            if can and can in cameras_c:
+                sensors.append(cameras_c[can])
+        assembly = _ensure_assembly(spec, robots_by_slug)
+        spec['_assembly_id'] = assembly.id
+        workspace = _ensure_workspace(spec, robots_by_slug, sensors)
+        return robots_by_slug, sensors, assembly, workspace
+
     robots_by_slug = {}
     for spec_robot in spec['robots']:
         row = _ensure_robot(spec['env'], spec_robot)
@@ -335,7 +365,8 @@ def make_sim_test_blueprint(spec):
 
     @bp.route(f'/{env}:start', methods=['POST'])
     def start():
-        robots_by_slug, sensors, assembly, workspace = ensure_rows(spec)
+        # 활성화 시에만 표준 디바이스를 이 환경으로 리포인트(토픽/IK 교체).
+        robots_by_slug, sensors, assembly, workspace = ensure_rows(spec, apply_binding=True)
         body = request.get_json(silent=True) or {}
         args = dict(launch.get('extra_args', {}))
         args['topic_prefix'] = launch['topic_prefix']

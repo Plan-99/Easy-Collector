@@ -102,7 +102,15 @@ const props = defineProps({
     assembly: {
         type: Object,
         required: false,
-    }
+    },
+    // 부모(AssemblePage)가 로봇 목록을 한 번만 받아 모든 폼에 내려주면, 각
+    // AssemblyForm 이 /robots 를 중복 호출하지 않는다. 미지정 시(standalone 사용)
+    // 만 onMounted 에서 자체 fetch. (이름은 로컬 `robots` ref 와 충돌하지 않게 분리)
+    availableRobots: {
+        type: Array,
+        required: false,
+        default: null,
+    },
 });
 
 const emit = defineEmits(['save']);
@@ -323,8 +331,18 @@ watch(activeParts, () => {
   draw();
 }, { deep: true });
 
+// 부모가 robots 를 내려주면 그걸 쓰고(로컬 사본 + 이미지 매핑), 처음엔 비어있다가
+// 나중에 채워져도 watch 가 반영한다. prop 미지정(standalone)일 때만 직접 fetch.
+watch(() => props.availableRobots, (val) => {
+    if (Array.isArray(val)) {
+        robots.value = val.map(r => ({ ...r, image: robotImage(r) }));
+    }
+}, { immediate: true });
+
 onMounted(() => {
-    listRobots();
+    if (!Array.isArray(props.availableRobots)) {
+        listRobots();
+    }
 });
 
 </script>

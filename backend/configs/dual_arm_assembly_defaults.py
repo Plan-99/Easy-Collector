@@ -56,6 +56,11 @@ def _arm_robot(slug, prefix, joint_prefix, urdf):
 
 SPEC = {
     'env': _ENV,
+    # canonical 모드: 환경 전용 로봇/센서를 시드하지 않고 표준 디바이스를 'dual_arm'
+    # 바인딩으로 리포인트해 쓴다 (sim_arm=왼팔, sim_arm_2=오른팔, cam=top, cam_2=front).
+    'canonical_env': 'dual_arm',
+    'canonical_robots': {'left_arm': 'arm', 'right_arm': 'arm_2'},
+    'canonical_cameras': {'top_cam': 'cam', 'front_cam': 'cam_2'},
     'launch': {
         'process_id': 'dual_arm_assembly_test_sim',
         'package': 'mujoco_world',

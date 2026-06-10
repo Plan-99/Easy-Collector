@@ -58,7 +58,8 @@ class SimRunner:
                  camera_names: Sequence[str],
                  image_width: int = 640, image_height: int = 480,
                  realtime_factor: float = 1.0, show_viewer: bool = False,
-                 image_publish_hz: float = 20.0):
+                 image_publish_hz: float = 20.0,
+                 wrist_specs: Optional[Sequence] = None):
         self.model = mujoco.MjModel.from_xml_path(model_path)
         self.data = mujoco.MjData(self.model)
         self._show_viewer = bool(show_viewer)
@@ -87,16 +88,33 @@ class SimRunner:
         self._frame_buffers: dict[int, np.ndarray] = {}
         self._buffer_lock = threading.Lock()
 
-        # Wrist depth: the `visual_reach` planner block needs RGB-D from the wrist
-        # camera. We render a depth map for 'wrist_cam' each tick (SimRunner thread
-        # only) and snapshot the camera pose/intrinsics + ee_site pose alongside it,
-        # so the backend can back-project a pixel to world XYZ. Absent if no wrist_cam.
+        # Wrist depth: the `visual_reach` planner block needs RGB-D from a wrist
+        # camera. We render a depth map for each wrist camera every tick (SimRunner
+        # thread only) and snapshot the camera pose/intrinsics + its arm's ee_site
+        # pose alongside it, so the backend can back-project a pixel to world XYZ.
+        #
+        # `wrist_specs`: list of (camera_name, ee_site_name) — one entry per arm so
+        # a dual-arm world can serve `/<prefix>/wrist_rgbd` per side. When None we
+        # fall back to the single-arm tutorial convention: ("wrist_cam", "ee_site").
         self._depth_renderer: Optional[mujoco.Renderer] = None
-        self._wrist_cam_idx = (self._camera_names.index("wrist_cam")
-                               if "wrist_cam" in self._camera_names else -1)
+        if wrist_specs is None:
+            wrist_specs = ([("wrist_cam", "ee_site")]
+                           if "wrist_cam" in self._camera_names else [])
+        self._wrist_specs: list[dict] = []
+        for cam_name, site_name in wrist_specs:
+            if cam_name not in self._camera_names:
+                continue
+            site_id = (mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, site_name)
+                       if site_name else -1)
+            self._wrist_specs.append({
+                "name": cam_name,
+                "cam_idx": self._camera_names.index(cam_name),
+                "site_id": int(site_id),
+            })
+        # Latest {cam_name: {"depth": ndarray, "meta": dict}} under _buffer_lock.
+        self._wrist_data: dict[str, dict] = {}
+        # Kept for the single-arm peg auto-grasp path (find by name; -1 if absent).
         self._ee_site_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "ee_site")
-        self._wrist_depth: Optional[np.ndarray] = None
-        self._wrist_meta: Optional[dict] = None
 
         self._target_lock = threading.Lock()
         self._stop_event = threading.Event()
@@ -461,8 +479,10 @@ class SimRunner:
         except Exception as e:
             print(f"[SimRunner] Renderer init failed: {e} — cameras will be unavailable")
             self._renderer = None
-        # Separate depth renderer for the wrist camera (visual_reach block).
-        if self._wrist_cam_idx >= 0 and self._renderer is not None:
+        # One depth renderer, reused sequentially for every wrist camera
+        # (visual_reach block). Rendering is serial on this thread so a single
+        # renderer can cover all arms.
+        if self._wrist_specs and self._renderer is not None:
             try:
                 self._depth_renderer = mujoco.Renderer(
                     self.model, height=self._image_height, width=self._image_width)
@@ -498,42 +518,60 @@ class SimRunner:
         if new_frames:
             with self._buffer_lock:
                 self._frame_buffers.update(new_frames)
-        # Wrist depth + camera pose/intrinsics + ee_site snapshot (visual_reach).
-        if self._wrist_cam_idx >= 0 and self._depth_renderer is not None:
-            try:
-                cid = self._camera_ids[self._wrist_cam_idx]
-                self._depth_renderer.update_scene(self.data, camera=cid)
-                depth = self._depth_renderer.render()  # HxW float32, metric (m)
-                meta = {
-                    "cam_pos": self.data.cam_xpos[cid].copy().tolist(),
-                    "cam_mat": self.data.cam_xmat[cid].copy().tolist(),  # 9, row-major
-                    "fovy": float(self.model.cam_fovy[cid]),
-                    "ee_pos": self.data.site_xpos[self._ee_site_id].copy().tolist(),
-                    "width": self._image_width,
-                    "height": self._image_height,
-                }
+        # Per-arm wrist depth + camera pose/intrinsics + ee_site snapshot
+        # (visual_reach). One entry per wrist camera, rendered serially.
+        if self._depth_renderer is not None and self._wrist_specs:
+            new_wrist: dict[str, dict] = {}
+            for spec in self._wrist_specs:
+                try:
+                    cid = self._camera_ids[spec["cam_idx"]]
+                    self._depth_renderer.update_scene(self.data, camera=cid)
+                    depth = self._depth_renderer.render()  # HxW float32, metric (m)
+                    site_id = spec["site_id"]
+                    ee_pos = (self.data.site_xpos[site_id].copy().tolist()
+                              if site_id >= 0 else [0.0, 0.0, 0.0])
+                    new_wrist[spec["name"]] = {
+                        "depth": depth,
+                        "meta": {
+                            "cam_pos": self.data.cam_xpos[cid].copy().tolist(),
+                            "cam_mat": self.data.cam_xmat[cid].copy().tolist(),  # 9, row-major
+                            "fovy": float(self.model.cam_fovy[cid]),
+                            "ee_pos": ee_pos,
+                            "width": self._image_width,
+                            "height": self._image_height,
+                        },
+                    }
+                except Exception as e:
+                    print(f"[SimRunner] wrist depth render failed ({spec['name']}): {e}")
+            if new_wrist:
                 with self._buffer_lock:
-                    self._wrist_depth = depth
-                    self._wrist_meta = meta
-            except Exception as e:
-                print(f"[SimRunner] wrist depth render failed: {e}")
+                    self._wrist_data.update(new_wrist)
 
-    def get_wrist_rgbd(self) -> Optional[dict]:
-        """Latest wrist RGB + depth + camera pose/intrinsics + ee_site pose.
+    @property
+    def wrist_cam_names(self) -> list[str]:
+        return [s["name"] for s in self._wrist_specs]
 
-        Returns None if there is no wrist_cam or nothing has been rendered yet.
-        Read-only snapshot for the `visual_reach` block; no GL touched here.
+    def get_wrist_rgbd(self, cam_name: Optional[str] = None) -> Optional[dict]:
+        """Latest wrist RGB + depth + camera pose/intrinsics + ee_site pose for the
+        given wrist camera (defaults to the first registered one).
+
+        Returns None if there is no such wrist cam or nothing has been rendered
+        yet. Read-only snapshot for the `visual_reach` block; no GL touched here.
         """
-        if self._wrist_cam_idx < 0:
+        if not self._wrist_specs:
+            return None
+        if cam_name is None:
+            cam_name = self._wrist_specs[0]["name"]
+        spec = next((s for s in self._wrist_specs if s["name"] == cam_name), None)
+        if spec is None:
             return None
         with self._buffer_lock:
-            rgb = self._frame_buffers.get(self._wrist_cam_idx)
-            depth = self._wrist_depth
-            meta = self._wrist_meta
-        if rgb is None or depth is None or meta is None:
+            rgb = self._frame_buffers.get(spec["cam_idx"])
+            wd = self._wrist_data.get(cam_name)
+        if rgb is None or wd is None:
             return None
-        out = {"rgb": rgb, "depth": depth}
-        out.update(meta)
+        out = {"rgb": rgb, "depth": wd["depth"]}
+        out.update(wd["meta"])
         return out
 
     def _run(self) -> None:

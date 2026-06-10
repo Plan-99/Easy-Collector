@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"cd /home/airlab/Easy-Collector\\necho \\\"=== checkpoint_model fields ===\\\"\\ngrep -nE \\\"Field|path|model_path|= .*Field\\\" backend/database/models/checkpoint_model.py | head -25\\necho \\\"=== pa...",
+  "error": "Exit code 1\n=== checkpoint_model fields ===\n1:from peewee import CharField, IntegerField, TextField, DateTimeField, FloatField\n17:    # status 가 가질 수 있는 명시적 값들 (열거 전용; DB는 단순 CharField).\n33:    name = CharField(null=True)\n34:    dir = CharField(null=True)\n35:    file_name = CharField(null=True)\n36:    task_id = IntegerField(null=True)\n37:    policy_id = IntegerField(null=True)\n38:    dataset_info = TextField(null=True)\n39:    status = CharField(null=True)\n40:    train_settings = TextField(null=T...",
+  "timestamp": "2026-06-10T04:48:10.696Z",
+  "retry_count": 1
+}

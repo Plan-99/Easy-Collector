@@ -50,12 +50,14 @@
                 <TutorialHint class="q-mb-sm" :text="$t('tutorialAssembleNew')" />
                 <assembly-form
                     :assembly="null"
+                    :available-robots="robots"
                     @save="saveAssembly"
                 ></assembly-form>
             </template>
             <template v-slot:[assembly.id] v-for="assembly in assemblies" :key="assembly.id">
                 <assembly-form
                     :assembly="assembly"
+                    :available-robots="robots"
                     @save="saveAssembly"
                 ></assembly-form>
             </template>

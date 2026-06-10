@@ -47,6 +47,9 @@ def _sim_robot_settings():
     s['is_tutorial'] = False
     s['is_sim'] = True
     s[SIM_DEVICE_MARKER] = True
+    # 표준 디바이스 슬러그는 canonical sim_arm 전용 — 데모 디바이스가 상속하면
+    # 슬러그가 중복된다(데모 통합은 Phase 2). 여기선 제거.
+    s.pop('sim_device_slug', None)
     return s
 
 

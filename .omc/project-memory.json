@@ -1,0 +1,553 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1780989604636,
+  "projectRoot": "/home/airlab/Easy-Collector",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Python",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "requirements.txt"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": "pip",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "docs",
+      "scripts"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "backend": {
+      "path": "backend",
+      "purpose": null,
+      "fileCount": 7,
+      "lastAccessed": 1780989604632,
+      "keyFiles": [
+        "Dockerfile",
+        "Dockerfile.base",
+        "__init__.py",
+        "entrypoint.sh",
+        "install_modules.sh"
+      ]
+    },
+    "demo": {
+      "path": "demo",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1780989604632,
+      "keyFiles": [
+        "README.md",
+        "RESULTS.md"
+      ]
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 3,
+      "lastAccessed": 1780989604632,
+      "keyFiles": [
+        "HARNESS.md",
+        "README.md",
+        "openpi_vs_easytrainer_pi05.md"
+      ]
+    },
+    "foundry-harness": {
+      "path": "foundry-harness",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1780989604632,
+      "keyFiles": [
+        "README.md"
+      ]
+    },
+    "frontend": {
+      "path": "frontend",
+      "purpose": null,
+      "fileCount": 12,
+      "lastAccessed": 1780989604633,
+      "keyFiles": [
+        "DESIGN.md",
+        "Dockerfile",
+        "README.md",
+        "__init__.py",
+        "entrypoint.sh"
+      ]
+    },
+    "home-next": {
+      "path": "home-next",
+      "purpose": null,
+      "fileCount": 17,
+      "lastAccessed": 1780989604634,
+      "keyFiles": [
+        "AGENTS.md",
+        "CLAUDE.md",
+        "README.md",
+        "copy.md",
+        "dev.db"
+      ]
+    },
+    "isaaclab": {
+      "path": "isaaclab",
+      "purpose": null,
+      "fileCount": 18,
+      "lastAccessed": 1780989604634,
+      "keyFiles": [
+        "CITATION.cff",
+        "CONTRIBUTING.md",
+        "CONTRIBUTORS.md",
+        "LICENSE",
+        "LICENSE-mimic"
+      ]
+    },
+    "modules": {
+      "path": "modules",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1780989604634,
+      "keyFiles": [
+        "README.md"
+      ]
+    },
+    "nightwatch": {
+      "path": "nightwatch",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1780989604634,
+      "keyFiles": [
+        "README.md"
+      ]
+    },
+    "policy-lab": {
+      "path": "policy-lab",
+      "purpose": null,
+      "fileCount": 5,
+      "lastAccessed": 1780989604634,
+      "keyFiles": [
+        "AGENTS.md",
+        "README.md",
+        "golden-principles.md",
+        "learning.md",
+        "rubric.md"
+      ]
+    },
+    "release": {
+      "path": "release",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1780989604634,
+      "keyFiles": [
+        "build.sh",
+        "easytrainer_4.1.0_amd64.deb"
+      ]
+    },
+    "ros2": {
+      "path": "ros2",
+      "purpose": null,
+      "fileCount": 7,
+      "lastAccessed": 1780989604634,
+      "keyFiles": [
+        "Dockerfile",
+        "Dockerfile.base",
+        "Dockerfile.ros2",
+        "entrypoint.sh",
+        "install_modules.sh"
+      ]
+    },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 16,
+      "lastAccessed": 1780989604635,
+      "keyFiles": [
+        "clean_easytrainer.sh",
+        "db_snapshot.sh",
+        "install_nvidia_runtime.sh",
+        "lint_frontend.sh",
+        "manual-check.sh"
+      ]
+    },
+    "training_server": {
+      "path": "training_server",
+      "purpose": null,
+      "fileCount": 9,
+      "lastAccessed": 1780989604635,
+      "keyFiles": [
+        "Dockerfile",
+        "README.md",
+        "app.py",
+        "docker-compose.yml",
+        "requirements.txt"
+      ]
+    },
+    "vision-reach": {
+      "path": "vision-reach",
+      "purpose": null,
+      "fileCount": 3,
+      "lastAccessed": 1780989604635,
+      "keyFiles": [
+        "DESIGN.md",
+        "RESULTS.md",
+        "SPEC.md"
+      ]
+    },
+    "backend/api": {
+      "path": "backend/api",
+      "purpose": "API routes",
+      "fileCount": 8,
+      "lastAccessed": 1780989604635,
+      "keyFiles": [
+        "__init__.py",
+        "app.py",
+        "gpu_estimate.py"
+      ]
+    },
+    "policy-lab/docs": {
+      "path": "policy-lab/docs",
+      "purpose": "Documentation",
+      "fileCount": 1,
+      "lastAccessed": 1780989604635,
+      "keyFiles": [
+        "easytrainer-integration.md"
+      ]
+    },
+    "ros2/examples": {
+      "path": "ros2/examples",
+      "purpose": "Example code",
+      "fileCount": 1,
+      "lastAccessed": 1780989604636,
+      "keyFiles": [
+        "query_pose_target_server.py"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "backend/api/process/planner_run.py",
+      "accessCount": 12,
+      "lastAccessed": 1780994382448,
+      "type": "file"
+    },
+    {
+      "path": "ros2/ros2_ws/src/mujoco_world/mujoco_world/sim_runner.py",
+      "accessCount": 10,
+      "lastAccessed": 1780995020073,
+      "type": "file"
+    },
+    {
+      "path": "frontend/src/pages/v2/PlannerPage.vue",
+      "accessCount": 8,
+      "lastAccessed": 1780994374566,
+      "type": "file"
+    },
+    {
+      "path": "ros2/ros2_ws/src/mujoco_world/mujoco_world/mujoco_world_node.py",
+      "accessCount": 8,
+      "lastAccessed": 1780995091836,
+      "type": "file"
+    },
+    {
+      "path": "backend/api/routes/planner.py",
+      "accessCount": 7,
+      "lastAccessed": 1780996345406,
+      "type": "file"
+    },
+    {
+      "path": "isaaclab/ros2_env/base_env.py",
+      "accessCount": 5,
+      "lastAccessed": 1780994378168,
+      "type": "file"
+    },
+    {
+      "path": "backend/configs/sim_devices.py",
+      "accessCount": 5,
+      "lastAccessed": 1780995356729,
+      "type": "file"
+    },
+    {
+      "path": "backend/configs/dual_arm_assembly_defaults.py",
+      "accessCount": 4,
+      "lastAccessed": 1780994713414,
+      "type": "file"
+    },
+    {
+      "path": "backend/configs/tutorial_defaults.py",
+      "accessCount": 4,
+      "lastAccessed": 1780995256073,
+      "type": "file"
+    },
+    {
+      "path": "backend/api/app.py",
+      "accessCount": 4,
+      "lastAccessed": 1780995437305,
+      "type": "file"
+    },
+    {
+      "path": "backend/configs/dual_arm_defaults.py",
+      "accessCount": 3,
+      "lastAccessed": 1780994359658,
+      "type": "file"
+    },
+    {
+      "path": "isaaclab/ros2_env/objects.py",
+      "accessCount": 3,
+      "lastAccessed": 1780994374655,
+      "type": "file"
+    },
+    {
+      "path": "backend/api/routes/tutorial.py",
+      "accessCount": 3,
+      "lastAccessed": 1780994866072,
+      "type": "file"
+    },
+    {
+      "path": "ros2/ros2_ws/src/mujoco_world/assets/dual_arm_plank_scene.xml",
+      "accessCount": 3,
+      "lastAccessed": 1780995835333,
+      "type": "file"
+    },
+    {
+      "path": "frontend/src/pages/v2/CurriculumPage.vue",
+      "accessCount": 2,
+      "lastAccessed": 1780991478008,
+      "type": "file"
+    },
+    {
+      "path": "frontend/src/pages/v2/WorkspacePage.vue",
+      "accessCount": 2,
+      "lastAccessed": 1780994355581,
+      "type": "file"
+    },
+    {
+      "path": "ros2/ros2_ws/src/mujoco_world/assets/scene.xml",
+      "accessCount": 2,
+      "lastAccessed": 1780994553783,
+      "type": "file"
+    },
+    {
+      "path": "ros2/ros2_ws/src/mujoco_world/assets/dual_arm_scene.xml",
+      "accessCount": 2,
+      "lastAccessed": 1780994682401,
+      "type": "file"
+    },
+    {
+      "path": "ros2/ros2_ws/src/mujoco_world/launch/dual_arm_assembly_world.launch.py",
+      "accessCount": 2,
+      "lastAccessed": 1780994683223,
+      "type": "file"
+    },
+    {
+      "path": "backend/api/routes/sim_test_common.py",
+      "accessCount": 2,
+      "lastAccessed": 1780994712711,
+      "type": "file"
+    },
+    {
+      "path": "ros2/ros2_ws/src/mujoco_world/assets/scene_peg.xml",
+      "accessCount": 2,
+      "lastAccessed": 1780994946938,
+      "type": "file"
+    },
+    {
+      "path": "backend/configs/dual_arm_plank_defaults.py",
+      "accessCount": 2,
+      "lastAccessed": 1780996314816,
+      "type": "file"
+    },
+    {
+      "path": "backend/configs/sim_defaults.py",
+      "accessCount": 1,
+      "lastAccessed": 1780994300395,
+      "type": "file"
+    },
+    {
+      "path": "backend/database/models/planner_model.py",
+      "accessCount": 1,
+      "lastAccessed": 1780994307788,
+      "type": "file"
+    },
+    {
+      "path": "backend/api/routes/dual_arm_test.py",
+      "accessCount": 1,
+      "lastAccessed": 1780994315080,
+      "type": "file"
+    },
+    {
+      "path": "backend/api/routes/dual_arm_assembly_test.py",
+      "accessCount": 1,
+      "lastAccessed": 1780994315189,
+      "type": "file"
+    },
+    {
+      "path": "demo/peg_in_hole/env/mujoco_world_node.py",
+      "accessCount": 1,
+      "lastAccessed": 1780994318822,
+      "type": "file"
+    },
+    {
+      "path": "backend/database/models/__init__.py",
+      "accessCount": 1,
+      "lastAccessed": 1780994320422,
+      "type": "file"
+    },
+    {
+      "path": "backend/configs/global_configs.py",
+      "accessCount": 1,
+      "lastAccessed": 1780994322237,
+      "type": "file"
+    },
+    {
+      "path": "backend/database/models/robot_model.py",
+      "accessCount": 1,
+      "lastAccessed": 1780994322314,
+      "type": "file"
+    },
+    {
+      "path": "backend/database/models/sensor_model.py",
+      "accessCount": 1,
+      "lastAccessed": 1780994322521,
+      "type": "file"
+    },
+    {
+      "path": "backend/database/models/task_model.py",
+      "accessCount": 1,
+      "lastAccessed": 1780994322714,
+      "type": "file"
+    },
+    {
+      "path": "backend/database/models/assembly_model.py",
+      "accessCount": 1,
+      "lastAccessed": 1780994323041,
+      "type": "file"
+    },
+    {
+      "path": "backend/database/models/teleoperator_model.py",
+      "accessCount": 1,
+      "lastAccessed": 1780994323110,
+      "type": "file"
+    },
+    {
+      "path": "isaaclab/ros2_env/envs/piper_peg_in_hole.py",
+      "accessCount": 1,
+      "lastAccessed": 1780994328291,
+      "type": "file"
+    },
+    {
+      "path": "isaaclab/ros2_env/ros2_bridge.py",
+      "accessCount": 1,
+      "lastAccessed": 1780994336321,
+      "type": "file"
+    },
+    {
+      "path": "isaaclab/ros2_env/envs/pi0_env.py",
+      "accessCount": 1,
+      "lastAccessed": 1780994346541,
+      "type": "file"
+    },
+    {
+      "path": "isaaclab/ros2_env/envs/piper_env_custom.py",
+      "accessCount": 1,
+      "lastAccessed": 1780994346693,
+      "type": "file"
+    },
+    {
+      "path": "frontend/src/components/v2/PlannerBlockCard.vue",
+      "accessCount": 1,
+      "lastAccessed": 1780994348836,
+      "type": "file"
+    },
+    {
+      "path": "backend/api/routes/task.py",
+      "accessCount": 1,
+      "lastAccessed": 1780994365315,
+      "type": "file"
+    },
+    {
+      "path": "backend/api/routes/assembly.py",
+      "accessCount": 1,
+      "lastAccessed": 1780994375783,
+      "type": "file"
+    },
+    {
+      "path": "backend/api/routes/sensor.py",
+      "accessCount": 1,
+      "lastAccessed": 1780994379096,
+      "type": "file"
+    },
+    {
+      "path": "ros2/ros2_ws/src/mujoco_world/launch/mujoco_world.launch.py",
+      "accessCount": 1,
+      "lastAccessed": 1780994516776,
+      "type": "file"
+    },
+    {
+      "path": "ros2/ros2_ws/src/mujoco_world/launch/dual_arm_world.launch.py",
+      "accessCount": 1,
+      "lastAccessed": 1780994538443,
+      "type": "file"
+    },
+    {
+      "path": "ros2/ros2_ws/src/mujoco_world/package.xml",
+      "accessCount": 1,
+      "lastAccessed": 1780994541635,
+      "type": "file"
+    },
+    {
+      "path": "ros2/ros2_ws/src/mujoco_world/setup.py",
+      "accessCount": 1,
+      "lastAccessed": 1780994542006,
+      "type": "file"
+    },
+    {
+      "path": "ros2/ros2_ws/src/mujoco_world/mujoco_world/task_success.py",
+      "accessCount": 1,
+      "lastAccessed": 1780994557256,
+      "type": "file"
+    },
+    {
+      "path": "demo/peg_in_hole/env/mujoco_world.launch.py",
+      "accessCount": 1,
+      "lastAccessed": 1780994560438,
+      "type": "file"
+    },
+    {
+      "path": "ros2/ros2_ws/src/mujoco_world/launch/dual_arm_plank_world.launch.py",
+      "accessCount": 1,
+      "lastAccessed": 1780995249059,
+      "type": "file"
+    },
+    {
+      "path": "backend/api/routes/dual_arm_plank.py",
+      "accessCount": 1,
+      "lastAccessed": 1780995410277,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

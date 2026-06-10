@@ -26,8 +26,9 @@ from .routes.sim import sim_bp
 from .routes.robot_pose import robot_pose_bp
 from .routes.remote_train import remote_train_bp
 from .routes.tutorial import tutorial_bp
-from .routes.dual_arm_test import dual_arm_test_bp
+# dual_arm_test(14관절 단일 로봇)는 두 단일팔(sim_arm+sim_arm_2) 방식으로 대체되어 은퇴.
 from .routes.dual_arm_assembly_test import dual_arm_assembly_test_bp
+from .routes.dual_arm_plank import dual_arm_plank_bp
 from .routes.remote_train import run_training_job, probe_gpu_free_mib
 from .routes.planner import planner_bp
 from .routes.curriculum import curriculum_bp
@@ -107,8 +108,8 @@ app.register_blueprint(sim_bp, url_prefix='/api')
 app.register_blueprint(robot_pose_bp, url_prefix='/api')
 app.register_blueprint(remote_train_bp, url_prefix='/api')
 app.register_blueprint(tutorial_bp, url_prefix='/api')
-app.register_blueprint(dual_arm_test_bp, url_prefix='/api')
 app.register_blueprint(dual_arm_assembly_test_bp, url_prefix='/api')
+app.register_blueprint(dual_arm_plank_bp, url_prefix='/api')
 app.register_blueprint(planner_bp, url_prefix='/api')
 app.register_blueprint(curriculum_bp, url_prefix='/api')
 app.register_blueprint(module_bp, url_prefix='/api')
@@ -337,16 +338,25 @@ def main():
     except Exception as e:
         print(f"[WARN] Tutorial seeding skipped: {e}")
 
-    # Dual-arm TEST workspaces are seeded eagerly too so they appear in the UI
-    # workspace list without first hitting :start.
+    # 양팔 시뮬 워크스페이스도 startup 에 시드해 UI 목록에 바로 보이게 한다.
+    # 이제 표준 디바이스(sim_arm+sim_arm_2)를 쓰는 canonical 모드 — startup 에서는
+    # 토픽 리포인트 없이 assembly/workspace 만 구성(apply_binding=False 기본).
+    # 14관절 단일로봇 dual_arm_test 는 두 단일팔 방식으로 대체되어 은퇴.
     try:
         from .routes.sim_test_common import ensure_rows as _ensure_sim_test_rows
-        from ..configs.dual_arm_defaults import SPEC as _DUAL_ARM_SPEC
         from ..configs.dual_arm_assembly_defaults import SPEC as _DUAL_ARM_ASM_SPEC
-        _ensure_sim_test_rows(_DUAL_ARM_SPEC)
         _ensure_sim_test_rows(_DUAL_ARM_ASM_SPEC)
     except Exception as e:
         print(f"[WARN] Dual-arm test seeding skipped: {e}")
+
+    # dual_arm_plank 데모: 두 단일팔 + 각자 워크스페이스(어셈블리 미결합) + 손목캠
+    # 2개/팔 + plank. cam_4 표준 디바이스도 여기서 시드. apply_binding=False —
+    # 토픽 리포인트는 :start 때만.
+    try:
+        from .routes.dual_arm_plank import ensure_plank_rows as _ensure_plank_rows
+        _ensure_plank_rows()
+    except Exception as e:
+        print(f"[WARN] dual_arm_plank seeding skipped: {e}")
 
     app.node = node  # 호환성 유지 (None)
     app.bridge_client = bridge_client  # gRPC bridge 클라이언트
