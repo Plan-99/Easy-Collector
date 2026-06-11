@@ -107,13 +107,17 @@ class Checkpoint(SoftDeleteModel):
         load_model.name 만 사용)하므로 shallow 로 끊는다."""
         return super().to_dict()
 
-    def to_dict(self):
+    def to_dict(self, include_task=True):
         data = super().to_dict()
         # Enrich dataset_info
         data['dataset_info'] = self._dataset_info
-        # Include relationships
-        task = self.task
-        data['task'] = task.to_dict() if task else None
+        # Include relationships.
+        # task.to_dict() 는 sensors/assembly/robots 전체를 DB resolve 하는 무거운
+        # 경로(~1s). 추론 rollout(planner/curriculum)은 task 를 workspace(ctx)에서
+        # 받아 checkpoint['task'] 를 쓰지 않으므로 include_task=False 로 건너뛴다.
+        if include_task:
+            task = self.task
+            data['task'] = task.to_dict() if task else None
         policy = self.policy
         data['policy'] = policy.to_dict() if policy else None
         load_model = self.load_model

@@ -128,6 +128,7 @@ def _preload_checkpoints(groups, socketio_instance):
 
     seen = set()
     cache = {}
+    warm_targets = {}  # policy_type -> 첫 policy (GPU 워밍업용, 타입당 1회)
     ckpt_blocks = []
     for grp in groups:
         for b in grp.get('blocks') or []:
@@ -200,8 +201,54 @@ def _preload_checkpoints(groups, socketio_instance):
                 'ood': ood,
             }
             print(f'[PRELOAD] checkpoint {cid} ready ({time.time() - t0:.1f}s)')
+            # 워밍업 dedup 키 = (타입, 입력 형상 시그니처). cuDNN autotune 은 conv
+            # 형상별이라, 형상이 다른 체크포인트는 각각 데워야 하고 같은 형상은 한
+            # 번만 데우면 된다.
+            _sig = (ptype, tuple(sorted(
+                (k, tuple(getattr(v, 'shape', ()) or ()))
+                for k, v in (getattr(policy.config, 'input_features', {}) or {}).items()
+            )))
+            if _sig not in warm_targets:
+                warm_targets[_sig] = (ptype, policy)
         except Exception:
             print(f'[PRELOAD][ERROR] failed to preload checkpoint {cid}: {traceback.format_exc()}')
+
+    # --- GPU 워밍업 ---
+    # 프로세스 첫 GPU forward 는 CUDA 컨텍스트 초기화 + cuDNN autotuning + 커널
+    # 컴파일로 ~2.6s 걸린다(블럭 첫 추론 콜드 스타트의 75%). 이 캐시들은 프로세스
+    # 전역이라, preload 단계에서 정책 타입당 한 번 더미 forward 를 돌려 미리 데워두면
+    # 실제 블럭의 첫 추론이 2.6s → ~8ms 로 떨어진다. (모델은 다시 CPU 로 내려 preload
+    # 의 메모리 레이아웃을 유지 — 각 블럭은 자체적으로 .cuda() 한다.)
+    if torch.cuda.is_available() and warm_targets:
+        def _dummy_batch(cfg):
+            batch = {}
+            for key, feat in (getattr(cfg, 'input_features', {}) or {}).items():
+                shape = tuple(getattr(feat, 'shape', ()) or ())
+                if not shape:
+                    continue
+                batch[key] = torch.rand((1, *shape), dtype=torch.float32, device='cuda')
+            return batch
+
+        _wt0 = time.time()
+        for _sig, (ptype, policy) in warm_targets.items():
+            try:
+                policy.cuda()
+                policy.eval()
+                with torch.no_grad():
+                    if hasattr(policy, 'reset'):
+                        policy.reset()
+                    policy.select_action(_dummy_batch(policy.config))
+                torch.cuda.synchronize()
+                policy.cpu()
+                # NOTE: empty_cache() 를 부르지 않는다. 부르면 데워둔 GPU 메모리 풀이
+                # CUDA 로 반납돼 블럭이 첫 forward 에서 cudaMalloc 을 다시 치른다(워밍업
+                # 무력화). caching allocator 가 풀을 유지하면 블럭의 .cuda()+첫 forward
+                # 가 그 풀을 재사용해 할당 비용이 사라진다.
+                print(f'[PRELOAD] GPU warmup done ({ptype})')
+            except Exception:
+                # best-effort — 실패해도 CUDA 컨텍스트 초기화(가장 큰 몫)는 이미 이뤄짐.
+                print(f'[PRELOAD][WARN] GPU warmup failed for {ptype}: {traceback.format_exc()}')
+        print(f'[PRELOAD] GPU warmup total {time.time() - _wt0:.1f}s (첫 블럭 추론 콜드스타트 제거)')
 
     _emit(socketio_instance, 'planner_preload_done', {'count': len(cache)})
     return cache
@@ -549,7 +596,7 @@ def _run_checkpoint(block, ctx, task_control):
     if checkpoint_model is None:
         raise RuntimeError(f"checkpoint_id={block.get('checkpoint_id')} not found")
 
-    checkpoint = checkpoint_model.to_dict()
+    checkpoint = checkpoint_model.to_dict(include_task=False)
     policy = checkpoint.get('policy')
     if policy is None:
         raise RuntimeError(f"checkpoint '{checkpoint.get('name')}' has no associated policy")

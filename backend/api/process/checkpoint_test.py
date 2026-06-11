@@ -210,10 +210,16 @@ def checkpoint_test(
         flush=True,
     )
 
+    def _blk(tag):  # no-op (진단 계측 잔재 — 호출부는 무해)
+        pass
+
     # --- 1. 초기 설정 ---
     try:
-        gc.collect()
-        torch.cuda.empty_cache()
+        # NOTE: gc.collect() / torch.cuda.empty_cache() 를 블럭 시작 critical path 에서
+        # 부르지 않는다. gc.collect() 만으로도 ~190ms 걸렸고, empty_cache 는 preload
+        # 워밍업이 데운 GPU 메모리 풀을 반납해 첫 forward 의 cudaMalloc 을 되살린다.
+        # 이전 블럭 정리는 각 블럭의 finally 가 담당.
+        _blk('init (gc/empty_cache 생략)')
 
         from concurrent.futures import ThreadPoolExecutor
         thread_pool = ThreadPoolExecutor(max_workers=len(agents))
@@ -319,6 +325,8 @@ def checkpoint_test(
                 if 'image_dist_sorted' in ood_data:
                     ood_cpu['image_dist_sorted'] = ood_data['image_dist_sorted']
 
+        _blk('model loaded (preloaded cache)' if preloaded is not None else 'model loaded (from_pretrained disk)')
+
         # Per-block re-inference / temporal ensemble setup. Always reapply because
         # the same cached policy may be reused with different params across blocks.
         # ACT uses ``config.temporal_ensemble_coeff`` (not the attribute) to choose
@@ -341,6 +349,7 @@ def checkpoint_test(
 
         policy.cuda()
         policy.eval()
+        _blk('policy.cuda()+eval()')
         print(f'Loaded Policy from {ckpt_dir}, hz: {hz}, re_inference_steps: {re_inference_steps}, action_key: {action_key}')
         # DIAG: 모델이 observation.state 를 실제로 입력으로 받는지 확인 (ACT 의
         # robot_state_feature property — input_features 에 observation.state 가
@@ -444,6 +453,7 @@ def checkpoint_test(
         state_dim = sum(agent.joint_len for agent in agents)
         tutorial = any((s.get('settings') or {}).get('is_tutorial') for s in (sensors or []))
         env = RemoteEnv(agents, sensors, tutorial=tutorial)
+        _blk('RemoteEnv() = CreateEnv gRPC')
         vision_backbone = policy_obj.get('vision_backbone')
         # 추론 1 에피소드 길이 — UI 진행도 표시(``inference_progress`` emit) 의
         # 분모로 사용. 이전엔 이 step 마다 home 복귀하는 cycle 의 길이였지만 그
@@ -532,6 +542,31 @@ def checkpoint_test(
         probing_freqs = np.linspace(0.1, 0.4, joint_len) * 2 * np.pi
 
         policy.reset()
+        _blk('init-tail + main-loop setup + policy.reset')
+        # 첫 추론 콜드 스타트(~410ms) 숨김 — per-block 설정이 끝난 policy 로 더미
+        # forward 1회를 미리 실행해 데운다. **반드시 실제 추론과 같은 스레드에서**
+        # 돌려야 한다: cuDNN/cuBLAS 핸들은 스레드별로 lazily 생성되므로, 다른
+        # 스레드서 데우면 inference_executor 워커의 첫 추론이 또 콜드를 낸다.
+        # 따라서 inference_executor 를 여기서(homepose 앞) 만들고 거기에 submit →
+        # homepose 이동/센서 셋업과 overlap 되고, main loop 첫 추론 직전에 result()
+        # 로 join. (첫 실제 추론은 policy.reset 후라 warmup state 와 무관.)
+        def _warm_first_forward():
+            try:
+                _wb = {}
+                for _k, _v in (getattr(policy.config, 'input_features', {}) or {}).items():
+                    _shape = tuple(getattr(_v, 'shape', ()) or ())
+                    if _shape:
+                        _wb[_k] = torch.rand((1, *_shape), dtype=torch.float32, device='cuda')
+                with torch.no_grad():
+                    if hasattr(policy, 'predict_action_chunk'):
+                        policy.predict_action_chunk(_wb)
+                    else:
+                        policy.select_action(_wb)
+                torch.cuda.synchronize()
+            except Exception as _we:
+                print(f'[checkpoint_test] warmup forward skipped: {_we}', flush=True)
+        inference_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='infer')
+        _warm_future = inference_executor.submit(_warm_first_forward)
         # 초기 homepose 이동은 ``move_homepose`` toggle 로만 트리거. 이전엔 별도
         # ``go_home_first`` flag 가 있어 호출자가 빠뜨리면 기본값 True 로 강제
         # 이동했는데, 이는 UI 토글을 무시하는 경로라 제거.
@@ -540,9 +575,11 @@ def checkpoint_test(
             if task_control['stop']:
                 return
             print('Robot moved to homepose')
+            _blk('move_to_homepose')
         # Block until every sensor has produced its first frame; otherwise the
         # first iteration of the main loop hits ``None`` images.
         env.wait_for_images(timeout=10.0)
+        _blk('env.wait_for_images (first camera frame)')
         # Robots may not have published their first joint_states yet either —
         # poll until each agent has one before the inference loop reads it.
         # NOTE: `agent.joint_states` (cache) 는 subscribe_state_stream gRPC stream
@@ -561,7 +598,9 @@ def checkpoint_test(
             if ok:
                 break
             time.sleep(0.05)
+        _blk('wait first joint_states (per-agent RPC poll)')
         ts = env.reset()
+        _blk('env.reset() = WaitForImages')
         if move_homepose:
             socketio_instance.emit('inference_progress', {
                 'progress': 0.0, 'step': 0, 'episode_len': episode_len,
@@ -595,7 +634,7 @@ def checkpoint_test(
         # 그 iter 는 action skip (cold start / inference 늦을 때만 발생).
         # PI05 use_relative_actions 및 일반 ACT online 경로는 기존대로 synchronous 유지
         # (변경 폭 최소화).
-        inference_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='infer')
+        # inference_executor 는 위(homepose 앞)에서 워밍업과 함께 생성됨.
         _inference_future = None
 
         # 아래 nested function 은 closure 로 env, policy, preprocessor, postprocessor,
@@ -611,6 +650,8 @@ def checkpoint_test(
             Returns: deltas np.ndarray (chunk_size, action_dim).
             """
             with torch.no_grad():
+                def _bt_mark(tag):  # no-op (진단 계측 잔재)
+                    return None
                 if use_relative_trajectory and action_key_norm == 'ee_delta':
                     policy.reset()
                 # 학습 측 _build_obs_state 와 동일 semantic — arm features 만 user-selected,
@@ -758,6 +799,7 @@ def checkpoint_test(
                 # 않는데, 여기서 stash 해두면 main loop 가 다음 iter 에서 읽는다.
                 _vm_last_batch['value'] = _policy_input
 
+                _bt_mark('obs build (gRPC reads + image preproc + tensor pack)')
                 policy.reset()
                 if hasattr(policy, 'predict_action_chunk'):
                     _raw_actions = policy.predict_action_chunk(_policy_input).squeeze(0)
@@ -773,6 +815,7 @@ def checkpoint_test(
                 if postprocessor is not None:
                     _raw_actions = postprocessor(_raw_actions)
                 _raw_np = _raw_actions.cpu().numpy()
+                _bt_mark('model forward (reset + select_action/chunk + postproc)')
 
                 # Current EE pose — image/state 가 캡처된 T1 시점의 eepos (obs_snap).
                 # 학습은 (image_t, eepos_t) 가 같은 frame t 에서 페어링되어 모델 출력의
@@ -793,6 +836,7 @@ def checkpoint_test(
                         _curr_eepos_local = np.array(_ee_dict[_ee_name][:6], dtype=np.float32)
                         break
                 _deltas_local = relative_trajectory_to_delta(_raw_np, current_eepos=_curr_eepos_local)
+                _bt_mark('relative_trajectory_to_delta')
                 return _deltas_local
 
         # curriculum 녹화 버퍼 초기화 (opt-in). 호출자가 record dict 를 넘긴 경우만.
@@ -824,7 +868,20 @@ def checkpoint_test(
             })
         except Exception:
             pass
+        # 워밍업 forward 완료 보장 — 첫 실제 추론 전에 join (같은 executor 워커라
+        # 순서대로 실행되지만, 명시적으로 result() 로 완료 대기 + 예외 흡수).
+        # homepose/셋업과 overlap 됐으면 즉시 통과; 아니면 잔여만큼만 대기.
+        try:
+            _warm_future.result()
+        except Exception:
+            pass
+        _blk('warmup forward join')
+        _blk_loop_first = {'v': True}
+        _blk_inf_first = {'v': True}  # 첫 inference 결과가 큐에 들어온 시점 측정
         while not task_control['stop']:
+            if _blk_loop_first['v']:
+                _blk_loop_first['v'] = False
+                _blk('main loop entered (about to do first inference)')
             # 교정 코디네이션 pause — 동시 진행 플랜에서 다른 그룹이 교정(teleop)
             # 중이면 이 체크포인트 추론을 일시정지한다. 새 action 을 발행하지 않아
             # 로봇이 현재 자세를 유지하고, step_num/타이밍도 진행하지 않는다. 교정이
@@ -850,8 +907,11 @@ def checkpoint_test(
                         'episode_len': episode_len,
                     })
 
-            # 일정 스텝마다 강제 메모리 정리 (예: 100스텝마다)
-            if step_num % 100 == 0:
+            # 일정 스텝마다 강제 메모리 정리 (예: 100스텝마다). step_num==0(첫 스텝)은
+            # 제외 — 여기서 gc.collect()(~190ms)가 첫 추론을 지연시키고, empty_cache()가
+            # homepose 워밍업으로 데운 GPU 풀을 첫 forward 직전에 반납해 콜드 스타트를
+            # 되살리던 버그(0 % 100 == 0 이 참).
+            if step_num > 0 and step_num % 100 == 0:
                 gc.collect()
                 torch.cuda.empty_cache()
                 
@@ -925,8 +985,13 @@ def checkpoint_test(
             if action_key_norm == 'relative_ee_pos':
                 if _inference_due and _inference_future is None:
                     last_inference_time = _t_now_for_gate
+                    if _blk_inf_first['v']:
+                        _blk('첫 inference submit (entered→submit = 첫 iter 전처리)')
                     _inference_future = inference_executor.submit(_do_rel_ee_inference, obs_t)
                 if len(rel_action_queue) > 0:
+                    if _blk_inf_first['v']:
+                        _blk_inf_first['v'] = False
+                        _blk('첫 inference 결과 도착 (entered→여기 = spin+future 대기)')
                     state_t = rel_action_queue.popleft()
                 else:
                     # Queue 비어 있음 — cold start 또는 inference 가 inference_dt 안에
@@ -1467,6 +1532,7 @@ def checkpoint_test(
             # Soft start: 첫 cycle 의 move_to 가 완료될 때까지 대기. 이후 cycle 들은
             # step_num 진행대로 normal loop 진행.
             if first_step:
+                _blk('first inference + first action dispatch (entering soft-start move)')
                 _soft_start_deadline = time.time() + first_step_duration + 2.0
                 while time.time() < _soft_start_deadline:
                     if task_control['stop']:

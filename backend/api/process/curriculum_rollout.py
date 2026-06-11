@@ -273,7 +273,7 @@ def _run_checkpoint_recorded(block, ctx, task_control, group_id):
     if workspace is None or checkpoint_model is None:
         raise RuntimeError(f"checkpoint block invalid: cp={cp_id} ws={block.get('workspace_id')}")
 
-    checkpoint = checkpoint_model.to_dict()
+    checkpoint = checkpoint_model.to_dict(include_task=False)
     policy = checkpoint.get('policy')
     if policy is None:
         raise RuntimeError(f"checkpoint '{checkpoint.get('name')}' has no policy")
