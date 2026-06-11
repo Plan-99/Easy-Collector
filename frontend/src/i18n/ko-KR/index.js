@@ -981,6 +981,8 @@ export default {
   currStopRollout: '롤아웃 중지',
   currStopAll: '전체 종료',
   currHandleFailure: '실패처리',
+  currPausedForCorrection: '교정 대기 중',
+  currStopAllHintMulti: '동시 진행 플랜 — 전체 종료는 모든 플랜을 종료합니다.',
   currStopNonCpHint: '체크포인트가 아닌 블록 — 중지 시 롤아웃이 즉시 종료됩니다 (교정 dialog 없음).',
   currMaxStepsExceeded: '스텝 한도 초과',
   currCorrectionTitle: '체크포인트 실패',
@@ -1173,6 +1175,10 @@ export default {
 
   // ───── Vision Map (EpisodeViewer overlay) ─────
   visionMap: 'Vision Map',
+  oodScore: 'OOD',
+  oodScoreHint: '학습 분포 대비 이미지 OOD 정도 (0 = 분포 내, 1 = 분포 밖)',
+  successScore: '성공도',
+  successScoreHint: '정책의 succeed 토큰 값 (>0.5 면 성공 예측)',
   visionMapSettings: 'Vision Map 설정',
   visionMapMethod: '방식',
   visionMapNoCheckpoints: '이 워크스페이스에 학습 완료된 ACT 체크포인트가 없습니다',

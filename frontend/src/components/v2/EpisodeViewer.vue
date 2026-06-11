@@ -91,6 +91,19 @@
             <span v-if="visionMapStatus" class="text-caption" :class="visionMapStatusClass">
                 {{ visionMapStatus }}
             </span>
+            <!-- 현재 프레임의 OOD / success 점수 — vision map 과 같은 추론에서 계산.
+                 OOD: 0(분포 내) → 1(분포 밖). Success: succeed 토큰 값(0~1 근처). -->
+            <template v-if="showScorePanel">
+                <q-separator vertical dark />
+                <q-badge v-if="vmHasOod" :color="oodColor" text-color="white">
+                    {{ $t('oodScore') || 'OOD' }}&nbsp;{{ currentScore.ood != null ? currentScore.ood.toFixed(3) : '—' }}
+                    <q-tooltip>{{ $t('oodScoreHint') || '학습 분포 대비 이미지 OOD 정도 (0 = 분포 내, 1 = 분포 밖)' }}</q-tooltip>
+                </q-badge>
+                <q-badge v-if="vmHasSuccess" :color="successColor" text-color="white">
+                    {{ $t('successScore') || 'Success' }}&nbsp;{{ currentScore.success != null ? currentScore.success.toFixed(3) : '—' }}
+                    <q-tooltip>{{ $t('successScoreHint') || '정책의 succeed 토큰 값 (>0.5 면 성공 예측)' }}</q-tooltip>
+                </q-badge>
+            </template>
         </div>
 
         <!-- Vision map settings dialog -->
@@ -395,6 +408,12 @@ const showVMSettings = ref(false);
 const vmCheckpointId = ref(LocalStorage.getItem('vmCheckpointId') || null);
 const vmMethod = ref(LocalStorage.getItem('vmMethod') || 'attention');
 const heatmapCache = ref({});        // { [frame_idx]: { sensor_name: data-url } }
+// 프레임별 success(succeed 토큰) / ood(image OOD 백분위) 점수. heatmap 과 같은
+// vision_map_episode_frame 이벤트로 함께 들어온다. has* 플래그는 start 에서 받아
+// 점수 컬럼 노출 여부를 정한다(체크포인트에 해당 정보가 없으면 숨김).
+const scoreCache = ref({});          // { [frame_idx]: { success, ood } }
+const vmHasSuccess = ref(false);
+const vmHasOod = ref(false);
 const visionMapStatus = ref('');
 const visionMapStatusClass = ref('text-grey-5');
 const taskCheckpoints = ref([]);
@@ -413,6 +432,26 @@ let vmSessionId = null;
 const currentHeatmaps = computed(() => {
     if (!visionMapOn.value) return {};
     return heatmapCache.value[sliderFrame.value] || {};
+});
+
+// 현재 프레임의 success / ood 점수 (vision map 켜진 동안 readout 에 표시).
+const currentScore = computed(() => {
+    if (!visionMapOn.value) return {};
+    return scoreCache.value[sliderFrame.value] || {};
+});
+const showScorePanel = computed(() =>
+    visionMapOn.value && (vmHasSuccess.value || vmHasOod.value)
+);
+// OOD: 낮음(분포 내)=초록 → 높음(분포 밖)=빨강. Success: >0.5 면 초록.
+const oodColor = computed(() => {
+    const v = currentScore.value.ood;
+    if (v == null) return 'grey-6';
+    return v >= 0.66 ? 'negative' : v >= 0.33 ? 'warning' : 'positive';
+});
+const successColor = computed(() => {
+    const v = currentScore.value.success;
+    if (v == null) return 'grey-6';
+    return v > 0.5 ? 'positive' : 'grey-7';
 });
 
 const methodOptions = [
@@ -547,6 +586,9 @@ function onVMEpisodeStart(payload) {
     if (!payload || payload.session_id !== vmSessionId) return;
     vmProgressTotal.value = payload.total_frames || 0;
     vmProgressDone.value = 0;
+    vmHasSuccess.value = !!payload.has_success;
+    vmHasOod.value = !!payload.has_ood;
+    scoreCache.value = {};
     visionMapStatus.value = `0 / ${vmProgressTotal.value} 프레임`;
 }
 
@@ -557,6 +599,12 @@ function onVMEpisodeFrame(payload) {
     // making a deep copy of every frame's PNGs.
     heatmapCache.value[payload.frame_idx] = payload.heatmaps || {};
     heatmapCache.value = { ...heatmapCache.value };
+    // success / ood 점수도 같은 프레임 키로 캐시(없으면 null).
+    scoreCache.value[payload.frame_idx] = {
+        success: payload.success ?? null,
+        ood: payload.ood ?? null,
+    };
+    scoreCache.value = { ...scoreCache.value };
     vmProgressDone.value += 1;
     if (vmProgressTotal.value > 0) {
         visionMapStatus.value = `${vmProgressDone.value} / ${vmProgressTotal.value} 프레임`;

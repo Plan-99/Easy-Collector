@@ -216,6 +216,17 @@ def _enqueue_training(curriculum, group, stage, socketio_instance, app=None):
         # 경우 등) 언더트레이닝 됨 — 합리적 기본값으로 floor. 명시값이 있으면 존중.
         if not train_settings.get('num_epochs'):
             train_settings = {**train_settings, 'num_epochs': 5000}
+        # has_succeed(= action 에 succeed 토큰 +1 dim) 는 **모델 아키텍처**를 결정한다.
+        # stage graduation 은 load_model(=old)에서 모델을 그대로 이어 학습하므로 새 cp 의
+        # action dim 도 부모와 같다. 그런데 train_settings 를 블록 conf 에서만 가져오면,
+        # 블록 conf 에 has_succeed 가 없을 때 새 cp 의 메타데이터에서 누락된다(모델은
+        # succeed 토큰을 가졌는데 has_succeed=False 로 기록) → 추론 시 action dim 불일치로
+        # 잘못 거절(checkpoint_test 의 EE dim 가드). 블록 conf 에 명시가 없으면 부모(old)
+        # 에서 상속해 모델과 메타데이터를 일치시킨다.
+        if 'has_succeed' not in train_settings:
+            _parent_ts = old._get_json_field('train_settings') or {}
+            if isinstance(_parent_ts, dict) and 'has_succeed' in _parent_ts:
+                train_settings = {**train_settings, 'has_succeed': _parent_ts['has_succeed']}
         server_url = train_settings.get('server_url', '') or ''
         # server_url 이 비면 로컬 training_server(127.0.0.1:5100) 가 떠 있을 때 기본값
         # 으로 채운다 — 안 그러면 enqueue 가 스킵돼 자동 학습이 영영 안 걸린다.

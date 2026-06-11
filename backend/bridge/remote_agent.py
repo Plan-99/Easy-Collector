@@ -403,9 +403,22 @@ class RemoteAgent:
         """
         client = get_bridge_client()
         try:
-            stream = client.agent.SubscribeRobotState(
+            # stream 채널 전용 스텁 — control 채널(ListProcesses/Move* 등)이 누적된
+            # robot-state 스트림으로 wedge 되지 않게 격리.
+            stream = client.agent_stream.SubscribeRobotState(
                 pb.SubscribeRequest(agent_id=self._agent_id)
             )
+            # stop_flag 가 서면 다음 메시지를 기다리지 않고 즉시 스트림을 끊는다.
+            # (ros2 executor 가 wedge 돼 server 가 더 이상 안 보낼 때 for 루프가
+            # 영영 매달려 스트림이 누수되는 것을 방지.)
+            def _watch_stop():
+                while not stop_flag.get('stop'):
+                    time.sleep(0.2)
+                try:
+                    stream.cancel()
+                except Exception:
+                    pass
+            threading.Thread(target=_watch_stop, daemon=True).start()
             for state in stream:
                 if stop_flag.get('stop'):
                     break

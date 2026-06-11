@@ -31,6 +31,12 @@
             "type": "command",
             "command": "bash .claude/hooks/frontend-ui-test-reminder.sh",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/quick-apply-sync.sh",
+            "timeout": 60,
+            "statusMessage": "Syncing to runtime (quick_apply)…"
           }
         ]
       }

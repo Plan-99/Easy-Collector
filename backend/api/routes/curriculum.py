@@ -38,6 +38,20 @@ def _rollout_process_name(curriculum_id):
     return f'curriculum_rollout_{curriculum_id}'
 
 
+def _group_awaiting(obj, block_id):
+    """task_control 에서 이 block_id 의 교정 결정을 기다리는 group_id 를 역조회.
+
+    동시 진행 플랜에선 각 그룹이 ``awaiting_correction_by_group: {group_id:
+    block_id}`` 로 자기 교정 대기 블록을 표시한다. block_id 는 그룹 간 유일하므로
+    이를 키로 어느 그룹이 기다리는지 찾는다. 기다리는 그룹이 없으면 None(=stale).
+    """
+    m = obj.get('awaiting_correction_by_group') or {}
+    for gid, bid in m.items():
+        if bid == block_id:
+            return gid
+    return None
+
+
 def _next_group_color(curriculum):
     """이미 쓰인 색을 피해 팔레트에서 다음 색을 고른다."""
     used = {g.color for g in curriculum.checkpoint_groups if g.color}
@@ -848,10 +862,14 @@ def resume_after_failure(id):
     #      stale(이미 소비됐거나 다른 블록) → 무시. 소비 후 늦게 온 신호 차단.
     #  (2) non-override: 이미 명시적 결정(next/abort)이 들어왔으면 'fallback' 으로
     #      덮어쓰지 않는다. 반대로 'fallback' 위에 'next' 는 덮을 수 있다.
-    awaiting = obj.get('awaiting_correction')
-    if awaiting != block_id:
+    # 동시 진행 플랜 — 그룹별로 "지금 이 block_id 의 결정을 기다리는 중"인지 본다.
+    # (awaiting_correction_by_group: {group_id: block_id}). block_id 는 그룹 간
+    # 유일하므로 어느 그룹이 이 블록을 기다리는지 역조회한다.
+    awaiting_gid = _group_awaiting(obj, block_id)
+    if awaiting_gid is None:
+        awaiting_map = obj.get('awaiting_correction_by_group') or {}
         return {'status': 'success',
-                'message': f'ignored stale signal (not awaiting {block_id!r}, awaiting={awaiting!r})'}, 200
+                'message': f'ignored stale signal (not awaiting {block_id!r}, awaiting={awaiting_map!r})'}, 200
     decisions = obj.setdefault('correction_decisions', {})
     existing = decisions.get(block_id)
     if existing in ('next', 'abort') and action == 'fallback':
@@ -886,6 +904,14 @@ def stop_current_block(id):
     obj = proc.get('obj') if isinstance(proc, dict) else None
     if obj is None:
         return {'status': 'error', 'message': 'Internal: no task_control'}, 500
+    # 동시 진행 플랜 — body 에 group_id 가 오면 해당 플랜의 체크포인트만 겨냥한다
+    # (stop_current_block_by_group). group_id 가 없으면(단일 플랜) legacy 전역
+    # 플래그로 현재 추론 중인 체크포인트가 소비한다.
+    body = request.json or {}
+    group_id = body.get('group_id')
+    if group_id is not None:
+        obj.setdefault('stop_current_block_by_group', {})[group_id] = True
+        return {'status': 'success', 'message': f'Block stop requested (group {group_id})'}, 200
     obj['stop_current_block'] = True
     return {'status': 'success', 'message': 'Block stop requested'}, 200
 
@@ -921,12 +947,13 @@ def rewind_seek(id):
         step = int(step)
     except (TypeError, ValueError):
         return {'status': 'error', 'message': 'step must be an integer'}, 400
-    awaiting = obj.get('awaiting_correction')
-    if awaiting != block_id:
+    awaiting_gid = _group_awaiting(obj, block_id)
+    if awaiting_gid is None:
+        awaiting_map = obj.get('awaiting_correction_by_group') or {}
         return {'status': 'success',
-                'message': f'ignored stale rewind (not awaiting {block_id!r}, awaiting={awaiting!r})'}, 200
-    obj['rewind_seek'] = step
-    return {'status': 'success', 'message': f'rewind seek to {step}'}, 200
+                'message': f'ignored stale rewind (not awaiting {block_id!r}, awaiting={awaiting_map!r})'}, 200
+    obj.setdefault('rewind_seek_by_group', {})[awaiting_gid] = step
+    return {'status': 'success', 'message': f'rewind seek to {step} (group {awaiting_gid})'}, 200
 
 
 @curriculum_bp.route('/curriculum/<id>/:rollout_status', methods=['GET'])

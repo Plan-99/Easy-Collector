@@ -225,6 +225,40 @@ def _rewind_to_step(timesteps, agents, k, duration=0.4):
         time.sleep(0.02)
 
 
+# ── 동시 진행 플랜 교정 coordination ───────────────────────────────────────
+# 두 플랜(그룹)이 병렬 실행될 때, 한쪽이 체크포인트 교정(teleop)에 들어가면
+# 작업자는 한 번에 한 팔만 다룰 수 있으므로 교정은 직렬화돼야 한다. 교정 중인
+# 그룹을 ``task_control['correcting_groups']`` (set of group_id) 로 표시하고,
+# 다른 그룹의 체크포인트 추론 폴링이 이를 보고 자기 추론을 pause(현재 자세 유지)
+# 한다. 교정이 끝나 set 에서 빠지면 멈췄던 지점에서 그대로 추론을 재개한다.
+# correcting_groups 는 여러 그룹 스레드가 동시에 만지므로 ctx['lock'] 으로 보호.
+def _set_correcting(ctx, task_control, group_id, active):
+    with ctx['lock']:
+        s = task_control.setdefault('correcting_groups', set())
+        if active:
+            s.add(group_id)
+        else:
+            s.discard(group_id)
+
+
+def _others_correcting(ctx, task_control, group_id):
+    """이 그룹이 아닌 다른 그룹이 현재 교정 중이면 True → 추론 pause 대상."""
+    with ctx['lock']:
+        s = task_control.get('correcting_groups') or ()
+        return any(g != group_id for g in tuple(s))
+
+
+def _clear_group_correction_state(ctx, task_control, group_id):
+    """그룹의 교정 pause 상태(awaiting/rewind/correcting)를 한 번에 정리."""
+    with ctx['lock']:
+        (task_control.get('awaiting_correction_by_group') or {}).pop(group_id, None)
+        (task_control.get('rewind_seek_by_group') or {}).pop(group_id, None)
+        (task_control.get('rewind_step_by_group') or {}).pop(group_id, None)
+        s = task_control.get('correcting_groups')
+        if s is not None:
+            s.discard(group_id)
+
+
 def _run_checkpoint_recorded(block, ctx, task_control, group_id):
     """체크포인트 블록을 녹화하며 실행하고, 성공/실패 + 녹화 버퍼를 ctx 에 적재.
 
@@ -321,13 +355,37 @@ def _run_checkpoint_recorded(block, ctx, task_control, group_id):
         while not force_dagger:
             if task_control['stop']:
                 break
-            # 사용자가 Monitor 다이얼로그에서 Stop 을 누르면 ``:stop_current_block``
-            # API 가 task_control 에 키를 박는다 (ctx 는 process_manager 가
-            # 외부에서 못 잡으므로 task_control 채널을 빌려쓰는 구조).
+            # 동시 진행 플랜 coordination — 다른 그룹이 교정 중이면 이 추론을
+            # 일시정지(로봇 현재 자세 유지). pause 동안은 done/max_steps 판정도
+            # 멈춰, 교정이 끝나면 멈췄던 그 지점에서 그대로 이어서 추론한다.
+            if _others_correcting(ctx, task_control, group_id):
+                if not sub_control.get('pause'):
+                    sub_control['pause'] = True
+                    _emit(socketio, 'curriculum_block_paused', {
+                        'curriculum_id': ctx.get('curriculum_id'),
+                        'group_id': group_id, 'block_id': block_id, 'paused': True,
+                    })
+                time.sleep(0.1)
+                continue
+            if sub_control.get('pause'):
+                sub_control['pause'] = False
+                _emit(socketio, 'curriculum_block_paused', {
+                    'curriculum_id': ctx.get('curriculum_id'),
+                    'group_id': group_id, 'block_id': block_id, 'paused': False,
+                })
+            # 사용자가 Monitor 의 "실패처리" 를 누르면 ``:stop_current_block`` API 가
+            # task_control 에 키를 박는다 (ctx 는 process_manager 가 외부에서 못
+            # 잡으므로 task_control 채널을 빌려쓰는 구조). 동시 플랜에선 그룹별 키
+            # (stop_current_block_by_group)로 해당 플랜만 정확히 겨냥하고, group_id
+            # 없이 온 legacy 전역 신호(단일 플랜)는 fallback 으로 같이 본다.
             # 이는 max_steps 초과와 같은 의미의 "실패" 로 처리.
-            if task_control.get('stop_current_block'):
+            _scb = task_control.get('stop_current_block_by_group') or {}
+            if _scb.get(group_id) or task_control.get('stop_current_block'):
                 user_stopped_block = True
-                task_control['stop_current_block'] = False  # 플래그 소비
+                if group_id in _scb:
+                    _scb[group_id] = False  # 그룹별 플래그 소비
+                if task_control.get('stop_current_block'):
+                    task_control['stop_current_block'] = False  # legacy 전역 소비
                 break
             if sub_control.get('done'):
                 success = True
@@ -442,15 +500,20 @@ def _run_checkpoint_recorded(block, ctx, task_control, group_id):
             # task_control['correction_decisions'][block_id] 가 set 될 때까지 대기.
             # 0.5s 간격 polling — task_control['stop'] 체크 같이.
             decisions = task_control.setdefault('correction_decisions', {})
+            # 동시 진행 플랜 coordination — 이 그룹이 교정에 들어감을 표시한다. 다른
+            # 그룹의 체크포인트 추론 폴링이 이를 보고 자기 추론을 pause(현재 자세
+            # 유지)하고, 이 교정이 끝나면(아래 정리에서 set 해제) 그대로 재개한다.
+            _set_correcting(ctx, task_control, group_id, True)
             # resume_after_failure 가 "지금 이 블록의 결정을 기다리는 중"인지 알 수
-            # 있도록 마커 노출. 이중 클라이언트의 stale/중복 신호를 라우트에서 걸러낸다.
-            task_control['awaiting_correction'] = block_id
+            # 있도록 마커 노출(그룹별). 이중 클라이언트의 stale/중복 신호를 라우트에서
+            # 걸러내고, 동시 플랜에서 두 그룹의 교정 대기가 충돌하지 않게 한다.
+            task_control.setdefault('awaiting_correction_by_group', {})[group_id] = block_id
             # Rewind(되감기): 실패 자세에서 사용자가 ←/→ 로 체크포인트가 실행한 과거
             # step 으로 팔을 되감을 수 있게 한다. 프론트가 절대 step K 를 :rewind_seek
             # 로 보내면 여기서 timesteps[K] 의 qpos 로 각 agent 를 move_to 한다. 교정
             # 레코딩은 forceNoHomepose 라 되감은 자세에서 그대로 시작된다.
             rewind_total = len(timesteps)
-            task_control['rewind_step'] = max(0, rewind_total - 1)
+            task_control.setdefault('rewind_step_by_group', {})[group_id] = max(0, rewind_total - 1)
             _emit(socketio, 'curriculum_rewind_ready', {
                 'curriculum_id': ctx.get('curriculum_id'),
                 'group_id': group_id,
@@ -459,12 +522,10 @@ def _run_checkpoint_recorded(block, ctx, task_control, group_id):
             })
             while block_id not in decisions:
                 if task_control['stop']:
-                    task_control['awaiting_correction'] = None
-                    task_control.pop('rewind_seek', None)
-                    task_control.pop('rewind_step', None)
+                    _clear_group_correction_state(ctx, task_control, group_id)
                     print(f"[curriculum] [{group_id}] pause aborted by stop")
                     return
-                seek = task_control.pop('rewind_seek', None)
+                seek = (task_control.get('rewind_seek_by_group') or {}).pop(group_id, None)
                 if seek is not None and rewind_total > 0:
                     # 되감기 처리 중 어떤 오류가 나도 pause 를 유지해야 한다. 예외가
                     # 밖으로 새면 _dispatch_block 이 블록 실패로 보고 fallback 으로
@@ -473,9 +534,9 @@ def _run_checkpoint_recorded(block, ctx, task_control, group_id):
                         try:
                             k = max(0, min(int(seek), rewind_total - 1))
                         except (TypeError, ValueError):
-                            k = task_control.get('rewind_step', rewind_total - 1)
+                            k = (task_control.get('rewind_step_by_group') or {}).get(group_id, rewind_total - 1)
                         _rewind_to_step(timesteps, agents, k)
-                        task_control['rewind_step'] = k
+                        task_control.setdefault('rewind_step_by_group', {})[group_id] = k
                         _emit(socketio, 'curriculum_rewind_position', {
                             'curriculum_id': ctx.get('curriculum_id'),
                             'group_id': group_id,
@@ -495,9 +556,9 @@ def _run_checkpoint_recorded(block, ctx, task_control, group_id):
             while time.time() < _grace_end and not task_control['stop']:
                 time.sleep(0.1)
             action = decisions.pop(block_id, 'fallback')
-            task_control['awaiting_correction'] = None
-            task_control.pop('rewind_seek', None)
-            task_control.pop('rewind_step', None)
+            # 교정 종료 — 그룹별 awaiting/rewind 정리 + correcting set 에서 빠진다.
+            # 이 시점에 다른 그룹의 추론 pause 가 자동 해제되어 그대로 재개된다.
+            _clear_group_correction_state(ctx, task_control, group_id)
             print(f"[curriculum] [{group_id}] user decision: {action!r}")
             if action == 'fallback':
                 _thread_local.jump_to_block_id = fb_id
@@ -533,6 +594,7 @@ def _dispatch_block(block, ctx, task_control, group_id, record_checkpoints=True)
         # (예: 교정 중 Space 연타로 포커스된 'stop' 버튼이 우발적으로 눌려 신호가
         #  남아도, 다음 체크포인트가 그걸 물려받아 곧바로 실패하던 문제 차단.)
         task_control['stop_current_block'] = False
+        task_control.setdefault('stop_current_block_by_group', {})[group_id] = False
         cp_id = block.get('checkpoint_id')
         target_cps = ctx['target_cp_by_group'].get(group_id, set())
         if record_checkpoints and cp_id in target_cps:

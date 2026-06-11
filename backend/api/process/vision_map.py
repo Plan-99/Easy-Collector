@@ -43,7 +43,7 @@ from ...utils.lerobot_io import (
 # scrub frames smoothly.
 # ---------------------------------------------------------------------------
 _CACHE: Dict[str, Any] = {'ckpt_id': None, 'policy': None, 'preprocessor': None,
-                          'image_resolution': None, 'device': None}
+                          'postprocessor': None, 'image_resolution': None, 'device': None}
 
 
 def _device() -> torch.device:
@@ -51,10 +51,15 @@ def _device() -> torch.device:
 
 
 def _load_policy(checkpoint: dict, policy_obj: dict):
-    """Return (policy, preprocessor, image_resolution) — cached per checkpoint."""
+    """Return (policy, preprocessor, postprocessor, image_resolution) — cached per checkpoint.
+
+    postprocessor 는 succeed 토큰을 추론과 동일하게 unnormalize 해 success score 를
+    내기 위해 같이 반환한다(없으면 None).
+    """
     ckpt_id = str(checkpoint['id'])
     if _CACHE['ckpt_id'] == ckpt_id and _CACHE['policy'] is not None:
-        return _CACHE['policy'], _CACHE['preprocessor'], _CACHE['image_resolution']
+        return (_CACHE['policy'], _CACHE['preprocessor'],
+                _CACHE.get('postprocessor'), _CACHE['image_resolution'])
 
     ckpt_dir = resolve_checkpoint_dir(checkpoint['id'])
     if not os.path.isdir(ckpt_dir):
@@ -83,15 +88,16 @@ def _load_policy(checkpoint: dict, policy_obj: dict):
     device = _device()
     policy = ACTPolicy.from_pretrained(ckpt_dir).to(device)
     policy.eval()
-    preprocessor, _ = make_easytrainer_processors(
+    preprocessor, postprocessor = make_easytrainer_processors(
         policy_type='ACT', cfg=policy.config, pretrained_path=ckpt_dir,
     )
 
     _CACHE.update({
         'ckpt_id': ckpt_id, 'policy': policy, 'preprocessor': preprocessor,
+        'postprocessor': postprocessor,
         'image_resolution': image_resolution, 'device': device,
     })
-    return policy, preprocessor, image_resolution
+    return policy, preprocessor, postprocessor, image_resolution
 
 
 # ---------------------------------------------------------------------------
@@ -387,7 +393,7 @@ def compute_vision_map(checkpoint: dict, policy_obj: dict,
     if method not in ('attention', 'gradcam'):
         raise ValueError(f'Unknown vision map method: {method}')
 
-    policy, preprocessor, image_resolution = _load_policy(checkpoint, policy_obj)
+    policy, preprocessor, _postprocessor, image_resolution = _load_policy(checkpoint, policy_obj)
     frames, state, _info = _read_single_frame(dataset_id, episode_idx, frame_idx)
     if not frames:
         raise RuntimeError('No camera frames decoded at this index')
@@ -565,23 +571,105 @@ def compute_vision_map_from_preprocessed_batch(
     return out
 
 
-def _compute_one_frame(policy, preprocessor, image_resolution, device,
+def _load_ood_image_ref(ckpt_dir: str, device: torch.device) -> Optional[dict]:
+    """checkpoint 의 ``ood_features.npz`` 에서 image OOD reference 를 로드.
+
+    반환 {'feats': (N, D) cuda tensor, 'dist_sorted': sorted 1D np array | None} 또는
+    파일/키 없으면 None (→ OOD score 표시 안 함). 추론(checkpoint_test)과 동일 포맷.
+    """
+    try:
+        path = os.path.join(ckpt_dir, 'ood_features.npz')
+        if not os.path.exists(path):
+            return None
+        data = np.load(path)
+        if 'image_features' not in data:
+            return None
+        feats = torch.from_numpy(data['image_features']).float().to(device)
+        dist_sorted = data['image_dist_sorted'] if 'image_dist_sorted' in data else None
+        return {'feats': feats, 'dist_sorted': dist_sorted}
+    except Exception as e:
+        print(f'[vision_map] OOD ref load failed: {e}')
+        return None
+
+
+def _score_frame(policy, preprocessed_batch: dict, postprocessor,
+                 has_succeed: bool, ood_ref: Optional[dict],
+                 img_keys: List[str]):
+    """이미 preprocess 된 batch 로 (success_score, ood_score) 계산. 둘 다 실패/미가용
+    시 None 반환 — heatmap 흐름을 절대 깨지 않도록 전부 graceful.
+
+    - success: 정책 action chunk 의 succeed 토큰(마지막 dim, chunk[0]) 을 추론과 동일
+      하게 postprocessor 로 unnormalize 한 값 [0~1 근처]. has_succeed 인 경우만.
+    - ood: 현재 image backbone latent vs 학습 reference 의 5-NN 거리 → reference 분포
+      백분위 [0(in-dist)~1(far OOD)]. ood_features.npz 있을 때만.
+    """
+    success = None
+    ood = None
+    # success score (succeed 토큰)
+    if has_succeed:
+        try:
+            with torch.no_grad():
+                act = policy.predict_action_chunk(preprocessed_batch)
+                if postprocessor is not None:
+                    try:
+                        act = postprocessor(act)
+                    except Exception:
+                        pass  # unnormalize 실패 시 정규화 값 그대로 사용
+                a = act.detach().float().cpu().numpy()
+                a = a.reshape(-1, a.shape[-1])  # (chunk, dim)
+                success = round(float(a[0, -1]), 4)  # chunk[0] 의 succeed 토큰
+        except Exception as e:
+            print(f'[vision_map] success score skipped: {e}')
+    # ood score (image latent percentile)
+    if ood_ref is not None:
+        try:
+            from .checkpoint_test import compute_image_latent
+            with torch.no_grad():
+                lat = compute_image_latent(policy, preprocessed_batch, img_keys)
+            if lat is not None and lat.shape[1] == ood_ref['feats'].shape[1]:
+                lat = lat.float().to(ood_ref['feats'].device)
+                kk = min(5, ood_ref['feats'].shape[0])
+                rd = float(torch.cdist(lat, ood_ref['feats']).topk(kk, largest=False).values.mean())
+                ds = ood_ref.get('dist_sorted')
+                if ds is not None and len(ds) > 0:
+                    ii = int(np.searchsorted(ds, rd))
+                    ood = round(min(ii / len(ds), 1.0), 3)
+                else:
+                    ood = round(rd, 4)
+        except Exception as e:
+            print(f'[vision_map] ood score skipped: {e}')
+    return success, ood
+
+
+def _compute_one_frame(policy, preprocessor, postprocessor, image_resolution, device,
                        frames_bgr: Dict[str, np.ndarray],
                        state_np: Optional[np.ndarray],
-                       method: str) -> Dict[str, str]:
-    """Compute heatmap PNGs for a single frame's camera dict."""
+                       method: str,
+                       has_succeed: bool = False,
+                       ood_ref: Optional[dict] = None,
+                       img_keys: Optional[List[str]] = None):
+    """Compute (heatmap PNGs, success_score, ood_score) for a single frame.
+
+    batch 를 한 번만 preprocess 해서 heatmap 과 score 계산에 함께 쓴다 (generate 와
+    동일 경로 보장 + 중복 전처리 회피). 반환: (heatmaps, success, ood).
+    """
     batch, ordered = _build_batch(policy, frames_bgr, state_np, image_resolution, device)
+    # preprocess once — heatmap helper 와 scoring 이 같은 normalized batch 를 공유.
+    b = preprocessor(batch) if preprocessor is not None else batch
     if method == 'attention':
-        attn, cam_shapes = _compute_attention_maps(policy, batch, preprocessor)
+        attn, cam_shapes = _compute_attention_maps(policy, b, preprocessor=None)
         per_cam = _split_attention_per_camera(attn, cam_shapes, policy)
     else:
-        per_cam = _compute_gradcam_maps(policy, batch, preprocessor)
+        per_cam = _compute_gradcam_maps(policy, b, preprocessor=None)
     out: Dict[str, str] = {}
     for sensor_name, hm in zip(ordered, per_cam):
         orig = frames_bgr[sensor_name]
         png_b64 = _heatmap_to_rgba_png(hm, (orig.shape[0], orig.shape[1]))
         out[sensor_name] = 'data:image/png;base64,' + png_b64
-    return out
+    # compute_image_latent 는 full 'observation.images.*' 키를 기대(센서명 아님).
+    _ik = img_keys if img_keys else list(policy.config.image_features)
+    success, ood = _score_frame(policy, b, postprocessor, has_succeed, ood_ref, _ik)
+    return out, success, ood
 
 
 def compute_vision_map_episode_stream(
@@ -619,10 +707,28 @@ def compute_vision_map_episode_stream(
 
     caps: Dict[str, Any] = {}
     try:
-        policy, preprocessor, image_resolution = _load_policy(checkpoint, policy_obj)
+        policy, preprocessor, postprocessor, image_resolution = _load_policy(checkpoint, policy_obj)
         device = _device()
+        # success/ood score 준비(1회). has_succeed 는 train_settings 에서, OOD reference 는
+        # checkpoint dir 의 ood_features.npz 에서. 둘 다 없으면 해당 score 는 null 로 나가
+        # heatmap 만 표시된다(기존 동작 보존).
+        ts = checkpoint.get('train_settings') or {}
+        if isinstance(ts, str):
+            try:
+                import json as _json
+                ts = _json.loads(ts)
+            except (ValueError, TypeError):
+                ts = {}
+        has_succeed = bool(ts.get('has_succeed', False))
+        ood_ref = _load_ood_image_ref(resolve_checkpoint_dir(checkpoint['id']), device)
+        img_keys = list(policy.config.image_features)
         total, info, chunk = _episode_total_frames(dataset_id, episode_idx)
-        emit('vision_map_episode_start', {'total_frames': int(total)})
+        emit('vision_map_episode_start', {
+            'total_frames': int(total),
+            # 프론트가 점수 컬럼을 띄울지 미리 알 수 있게 가용 여부 전달.
+            'has_success': has_succeed,
+            'has_ood': ood_ref is not None,
+        })
 
         caps = _open_episode_videos(dataset_id, episode_idx, info, chunk)
         if not caps:
@@ -647,9 +753,10 @@ def compute_vision_map_episode_stream(
 
             state_vec = states[frame_idx] if (states is not None and frame_idx < len(states)) else None
             try:
-                heatmaps = _compute_one_frame(
-                    policy, preprocessor, image_resolution, device,
+                heatmaps, success, ood = _compute_one_frame(
+                    policy, preprocessor, postprocessor, image_resolution, device,
                     frames_bgr, state_vec, method,
+                    has_succeed=has_succeed, ood_ref=ood_ref, img_keys=img_keys,
                 )
             except Exception as e:
                 print(f'[vision_map_episode] frame {frame_idx} failed: {e}')
@@ -657,6 +764,7 @@ def compute_vision_map_episode_stream(
 
             emit('vision_map_episode_frame', {
                 'frame_idx': int(frame_idx), 'heatmaps': heatmaps,
+                'success': success, 'ood': ood,
             })
             computed += 1
 

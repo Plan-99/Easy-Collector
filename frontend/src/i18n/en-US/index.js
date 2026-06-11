@@ -980,6 +980,8 @@ export default {
   currStopRollout: 'Stop rollout',
   currStopAll: 'End all',
   currHandleFailure: 'Handle failure',
+  currPausedForCorrection: 'Paused for correction',
+  currStopAllHintMulti: 'Concurrent plans — End all stops every plan.',
   currStopNonCpHint: 'Non-checkpoint block — stopping aborts the rollout immediately (no correction dialog).',
   currMaxStepsExceeded: 'Max steps exceeded',
   currCorrectionTitle: 'Checkpoint Failed',
@@ -1172,6 +1174,10 @@ export default {
 
   // ───── Vision Map (EpisodeViewer overlay) ─────
   visionMap: 'Vision Map',
+  oodScore: 'OOD',
+  oodScoreHint: 'How OOD the image is vs the training distribution (0 = in-dist, 1 = far OOD)',
+  successScore: 'Success',
+  successScoreHint: "Policy's succeed-token value (>0.5 predicts success)",
   visionMapSettings: 'Vision Map Settings',
   visionMapMethod: 'Method',
   visionMapNoCheckpoints: 'No finished ACT checkpoints for this workspace',

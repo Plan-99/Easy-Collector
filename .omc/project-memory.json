@@ -250,8 +250,8 @@
   "hotPaths": [
     {
       "path": "frontend/src/pages/v2/CurriculumPage.vue",
-      "accessCount": 35,
-      "lastAccessed": 1781090382438,
+      "accessCount": 54,
+      "lastAccessed": 1781162033807,
       "type": "file"
     },
     {
@@ -279,27 +279,33 @@
       "type": "file"
     },
     {
+      "path": "backend/api/app.py",
+      "accessCount": 11,
+      "lastAccessed": 1781151515606,
+      "type": "file"
+    },
+    {
+      "path": "backend/api/routes/tutorial.py",
+      "accessCount": 9,
+      "lastAccessed": 1781152952748,
+      "type": "file"
+    },
+    {
+      "path": "backend/configs/sim_devices.py",
+      "accessCount": 9,
+      "lastAccessed": 1781152963798,
+      "type": "file"
+    },
+    {
       "path": "backend/api/routes/planner.py",
       "accessCount": 8,
       "lastAccessed": 1781084629954,
       "type": "file"
     },
     {
-      "path": "backend/configs/sim_devices.py",
-      "accessCount": 8,
-      "lastAccessed": 1781087334913,
-      "type": "file"
-    },
-    {
-      "path": "backend/api/routes/tutorial.py",
-      "accessCount": 7,
-      "lastAccessed": 1781087350481,
-      "type": "file"
-    },
-    {
-      "path": "backend/api/app.py",
+      "path": "backend/configs/tutorial_defaults.py",
       "accessCount": 6,
-      "lastAccessed": 1781087269927,
+      "lastAccessed": 1781152902038,
       "type": "file"
     },
     {
@@ -309,21 +315,15 @@
       "type": "file"
     },
     {
-      "path": "backend/configs/tutorial_defaults.py",
+      "path": "backend/configs/dual_arm_plank_defaults.py",
       "accessCount": 5,
-      "lastAccessed": 1781087248357,
+      "lastAccessed": 1781152967663,
       "type": "file"
     },
     {
       "path": "backend/configs/dual_arm_assembly_defaults.py",
       "accessCount": 4,
       "lastAccessed": 1780994713414,
-      "type": "file"
-    },
-    {
-      "path": "backend/configs/dual_arm_plank_defaults.py",
-      "accessCount": 4,
-      "lastAccessed": 1781087309483,
       "type": "file"
     },
     {
@@ -354,6 +354,12 @@
       "path": "backend/api/routes/dual_arm_plank.py",
       "accessCount": 3,
       "lastAccessed": 1781087334696,
+      "type": "file"
+    },
+    {
+      "path": "backend/api/routes/sensor.py",
+      "accessCount": 3,
+      "lastAccessed": 1781152933889,
       "type": "file"
     },
     {
@@ -405,9 +411,27 @@
       "type": "file"
     },
     {
+      "path": "backend/database/models/robot_model.py",
+      "accessCount": 2,
+      "lastAccessed": 1781151851201,
+      "type": "file"
+    },
+    {
+      "path": "backend/database/models/sensor_model.py",
+      "accessCount": 2,
+      "lastAccessed": 1781152875214,
+      "type": "file"
+    },
+    {
+      "path": "backend/configs/global_configs.py",
+      "accessCount": 2,
+      "lastAccessed": 1781152881120,
+      "type": "file"
+    },
+    {
       "path": "backend/configs/sim_defaults.py",
-      "accessCount": 1,
-      "lastAccessed": 1780994300395,
+      "accessCount": 2,
+      "lastAccessed": 1781152902030,
       "type": "file"
     },
     {
@@ -432,24 +456,6 @@
       "path": "backend/database/models/__init__.py",
       "accessCount": 1,
       "lastAccessed": 1780994320422,
-      "type": "file"
-    },
-    {
-      "path": "backend/configs/global_configs.py",
-      "accessCount": 1,
-      "lastAccessed": 1780994322237,
-      "type": "file"
-    },
-    {
-      "path": "backend/database/models/robot_model.py",
-      "accessCount": 1,
-      "lastAccessed": 1780994322314,
-      "type": "file"
-    },
-    {
-      "path": "backend/database/models/sensor_model.py",
-      "accessCount": 1,
-      "lastAccessed": 1780994322521,
       "type": "file"
     },
     {
@@ -504,12 +510,6 @@
       "path": "backend/api/routes/assembly.py",
       "accessCount": 1,
       "lastAccessed": 1780994375783,
-      "type": "file"
-    },
-    {
-      "path": "backend/api/routes/sensor.py",
-      "accessCount": 1,
-      "lastAccessed": 1780994379096,
       "type": "file"
     },
     {

@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"cd /home/airlab/Easy-Collector\\necho \\\"=== jq 있나 ===\\\"; which jq || echo \\\"NO JQ\\\"\\necho \\\"=== jq 버전 ===\\\"; jq --version 2>&1\\necho \\\"=== 직접 테스트 ===\\\"\\nP='{\\\"tool_input\\\":{\\\"file_path\\\":\\\"...",
+  "error": "Exit code 127\n=== jq 있나 ===\nNO JQ\n=== jq 버전 ===\n/bin/bash: 줄 10: jq: 명령어를 찾을 수 없음\n=== 직접 테스트 ===\nexpr1:\n/bin/bash: 줄 13: jq: 명령어를 찾을 수 없음\nexpr2 (stderr 보기):\n/bin/bash: 줄 14: jq: 명령어를 찾을 수 없음\nexprA:\n/bin/bash: 줄 15: jq: 명령어를 찾을 수 없음",
+  "timestamp": "2026-06-11T03:05:36.967Z",
+  "retry_count": 1
+}

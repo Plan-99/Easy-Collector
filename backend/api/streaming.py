@@ -51,6 +51,10 @@ class _TopicFrameSource:
         self._frame_seq = 0          # 마지막 frame 의 단조 시퀀스 (track 측 cache 비교용)
         self._refs = 0
         self._running = True
+        # 활성 SubscribeImage 호출 핸들. release() 가 능동 .cancel() 하기 위해 보관.
+        # 이게 없으면 topic 이 프레임 발행을 멈췄을 때 _loop 의 for 문이 다음
+        # 프레임을 영영 기다리며 break 하지 못해 gRPC stream 이 누수된다.
+        self._call = None
         # gRPC SubscribeImage 의 stream_id 는 **이 source 인스턴스마다 고유**해야 한다.
         # ros2 StreamingService 는 stream_id 를 키로 구독 lifecycle(refcount)을 관리하는데,
         # 고정 'src-<topic>' 를 쓰면 view churn 으로 옛 stream 종료와 새 stream 시작이
@@ -69,7 +73,8 @@ class _TopicFrameSource:
                 msg_type=self.msg_type,
                 stream_id=self._stream_id,
             )
-            for image_frame in self._grpc_stub.SubscribeImage(request):
+            self._call = self._grpc_stub.SubscribeImage(request)
+            for image_frame in self._call:
                 if not self._running:
                     break
                 try:
@@ -109,6 +114,14 @@ class _TopicFrameSource:
             if src._refs <= 0:
                 cls._instances_by_topic.pop(src.topic, None)
                 src._running = False
+                # 능동 취소 — topic 이 프레임을 안 보내도 _loop 가 즉시 빠져나오게
+                # 해서 gRPC server-stream(HTTP/2 stream)을 확실히 닫는다.
+                call = src._call
+                if call is not None:
+                    try:
+                        call.cancel()
+                    except Exception:
+                        pass
                 print(f"[GRPCStream:src] released last ref for {src.topic}")
 
 

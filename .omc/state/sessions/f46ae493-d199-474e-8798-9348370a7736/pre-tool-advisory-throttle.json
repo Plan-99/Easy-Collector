@@ -1,18 +1,18 @@
 {
   "version": 1,
   "entries": {
-    "4f7a67fba0a8473e9883d9e8dffbb2d72e00a4a1eeb4fa80cb14213b167dc90f": {
-      "last_emitted_at_ms": 1781146673979,
-      "message": "Mark todos in_progress BEFORE starting, completed IMMEDIATELY after finishing."
-    },
     "79a93d4a2f8f50b95f852280616242fee1855dc99a3c75211917f55e72e95fae": {
-      "last_emitted_at_ms": 1781146440529,
+      "last_emitted_at_ms": 1781162037608,
       "message": "Use parallel execution for independent tasks. Use run_in_background for long operations (npm install, builds, tests)."
     },
     "466399dafa2d20f60587180bad0a07358eb7f2bce724df0ff682f038ad33f5ad": {
-      "last_emitted_at_ms": 1781143503125,
+      "last_emitted_at_ms": 1781162032231,
       "message": "Read multiple files in parallel when possible for faster analysis."
+    },
+    "2a3ea6566510542470c05603860d36040af8b0895436592dece01940695f19bb": {
+      "last_emitted_at_ms": 1781162030287,
+      "message": "Spawning agent: Explore (inherit) | Task: Analyze curriculum self-learning code"
     }
   },
-  "updated_at": "2026-06-11T02:57:53.979Z"
+  "updated_at": "2026-06-11T07:13:57.608Z"
 }

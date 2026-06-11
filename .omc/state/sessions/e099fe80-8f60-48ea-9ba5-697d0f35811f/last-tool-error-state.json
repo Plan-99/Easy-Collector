@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"docker exec easytrainer_backend bash -lc '\\npid=$(ps -eo pid,cmd | grep \\\"backend.api.app --debug\\\" | grep -v watchfiles | grep -v grep | head -1 | awk \\\"{print \\\\$1}\\\")\\nwhich py-spy >/de...",
+  "error": "Exit code 1\nError response from daemon: No such container: easytrainer_backend",
+  "timestamp": "2026-06-11T06:48:08.222Z",
+  "retry_count": 1
+}

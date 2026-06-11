@@ -825,6 +825,14 @@ def checkpoint_test(
         except Exception:
             pass
         while not task_control['stop']:
+            # 교정 코디네이션 pause — 동시 진행 플랜에서 다른 그룹이 교정(teleop)
+            # 중이면 이 체크포인트 추론을 일시정지한다. 새 action 을 발행하지 않아
+            # 로봇이 현재 자세를 유지하고, step_num/타이밍도 진행하지 않는다. 교정이
+            # 끝나(pause 해제)면 멈췄던 그 지점에서 그대로 이어서 추론한다.
+            # (pause 플래그는 curriculum_rollout 의 그룹 폴링 스레드가 set/clear.)
+            if task_control.get('pause'):
+                time.sleep(0.05)
+                continue
             # 이 step 의 succeed 라벨 (has_succeed 일 때만 갱신).
             _frame_succeed = 0.0
             # 이전엔 ``step_num % episode_len == 0`` 마다 강제로 homepose 로 복귀

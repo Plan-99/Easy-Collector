@@ -524,24 +524,74 @@
         <q-btn flat round dense icon="close" @click="showMonitor = false" />
       </div>
       <q-separator dark />
-      <!-- 현재 실행 중 블록 상세 — PlannerBlockCard 그대로 재사용. 동일 group
-           의 다른 블록은 카드에서 미니멀하게, 현재 블록만 우측 절반에 큼지막
-           하게. 카메라/로봇 보면서 어떤 블록인지 명확. -->
-      <div class="row items-stretch bg-dark q-pa-sm q-gutter-x-md">
-        <PlannerBlockCard
-          v-if="runningBlock"
-          :block="runningBlock"
-          :block-config="blockConfigs[runningBlock.type]"
-          :running="true"
-          :result="null"
-          :progress="blockProgressById[runningBlock.id]"
-          :workspace-name="monitorWorkspace?.name || ''"
-          :active="true"
-          width="220px"
-          badges-align="right"
-        />
-        <div v-else class="text-grey-5 q-py-md">
-          {{ t('currMonitorWaiting') }}
+      <!-- 동시 진행 플랜 분할 — plan group 별로 현재 블록·진행도·실패처리를 한 칸씩.
+           단일 플랜이면 한 칸(기존과 동일), 두 플랜이면 좌/우로 나뉜다. 각 칸에서
+           해당 플랜의 진행을 따로 보고, 체크포인트면 progress + 실패처리(그 플랜만
+           겨냥)가 뜬다. 한쪽이 교정 중이라 반대편 추론이 pause 되면 'paused' 뱃지. -->
+      <div class="row items-stretch bg-dark q-pa-sm q-col-gutter-md">
+        <div
+          v-for="gm in monitorGroups"
+          :key="gm.groupId"
+          :class="isMultiPlan ? 'col-6' : 'col-12'"
+        >
+          <div class="row items-center q-mb-xs">
+            <div v-if="isMultiPlan && gm.workspaceName" class="text-caption text-primary text-uppercase" style="letter-spacing: 1px;">
+              {{ gm.workspaceName }}
+            </div>
+            <q-space />
+            <q-badge v-if="gm.paused" color="amber" text-color="dark">
+              <q-icon name="pause" size="xs" class="q-mr-xs" />{{ t('currPausedForCorrection') }}
+            </q-badge>
+          </div>
+          <PlannerBlockCard
+            v-if="gm.block"
+            :block="gm.block"
+            :block-config="blockConfigs[gm.block.type]"
+            :running="!gm.paused"
+            :result="null"
+            :progress="blockProgressById[gm.block.id]"
+            :workspace-name="gm.workspaceName"
+            :active="!gm.paused"
+            width="220px"
+            badges-align="right"
+          />
+          <div v-else class="text-grey-5 q-py-md">
+            {{ t('currMonitorWaiting') }}
+          </div>
+          <!-- 진행도 + 실패처리 — 체크포인트 추론 중인 플랜만. -->
+          <div v-if="gm.block" class="q-mt-sm">
+            <template v-if="gm.isCheckpoint">
+              <div class="row items-center q-mb-xs">
+                <div class="text-caption text-grey-4">
+                  {{ gm.progress.step }} / {{ gm.progress.maxSteps || '∞' }}
+                </div>
+                <q-space />
+                <div class="text-caption text-grey-4" v-if="gm.progress.maxSteps">
+                  {{ Math.round((gm.progress.step / gm.progress.maxSteps) * 100) }}%
+                </div>
+              </div>
+              <q-linear-progress
+                rounded
+                size="10px"
+                :value="gm.progress.maxSteps ? gm.progress.step / gm.progress.maxSteps : 0"
+                :color="gm.paused ? 'amber' : 'primary'"
+                track-color="grey-9"
+                class="q-mb-sm"
+              />
+              <q-btn
+                color="amber"
+                text-color="dark"
+                icon="report_problem"
+                :label="t('currHandleFailure')"
+                :loading="handleFailureBusy"
+                :disable="gm.paused"
+                @click="onHandleFailure(gm.groupId)"
+              />
+            </template>
+            <div v-else class="text-caption text-grey-4">
+              {{ t('currStopNonCpHint') }}
+            </div>
+          </div>
         </div>
       </div>
       <q-separator dark />
@@ -591,47 +641,15 @@
           </div>
         </div>
       </div>
-      <!-- 하단 컨트롤 바. 버튼 2종:
-             - 전체 종료(currStopAll): 블록 타입과 무관하게 항상 파이프라인 전체를
-               종료(:stop_rollout). 체크포인트 추론 중에도 누르면 파이프라인 종료.
-             - 실패처리(currHandleFailure): 체크포인트 추론 중에만 노출. per-block
-               stop(:stop_current_block) → 교정 dialog 트리거.
-           progress bar 는 step 정보가 있는 checkpoint 일 때만. -->
+      <!-- 하단 컨트롤 바 — 전체 종료(currStopAll) 1개. 동시 진행 플랜이든 단일
+           플랜이든 항상 파이프라인 전체를 :stop_rollout 으로 종료한다. 플랜별
+           실패처리/진행도는 위 per-group 스트립에 있다. -->
       <q-separator v-if="runningBlock" dark />
       <div v-if="runningBlock" class="bg-dark q-pa-md">
         <div class="row items-center q-gutter-x-md">
-          <div class="col" v-if="runningBlock.type === 'checkpoint'">
-            <div class="row items-center q-mb-xs">
-              <div class="text-caption text-grey-4">
-                {{ runningProgress.step }} / {{ runningProgress.maxSteps || '∞' }}
-              </div>
-              <q-space />
-              <div class="text-caption text-grey-4" v-if="runningProgress.maxSteps">
-                {{ Math.round((runningProgress.step / runningProgress.maxSteps) * 100) }}%
-              </div>
-            </div>
-            <q-linear-progress
-              rounded
-              size="10px"
-              :value="runningProgress.maxSteps ? runningProgress.step / runningProgress.maxSteps : 0"
-              color="primary"
-              track-color="grey-9"
-            />
+          <div class="col text-caption text-grey-5">
+            {{ isMultiPlan ? t('currStopAllHintMulti') : '' }}
           </div>
-          <div v-else class="col text-caption text-grey-4">
-            {{ t('currStopNonCpHint') }}
-          </div>
-          <!-- 실패처리 — 체크포인트 추론 중에만. 교정 dialog 트리거. -->
-          <q-btn
-            v-if="runningBlock.type === 'checkpoint'"
-            color="amber"
-            text-color="dark"
-            icon="report_problem"
-            :label="t('currHandleFailure')"
-            :loading="handleFailureBusy"
-            @click="onHandleFailure"
-          />
-          <!-- 전체 종료 — 항상 노출. 파이프라인 전체 종료. -->
           <q-btn
             color="red"
             icon="stop"
@@ -859,6 +877,12 @@ const blockConfigs = ref({})
 // 실행 중 표시용 runtime 상태 — backend curriculum_rollout 이 planner_run 과
 // 동일한 ``planner_block_start/end/progress`` 이벤트를 emit 한다.
 const runningBlockId = ref(null)
+// 동시 진행 플랜(그룹) 분할 모니터용 — 그룹별 현재 블록/일시정지 상태. 단일 플랜이면
+// 키가 1개라 기존과 동일하게 동작한다. 두 플랜이 병렬 실행되면 각 그룹의 진행을
+// 따로 추적해 좌/우로 나눠 보여준다.
+const runningBlockIdByGroup = reactive({})  // { groupId: blockId }
+const pausedByGroup = reactive({})          // { groupId: bool } — 교정 대기(pause)
+const plannerPlans = ref([])                // planner.plans 원본 (그룹별 분할에 사용)
 const blockResultById = reactive({})    // { blockId: 'finished' | 'stopped' | 'error' }
 const blockProgressById = reactive({})  // { blockId: { step, maxSteps } }
 const { socket } = useSocket()
@@ -878,7 +902,12 @@ function onCurriculumSavingEpisode (payload) {
 function onPlannerBlockStart (payload) {
     const bid = payload?.block_id
     if (!bid) return
-    runningBlockId.value = bid
+    const gid = payload?.group_id
+    if (gid != null) {
+        runningBlockIdByGroup[gid] = bid
+        delete pausedByGroup[gid]  // 새 블록 시작 시 pause 상태 정리
+    }
+    runningBlockId.value = bid  // 단일 플랜/하위호환용 "마지막 블록" 포인터
     // 새 블록 시작 — 이전 진행도/결과 정리.
     delete blockProgressById[bid]
     delete blockResultById[bid]
@@ -894,9 +923,21 @@ function onPlannerBlockProgress (payload) {
 function onPlannerBlockEnd (payload) {
     const bid = payload?.block_id
     if (!bid) return
+    const gid = payload?.group_id
+    if (gid != null && runningBlockIdByGroup[gid] === bid) {
+        delete runningBlockIdByGroup[gid]
+        delete pausedByGroup[gid]
+    }
     if (runningBlockId.value === bid) runningBlockId.value = null
     blockResultById[bid] = payload?.status || 'finished'
     delete blockProgressById[bid]
+}
+// 동시 진행 플랜 coordination — 한 그룹이 교정 중이면 다른 그룹의 체크포인트 추론이
+// pause(현재 자세 유지)된다. 백엔드가 그룹별로 paused true/false 를 emit.
+function onCurriculumBlockPaused (payload) {
+    const gid = payload?.group_id
+    if (gid == null) return
+    pausedByGroup[gid] = !!payload?.paused
 }
 
 // ── Monitor dialog (실행 중 우측 하단 FAB → 풀스크린 다이얼로그) ───────────
@@ -998,25 +1039,44 @@ const monitorVisibleViewKeys = computed(() => {
     return out
 })
 
-// 현재 실행 중 체크포인트 블록의 progress (Monitor 다이얼로그 footer 에 표시).
-const runningProgress = computed(() => {
-    const blk = runningBlock.value
-    if (!blk) return { step: 0, maxSteps: null }
-    const p = blockProgressById[blk.id]
-    return {
-        step: p?.step || 0,
-        maxSteps: p?.maxSteps || blk.max_steps || null,
-    }
+// 동시 진행 플랜 분할 모니터 — plan group 별 진행 상태 디스크립터 배열. 단일 플랜이면
+// 1개라 기존과 동일하게 한 칸으로 렌더되고, 두 플랜이면 좌/우로 나뉜다. 각 그룹의
+// 현재 블록·워크스페이스·진행도·pause 상태를 한데 모아 템플릿이 v-for 로 돈다.
+const monitorGroups = computed(() => {
+    const plans = (plannerPlans.value || []).filter((p) => (p.blocks || []).length)
+    return plans.map((p) => {
+        const gid = p.id
+        const bid = runningBlockIdByGroup[gid]
+        const blk = bid ? plannerBlocks.value.find((b) => b.id === bid) : null
+        const wsId = blk?.workspace_id ?? (p.workspace_ids || [])[0]
+        const ws = deviceWorkspaces.value.find((w) => w.id === wsId) || null
+        const prog = blk ? blockProgressById[blk.id] : null
+        return {
+            groupId: gid,
+            block: blk,
+            workspaceName: ws?.name || '',
+            progress: {
+                step: prog?.step || 0,
+                maxSteps: prog?.maxSteps || blk?.max_steps || null,
+            },
+            paused: !!pausedByGroup[gid],
+            isCheckpoint: blk?.type === 'checkpoint',
+        }
+    })
 })
+const isMultiPlan = computed(() => monitorGroups.value.length > 1)
 
 // 실패처리 — 체크포인트 추론 중에만 노출되는 버튼. per-block stop 신호를 보내
 // 백엔드가 curriculum_checkpoint_failed 이벤트를 emit → 교정 dialog 가 자동 노출.
 // (파이프라인 전체를 종료하지 않는다 — 해당 블록만 실패 처리.)
-async function onHandleFailure () {
+async function onHandleFailure (groupId) {
     if (!curriculum.value) return
     handleFailureBusy.value = true
     try {
-        await api.post(`/curriculum/${curriculum.value.id}/:stop_current_block`)
+        // 동시 진행 플랜에선 group_id 로 해당 플랜의 체크포인트만 겨냥(반대편은
+        // 백엔드 coordination 으로 추론 pause). 단일 플랜이면 group_id 없이 legacy.
+        const body = (groupId != null) ? { group_id: groupId } : {}
+        await api.post(`/curriculum/${curriculum.value.id}/:stop_current_block`, body)
         Notify.create({ type: 'warning', message: t('currHandleFailure') })
     } catch (e) {
         console.error('handle-failure request failed:', e)
@@ -1654,6 +1714,7 @@ async function loadCurriculumForPlanner () {
 async function loadPlannerBlocks () {
   const planner = planners.value.find((p) => p.id === selectedPlannerId.value)
   const plans = planner?.plans || []
+  plannerPlans.value = plans
   plannerBlocks.value = plans.flatMap((g) => g.blocks || [])
 }
 
@@ -2051,6 +2112,8 @@ onMounted(async () => {
   // Rewind(되감기) — pause 진입(전체 step 수) / 되감기 완료(현재 step) 동기화.
   socket.on('curriculum_rewind_ready', onCurriculumRewindReady)
   socket.on('curriculum_rewind_position', onCurriculumRewindPosition)
+  // 동시 진행 플랜 — 다른 그룹 교정 중 이 그룹 추론 pause/resume.
+  socket.on('curriculum_block_paused', onCurriculumBlockPaused)
   // 롤아웃 정상/이상 종료 → FAB + dialog 즉시 정리.
   socket.on('curriculum_rollout_end', onCurriculumRolloutEnd)
   // _judge_and_store 의 sync 인코딩 동안 "저장 중" 배너 노출.
@@ -2074,6 +2137,7 @@ onUnmounted(() => {
   socket.off('curriculum_checkpoint_failed', onCurriculumCheckpointFailed)
   socket.off('curriculum_rewind_ready', onCurriculumRewindReady)
   socket.off('curriculum_rewind_position', onCurriculumRewindPosition)
+  socket.off('curriculum_block_paused', onCurriculumBlockPaused)
   socket.off('curriculum_rollout_end', onCurriculumRolloutEnd)
   socket.off('curriculum_saving_episode', onCurriculumSavingEpisode)
   socket.off('stop_process', onStopProcess)
